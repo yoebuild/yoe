@@ -443,11 +443,10 @@ func loadProject() *yoestar.Project {
 // tryLoadProject returns nil if no project is loadable from the cwd
 // (rather than os.Exit'ing like loadProject). Useful for commands that
 // can run inside or outside a project, like `yoe device repo list`.
-func tryLoadProject() *yoestar.Project {
-	dir := os.Getenv("YOE_PROJECT")
-	if dir == "" {
-		dir = "."
-	}
+// projectLoadOpts returns the LoadOptions derived from global CLI flags. The
+// TUI also needs these so reloads (after editing .star files or switching
+// machines) honor flags like --allow-duplicate-provides.
+func projectLoadOpts() []yoestar.LoadOption {
 	opts := []yoestar.LoadOption{
 		yoestar.WithModuleSync(module.SyncIfNeeded),
 		yoestar.WithShowShadows(globalShowShadows),
@@ -456,7 +455,15 @@ func tryLoadProject() *yoestar.Project {
 	if globalProjectFile != "" {
 		opts = append(opts, yoestar.WithProjectFile(globalProjectFile))
 	}
-	proj, err := yoestar.LoadProject(dir, opts...)
+	return opts
+}
+
+func tryLoadProject() *yoestar.Project {
+	dir := os.Getenv("YOE_PROJECT")
+	if dir == "" {
+		dir = "."
+	}
+	proj, err := yoestar.LoadProject(dir, projectLoadOpts()...)
 	if err != nil {
 		return nil
 	}
@@ -481,16 +488,9 @@ func loadProjectWithMachine(machineName string) *yoestar.Project {
 			}
 		}
 	}
-	opts := []yoestar.LoadOption{
-		yoestar.WithModuleSync(module.SyncIfNeeded),
-		yoestar.WithShowShadows(globalShowShadows),
-		yoestar.WithAllowDuplicateProvides(globalAllowDuplicateProvides),
-	}
+	opts := projectLoadOpts()
 	if machineName != "" {
 		opts = append(opts, yoestar.WithMachine(machineName))
-	}
-	if globalProjectFile != "" {
-		opts = append(opts, yoestar.WithProjectFile(globalProjectFile))
 	}
 	proj, err := yoestar.LoadProject(dir, opts...)
 	if err != nil {
@@ -771,7 +771,7 @@ func cmdUpdate() {
 
 func cmdTUI(_ []string) {
 	proj := loadProject()
-	if err := tui.Run(proj, projectDir()); err != nil {
+	if err := tui.Run(proj, projectDir(), projectLoadOpts()...); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

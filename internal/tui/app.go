@@ -189,10 +189,16 @@ type model struct {
 
 	// Feed (yoe serve) status — set at startup by startProjectFeed.
 	feedStatus string
+
+	// loadOpts is the set of LoadOptions to apply when the TUI reloads the
+	// project (e.g. after editing a .star file or switching machines). The
+	// caller passes the same options used for the initial load so global
+	// flags like --allow-duplicate-provides survive reloads.
+	loadOpts []yoestar.LoadOption
 }
 
-// Run launches the TUI.
-func Run(proj *yoestar.Project, projectDir string) error {
+// Run launches the TUI. loadOpts are reused on every project reload.
+func Run(proj *yoestar.Project, projectDir string, loadOpts ...yoestar.LoadOption) error {
 	dag, err := resolve.BuildDAG(proj)
 	if err != nil {
 		return fmt.Errorf("building DAG: %w", err)
@@ -245,6 +251,7 @@ func Run(proj *yoestar.Project, projectDir string) error {
 		machines:      machines,
 		flashProgress: progress.New(progress.WithDefaultGradient()),
 		deployHost:    deployHost,
+		loadOpts:      loadOpts,
 	}
 	m.checkBinfmtWarning()
 
@@ -1497,6 +1504,7 @@ func (m *model) startBuild(name string) tea.Cmd {
 	arch := m.arch
 	machine := m.proj.Defaults.Machine
 	unitName := name
+	loadOpts := append([]yoestar.LoadOption{}, m.loadOpts...)
 
 	// Write executor output to a log file so detail view can tail it
 	sd := arch
@@ -1517,7 +1525,7 @@ func (m *model) startBuild(name string) tea.Cmd {
 		// Reload project from .star files so we pick up any changes
 		// made since the TUI started (e.g., edited build steps).
 		freshProj, err := yoestar.LoadProject(projectDir,
-			yoestar.WithMachine(machine))
+			append(loadOpts, yoestar.WithMachine(machine))...)
 		if err != nil {
 			fmt.Fprintf(f, "warning: could not reload project: %v, using cached config\n", err)
 			freshProj = proj
@@ -1638,7 +1646,7 @@ func (m *model) recomputeStatuses() {
 	// Reload project with the new machine so MACHINE_CONFIG/PROVIDES/ARCH
 	// are correct for image definitions.
 	freshProj, err := yoestar.LoadProject(m.projectDir,
-		yoestar.WithMachine(m.proj.Defaults.Machine))
+		append(m.loadOpts, yoestar.WithMachine(m.proj.Defaults.Machine))...)
 	if err == nil {
 		m.proj = freshProj
 		// Rebuild DAG and unit list from fresh project
