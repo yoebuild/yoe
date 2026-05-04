@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`patches=` resolves relative to the unit's own .star file directory.**
+  A unit can now ship its patches alongside its definition (e.g.
+  `units/bsp/foo/patches/0001-fix.patch` next to `units/bsp/foo.star`), and
+  the same `patches=["patches/foo/0001-fix.patch"]` works whether the unit is
+  loaded from a local module override or a fetched remote module. Previously
+  patches were resolved against the project root, which meant module-shipped
+  patches couldn't be found unless every consumer copied them.
 ## [0.9.1] - 2026-05-01
 
 - **`yoe deploy <unit>` now installs the package's runtime deps too.**

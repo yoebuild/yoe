@@ -215,6 +215,7 @@ func kwStringMap(kwargs []starlark.Tuple, key string) map[string]string {
 var reservedUnitKwargs = map[string]bool{
 	"name": true, "version": true, "release": true, "scope": true,
 	"description": true, "license": true, "source": true, "sha256": true,
+	"apk_checksum": true,
 	"tag": true, "branch": true, "patches": true, "deps": true,
 	"runtime_deps": true, "container": true, "container_arch": true,
 	"sandbox": true, "shell": true, "tasks": true, "provides": true,
@@ -589,6 +590,7 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 		License:     kwString(kwargs, "license"),
 		Source:      kwString(kwargs, "source"),
 		SHA256:      kwString(kwargs, "sha256"),
+		APKChecksum: kwString(kwargs, "apk_checksum"),
 		Tag:         kwString(kwargs, "tag"),
 		Branch:      kwString(kwargs, "branch"),
 		Patches:     kwStringList(kwargs, "patches"),
