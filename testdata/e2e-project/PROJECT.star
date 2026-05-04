@@ -4,9 +4,10 @@ project(
     defaults = defaults(machine = "qemu-x86_64", image = "base-image"),
     cache = cache(path = "build/cache"),
     modules = [
-        module("github.com/yoebuild/yoe",
-              local = "../..",
-              path = "modules/units-alpine"),
+        module("https://github.com/yoebuild/units-alpine.git",
+              ref = "main"),
+        module("https://github.com/yoebuild/units-jetson.git",
+              ref = "main"),
         module("github.com/yoebuild/yoe",
               local = "../..",
               path = "modules/units-core"),

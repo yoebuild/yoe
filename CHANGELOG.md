@@ -8,13 +8,26 @@ and this project adheres to
 
 ## [Unreleased]
 
-- **`patches=` resolves relative to the unit's own .star file directory.**
-  A unit can now ship its patches alongside its definition (e.g.
-  `units/bsp/foo/patches/0001-fix.patch` next to `units/bsp/foo.star`), and
-  the same `patches=["patches/foo/0001-fix.patch"]` works whether the unit is
-  loaded from a local module override or a fetched remote module. Previously
-  patches were resolved against the project root, which meant module-shipped
-  patches couldn't be found unless every consumer copied them.
+- **`units-alpine` now lives in its own repo.** `yoe init` and the e2e project
+  pull `units-alpine` and `units-jetson` from `github.com/yoebuild/` instead of
+  carrying units-alpine inside this repo. Existing projects with
+  `path = "modules/units-alpine"` should switch to a remote `module(...)` ref.
+- **Shadow notices are off by default.** Cross-module unit shadowing and
+  `provides` overrides no longer print a stderr notice on every load. Pass
+  `--show-shadows` to see them when you actually want to audit which module won.
+- **`--allow-duplicate-provides` lets multiple units share a virtual.** When
+  set, units in the same module may declare the same `provides` (apk-style "any
+  of these satisfies"); the first one wins for `PROVIDES` lookup. Needed for
+  `units-alpine`'s `linux-firmware-*` fan-out, where ~100 packages all provide
+  `linux-firmware-any`.
+- **`patches=` resolves relative to the unit's own .star file directory.** A
+  unit can now ship its patches alongside its definition (e.g.
+  `units/bsp/foo/patches/0001-fix.patch` next to `units/bsp/foo.star`), and the
+  same `patches=["patches/foo/0001-fix.patch"]` works whether the unit is loaded
+  from a local module override or a fetched remote module. Previously patches
+  were resolved against the project root, which meant module-shipped patches
+  couldn't be found unless every consumer copied them.
+
 ## [0.9.1] - 2026-05-01
 
 - **`yoe deploy <unit>` now installs the package's runtime deps too.**

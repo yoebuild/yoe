@@ -39,6 +39,17 @@ type Engine struct {
 
 	// Tracks the directory of the currently executing .star file
 	currentFile string
+
+	// When true, emits stderr notices for cross-module unit shadowing and
+	// intra-module `provides` overrides. Default false: notices are off.
+	// The shadowing/override behavior itself is independent of this flag.
+	showShadows bool
+
+	// When true, multiple units within the same module may declare the same
+	// `provides` virtual without erroring. The first provider seen wins for
+	// the PROVIDES lookup; subsequent providers are silently accepted (apk
+	// "any of these satisfies" semantics).
+	allowDuplicateProvides bool
 }
 
 func NewEngine() *Engine {
@@ -68,6 +79,15 @@ func (e *Engine) SetCurrentModule(name string, index int) {
 	e.currentModule = name
 	e.currentModuleIndex = index
 }
+
+// SetShowShadows toggles emission of stderr notices about cross-module unit
+// shadowing and intra-module `provides` overrides. Default is off.
+func (e *Engine) SetShowShadows(v bool) { e.showShadows = v }
+
+// SetAllowDuplicateProvides toggles intra-module `provides` collision
+// handling. When true, multiple units in the same module may declare the
+// same virtual without erroring (first-wins for PROVIDES lookup).
+func (e *Engine) SetAllowDuplicateProvides(v bool) { e.allowDuplicateProvides = v }
 
 // ExecString evaluates Starlark source code with built-in functions available.
 func (e *Engine) ExecString(filename, src string) error {

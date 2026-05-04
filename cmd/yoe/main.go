@@ -26,7 +26,11 @@ import (
 
 var version = "dev"
 
-var globalProjectFile string
+var (
+	globalProjectFile            string
+	globalShowShadows            bool
+	globalAllowDuplicateProvides bool
+)
 
 // stringSlice implements flag.Value for repeatable string flags.
 type stringSlice []string
@@ -40,11 +44,19 @@ func (s *stringSlice) Set(v string) error {
 func main() {
 	// Parse global flags before command dispatch
 	args := os.Args[1:]
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--project" && i+1 < len(args) {
+	for i := 0; i < len(args); {
+		switch {
+		case args[i] == "--project" && i+1 < len(args):
 			globalProjectFile = args[i+1]
 			args = append(args[:i], args[i+2:]...)
-			break
+		case args[i] == "--show-shadows":
+			globalShowShadows = true
+			args = append(args[:i], args[i+1:]...)
+		case args[i] == "--allow-duplicate-provides":
+			globalAllowDuplicateProvides = true
+			args = append(args[:i], args[i+1:]...)
+		default:
+			i++
 		}
 	}
 
@@ -438,6 +450,8 @@ func tryLoadProject() *yoestar.Project {
 	}
 	opts := []yoestar.LoadOption{
 		yoestar.WithModuleSync(module.SyncIfNeeded),
+		yoestar.WithShowShadows(globalShowShadows),
+		yoestar.WithAllowDuplicateProvides(globalAllowDuplicateProvides),
 	}
 	if globalProjectFile != "" {
 		opts = append(opts, yoestar.WithProjectFile(globalProjectFile))
@@ -469,6 +483,8 @@ func loadProjectWithMachine(machineName string) *yoestar.Project {
 	}
 	opts := []yoestar.LoadOption{
 		yoestar.WithModuleSync(module.SyncIfNeeded),
+		yoestar.WithShowShadows(globalShowShadows),
+		yoestar.WithAllowDuplicateProvides(globalAllowDuplicateProvides),
 	}
 	if machineName != "" {
 		opts = append(opts, yoestar.WithMachine(machineName))

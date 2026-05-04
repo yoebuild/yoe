@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/yoebuild/yoe/internal/module"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -15,7 +16,13 @@ func TestE2E_DryRun(t *testing.T) {
 		t.Skip("e2e test project not found")
 	}
 
-	proj, err := yoestar.LoadProject(projectDir)
+	abs, _ := filepath.Abs(projectDir)
+	t.Setenv("YOE_CACHE", filepath.Join(abs, "build", "cache"))
+
+	proj, err := yoestar.LoadProject(projectDir,
+		yoestar.WithModuleSync(module.SyncIfNeeded),
+		yoestar.WithAllowDuplicateProvides(true),
+	)
 	if err != nil {
 		t.Fatalf("LoadProject: %v", err)
 	}
@@ -48,7 +55,6 @@ func TestE2E_DryRun(t *testing.T) {
 
 	// Dry run should work
 	var buf bytes.Buffer
-	abs, _ := filepath.Abs(projectDir)
 	opts := Options{
 		DryRun:     true,
 		ProjectDir: abs,

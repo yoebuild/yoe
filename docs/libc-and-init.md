@@ -174,8 +174,8 @@ project(
     base = alpine_rootfs(version = "v3.21"),
     machines = [...],
     modules = [
-        module("...", path = "modules/units-alpine"),
-        module("...", path = "modules/units-core"),
+        module("https://github.com/yoebuild/units-alpine.git", ref = "main"),
+        module("https://github.com/yoebuild/yoe.git", ref = "main", path = "modules/units-core"),
     ],
 )
 ```

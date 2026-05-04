@@ -54,14 +54,16 @@ The coupling is not aesthetic. Three things tie them together:
    from one release and `package-B` from another lands you with conflicting
    `so:` constraints that `apk` will refuse to install.
 
-When bumping the Alpine release, do all three in the same commit:
+When bumping the Alpine release, do all three in lockstep across the yoe repo
+and the [units-alpine repo](https://github.com/yoebuild/units-alpine):
 
 1. Update `FROM alpine:<release>` in
-   `modules/units-core/containers/toolchain-musl/Dockerfile`.
-2. Update `_ALPINE_RELEASE` in `modules/units-alpine/classes/alpine_pkg.star`.
-3. Update `version` and `sha256` on every unit in `modules/units-alpine/units/`.
-   The version comes from the new release's APKINDEX; the sha256 is the SHA-256
-   of the apk file itself.
+   `modules/units-core/containers/toolchain-musl/Dockerfile` in the yoe repo.
+2. Update `_ALPINE_RELEASE` in `classes/alpine_pkg.star` in the units-alpine
+   repo.
+3. Update `version` and `sha256` on every unit under `units/` in the
+   units-alpine repo. The version comes from the new release's APKINDEX; the
+   sha256 is the SHA-256 of the apk file itself.
 
 ## Writing a new alpine_pkg unit
 
@@ -123,8 +125,8 @@ defining a unit with the same name. See
 ```python
 # PROJECT.star
 modules = [
-    module(..., path = "modules/units-alpine"),  # ships musl, sqlite-libs, …
-    module(..., path = "modules/units-core"),    # source-built kernel, busybox, …
+    module("https://github.com/yoebuild/units-alpine.git", ref = "main"),  # ships musl, sqlite-libs, …
+    module("https://github.com/yoebuild/yoe.git", ref = "main", path = "modules/units-core"),  # source-built kernel, busybox, …
     module(..., path = "modules/my-overrides"),  # last → wins
 ]
 
