@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 // FetchAll downloads sources for all units (or specific ones).

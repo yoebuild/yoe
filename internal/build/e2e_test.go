@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 func TestE2E_DryRun(t *testing.T) {

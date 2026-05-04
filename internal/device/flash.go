@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 // Flash writes an image unit's built artifact to a block device.

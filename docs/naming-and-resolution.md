@@ -17,7 +17,7 @@ classes, machine definitions, and images. Modules are declared in
 project(
     name = "my-product",
     modules = [
-        module("https://github.com/YoeDistro/yoe-ng.git",
+        module("https://github.com/yoebuild/yoe.git",
               ref = "main",
               path = "modules/units-core"),
         module("https://github.com/vendor/bsp-imx8.git",
@@ -29,10 +29,10 @@ project(
 **Module name** is derived from the `path` field's last component if set,
 otherwise the URL's repository name. Examples:
 
-| URL                               | path                 | Derived name |
-| --------------------------------- | -------------------- | ------------ |
-| `github.com/YoeDistro/yoe-ng.git` | `modules/units-core` | `units-core` |
-| `github.com/vendor/bsp-imx8.git`  | (none)               | `bsp-imx8`   |
+| URL                              | path                 | Derived name |
+| -------------------------------- | -------------------- | ------------ |
+| `github.com/yoebuild/yoe.git`    | `modules/units-core` | `units-core` |
+| `github.com/vendor/bsp-imx8.git` | (none)               | `bsp-imx8`   |
 
 Module names are used in `load()` statements:
 `load("@units-core//classes/autotools.star", "autotools")`.

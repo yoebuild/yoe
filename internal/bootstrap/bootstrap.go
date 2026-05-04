@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	yoe "github.com/YoeDistro/yoe-ng/internal"
-	"github.com/YoeDistro/yoe-ng/internal/build"
-	"github.com/YoeDistro/yoe-ng/internal/artifact"
-	"github.com/YoeDistro/yoe-ng/internal/repo"
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoe "github.com/yoebuild/yoe/internal"
+	"github.com/yoebuild/yoe/internal/build"
+	"github.com/yoebuild/yoe/internal/artifact"
+	"github.com/yoebuild/yoe/internal/repo"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 // Bootstrap unit names — the minimal set needed for a self-hosting build root.
@@ -27,7 +27,7 @@ var bootstrapUnits = []string{
 
 // Stage0 builds the initial base packages using the host's toolchain (Alpine's
 // gcc inside the container). The output is a minimal set of .apk files — enough
-// to create a self-hosting Yoe-NG build root.
+// to create a self-hosting Yoe build root.
 func Stage0(proj *yoestar.Project, projectDir string, w io.Writer) error {
 	fmt.Fprintln(w, "=== Bootstrap Stage 0: Cross-Pollination ===")
 	fmt.Fprintln(w, "Building base packages using host toolchain...")
@@ -109,10 +109,10 @@ func Stage0(proj *yoestar.Project, projectDir string, w io.Writer) error {
 }
 
 // Stage1 rebuilds the base packages using the Stage 0 packages. After this,
-// all packages in the repository were built by Yoe-NG's own toolchain.
+// all packages in the repository were built by Yoe's own toolchain.
 func Stage1(proj *yoestar.Project, projectDir string, w io.Writer) error {
 	fmt.Fprintln(w, "=== Bootstrap Stage 1: Self-Hosting Rebuild ===")
-	fmt.Fprintln(w, "Rebuilding base packages using Yoe-NG's own toolchain...")
+	fmt.Fprintln(w, "Rebuilding base packages using Yoe's own toolchain...")
 	fmt.Fprintln(w)
 
 	arch := build.Arch()
@@ -123,7 +123,7 @@ func Stage1(proj *yoestar.Project, projectDir string, w io.Writer) error {
 		return fmt.Errorf("stage 0 not complete: %w\nRun 'yoe bootstrap stage0' first", err)
 	}
 
-	// Create a Yoe-NG build root from Stage 0 packages
+	// Create a Yoe build root from Stage 0 packages
 	buildRoot := filepath.Join(projectDir, "build", "bootstrap", "buildroot")
 	if err := createBuildRoot(buildRoot, repoDir, projectDir, w); err != nil {
 		return fmt.Errorf("creating build root: %w", err)
@@ -145,7 +145,7 @@ func Stage1(proj *yoestar.Project, projectDir string, w io.Writer) error {
 			continue
 		}
 
-		// Build inside the Yoe-NG build root using bubblewrap
+		// Build inside the Yoe build root using bubblewrap
 		env := map[string]string{
 			"PREFIX":  "/usr",
 			"DESTDIR": "/build/destdir",
@@ -181,7 +181,7 @@ func Stage1(proj *yoestar.Project, projectDir string, w io.Writer) error {
 		fmt.Fprintf(w, "  → %s (self-hosted)\n", filepath.Base(apkPath))
 	}
 
-	fmt.Fprintf(w, "\n=== Stage 1 complete: all base packages rebuilt with Yoe-NG toolchain ===\n")
+	fmt.Fprintf(w, "\n=== Stage 1 complete: all base packages rebuilt with Yoe toolchain ===\n")
 	return nil
 }
 

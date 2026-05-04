@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	githubAPIURL = "https://api.github.com/repos/YoeDistro/yoe/releases/latest"
-	githubRelURL = "https://github.com/YoeDistro/yoe/releases/latest/download"
+	githubAPIURL = "https://api.github.com/repos/yoebuild/yoe/releases/latest"
+	githubRelURL = "https://github.com/yoebuild/yoe/releases/latest/download"
 )
 
 // GitHubRelease represents the GitHub API release response
@@ -58,7 +58,7 @@ func Update(currentVersion string) error {
 
 	fmt.Printf("Successfully updated to version %s\n", latestVersion)
 	fmt.Println()
-	fmt.Println("Note: Yoe-NG is in heavy development. We recommend cleaning your")
+	fmt.Println("Note: Yoe is in heavy development. We recommend cleaning your")
 	fmt.Println("build directory and re-creating projects (yoe init) with each new release")
 	return nil
 }

@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	yoe "github.com/YoeDistro/yoe-ng/internal"
-	"github.com/YoeDistro/yoe-ng/internal/artifact"
-	"github.com/YoeDistro/yoe-ng/internal/repo"
-	"github.com/YoeDistro/yoe-ng/internal/resolve"
-	"github.com/YoeDistro/yoe-ng/internal/source"
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoe "github.com/yoebuild/yoe/internal"
+	"github.com/yoebuild/yoe/internal/artifact"
+	"github.com/yoebuild/yoe/internal/repo"
+	"github.com/yoebuild/yoe/internal/resolve"
+	"github.com/yoebuild/yoe/internal/source"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 	"go.starlark.net/starlark"
 )
 
@@ -628,7 +628,7 @@ func hasTask(unit *yoestar.Unit, name string) bool {
 }
 
 // resolveContainerImage returns the Docker image tag for a unit's container.
-// For container units (referenced by name), the tag is yoe-ng/<name>:<version>-<arch>.
+// For container units (referenced by name), the tag is yoe/<name>:<version>-<arch>.
 // For external images (containing ":" or "/"), the value is used directly.
 func resolveContainerImage(proj *yoestar.Project, unit *yoestar.Unit, arch string) string {
 	container := unit.Container

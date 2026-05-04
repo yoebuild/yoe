@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 func TestAssemble(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 // Describe prints detailed information about a unit.

@@ -11,10 +11,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
-// hostArch returns the host machine architecture in Yoe-NG format.
+// hostArch returns the host machine architecture in Yoe format.
 // HostArch returns the host machine's architecture (e.g., "x86_64", "arm64").
 func HostArch() string {
 	return hostArch()

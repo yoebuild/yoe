@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/YoeDistro/yoe-ng/internal/artifact"
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	"github.com/yoebuild/yoe/internal/artifact"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 // RepoDir returns the local package repository path for a project.

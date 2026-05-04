@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 // CreateAPK builds an .apk package from a unit's $DESTDIR contents.

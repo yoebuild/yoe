@@ -7,7 +7,7 @@ import (
 	"strings"
 	"text/template"
 
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 // BuildTemplateContext builds the context map passed to Go templates, merging

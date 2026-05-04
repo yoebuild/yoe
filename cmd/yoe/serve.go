@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/YoeDistro/yoe-ng/internal/feed"
-	"github.com/YoeDistro/yoe-ng/internal/repo"
+	"github.com/yoebuild/yoe/internal/feed"
+	"github.com/yoebuild/yoe/internal/repo"
 )
 
 func cmdServe(args []string) {

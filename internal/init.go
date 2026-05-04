@@ -31,10 +31,10 @@ func RunInit(projectDir string, machine string) error {
     cache = cache(path = "build/cache"),
     sources = sources(go_proxy = "https://proxy.golang.org"),
     modules = [
-        module("https://github.com/YoeDistro/yoe.git",
+        module("https://github.com/yoebuild/yoe.git",
                ref = "main",
                path = "modules/units-core"),
-        module("https://github.com/YoeDistro/yoe.git",
+        module("https://github.com/yoebuild/yoe.git",
                ref = "main",
                path = "modules/units-rpi"),
     ],
@@ -57,7 +57,7 @@ func RunInit(projectDir string, machine string) error {
 		}
 	}
 
-	fmt.Printf("Created Yoe-NG project at %s\n", projectDir)
+	fmt.Printf("Created Yoe project at %s\n", projectDir)
 	return nil
 }
 

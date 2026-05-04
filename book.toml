@@ -10,8 +10,8 @@ title = "[yoe] Build"
 optional = true
 
 [output.html]
-git-repository-url = "https://github.com/YoeDistro/yoe"
-edit-url-template = "https://github.com/YoeDistro/yoe/edit/main/{path}"
+git-repository-url = "https://github.com/yoebuild/yoe"
+edit-url-template = "https://github.com/yoebuild/yoe/edit/main/{path}"
 default-theme = "navy"
 preferred-dark-theme = "navy"
 additional-js = ["theme/home-link.js"]

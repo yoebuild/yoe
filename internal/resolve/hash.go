@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 // hashStringMap writes a deterministic representation of a string→string map

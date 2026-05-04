@@ -13,8 +13,8 @@ configuration). Claude Code is highly recommended, but not required.
 
 ```sh
 # Download the yoe binary (Linux x86_64)
-curl -L https://github.com/YoeDistro/yoe/releases/latest/download/yoe-Linux-x86_64 -o yoe
-# For other platforms, download from https://github.com/YoeDistro/yoe/releases/latest
+curl -L https://github.com/yoebuild/yoe/releases/latest/download/yoe-Linux-x86_64 -o yoe
+# For other platforms, download from https://github.com/yoebuild/yoe/releases/latest
 
 chmod +x yoe
 mkdir -p ~/bin

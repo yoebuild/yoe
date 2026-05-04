@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	yoe "github.com/YoeDistro/yoe-ng/internal"
-	"github.com/YoeDistro/yoe-ng/internal/resolve"
+	yoe "github.com/yoebuild/yoe/internal"
+	"github.com/yoebuild/yoe/internal/resolve"
 )
 
 // SandboxConfig defines the build sandbox for a unit build.
@@ -265,7 +265,7 @@ func NProc() string {
 	return strings.TrimSpace(string(out))
 }
 
-// Arch returns the current machine architecture in Yoe-NG format.
+// Arch returns the current machine architecture in Yoe format.
 func Arch() string {
 	out, err := exec.Command("uname", "-m").Output()
 	if err != nil {

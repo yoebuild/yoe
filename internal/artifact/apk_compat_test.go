@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/YoeDistro/yoe-ng/internal/artifact"
-	"github.com/YoeDistro/yoe-ng/internal/repo"
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	"github.com/yoebuild/yoe/internal/artifact"
+	"github.com/yoebuild/yoe/internal/repo"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 // TestAPKRoundTripWithUpstreamApk exercises yoe-built apks against the real

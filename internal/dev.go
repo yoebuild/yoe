@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 // DevExtract extracts local commits in a unit's build directory as patch

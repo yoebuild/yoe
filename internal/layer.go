@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 func ListModules(dir string, w io.Writer) error {

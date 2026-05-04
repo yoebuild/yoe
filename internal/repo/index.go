@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/YoeDistro/yoe-ng/internal/artifact"
+	"github.com/yoebuild/yoe/internal/artifact"
 )
 
 // GenerateIndex scans repoDir for .apk files and produces an

@@ -50,7 +50,7 @@ The `units-core` module lives at `modules/units-core/` in this repo. Projects
 reference it with `path = "modules/units-core"`:
 
 ```python
-module("https://github.com/YoeDistro/yoe-ng.git",
+module("https://github.com/yoebuild/yoe.git",
       ref = "main",
       path = "modules/units-core")
 ```

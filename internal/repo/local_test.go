@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 func TestRepoDir_IncludesProjectName(t *testing.T) {

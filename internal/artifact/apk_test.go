@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 func TestCreateAPK(t *testing.T) {
