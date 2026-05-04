@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Source-built `openssl` no longer collides with Alpine's `libcrypto3` /
+  `libssl3`.** The `openssl` unit in `units-core` now declares
+  `provides = ["libcrypto3", "libssl3"]`, so any package whose `runtime_deps`
+  reach `libcrypto3` or `libssl3` (e.g. `units-alpine`'s `apk-tools`) routes
+  back to the source-built openssl instead of pulling Alpine's split libcrypto3
+  /libssl3 packages alongside. Without this, image-time `apk add` aborted with
+  `trying to overwrite usr/lib/libcrypto.so.3 owned by openssl-3.4.1-r0`.
 - **`units-alpine` now lives in its own repo.** `yoe init` and the e2e project
   pull `units-alpine` and `units-jetson` from `github.com/yoebuild/` instead of
   carrying units-alpine inside this repo. Existing projects with
