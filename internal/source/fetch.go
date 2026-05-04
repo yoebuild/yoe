@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 // CacheDir returns the source cache directory, creating it if needed.

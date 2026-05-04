@@ -115,7 +115,7 @@ Go `text/template` with the unit context map:
 NAME=Yoe
 ID=yoe
 PRETTY_NAME="Yoe Linux ({{.machine}})"
-HOME_URL=https://github.com/YoeDistro/yoe
+HOME_URL=https://github.com/yoebuild/yoe
 ```
 
 ```
@@ -193,7 +193,7 @@ INITTAB""",
 NAME=Yoe
 ID=yoe
 PRETTY_NAME="Yoe Linux ($MACHINE)"
-HOME_URL=https://github.com/YoeDistro/yoe
+HOME_URL=https://github.com/yoebuild/yoe
 OSRELEASE""",
 ])
 ```
@@ -218,7 +218,7 @@ OSRELEASE""",
 NAME=Yoe
 ID=yoe
 PRETTY_NAME="Yoe Linux ({{.machine}})"
-HOME_URL=https://github.com/YoeDistro/yoe
+HOME_URL=https://github.com/yoebuild/yoe
 ```
 
 `base-files/rcS`:

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/YoeDistro/yoe-ng/internal/artifact"
-	"github.com/YoeDistro/yoe-ng/internal/device"
-	"github.com/YoeDistro/yoe-ng/internal/feed"
+	"github.com/yoebuild/yoe/internal/artifact"
+	"github.com/yoebuild/yoe/internal/device"
+	"github.com/yoebuild/yoe/internal/feed"
 )
 
 func cmdDevice(args []string) {

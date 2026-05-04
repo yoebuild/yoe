@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 func TestFetchHTTP(t *testing.T) {

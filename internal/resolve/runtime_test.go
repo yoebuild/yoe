@@ -4,8 +4,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/YoeDistro/yoe-ng/internal/resolve"
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	"github.com/yoebuild/yoe/internal/resolve"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 func TestRuntimeClosure_Sqlite(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/YoeDistro/yoe-ng/internal/artifact"
+	"github.com/yoebuild/yoe/internal/artifact"
 )
 
 // cmdKey dispatches `yoe key <subcommand>`.

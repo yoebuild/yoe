@@ -5,3 +5,4 @@
 /testdata/e2e-project/repo
 local.star
 /.claude/scheduled_tasks.lock
+/book

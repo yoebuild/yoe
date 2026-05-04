@@ -1,5 +1,8 @@
 # Project name
 
+**(actually, I'm really happy with `yoe`, likely drop this page in the
+future.)**
+
 This tool needs a new project name. Feel that since this is a new start, having
 something other than "yoe" might be beneficial.
 

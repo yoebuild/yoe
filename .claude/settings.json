@@ -1,0 +1,18 @@
+
+{
+    "permissions": {
+      "additionalDirectories": ["/scratch/yoe/yoe-build-web-site"],
+      "allow": [
+        "Write(/scratch/yoe/yoe-build-web-site/**)",
+        "Edit(/scratch/yoe/yoe-build-web-site/**)",
+        "Read(/scratch/yoe/yoe-build-web-site/**)",
+        "Bash(zola *)",
+        "Bash(mkdir *)",
+        "Bash(cp *)",
+        "Bash(ls /scratch/yoe/yoe-build-web-site*)",
+        "Bash(find /scratch/yoe/yoe-build-web-site*)",
+        "Bash(cat /scratch/yoe/yoe-build-web-site*)",
+        "Bash(rm /scratch/yoe/yoe-build-web-site*)"
+      ]
+    }
+  }

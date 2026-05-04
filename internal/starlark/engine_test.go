@@ -11,7 +11,7 @@ project(
     name = "test-project",
     version = "0.1.0",
     defaults = defaults(machine = "qemu-arm64", image = "base-image"),
-    cache = cache(path = "/var/cache/yoe-ng/build"),
+    cache = cache(path = "/var/cache/yoe/build"),
 )
 `
 	eng := NewEngine()
@@ -31,8 +31,8 @@ project(
 	if proj.Defaults.Image != "base-image" {
 		t.Errorf("Defaults.Image = %q, want %q", proj.Defaults.Image, "base-image")
 	}
-	if proj.Cache.Path != "/var/cache/yoe-ng/build" {
-		t.Errorf("Cache.Path = %q, want %q", proj.Cache.Path, "/var/cache/yoe-ng/build")
+	if proj.Cache.Path != "/var/cache/yoe/build" {
+		t.Errorf("Cache.Path = %q, want %q", proj.Cache.Path, "/var/cache/yoe/build")
 	}
 }
 

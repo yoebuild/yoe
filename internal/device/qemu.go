@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	yoe "github.com/YoeDistro/yoe-ng/internal"
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoe "github.com/yoebuild/yoe/internal"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 // QEMUOptions configures a QEMU run.

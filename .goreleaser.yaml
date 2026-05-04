@@ -50,5 +50,5 @@ release:
 
     Or download the binary for your architecture and place it in your PATH.
 
-    **Note:** Yoe-NG is in heavy development. We recommend cleaning your build
+    **Note:** Yoe is in heavy development. We recommend cleaning your build
     directory and re-creating projects (`yoe init`) with each new release.

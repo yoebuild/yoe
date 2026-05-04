@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 // Prepare sets up the build source directory for a unit:
@@ -384,8 +384,8 @@ func tagUpstream(srcDir string) error {
 func initGitRepo(srcDir string) error {
 	cmds := [][]string{
 		{"git", "init"},
-		{"git", "config", "user.email", "yoe@yoe-ng.local"},
-		{"git", "config", "user.name", "yoe-ng"},
+		{"git", "config", "user.email", "yoe@yoe.local"},
+		{"git", "config", "user.name", "yoe"},
 		{"git", "add", "-A"},
 		{"git", "commit", "-m", "upstream source"},
 		{"git", "tag", "upstream"},

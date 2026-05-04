@@ -1,7 +1,7 @@
 package resolve
 
 import (
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 // RuntimeClosure returns the unit names reachable from `roots` by walking

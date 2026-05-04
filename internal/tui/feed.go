@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/YoeDistro/yoe-ng/internal/feed"
-	"github.com/YoeDistro/yoe-ng/internal/repo"
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	"github.com/yoebuild/yoe/internal/feed"
+	"github.com/yoebuild/yoe/internal/repo"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 // startProjectFeed brings up a `yoe serve` equivalent for the TUI session

@@ -1,0 +1,20 @@
+# run cargo install mdbook mdbook-toc mdbook-linkcheck
+
+[book]
+authors = ["Cliff Brake"]
+language = "en"
+src = "docs"
+title = "[yoe] Build"
+
+[preprocessor.toc]
+optional = true
+
+[output.html]
+git-repository-url = "https://github.com/yoebuild/yoe"
+edit-url-template = "https://github.com/yoebuild/yoe/edit/main/{path}"
+default-theme = "navy"
+preferred-dark-theme = "navy"
+additional-js = ["theme/home-link.js"]
+
+#[output.linkcheck]
+#follow-web-links = true

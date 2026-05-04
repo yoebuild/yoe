@@ -1,4 +1,4 @@
-# The `yoe` Tool
+# The `[yoe]` Tool
 
 `yoe` is the single CLI tool that drives all `[yoe]` workflows — building
 packages and images from units, managing caches and source downloads, and
@@ -7,13 +7,20 @@ dependencies.
 
 ## Installation
 
-```sh
-# From source
-go install github.com/YoeDistro/yoe-ng/cmd/yoe@latest
+Prerequisites: Linux or macOS with Git and Docker installed. Windows users:
+install WSL2 and use the Linux binary (Linux x86_64/Docker is the most tested
+configuration). Claude Code is highly recommended, but not required.
 
-# Or download a prebuilt binary
-curl -L https://github.com/YoeDistro/yoe/releases/latest/download/yoe-$(uname -s)-$(uname -m) -o yoe
+```sh
+# Download the yoe binary (Linux x86_64)
+curl -L https://github.com/yoebuild/yoe/releases/latest/download/yoe-Linux-x86_64 -o yoe
+# For other platforms, download from https://github.com/yoebuild/yoe/releases/latest
+
 chmod +x yoe
+mkdir -p ~/bin
+mv yoe ~/bin/
+# Make sure ~/bin is in your PATH (add to ~/.bashrc or ~/.zshrc if needed)
+export PATH="$HOME/bin:$PATH"
 ```
 
 Since `yoe` is a Go binary, it cross-compiles trivially — build on your x86

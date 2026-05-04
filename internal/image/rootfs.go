@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/YoeDistro/yoe-ng/internal/repo"
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	"github.com/yoebuild/yoe/internal/repo"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 // Assemble creates a root filesystem image from an image unit.

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 func TestBuildTemplateContext_MergesFields(t *testing.T) {

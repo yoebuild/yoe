@@ -10,13 +10,15 @@
 
 - document BSP and package moat
 - Better hostnames for targets.
-- mDNS on target
+- mDNS on target (we have a mdns component, why is it not working?)
 - base-files is modified by machine
+  - machine package feed?
+  - this needs to be solve before start building multiple machines in one tree.
+- e2e testing
 - Save flash device preference in local.star for TUI
-- Save device preference in local.star
-- In TUI, ask for host IP/name and cache it in local.star.
 - Data partition for rPI targets
   - Fill/format data partition
+- rPI updater
 - Error reading OS version: searching /etc/os-release, got: field VERSION not
   found
 

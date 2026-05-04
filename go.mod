@@ -1,4 +1,4 @@
-module github.com/YoeDistro/yoe-ng
+module github.com/yoebuild/yoe
 
 go 1.25.0
 

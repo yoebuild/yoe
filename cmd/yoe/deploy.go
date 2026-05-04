@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/YoeDistro/yoe-ng/internal/build"
-	"github.com/YoeDistro/yoe-ng/internal/device"
-	"github.com/YoeDistro/yoe-ng/internal/feed"
-	"github.com/YoeDistro/yoe-ng/internal/repo"
-	"github.com/YoeDistro/yoe-ng/internal/resolve"
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	"github.com/yoebuild/yoe/internal/build"
+	"github.com/yoebuild/yoe/internal/device"
+	"github.com/yoebuild/yoe/internal/feed"
+	"github.com/yoebuild/yoe/internal/repo"
+	"github.com/yoebuild/yoe/internal/resolve"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 func cmdDeploy(args []string) {

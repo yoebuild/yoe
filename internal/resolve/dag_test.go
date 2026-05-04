@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 func makeProject(units map[string]*yoestar.Unit) *yoestar.Project {

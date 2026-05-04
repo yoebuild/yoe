@@ -11,17 +11,17 @@ import (
 	"sort"
 	"strings"
 
-	yoe "github.com/YoeDistro/yoe-ng/internal"
-	"github.com/YoeDistro/yoe-ng/internal/artifact"
-	"github.com/YoeDistro/yoe-ng/internal/bootstrap"
-	"github.com/YoeDistro/yoe-ng/internal/build"
-	"github.com/YoeDistro/yoe-ng/internal/device"
-	"github.com/YoeDistro/yoe-ng/internal/module"
-	"github.com/YoeDistro/yoe-ng/internal/repo"
-	"github.com/YoeDistro/yoe-ng/internal/resolve"
-	"github.com/YoeDistro/yoe-ng/internal/source"
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
-	"github.com/YoeDistro/yoe-ng/internal/tui"
+	yoe "github.com/yoebuild/yoe/internal"
+	"github.com/yoebuild/yoe/internal/artifact"
+	"github.com/yoebuild/yoe/internal/bootstrap"
+	"github.com/yoebuild/yoe/internal/build"
+	"github.com/yoebuild/yoe/internal/device"
+	"github.com/yoebuild/yoe/internal/module"
+	"github.com/yoebuild/yoe/internal/repo"
+	"github.com/yoebuild/yoe/internal/resolve"
+	"github.com/yoebuild/yoe/internal/source"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
+	"github.com/yoebuild/yoe/internal/tui"
 )
 
 var version = "dev"
@@ -114,10 +114,10 @@ func main() {
 
 func printUsage() {
 	fmt.Fprintf(os.Stderr, "Usage: %s COMMAND [OPTIONS]\n\n", os.Args[0])
-	fmt.Fprintf(os.Stderr, "Yoe-NG embedded Linux distribution builder\n\n")
+	fmt.Fprintf(os.Stderr, "Yoe embedded Linux distribution builder\n\n")
 	fmt.Fprintf(os.Stderr, "Commands:\n")
 	fmt.Fprintf(os.Stderr, "  (no args)               Launch the interactive TUI\n")
-	fmt.Fprintf(os.Stderr, "  init <project-dir>      Create a new Yoe-NG project\n")
+	fmt.Fprintf(os.Stderr, "  init <project-dir>      Create a new Yoe project\n")
 	fmt.Fprintf(os.Stderr, "  container               Manage the build container (build, shell, status)\n")
 	fmt.Fprintf(os.Stderr, "  build [units...]      Build units (--force, --clean, --verbose, --dry-run)\n")
 	fmt.Fprintf(os.Stderr, "  dev                     Manage source modifications (extract, diff, status)\n")

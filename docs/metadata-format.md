@@ -576,7 +576,7 @@ project(
         image = "base-image",
     ),
     cache = cache(
-        path = "/var/cache/yoe-ng/build",
+        path = "/var/cache/yoe/build",
         remote = [
             s3_cache(
                 name = "team",
@@ -593,7 +593,7 @@ project(
     ),
     modules = [
         # Module in a subdirectory of a repo — path specifies where MODULE.star is
-        module("https://github.com/YoeDistro/yoe-ng.git",
+        module("https://github.com/yoebuild/yoe.git",
               ref = "main",
               path = "modules/units-core"),
         # Module at the root of its own repo
@@ -798,7 +798,7 @@ project(
     version = "1.0.0",
     modules = [
         # Module in a subdirectory of a repo
-        module("https://github.com/YoeDistro/yoe-ng.git",
+        module("https://github.com/yoebuild/yoe.git",
               ref = "main",
               path = "modules/units-core"),
         # Module at the root of its own repo
@@ -895,8 +895,8 @@ fetching from Git. The `local` parameter overrides the remote URL:
 ```python
 modules = [
     # Local override — point at a checkout on disk instead of fetching
-    module("https://github.com/YoeDistro/yoe-ng.git",
-          local = "../yoe-ng",
+    module("https://github.com/yoebuild/yoe.git",
+          local = "../yoe",
           path = "modules/units-core"),
     # Local override for a standalone module
     module("git@github.com:vendor/bsp-imx8.git", local = "../bsp-imx8"),

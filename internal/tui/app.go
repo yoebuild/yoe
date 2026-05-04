@@ -17,11 +17,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	yoe "github.com/YoeDistro/yoe-ng/internal"
-	"github.com/YoeDistro/yoe-ng/internal/build"
-	"github.com/YoeDistro/yoe-ng/internal/device"
-	"github.com/YoeDistro/yoe-ng/internal/resolve"
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	yoe "github.com/yoebuild/yoe/internal"
+	"github.com/yoebuild/yoe/internal/build"
+	"github.com/yoebuild/yoe/internal/device"
+	"github.com/yoebuild/yoe/internal/resolve"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 // Styles

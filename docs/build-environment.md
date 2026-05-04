@@ -39,8 +39,8 @@ The only host requirements are:
 - The `yoe` Go binary (statically linked, runs anywhere)
 - Docker or Podman
 
-On first use, `yoe` builds the versioned container image `yoe-ng:<version>` from
-a Dockerfile embedded in the binary itself. The `yoe` binary copies itself into
+On first use, `yoe` builds the versioned container image `yoe:<version>` from a
+Dockerfile embedded in the binary itself. The `yoe` binary copies itself into
 the container — no source checkout or Go toolchain is needed on the host.
 Subsequent invocations reuse the cached image. When the container version
 changes (i.e., a new `yoe` binary with updated container dependencies), the
@@ -132,7 +132,7 @@ is where the actual compilers, toolchains, and language SDKs live.
 ```sh
 # yoe creates this automatically during build
 apk --root /var/yoe/buildroot \
-    --repo https://repo.yoe-ng.org/packages \
+    --repo https://repo.yoebuild.org/packages \
     add glibc gcc g++ make cmake go rust
 ```
 

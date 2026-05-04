@@ -4,7 +4,7 @@ project(
     description = "Test distribution",
     defaults = defaults(machine = "qemu-x86_64", image = "base-image"),
     cache = cache(
-        path = "/var/cache/yoe-ng/build",
+        path = "/var/cache/yoe/build",
         remote = [
             s3_cache(name="team", bucket="yoe-cache",
                      endpoint="https://minio.internal:9000", region="us-east-1"),

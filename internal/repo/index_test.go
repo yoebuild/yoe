@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/YoeDistro/yoe-ng/internal/artifact"
-	yoestar "github.com/YoeDistro/yoe-ng/internal/starlark"
+	"github.com/yoebuild/yoe/internal/artifact"
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 func TestGenerateIndex(t *testing.T) {
