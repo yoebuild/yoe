@@ -8,6 +8,14 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`yoe repo clean` drops stale `.apk` files.** Removes any `.apk` in the
+  project's local repo whose name+version no longer matches a current unit (unit
+  deleted, version bumped, release suffix changed) and re-signs the regenerated
+  APKINDEX. Without this, `apk add` happily picks the highest- versioned
+  candidate even when that candidate is leftover from a since-deleted unit —
+  which is how a `LUA=no`-built `apk-tools` ("apk has been built without help")
+  could keep winning over Alpine's prebuilt long after the source unit was
+  removed.
 - **Source-built `openssl` no longer collides with Alpine's `libcrypto3` /
   `libssl3`.** The `openssl` unit in `units-core` now declares
   `provides = ["libcrypto3", "libssl3"]`, so any package whose `runtime_deps`

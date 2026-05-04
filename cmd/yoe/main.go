@@ -883,7 +883,7 @@ func cmdRun(args []string) {
 
 func cmdRepo(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s repo <list|info|remove> [args...]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s repo <list|info|remove|clean> [args...]\n", os.Args[0])
 		os.Exit(1)
 	}
 
@@ -919,6 +919,18 @@ func cmdRepo(args []string) {
 			os.Exit(1)
 		}
 		if err := repo.Remove(repoDir, args[1], signer, os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	case "clean":
+		// Drops .apk files no current unit produces, then re-signs the
+		// regenerated APKINDEX. Same signer concern as `remove`.
+		signer, err := artifact.LoadOrGenerateSigner(proj.Name, proj.SigningKey)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: loading signing key: %v\n", err)
+			os.Exit(1)
+		}
+		if err := repo.Clean(proj, repoDir, signer, os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
