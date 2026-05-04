@@ -195,10 +195,24 @@ type model struct {
 	// caller passes the same options used for the initial load so global
 	// flags like --allow-duplicate-provides survive reloads.
 	loadOpts []yoestar.LoadOption
+
+	// globalFlagArgs holds the parent yoe invocation's global flags as argv
+	// tokens (e.g. ["--allow-duplicate-provides"]). Re-execs of the yoe
+	// binary from inside the TUI (currently `yoe run` on image units)
+	// prepend these so the child sees the same load behavior.
+	globalFlagArgs []string
 }
 
-// Run launches the TUI. loadOpts are reused on every project reload.
-func Run(proj *yoestar.Project, projectDir string, loadOpts ...yoestar.LoadOption) error {
+// Config carries the cross-cutting context the TUI needs from the cmd layer:
+// LoadOptions to use on every project reload, and the global flag tokens to
+// forward when re-execing the yoe binary for image runs.
+type Config struct {
+	LoadOpts       []yoestar.LoadOption
+	GlobalFlagArgs []string
+}
+
+// Run launches the TUI.
+func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	dag, err := resolve.BuildDAG(proj)
 	if err != nil {
 		return fmt.Errorf("building DAG: %w", err)
@@ -239,19 +253,20 @@ func Run(proj *yoestar.Project, projectDir string, loadOpts ...yoestar.LoadOptio
 	}
 
 	m := model{
-		proj:          proj,
-		projectDir:    projectDir,
-		arch:          arch,
-		dag:           dag,
-		units:         units,
-		hashes:        hashes,
-		statuses:      statuses,
-		building:      make(map[string]bool),
-		cancels:       make(map[string]context.CancelFunc),
-		machines:      machines,
-		flashProgress: progress.New(progress.WithDefaultGradient()),
-		deployHost:    deployHost,
-		loadOpts:      loadOpts,
+		proj:           proj,
+		projectDir:     projectDir,
+		arch:           arch,
+		dag:            dag,
+		units:          units,
+		hashes:         hashes,
+		statuses:       statuses,
+		building:       make(map[string]bool),
+		cancels:        make(map[string]context.CancelFunc),
+		machines:       machines,
+		flashProgress:  progress.New(progress.WithDefaultGradient()),
+		deployHost:     deployHost,
+		loadOpts:       cfg.LoadOpts,
+		globalFlagArgs: cfg.GlobalFlagArgs,
 	}
 	m.checkBinfmtWarning()
 
@@ -559,7 +574,9 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
 			if u, ok := m.proj.Units[name]; ok && u.Class == "image" {
-				c := exec.Command(os.Args[0], "run", name, "--machine", m.proj.Defaults.Machine)
+				args := append([]string{}, m.globalFlagArgs...)
+				args = append(args, "run", name, "--machine", m.proj.Defaults.Machine)
+				c := exec.Command(os.Args[0], args...)
 				c.Dir = m.projectDir
 				return m, tea.ExecProcess(c, func(err error) tea.Msg {
 					return execDoneMsg{err: err}
@@ -957,7 +974,9 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "r":
 		if u, ok := m.proj.Units[m.detailUnit]; ok && u.Class == "image" {
-			c := exec.Command(os.Args[0], "run", m.detailUnit, "--machine", m.proj.Defaults.Machine)
+			args := append([]string{}, m.globalFlagArgs...)
+			args = append(args, "run", m.detailUnit, "--machine", m.proj.Defaults.Machine)
+			c := exec.Command(os.Args[0], args...)
 			c.Dir = m.projectDir
 			return m, tea.ExecProcess(c, func(err error) tea.Msg {
 				return execDoneMsg{err: err}

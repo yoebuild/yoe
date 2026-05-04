@@ -458,6 +458,23 @@ func projectLoadOpts() []yoestar.LoadOption {
 	return opts
 }
 
+// globalFlagArgs returns the global flags as argv tokens, suitable for
+// prepending to a re-exec of the yoe binary so the child inherits the same
+// load behavior as the parent (TUI re-execs `yoe run` for image launches).
+func globalFlagArgs() []string {
+	var args []string
+	if globalProjectFile != "" {
+		args = append(args, "--project", globalProjectFile)
+	}
+	if globalShowShadows {
+		args = append(args, "--show-shadows")
+	}
+	if globalAllowDuplicateProvides {
+		args = append(args, "--allow-duplicate-provides")
+	}
+	return args
+}
+
 func tryLoadProject() *yoestar.Project {
 	dir := os.Getenv("YOE_PROJECT")
 	if dir == "" {
@@ -771,7 +788,11 @@ func cmdUpdate() {
 
 func cmdTUI(_ []string) {
 	proj := loadProject()
-	if err := tui.Run(proj, projectDir(), projectLoadOpts()...); err != nil {
+	cfg := tui.Config{
+		LoadOpts:        projectLoadOpts(),
+		GlobalFlagArgs:  globalFlagArgs(),
+	}
+	if err := tui.Run(proj, projectDir(), cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
