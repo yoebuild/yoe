@@ -8,11 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
-- **`yoe init` puts module-core after module-alpine.** New projects now match
-  the e2e project's module ordering, so source-built units in module-core
-  (busybox, openssl, …) win shadowing over Alpine prebuilts and avoid
-  image-assembly path collisions. Existing projects can flip their
-  `modules = [...]` list in `PROJECT.star` to get the same behavior.
+- **`yoe init` lists module-core last so it wins shadowing.** New projects
+  now order modules so module-core's source-built units (busybox, openssl,
+  …) take precedence over Alpine prebuilts and over module-rpi, avoiding
+  image-assembly path collisions. Existing projects can move
+  `module-core` to the end of their `modules = [...]` list in
+  `PROJECT.star` to get the same behavior.
 - **Images with `network-config` and busybox build again.** A path collision
   on `/usr/share/udhcpc/default.script` (busybox ships an example script
   there; network-config installs the real one) was aborting `apk add` at
