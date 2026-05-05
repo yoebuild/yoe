@@ -8,6 +8,14 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Source-built `ca-certificates` no longer collides with Alpine's
+  `ca-certificates-bundle`.** Image-time `apk add` was aborting with
+  `trying to overwrite etc/ssl/cert.pem owned by ca-certificates-bundle`
+  whenever `apk-tools` (or any package whose runtime closure reaches
+  `ca-certificates-bundle`) shared an image with the source-built unit.
+  The `ca-certificates` unit in `units-core` now declares
+  `provides = ["ca-certificates-bundle"]`, mirroring the openssl /
+  libcrypto3 / libssl3 fix from 0.10.0.
 - **TUI size column updates as each unit finishes.** When building an image,
   the `SIZE` column for each transitive dep now refreshes the moment that
   unit's build completes, instead of staying blank until the whole image is
