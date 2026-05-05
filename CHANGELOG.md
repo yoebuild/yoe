@@ -8,18 +8,15 @@ and this project adheres to
 
 ## [Unreleased]
 
-- **Source-built `ca-certificates` no longer collides with Alpine's
-  `ca-certificates-bundle`.** Image-time `apk add` was aborting with
-  `trying to overwrite etc/ssl/cert.pem owned by ca-certificates-bundle`
-  whenever `apk-tools` (or any package whose runtime closure reaches
-  `ca-certificates-bundle`) shared an image with the source-built unit.
-  The `ca-certificates` unit in `units-core` now declares
-  `provides = ["ca-certificates-bundle"]`, mirroring the openssl /
-  libcrypto3 / libssl3 fix from 0.10.0.
-- **TUI size column updates as each unit finishes.** When building an image,
-  the `SIZE` column for each transitive dep now refreshes the moment that
-  unit's build completes, instead of staying blank until the whole image is
-  done — and surviving even when a later unit fails the build.
+- **`helix` actually runs on the device.** Was previously bundled as a
+  glibc-linked binary that failed silently with `hx: not found`; now uses
+  Alpine's musl build.
+- **Images that include `apk-tools` or `libcurl` build again.** A collision
+  between the source-built `ca-certificates` and Alpine's
+  `ca-certificates-bundle` was aborting `apk add` at image-assembly time.
+- **`SIZE` column in the TUI updates as each unit finishes.** No more
+  waiting for the whole image to complete before transitive deps show their
+  size, and partial sizes survive a mid-build failure.
 - **Modules show their declared name.** The TUI's `MODULE` column and any
   diagnostic that names a module now use the name set in `MODULE.star`'s
   `module_info(name = ...)` instead of the path basename — so a module
