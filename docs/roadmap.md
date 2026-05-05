@@ -27,10 +27,6 @@
 - alpine packages like gvim provides vim. This could be a source of pain.
 - document BSP and package moat
 - Better hostnames for targets.
-- units-xxx -> module-xxx in git
-- unit details, show dependency graph up to image (upstream), and then
-  (downstream) a tree of stuff it pulls in
-- long z
 - mDNS on target (we have a mdns component, why is it not working?)
 - base-files is modified by machine
   - machine package feed?
@@ -57,6 +53,14 @@
 
 The biggest leverage area: making yoe pleasant for the developer writing apps
 that run on yoe-built devices, not just for the author of a distro.
+
+### Source can directly embed units
+
+- star file directly in source code
+- declares dependencies (modules, containers)
+- can be directly included in a PROJECT.star
+
+This allows yoe to be an application build tool as well as a system build tool.
 
 ### Build & Deploy Loop
 
