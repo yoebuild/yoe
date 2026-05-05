@@ -269,11 +269,8 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 
 	machines := sortedKeys(proj.Machines)
 
-	// Pre-fill the deploy host from local.star if present.
-	deployHost := ""
-	if ov, err := yoestar.LoadLocalOverrides(projectDir); err == nil {
-		deployHost = ov.DeployHost
-	}
+	// Read local.star once for both deploy-host prefill and query bootstrap.
+	ov, _ := yoestar.LoadLocalOverrides(projectDir)
 
 	m := model{
 		proj:           proj,
@@ -287,26 +284,19 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 		cancels:        make(map[string]context.CancelFunc),
 		machines:       machines,
 		flashProgress:  progress.New(progress.WithDefaultGradient()),
-		deployHost:     deployHost,
+		deployHost:     ov.DeployHost,
 		loadOpts:       cfg.LoadOpts,
 		globalFlagArgs: cfg.GlobalFlagArgs,
 	}
 
 	// Bootstrap query: prefer local.star, fall back to in:<defaults.image>.
-	if ov, err := yoestar.LoadLocalOverrides(projectDir); err == nil {
-		bootstrap := ov.Query
-		if bootstrap == "" && proj.Defaults.Image != "" {
-			bootstrap = "in:" + proj.Defaults.Image
-		}
-		if q, err := query.Parse(bootstrap); err == nil {
-			m.query = q
-			m.queryInput = q.String()
-		}
-	} else if proj.Defaults.Image != "" {
-		if q, err := query.Parse("in:" + proj.Defaults.Image); err == nil {
-			m.query = q
-			m.queryInput = q.String()
-		}
+	bootstrap := ov.Query
+	if bootstrap == "" && proj.Defaults.Image != "" {
+		bootstrap = "in:" + proj.Defaults.Image
+	}
+	if q, err := query.Parse(bootstrap); err == nil {
+		m.query = q
+		m.queryInput = q.String()
 	}
 	m.savedQuery = m.query.String()
 	m.applyQuery()
