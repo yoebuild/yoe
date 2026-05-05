@@ -1,4 +1,4 @@
 module_info(
-    name = "units-core",
+    name = "core",
     description = "Yoe base module: toolchain, base system, essential libraries",
 )
