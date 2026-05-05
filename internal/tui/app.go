@@ -1832,13 +1832,17 @@ func (m model) detailAllLines() []string {
 	return allLines
 }
 
-// upstreamLines reports, in one line, whether the current default
-// image actually ships m.detailUnit on the device. The check is exact
-// membership in the image's resolved artifact list — image() already
-// flattens that into the full set of installed packages, so a hit
-// means the apk really does end up in the rootfs, and a miss means
-// it doesn't. No transitive walking, no provides routing — we trust
-// what's already in Artifacts.
+// upstreamLines surfaces *why* the current default image ships
+// m.detailUnit, by walking back through runtime_deps to the explicit
+// pick(s) the user wrote in image(). Three states:
+//
+//   - The unit itself is in the explicit list: "└── <image> (explicit)"
+//   - It's pulled in transitively: list each explicit pick with the
+//     runtime-dep chain that bridges them, e.g.
+//       └── dev-image (image)
+//             ├── x11 → libx11 → cairo
+//             └── yazi → libpango → cairo
+//   - Nothing in the explicit list reaches it: "(not in <image>)"
 func (m model) upstreamLines() []string {
 	imgName := m.proj.Defaults.Image
 	if imgName == "" {
@@ -1848,12 +1852,84 @@ func (m model) upstreamLines() []string {
 	if !ok || img.Class != "image" {
 		return []string{dimStyle.Render("    (default image " + imgName + " not found)")}
 	}
-	for _, a := range img.Artifacts {
+	explicit := img.ArtifactsExplicit
+	if len(explicit) == 0 {
+		// Older image() output without artifacts_explicit — fall back
+		// to the resolved set so the check reports something.
+		explicit = img.Artifacts
+	}
+
+	// Direct: unit is itself an explicit pick.
+	for _, a := range explicit {
 		if a == m.detailUnit {
-			return []string{"  └── " + imgName + dimStyle.Render(" (image)")}
+			return []string{"  └── " + imgName + dimStyle.Render(" (image, explicit)")}
 		}
 	}
-	return []string{dimStyle.Render("    (not in " + imgName + ")")}
+
+	// Indirect: find a runtime-dep path from each explicit pick to
+	// the unit. Picks that don't reach it are skipped.
+	type chain struct {
+		pick string
+		path []string
+	}
+	var chains []chain
+	for _, pick := range explicit {
+		if path := m.findRuntimePath(pick, m.detailUnit); path != nil {
+			chains = append(chains, chain{pick, path})
+		}
+	}
+	if len(chains) == 0 {
+		return []string{dimStyle.Render("    (not in " + imgName + ")")}
+	}
+	sort.Slice(chains, func(i, j int) bool { return chains[i].pick < chains[j].pick })
+
+	out := []string{"  └── " + imgName + dimStyle.Render(" (image)")}
+	for i, c := range chains {
+		connector := "├── "
+		if i == len(chains)-1 {
+			connector = "└── "
+		}
+		out = append(out, "      "+connector+strings.Join(c.path, " → "))
+	}
+	return out
+}
+
+// findRuntimePath returns the shortest chain from->...->to via
+// runtime_deps (with provides routing), or nil if `to` isn't
+// reachable from `from`. The returned slice includes both endpoints.
+func (m model) findRuntimePath(from, to string) []string {
+	if from == to {
+		return []string{from}
+	}
+	type state struct {
+		name string
+		path []string
+	}
+	visited := map[string]bool{from: true}
+	queue := []state{{from, []string{from}}}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		u, ok := m.proj.Units[cur.name]
+		if !ok {
+			continue
+		}
+		for _, dep := range u.RuntimeDeps {
+			if real, ok := m.proj.Provides[dep]; ok {
+				dep = real
+			}
+			if visited[dep] {
+				continue
+			}
+			next := append(append([]string{}, cur.path...), dep)
+			if dep == to {
+				return next
+			}
+			visited[dep] = true
+			queue = append(queue, state{dep, next})
+		}
+	}
+	return nil
 }
 
 // downstreamChildren returns the units that `name` pulls in at runtime

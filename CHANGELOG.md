@@ -9,11 +9,13 @@ and this project adheres to
 ## [Unreleased]
 
 - **Unit detail shows what uses it and what it pulls in.** The detail page now
-  opens with two new sections above the build log: **USED BY** says whether
-  the current default image actually ships this unit on the device, and
-  **PULLS IN** shows the unit's runtime-deps as a tree. Drilling into an
-  image shows exactly the packages you wrote in `image()` (plus machine
-  packages); expand each one to see what it drags in transitively.
+  opens with two new sections above the build log: **USED BY** traces back
+  through runtime_deps to show which packages you wrote in `image()` pulled this
+  unit in, e.g. `dev-image → yazi → libpango → cairo`, so you can answer "why is
+  this on my device?" at a glance. **PULLS IN** shows the unit's runtime-deps as
+  a tree. Drilling into an image starts from exactly the packages you wrote in
+  `image()` (plus machine packages), then expands each one to show what it drags
+  in transitively.
 - **TUI layout overhaul.** Title and banners stay put when the list is long, the
   help bar is always the last line, status messages flash in its place, and
   pressing `/` turns the `Query:` header itself into the search input. Long unit
