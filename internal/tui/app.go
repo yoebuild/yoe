@@ -58,6 +58,11 @@ var (
 	// matchHighlightStyle draws the matched substring on top of whatever
 	// the row's existing color is.
 	matchHighlightStyle = lipgloss.NewStyle().Underline(true).Bold(true)
+
+	// Tab bar styling: active tab in amber-bold to match the [yoe] logo,
+	// inactive tabs faded so the eye is drawn to the current selection.
+	tabActiveStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#e8863a")).Bold(true)
+	tabInactiveStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 )
 
 // Package-level program reference for sending messages from goroutines.
@@ -86,6 +91,28 @@ const (
 	viewFlash
 	viewDeploy
 )
+
+// Tabs that share the home screen. Tab key cycles forward.
+type homeTab int
+
+const (
+	tabUnits homeTab = iota
+	tabModules
+	tabDiagnostics
+	numHomeTabs
+)
+
+func (t homeTab) String() string {
+	switch t {
+	case tabUnits:
+		return "Units"
+	case tabModules:
+		return "Modules"
+	case tabDiagnostics:
+		return "Diagnostics"
+	}
+	return ""
+}
 
 // Flash view stages
 type flashStage int
@@ -187,6 +214,10 @@ type model struct {
 	statuses   map[string]unitStatus
 	cursor     int
 	view       viewKind
+	activeTab  homeTab // which tab is showing on the home screen
+	modulesCursor    int // cursor row in the Modules tab
+	diagnosticsCursor int // cursor row in the Diagnostics tab
+	moduleStatus map[string]string // module name -> "clean" / "dirty (N)" / "missing" / err; populated lazily
 	detailUnit   string
 	outputLines  []string // executor output (executor.log)
 	logLines     []string // build log (build.log)
@@ -531,6 +562,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Tab cycles between home-screen tabs regardless of which one is
+	// active. Quit is also valid on every tab.
+	switch msg.String() {
+	case "tab":
+		m.activeTab = (m.activeTab + 1) % numHomeTabs
+		if m.activeTab == tabModules {
+			m.refreshModuleStatus()
+		}
+		m.message = ""
+		return m, nil
+	case "shift+tab":
+		m.activeTab = (m.activeTab + numHomeTabs - 1) % numHomeTabs
+		if m.activeTab == tabModules {
+			m.refreshModuleStatus()
+		}
+		m.message = ""
+		return m, nil
+	}
+
+	switch m.activeTab {
+	case tabModules:
+		return m.updateModulesTab(msg)
+	case tabDiagnostics:
+		return m.updateDiagnosticsTab(msg)
+	}
+
 	switch msg.String() {
 	case "q", "ctrl+c":
 		if len(m.cancels) > 0 {
@@ -805,6 +862,181 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+// updateModulesTab handles keys when the Modules tab is active. It only
+// consumes navigation and tab/quit keys — most unit-tab actions don't
+// apply when looking at modules.
+func (m model) updateModulesTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	maxRow := len(m.proj.ResolvedModules) - 1
+	if maxRow < 0 {
+		maxRow = 0
+	}
+	switch msg.String() {
+	case "q", "ctrl+c":
+		if len(m.cancels) > 0 {
+			m.confirm = "quit"
+			m.message = "Builds are running. Quit and cancel them? (y/n)"
+			return m, nil
+		}
+		return m, tea.Quit
+	case "up", "k":
+		if m.modulesCursor > 0 {
+			m.modulesCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.modulesCursor < maxRow {
+			m.modulesCursor++
+		}
+		return m, nil
+	case "pgup", "ctrl+b":
+		page := m.modulesViewportHeight()
+		m.modulesCursor -= page
+		if m.modulesCursor < 0 {
+			m.modulesCursor = 0
+		}
+		return m, nil
+	case "pgdown", "ctrl+f":
+		page := m.modulesViewportHeight()
+		m.modulesCursor += page
+		if m.modulesCursor > maxRow {
+			m.modulesCursor = maxRow
+		}
+		return m, nil
+	case "g":
+		m.modulesCursor = 0
+		return m, nil
+	case "G":
+		m.modulesCursor = maxRow
+		return m, nil
+	case "r":
+		m.refreshModuleStatus()
+		m.message = "Module status refreshed"
+		return m, nil
+	}
+	return m, nil
+}
+
+// modulesViewportHeight returns the number of module rows that fit on
+// screen. Subtracts the home header, summary line, column header, and
+// a help/message row.
+func (m model) modulesViewportHeight() int {
+	chrome := m.homeHeaderLines()
+	chrome++ // summary line
+	chrome++ // column header
+	chrome++ // ↑ more
+	chrome++ // ↓ more
+	chrome++ // detail strip "dir: ..."
+	chrome++ // detail strip "url: ..."
+	chrome++ // blank before bottom row
+	chrome++ // help / message
+	h := m.height - chrome
+	if h < 3 {
+		h = 3
+	}
+	return h
+}
+
+// diagnosticsViewportHeight returns the number of content lines that
+// fit in the Diagnostics tab body. Mirrors the layout of viewUnitsTab
+// so a tab switch keeps the body in the same screen region.
+func (m model) diagnosticsViewportHeight() int {
+	chrome := m.homeHeaderLines()
+	chrome++ // summary line
+	chrome++ // ↑ more (always reserved)
+	chrome++ // ↓ more (always reserved)
+	chrome++ // blank before bottom row
+	chrome++ // help / message
+	h := m.height - chrome
+	if h < 3 {
+		h = 3
+	}
+	return h
+}
+
+// updateDiagnosticsTab handles keys when the Diagnostics tab is active.
+// Read-only navigation: j/k/up/down step rows, pgup/pgdown jump a page.
+func (m model) updateDiagnosticsTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	rows := m.diagnosticsRowCount()
+	maxRow := rows - 1
+	if maxRow < 0 {
+		maxRow = 0
+	}
+	switch msg.String() {
+	case "q", "ctrl+c":
+		if len(m.cancels) > 0 {
+			m.confirm = "quit"
+			m.message = "Builds are running. Quit and cancel them? (y/n)"
+			return m, nil
+		}
+		return m, tea.Quit
+	case "up", "k":
+		if m.diagnosticsCursor > 0 {
+			m.diagnosticsCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.diagnosticsCursor < maxRow {
+			m.diagnosticsCursor++
+		}
+		return m, nil
+	case "pgup", "ctrl+b":
+		page := m.diagnosticsViewportHeight()
+		m.diagnosticsCursor -= page
+		if m.diagnosticsCursor < 0 {
+			m.diagnosticsCursor = 0
+		}
+		return m, nil
+	case "pgdown", "ctrl+f":
+		page := m.diagnosticsViewportHeight()
+		m.diagnosticsCursor += page
+		if m.diagnosticsCursor > maxRow {
+			m.diagnosticsCursor = maxRow
+		}
+		return m, nil
+	case "g":
+		m.diagnosticsCursor = 0
+		return m, nil
+	case "G":
+		m.diagnosticsCursor = maxRow
+		return m, nil
+	}
+	return m, nil
+}
+
+// diagnosticsRowCount returns the total number of rows shown in the
+// Diagnostics tab — sum of shadow rows and duplicate-provides rows.
+func (m model) diagnosticsRowCount() int {
+	return len(m.proj.Diagnostics.Shadows) + len(m.proj.Diagnostics.DuplicateProvides)
+}
+
+// refreshModuleStatus runs `git status --porcelain` in each resolved
+// module's directory and stores a summary string in m.moduleStatus.
+// Cheap enough to call on every tab switch — the worst case is a few
+// dozen short git invocations.
+func (m *model) refreshModuleStatus() {
+	if m.moduleStatus == nil {
+		m.moduleStatus = make(map[string]string)
+	}
+	for _, rm := range m.proj.ResolvedModules {
+		if !rm.Available {
+			m.moduleStatus[rm.Name] = "missing"
+			continue
+		}
+		out, err := exec.Command("git", "-C", rm.Dir, "status", "--porcelain").Output()
+		if err != nil {
+			m.moduleStatus[rm.Name] = "no-git"
+			continue
+		}
+		s := strings.TrimSpace(string(out))
+		if s == "" {
+			m.moduleStatus[rm.Name] = "clean"
+			continue
+		}
+		n := strings.Count(s, "\n") + 1
+		m.moduleStatus[rm.Name] = fmt.Sprintf("dirty (%d)", n)
+	}
 }
 
 // applySortReset re-applies the query (which re-sorts m.visible), then
@@ -1457,32 +1689,70 @@ func (m model) View() string {
 	}
 }
 
-func (m model) viewUnits() string {
+// renderHomeHeader renders the title + warning + notification + feed
+// banners + the tab bar. Shared by all home-screen tabs so the chrome
+// is identical across them.
+func (m model) renderHomeHeader() string {
 	var b strings.Builder
-
-	// Header
 	machine := m.proj.Defaults.Machine
 	image := m.proj.Defaults.Image
-	b.WriteString(fmt.Sprintf("  %s  Machine: %s  Image: %s\n",
+	fmt.Fprintf(&b, "  %s  Machine: %s  Image: %s\n",
 		titleStyle.Render("[yoe]"),
 		headerStyle.Render(machine),
-		headerStyle.Render(image)))
+		headerStyle.Render(image))
 
-	// Warning banner
 	if m.warning != "" {
 		warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Bold(true)
-		b.WriteString(fmt.Sprintf("  %s\n", warnStyle.Render(m.warning)))
+		fmt.Fprintf(&b, "  %s\n", warnStyle.Render(m.warning))
 	}
-	// Global notification (e.g., container rebuild)
 	if m.notification != "" {
 		notifyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Bold(true)
-		b.WriteString(fmt.Sprintf("  %s\n", notifyStyle.Render("⏳ "+m.notification)))
+		fmt.Fprintf(&b, "  %s\n", notifyStyle.Render("⏳ "+m.notification))
 	}
-	// Feed status (yoe serve)
 	if m.feedStatus != "" {
 		feedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-		b.WriteString(fmt.Sprintf("  %s\n", feedStyle.Render("feed: "+m.feedStatus)))
+		fmt.Fprintf(&b, "  %s\n", feedStyle.Render("feed: "+m.feedStatus))
 	}
+
+	// Tab bar with diagnostics-count badge so the user notices when
+	// shadows or duplicate provides exist without leaving the Units tab.
+	// Active tab is wrapped in `[ ... ]` and styled bold/amber so it
+	// reads as selected even on terminals that don't render underline.
+	var tabs []string
+	for t := homeTab(0); t < numHomeTabs; t++ {
+		label := t.String()
+		if t == tabDiagnostics {
+			n := m.diagnosticsRowCount()
+			if n > 0 {
+				label = fmt.Sprintf("%s (%d)", label, n)
+			}
+		}
+		if t == m.activeTab {
+			tabs = append(tabs, tabActiveStyle.Render("[ "+label+" ]"))
+		} else {
+			tabs = append(tabs, tabInactiveStyle.Render("  "+label+"  "))
+		}
+	}
+	fmt.Fprintf(&b, "  %s    %s%s\n",
+		strings.Join(tabs, " "),
+		helpKeyStyle.Render("tab"),
+		helpStyle.Render(": switch"))
+	return b.String()
+}
+
+func (m model) viewUnits() string {
+	switch m.activeTab {
+	case tabModules:
+		return m.viewModulesTab()
+	case tabDiagnostics:
+		return m.viewDiagnosticsTab()
+	}
+	return m.viewUnitsTab()
+}
+
+func (m model) viewUnitsTab() string {
+	var b strings.Builder
+	b.WriteString(m.renderHomeHeader())
 
 	// Query header — when the user presses `/`, the input editor replaces
 	// the query body in place rather than opening a separate input row at
@@ -1710,6 +1980,280 @@ func renderHelp(items []helpItem) string {
 	}
 	return b.String()
 }
+
+// viewModulesTab renders the Modules tab — one row per resolved module
+// with declared metadata and live git status.
+func (m model) viewModulesTab() string {
+	var b strings.Builder
+	b.WriteString(m.renderHomeHeader())
+
+	mods := m.proj.ResolvedModules
+	fmt.Fprintf(&b, "  %s%s\n",
+		queryDimStyle.Render("Modules: "),
+		queryDimStyle.Render(fmt.Sprintf("%d declared", len(mods))))
+	fmt.Fprintf(&b, "  %s\n", headerStyle.Render(fmt.Sprintf("%-22s %-10s %-32s %-32s %s",
+		"NAME", "REF", "URL", "PATH", "STATUS")))
+
+	viewH := m.modulesViewportHeight()
+
+	// Render each module row into a flat list, then scroll-window it
+	// the same way viewUnitsTab handles its visible slice.
+	rendered := make([]string, 0, len(mods))
+	for i, rm := range mods {
+		cursorMark := "  "
+		nameStyle := classUnitStyle
+		if i == m.modulesCursor {
+			cursorMark = "→ "
+			nameStyle = selectedStyle
+		}
+		ref := rm.Ref
+		if ref == "" {
+			ref = "-"
+		}
+		url := rm.URL
+		if url == "" {
+			url = "(unset)"
+		}
+		path := rm.Path
+		if rm.Local != "" {
+			path = "local:" + rm.Local
+			if rm.Path != "" {
+				path += "/" + rm.Path
+			}
+		}
+		if path == "" {
+			path = "(root)"
+		}
+		status := m.moduleStatus[rm.Name]
+		if status == "" {
+			status = "?"
+		}
+		statusStyle := dimStyle
+		switch status {
+		case "clean":
+			statusStyle = cachedStyle
+		case "missing":
+			statusStyle = failedStyle
+		case "no-git":
+			statusStyle = dimStyle
+		default:
+			if strings.HasPrefix(status, "dirty") {
+				statusStyle = waitingStyle
+			}
+		}
+		rendered = append(rendered, fmt.Sprintf("%s%s %s %s %s %s",
+			cursorMark,
+			nameStyle.Render(clipFixed(rm.Name, 22)),
+			classUnitStyle.Render(clipFixed(ref, 10)),
+			dimStyle.Render(clipFixed(url, 32)),
+			dimStyle.Render(clipFixed(path, 32)),
+			statusStyle.Render(status)))
+	}
+
+	// Cursor-driven scroll offset: smallest offset that keeps the
+	// cursor row in the viewport.
+	offset := 0
+	if m.modulesCursor >= viewH {
+		offset = m.modulesCursor - viewH + 1
+	}
+	end := offset + viewH
+	if end > len(rendered) {
+		end = len(rendered)
+	}
+
+	// Top "more" indicator (always one line).
+	if offset > 0 {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  ↑ %d more", offset)))
+	}
+	b.WriteString("\n")
+
+	for i := offset; i < end; i++ {
+		b.WriteString(rendered[i])
+		b.WriteString("\n")
+	}
+	for i := end - offset; i < viewH; i++ {
+		b.WriteString("\n")
+	}
+
+	// Bottom "more" indicator.
+	if end < len(rendered) {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  ↓ %d more", len(rendered)-end)))
+	}
+	b.WriteString("\n")
+
+	if len(mods) == 0 {
+		b.WriteString(dimStyle.Render("  (no modules declared in PROJECT.star)\n"))
+	}
+
+	// Detail strip for the cursor row — useful when fields are clipped.
+	if m.modulesCursor >= 0 && m.modulesCursor < len(mods) {
+		rm := mods[m.modulesCursor]
+		dir := rm.Dir
+		if dir == "" {
+			dir = "(not synced)"
+		}
+		fmt.Fprintf(&b, "  %s %s\n", dimStyle.Render("dir:"), dim(dir))
+		if rm.URL != "" {
+			fmt.Fprintf(&b, "  %s %s\n", dimStyle.Render("url:"), dim(rm.URL))
+		}
+	} else {
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString("\n") // blank before help/message
+	if m.message != "" {
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
+	} else {
+		b.WriteString(renderHelp([]helpItem{
+			{"tab", "next tab"}, {"j/k", "move"}, {"g/G", "top/bottom"}, {"r", "refresh"}, {"q", "quit"},
+		}))
+	}
+	return b.String()
+}
+
+// viewDiagnosticsTab renders the Diagnostics tab: shadowed units and
+// duplicate provides surfaced from Project.Diagnostics. The content
+// scrolls when it exceeds the available height; section/column headers
+// scroll with the rows so the user can see what they belong to.
+func (m model) viewDiagnosticsTab() string {
+	var b strings.Builder
+	b.WriteString(m.renderHomeHeader())
+
+	diag := m.proj.Diagnostics
+	fmt.Fprintf(&b, "  %s%s\n",
+		queryDimStyle.Render("Diagnostics: "),
+		queryDimStyle.Render(fmt.Sprintf("%d shadowed, %d duplicate provides",
+			len(diag.Shadows), len(diag.DuplicateProvides))))
+
+	viewH := m.diagnosticsViewportHeight()
+
+	if len(diag.Shadows) == 0 && len(diag.DuplicateProvides) == 0 {
+		b.WriteString("\n") // ↑ more (reserved)
+		b.WriteString(dimStyle.Render("  no diagnostic issues — every unit name and `provides` claim is unique.\n"))
+		for i := 1; i < viewH; i++ {
+			b.WriteString("\n")
+		}
+		b.WriteString("\n") // ↓ more (reserved)
+		b.WriteString("\n") // blank
+		b.WriteString(renderHelp([]helpItem{
+			{"tab", "next tab"}, {"q", "quit"},
+		}))
+		return b.String()
+	}
+
+	// Build content as a flat list of pre-rendered lines plus a parallel
+	// mapping from row index to line index so we can scroll the cursor
+	// into view.
+	var lines []string
+	rowLine := make([]int, 0, m.diagnosticsRowCount())
+	row := 0
+
+	if len(diag.Shadows) > 0 {
+		lines = append(lines, "  "+headerStyle.Render(fmt.Sprintf("SHADOWED UNITS (%d)", len(diag.Shadows))))
+		lines = append(lines, "  "+dimStyle.Render(fmt.Sprintf("%-28s %-22s %s", "UNIT", "WINNER", "SHADOWED FROM")))
+		for _, s := range diag.Shadows {
+			cursor := "  "
+			style := classUnitStyle
+			if row == m.diagnosticsCursor {
+				cursor = "→ "
+				style = selectedStyle
+			}
+			rowLine = append(rowLine, len(lines))
+			lines = append(lines, fmt.Sprintf("%s%s %s %s",
+				cursor,
+				style.Render(clipFixed(s.Unit, 28)),
+				dimStyle.Render(clipFixed(displayModule(s.WinnerModule), 22)),
+				dimStyle.Render(displayModule(s.LoserModule))))
+			row++
+		}
+	}
+	if len(diag.DuplicateProvides) > 0 {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, "  "+headerStyle.Render(fmt.Sprintf("DUPLICATE PROVIDES (%d)", len(diag.DuplicateProvides))))
+		lines = append(lines, "  "+dimStyle.Render(fmt.Sprintf("%-22s %-28s %s", "VIRTUAL", "ACTIVE", "ALSO PROVIDED BY")))
+		for _, p := range diag.DuplicateProvides {
+			cursor := "  "
+			style := classUnitStyle
+			if row == m.diagnosticsCursor {
+				cursor = "→ "
+				style = selectedStyle
+			}
+			others := strings.Join(p.Others, ", ")
+			rowLine = append(rowLine, len(lines))
+			lines = append(lines, fmt.Sprintf("%s%s %s %s",
+				cursor,
+				style.Render(clipFixed(p.Virtual, 22)),
+				cachedStyle.Render(clipFixed(p.Active, 28)),
+				dimStyle.Render(others)))
+			row++
+		}
+	}
+
+	// Derive the scroll offset from the cursor: pick the smallest
+	// offset that keeps the cursor row visible.
+	cursorLine := -1
+	if m.diagnosticsCursor >= 0 && m.diagnosticsCursor < len(rowLine) {
+		cursorLine = rowLine[m.diagnosticsCursor]
+	}
+	offset := 0
+	if cursorLine >= viewH {
+		offset = cursorLine - viewH + 1
+	}
+	if offset > len(lines)-viewH {
+		offset = len(lines) - viewH
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	end := offset + viewH
+	if end > len(lines) {
+		end = len(lines)
+	}
+
+	// Top "more" indicator (always one line, blank when at top).
+	if offset > 0 {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  ↑ %d more", offset)))
+	}
+	b.WriteString("\n")
+
+	for i := offset; i < end; i++ {
+		b.WriteString(lines[i])
+		b.WriteString("\n")
+	}
+	for i := end - offset; i < viewH; i++ {
+		b.WriteString("\n")
+	}
+
+	// Bottom "more" indicator.
+	if end < len(lines) {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  ↓ %d more", len(lines)-end)))
+	}
+	b.WriteString("\n")
+	b.WriteString("\n") // blank before help/message
+
+	if m.message != "" {
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
+	} else {
+		b.WriteString(renderHelp([]helpItem{
+			{"tab", "next tab"}, {"j/k", "move"}, {"g/G", "top/bottom"}, {"q", "quit"},
+		}))
+	}
+	return b.String()
+}
+
+// displayModule formats a module name for display ("project root" for
+// the empty string, the literal name otherwise).
+func displayModule(name string) string {
+	if name == "" {
+		return "project root"
+	}
+	return name
+}
+
+// dim renders a string in the dim style, used inline within format strings.
+func dim(s string) string { return dimStyle.Render(s) }
 
 func (m model) viewSetup() string {
 	var b strings.Builder
@@ -2710,16 +3254,7 @@ func (m *model) checkBinfmtWarning() {
 // rendered (single-page state) so the row count doesn't jump by 1 the
 // moment the user crosses into multi-page territory.
 func (m model) listViewportHeight() int {
-	chrome := 1 // title
-	if m.warning != "" {
-		chrome++
-	}
-	if m.notification != "" {
-		chrome++
-	}
-	if m.feedStatus != "" {
-		chrome++
-	}
+	chrome := m.homeHeaderLines()
 	chrome++ // query header
 	chrome++ // column header
 	chrome++ // ↑ more (always reserved)
@@ -2731,6 +3266,24 @@ func (m model) listViewportHeight() int {
 		h = 3
 	}
 	return h
+}
+
+// homeHeaderLines returns the number of lines renderHomeHeader outputs.
+// Counted exactly so each tab can subtract chrome from m.height when
+// sizing its own scrollable region.
+func (m model) homeHeaderLines() int {
+	n := 1 // title
+	if m.warning != "" {
+		n++
+	}
+	if m.notification != "" {
+		n++
+	}
+	if m.feedStatus != "" {
+		n++
+	}
+	n++ // tab bar
+	return n
 }
 
 func findUnitFile(projectDir, name string) string {

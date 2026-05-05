@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **TUI home screen has tabs.** Press `tab` to cycle between Units (the
+  existing list), Modules (declared modules with git status), and
+  Diagnostics (shadowed units and duplicate `provides`). The diagnostics
+  tab carries a count badge so issues are visible from any tab.
 - **`--allow-duplicate-provides` is on by default.** No more passing the flag
   on every yoe invocation while the `linux-firmware-*` fan-out keeps tripping
   the strict check.

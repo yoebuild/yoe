@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"go.starlark.net/starlark"
@@ -136,16 +137,29 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		path string
 	}
 	var resolvedModules []resolvedModule
+	var resolvedForProject []ResolvedModule
 	if proj := eng.Project(); proj != nil {
 		for _, m := range proj.Modules {
 			modulePath, ok := locateModulePath(m, root)
+			rm := ResolvedModule{
+				URL:       m.URL,
+				Ref:       m.Ref,
+				Path:      m.Path,
+				Local:     m.Local,
+				Available: ok,
+			}
 			if !ok {
+				rm.Name = pathBasename(m)
+				resolvedForProject = append(resolvedForProject, rm)
 				continue
 			}
 			name := peekModuleName(modulePath)
 			if name == "" {
 				name = pathBasename(m)
 			}
+			rm.Name = name
+			rm.Dir = modulePath
+			resolvedForProject = append(resolvedForProject, rm)
 			eng.SetModuleRoot(name, modulePath)
 			resolvedModules = append(resolvedModules, resolvedModule{name: name, path: modulePath})
 		}
@@ -347,6 +361,8 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 
 	proj.Machines = eng.Machines()
 	proj.Units = eng.Units()
+	proj.ResolvedModules = resolvedForProject
+	proj.Diagnostics.Shadows = eng.Shadows()
 
 	// Mirror the Starlark PROVIDES dict onto the Go side so callers that
 	// don't run inside a Starlark thread (the build executor, deploy path,
@@ -360,6 +376,43 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 				proj.Provides[string(k)] = string(v)
 			}
 		}
+	}
+
+	// Compute duplicate-provides diagnostics: every virtual claimed by
+	// more than one unit. The active provider in proj.Provides is the
+	// winner; the rest go in Others. Sorted by virtual name and then by
+	// unit name so the diagnostics tab is deterministic.
+	virtToUnits := map[string][]string{}
+	for _, u := range proj.Units {
+		for _, virt := range u.Provides {
+			if virt == "" {
+				continue
+			}
+			virtToUnits[virt] = append(virtToUnits[virt], u.Name)
+		}
+	}
+	var virts []string
+	for v := range virtToUnits {
+		if len(virtToUnits[v]) > 1 {
+			virts = append(virts, v)
+		}
+	}
+	sort.Strings(virts)
+	for _, v := range virts {
+		claimants := virtToUnits[v]
+		sort.Strings(claimants)
+		active := proj.Provides[v]
+		var others []string
+		for _, c := range claimants {
+			if c != active {
+				others = append(others, c)
+			}
+		}
+		proj.Diagnostics.DuplicateProvides = append(proj.Diagnostics.DuplicateProvides, ProvidesEvent{
+			Virtual: v,
+			Active:  active,
+			Others:  others,
+		})
 	}
 
 	// Validate: units with tasks must have container and container_arch.
