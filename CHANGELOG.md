@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **TUI size column updates as each unit finishes.** When building an image,
+  the `SIZE` column for each transitive dep now refreshes the moment that
+  unit's build completes, instead of staying blank until the whole image is
+  done — and surviving even when a later unit fails the build.
 - **Modules show their declared name.** The TUI's `MODULE` column and any
   diagnostic that names a module now use the name set in `MODULE.star`'s
   `module_info(name = ...)` instead of the path basename — so a module

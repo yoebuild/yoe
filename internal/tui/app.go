@@ -397,8 +397,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case buildEventMsg:
 		switch msg.status {
-		case "cached", "done":
+		case "cached":
 			m.statuses[msg.unit] = statusCached
+		case "done":
+			m.statuses[msg.unit] = statusCached
+			// Build just finished writing this unit's build.json (or
+			// destdir/<name>.img for images), so refresh the SIZE column
+			// now instead of waiting for the parent build's final
+			// recomputeMetrics — otherwise sizes for transitive deps stay
+			// blank for the entire duration of a multi-unit image build.
+			m.refreshUnitSize(msg.unit)
 		case "waiting":
 			m.statuses[msg.unit] = statusWaiting
 		case "building":
@@ -1852,15 +1860,20 @@ func (m model) upstreamLines() []string {
 	if !ok || img.Class != "image" {
 		return []string{dimStyle.Render("    (default image " + imgName + " not found)")}
 	}
-	explicit := img.ArtifactsExplicit
-	if len(explicit) == 0 {
-		// Older image() output without artifacts_explicit — fall back
-		// to the resolved set so the check reports something.
-		explicit = img.Artifacts
+	if len(img.ArtifactsExplicit) == 0 {
+		// Older image() output without artifacts_explicit. We can't
+		// distinguish explicit from transitive — report rootfs
+		// membership only, without claiming "explicit".
+		for _, a := range img.Artifacts {
+			if a == m.detailUnit {
+				return []string{"  └── " + imgName + dimStyle.Render(" (image)")}
+			}
+		}
+		return []string{dimStyle.Render("    (not in " + imgName + ")")}
 	}
 
 	// Direct: unit is itself an explicit pick.
-	for _, a := range explicit {
+	for _, a := range img.ArtifactsExplicit {
 		if a == m.detailUnit {
 			return []string{"  └── " + imgName + dimStyle.Render(" (image, explicit)")}
 		}
@@ -1873,7 +1886,7 @@ func (m model) upstreamLines() []string {
 		path []string
 	}
 	var chains []chain
-	for _, pick := range explicit {
+	for _, pick := range img.ArtifactsExplicit {
 		if path := m.findRuntimePath(pick, m.detailUnit); path != nil {
 			chains = append(chains, chain{pick, path})
 		}
@@ -2547,6 +2560,24 @@ func (m *model) recomputeMetrics() {
 	}
 	m.unitSize = size
 	m.unitDeps = deps
+}
+
+// refreshUnitSize re-reads a single unit's installed size from disk.
+// Called when a unit's build just finished, so the SIZE column updates
+// incrementally during a multi-unit build instead of waiting for the
+// final recomputeMetrics. Skips the runtime-closure walk because deps
+// don't change just because the unit got built.
+func (m *model) refreshUnitSize(name string) {
+	u, ok := m.proj.Units[name]
+	if !ok {
+		return
+	}
+	sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
+	buildDir := build.UnitBuildDir(m.projectDir, sd, name)
+	if m.unitSize == nil {
+		m.unitSize = make(map[string]int64)
+	}
+	m.unitSize[name] = installedSize(u, buildDir)
 }
 
 // installedSize returns the on-disk size for a built unit. For image
