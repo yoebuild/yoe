@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`yoe --help` now works and lists global options.** `yoe --help`, `-h`, and
+  `help` all print usage, including the `--project`, `--show-shadows`, and
+  `--allow-duplicate-provides` flags that were previously undocumented in the
+  CLI.
+
 ## [0.10.0] - 2026-05-05
 
 _Errata: due to an issue in the alpine module, you must currently run with:

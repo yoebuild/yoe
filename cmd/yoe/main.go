@@ -69,6 +69,9 @@ func main() {
 	cmdArgs := args[1:]
 
 	switch command {
+	case "--help", "-h", "help":
+		printUsage()
+		return
 	case "version":
 		fmt.Println(version)
 	case "update":
@@ -125,8 +128,15 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, "Usage: %s COMMAND [OPTIONS]\n\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "Usage: %s [GLOBAL OPTIONS] COMMAND [OPTIONS]\n\n", os.Args[0])
 	fmt.Fprintf(os.Stderr, "Yoe embedded Linux distribution builder\n\n")
+	fmt.Fprintf(os.Stderr, "Global Options:\n")
+	fmt.Fprintf(os.Stderr, "  --project <file>            Use an alternative project file instead of PROJECT.star\n")
+	fmt.Fprintf(os.Stderr, "  --show-shadows              Print stderr notices about cross-module unit shadowing\n")
+	fmt.Fprintf(os.Stderr, "                              and intra-module provides overrides\n")
+	fmt.Fprintf(os.Stderr, "  --allow-duplicate-provides  Allow multiple units in the same module to declare\n")
+	fmt.Fprintf(os.Stderr, "                              the same virtual provide (first registered wins)\n")
+	fmt.Fprintf(os.Stderr, "\n")
 	fmt.Fprintf(os.Stderr, "Commands:\n")
 	fmt.Fprintf(os.Stderr, "  (no args)               Launch the interactive TUI\n")
 	fmt.Fprintf(os.Stderr, "  init <project-dir>      Create a new Yoe project\n")
