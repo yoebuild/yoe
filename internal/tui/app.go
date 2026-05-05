@@ -1833,32 +1833,53 @@ func (m model) detailAllLines() []string {
 }
 
 // upstreamLines reports, in one line, whether the current default
-// image pulls in m.detailUnit. The full upstream tree got noisy fast
-// (every unit's dependents also depend on each other), and the
-// question that actually matters in practice is "does my image use
-// this?" — answer that and stop.
+// image actually ships m.detailUnit on the device. The check is exact
+// membership in the image's resolved artifact list — image() already
+// flattens that into the full set of installed packages, so a hit
+// means the apk really does end up in the rootfs, and a miss means
+// it doesn't. No transitive walking, no provides routing — we trust
+// what's already in Artifacts.
 func (m model) upstreamLines() []string {
-	img := m.proj.Defaults.Image
-	if img == "" {
+	imgName := m.proj.Defaults.Image
+	if imgName == "" {
 		return []string{dimStyle.Render("    (no default image set)")}
 	}
-	closure := query.BuildInClosure(m.proj, img)
-	if closure[m.detailUnit] {
-		return []string{"  └── " + img + dimStyle.Render(" (image)")}
+	img, ok := m.proj.Units[imgName]
+	if !ok || img.Class != "image" {
+		return []string{dimStyle.Render("    (default image " + imgName + " not found)")}
 	}
-	return []string{dimStyle.Render("    (not in " + img + ")")}
+	for _, a := range img.Artifacts {
+		if a == m.detailUnit {
+			return []string{"  └── " + imgName + dimStyle.Render(" (image)")}
+		}
+	}
+	return []string{dimStyle.Render("    (not in " + imgName + ")")}
 }
 
-// downstreamChildren returns the units that `name` pulls in at runtime —
-// runtime_deps with virtual provides routed through proj.Provides, so
-// the tree shows the concrete unit that wins override resolution.
+// downstreamChildren returns the units that `name` pulls in at runtime
+// — runtime_deps with virtual provides routed through proj.Provides,
+// so the tree shows the concrete unit that wins override resolution.
+// For image units the user's explicit artifact list (pre-closure
+// expansion) takes the place of runtime_deps, so the top of the tree
+// matches what the user actually wrote in image() rather than the
+// fully flattened runtime closure.
 func (m model) downstreamChildren(name string) []string {
 	u, ok := m.proj.Units[name]
 	if !ok {
 		return nil
 	}
+	deps := u.RuntimeDeps
+	if u.Class == "image" {
+		deps = u.ArtifactsExplicit
+		if len(deps) == 0 {
+			// Older image() output without artifacts_explicit — fall
+			// back to the resolved artifact list so the tree still
+			// renders something.
+			deps = u.Artifacts
+		}
+	}
 	var out []string
-	for _, dep := range u.RuntimeDeps {
+	for _, dep := range deps {
 		if real, ok := m.proj.Provides[dep]; ok {
 			dep = real
 		}
@@ -2431,12 +2452,22 @@ func (m *model) recomputeMetrics() {
 		buildDir := build.UnitBuildDir(m.projectDir, sd, name)
 		size[name] = installedSize(u, buildDir)
 
-		// Runtime closure includes the unit itself; subtract one so the
-		// number reflects what this unit drags in beyond itself.
-		closure := resolve.RuntimeClosure(m.proj, []string{name})
-		if len(closure) > 0 {
-			deps[name] = len(closure) - 1
+		// Runtime closure of what the unit pulls in. For image units the
+		// package list lives in Artifacts (image.RuntimeDeps is empty
+		// by convention), so walk from the artifact roots instead — the
+		// number then reflects what actually ships on the device.
+		var roots []string
+		if u.Class == "image" {
+			roots = u.Artifacts
+		} else {
+			roots = []string{name}
 		}
+		closure := resolve.RuntimeClosure(m.proj, roots)
+		count := len(closure)
+		if u.Class != "image" && count > 0 {
+			count-- // don't count the unit itself for non-image units
+		}
+		deps[name] = count
 	}
 	m.unitSize = size
 	m.unitDeps = deps

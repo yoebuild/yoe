@@ -161,7 +161,8 @@ type Unit struct {
 	CacheDirs   map[string]string // container_path:host_subdir cache mounts
 
 	// Image-specific (class == "image")
-	Artifacts  []string // artifacts to install in rootfs
+	Artifacts          []string // artifacts to install in rootfs (full runtime closure, resolved by image())
+	ArtifactsExplicit  []string // user-specified artifacts before runtime-closure expansion; for UX (TUI tree, etc.)
 	Exclude    []string
 	Hostname   string
 	Timezone   string

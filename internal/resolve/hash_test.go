@@ -18,9 +18,10 @@ import (
 // below will fail until you either reference unit.<Field> in UnitHash or
 // add the field name here with a one-line justification.
 var hashSkipFields = map[string]string{
-	"Module":      "registration provenance — same unit from different modules must hash identically",
-	"ModuleIndex": "registration order — informational, no output impact",
-	"CacheDirs":   "host-side mount points; doesn't affect built artifact contents",
+	"Module":            "registration provenance — same unit from different modules must hash identically",
+	"ModuleIndex":       "registration order — informational, no output impact",
+	"CacheDirs":         "host-side mount points; doesn't affect built artifact contents",
+	"ArtifactsExplicit": "UX-only metadata; the resolved Artifacts list (which IS hashed) drives the actual rootfs",
 }
 
 // TestUnitHash_CoversAllFields fails when a new field is added to Unit
