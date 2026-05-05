@@ -8,81 +8,30 @@ and this project adheres to
 
 ## [Unreleased]
 
-- **Help bar highlights shortcut keys in amber.** Each shortcut letter now
-  renders in the same amber as the `[yoe]` logo so the eye can pick out keys
-  without reading every word — same treatment on the detail page.
-- **Detail page no longer trails blank lines.** Chrome (title, metadata, scroll
-  indicator, optional search bar, bottom row) is counted exactly like the units
-  view, so the help bar sits flush at the bottom instead of with two or three
-  blank lines below it. Status messages also replace the help bar inline,
-  matching the units view.
-- **Detail search no longer pushes the help bar right.** The trailing newline on
-  the post-search match indicator now lives outside the `lipgloss.Render` call,
-  so the trailing ANSI reset doesn't land on the next row and offset the help
-  bar by a few cells.
-- **Cursor unit name always visible.** The spare line above the bottom row shows
-  the full name of the cursor's unit in a faded version of the cursor green —
-  useful when the name is wider than the NAME column, and a quiet confirmation
-  of which unit is selected the rest of the time.
-- **Banner block sits flush against the Query line.** Dropped the blank line
-  between feed/notification banners and the Query header, freeing up a row for
-  the unit list.
-- **Search edits in place on the Query: line.** Pressing `/` now turns the
-  existing `Query:` header into the input editor instead of opening a separate
-  row at the bottom of the screen, so your eye stays in one spot while you type
-  and the bottom row is always either the help bar or a transient status
-  message.
-- **Long unit names no longer break column alignment.** Names that exceed the
-  NAME column (e.g. `abseil-cpp-atomic-hook-test-helper`) are clipped with an
-  ellipsis instead of pushing the rest of the row off-screen. Same treatment for
-  class and module values that get unusually long.
-- **TUI layout no longer scrolls the title off the top.** Chrome (banners, query
-  header, column header, ↑/↓ markers, blank, bottom row) is counted exactly so
-  the unit list always fits inside the terminal. The ↑/↓ slots reserve a row
-  even when empty, so the bottom row's position is fixed regardless of scroll
-  state.
-- **Status messages replace the help bar.** Build/clean/save messages now render
-  in place of the keyboard shortcuts on a single bottom line instead of stacking
-  below it; the help bar reappears as soon as you press the next key.
-- **Switching the image re-anchors the search.** Picking a new image in Setup
-  updates the active query and the saved default to `in:<image>`, so the unit
-  table immediately filters to what the new image pulls in and the next session
-  opens with the same view.
-- **Default image is configurable per developer.** `local.star` now accepts an
-  `image = "..."` field that overrides `defaults.image` from `PROJECT.star`, the
-  same way `machine` already does. The TUI's Setup screen (`s`) has a new
-  **Image** entry — pick one and the choice is saved to `local.star`. The
-  override flows through `yoe run` (which builds the image when called with no
-  args), `yoe config show`, and the TUI bootstrap query / cursor placement.
-- **TUI opens with the cursor on the default image.** Whatever
-  `proj.Defaults.Image` resolves to (PROJECT.star or your local.star override)
-  is highlighted at startup and scrolled into view, so the most relevant
-  artifact is one keystroke away from a build or `enter` for detail. If the
-  bootstrap query filters that image out, the cursor stays at the top.
-- **TUI follows the active build.** When a build starts, the cursor jumps to
-  whatever unit is being compiled and the list scrolls to put it on screen, so
-  you can watch a long DAG without losing track or hunting for the spinner.
-  Press `enter` to drop straight into the detail/log view of the active unit. If
-  your current search filters the unit out, the cursor stays put — your filter
-  wins.
-- **TUI sort columns from the keyboard.** Press `o` to cycle through
-  `NAME → CLASS → MODULE → SIZE → DEPS → STATUS` (numeric columns default to
-  descending so the largest land at the top). Press `O` to flip direction of the
-  current column. The active column shows `↑` or `↓` next to its label so you
-  always know how the list is ordered, and unbuilt rows stay at the bottom
-  either way. Mouse capture is off so terminal text selection / copy-paste work
-  normally.
-- **TUI unit table shows module, size, and dependency-count columns.** Each row
-  now reports the module that won shadow resolution (or `(local)` for project-
-  root units), the on-disk install size after build (the `.img` file size for
-  images, destdir size for everything else, blank when not built), and how many
-  units this one drags into a runtime closure. Useful for spotting bloat before
-  flashing and for seeing at a glance which module is actually providing each
-  unit.
-- **`yoe --help` now works and lists global options.** `yoe --help`, `-h`, and
-  `help` all print usage, including the `--project`, `--show-shadows`, and
-  `--allow-duplicate-provides` flags that were previously undocumented in the
-  CLI.
+- **TUI layout overhaul.** Title and banners stay put when the list is long, the
+  help bar is always the last line, status messages flash in its place, and
+  pressing `/` turns the `Query:` header itself into the search input. Long unit
+  names get an ellipsis instead of breaking column alignment.
+- **Sort columns from the keyboard.** Press `o` to cycle the unit table through
+  `NAME → CLASS → MODULE → SIZE → DEPS → STATUS`; `O` flips direction. The
+  active column shows `↑` or `↓` next to its label.
+- **Help bar highlights shortcut keys.** Each shortcut letter renders in amber
+  matching `[yoe]`, so you can scan keys without reading every word.
+- **Cursor follows the work.** The TUI opens with the cursor on the default
+  image, jumps to whatever unit is currently building, and the cursor's full
+  unit name is always visible just above the help bar.
+- **Configure the default image per developer.** `local.star` accepts
+  `image = "..."` to override `defaults.image`. Pick an image from the new
+  **Image** entry in Setup (`s`) and the choice is saved — and the active search
+  re-anchors to `in:<image>`. Flows through `yoe run`, `yoe config show`, and
+  the TUI.
+- **More columns in the unit table.** Each row now also shows the module that
+  owns the unit (after shadow resolution), its install size after build (`.img`
+  size for images), and how many units it pulls into a runtime closure — so
+  bloat is easy to spot before flashing.
+- **`yoe --help` works and lists global options.** `--help`, `-h`, and `help`
+  all print usage, including `--project`, `--show-shadows`, and
+  `--allow-duplicate-provides`.
 
 ## [0.10.0] - 2026-05-05
 
