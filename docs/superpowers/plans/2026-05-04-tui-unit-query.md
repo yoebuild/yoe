@@ -40,8 +40,8 @@ before starting Task 1.
 
 - `internal/tui/query/parser.go` — `Query` type, `Parse(string) (Query, error)`,
   `Query.IsEmpty()`, `Query.String()`, and the `Query.InRoot()` /
-  `Query.BareTerms()` accessors used by the TUI integration tasks. (Trait of
-  the type, not the matcher, so it lives next to the type definition.)
+  `Query.BareTerms()` accessors used by the TUI integration tasks. (Trait of the
+  type, not the matcher, so it lives next to the type definition.)
 - `internal/tui/query/parser_test.go` — grammar coverage.
 - `internal/tui/query/match.go` — `Query.Matches(name, unit, status, inSet)`.
 - `internal/tui/query/match_test.go`

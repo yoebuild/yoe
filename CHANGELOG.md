@@ -8,6 +8,14 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-05-05
+
+_Errata: due to an issue in the alpine module, you must currently run with:
+`yoe --allow-duplicate-provides`._
+
+- **BREAKING CHANGE** This project has been moved to a new Github org:
+  https://github.com/yoebuild. `yoe update` from previous versions will not work
+  and you will need to download and manually install the 0.10.0 binary.
 - **TUI search is now a query language; defaults to your image's working set.**
   Press `/` to filter by `type:`, `module:`, `status:`, or `in:` (closure of any
   unit), in addition to plain substring search. `Tab` completes field names and
