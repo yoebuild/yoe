@@ -194,6 +194,14 @@ sections.
 - Sub-packages — one unit producing multiple `.apks`.
 - `MODULE.star` manifests for module versioning and inter-module deps.
 - Per-task container overrides.
+- Track the Starlark class function used to define each unit on the resolved
+  `Unit` (e.g., `Unit.BuiltVia = "autotools"`, `"cmake"`, `"alpine_pkg"`,
+  `"go_binary"`). Today `Unit.Class` only carries the unit's _type_ (`image` /
+  `container` / `unit`); the build-pattern function that wrapped the `unit()`
+  call leaves no fingerprint on the resolved data. With a separate field, the
+  TUI query language (and `yoe build` flags) can distinguish `type:autotools` —
+  meaningless today — from `type:image`, and we can answer questions like "what
+  alpine_pkg units are in this image" without scraping `.star` files.
 
 See [metadata-format.md](metadata-format.md).
 
