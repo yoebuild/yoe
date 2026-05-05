@@ -8,6 +8,9 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`dev-image` ships `helix` instead of `vim`.** Drops the editor entry that
+  was unintentionally resolving to Alpine's `gvim` (and its X11/GTK runtime
+  closure), keeping the image lean.
 - **Unit detail shows what uses it and what it pulls in.** The detail page now
   opens with two new sections above the build log: **USED BY** traces back
   through runtime_deps to show which packages you wrote in `image()` pulled this
