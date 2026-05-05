@@ -22,6 +22,7 @@ import (
 	"github.com/yoebuild/yoe/internal/device"
 	"github.com/yoebuild/yoe/internal/resolve"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
+	"github.com/yoebuild/yoe/internal/tui/query"
 )
 
 // Styles
@@ -88,6 +89,23 @@ const (
 	statusFailed
 )
 
+// statusKey maps the TUI's enum to the lowercase strings the query
+// language exposes via `status:`.
+func statusKey(s unitStatus) string {
+	switch s {
+	case statusCached:
+		return "cached"
+	case statusBuilding:
+		return "building"
+	case statusWaiting:
+		return "pending"
+	case statusFailed:
+		return "failed"
+	default:
+		return ""
+	}
+}
+
 // Messages
 type tickMsg time.Time
 
@@ -151,10 +169,13 @@ type model struct {
 	message    string
 	building   map[string]bool
 	cancels    map[string]context.CancelFunc // cancel funcs for active builds
-	confirm    string // non-empty = waiting for y/n confirmation
-	searching  bool   // true = search input active
-	searchText string // current search query
-	filtered   []int  // indices into units matching search
+	confirm      string // non-empty = waiting for y/n confirmation
+	queryEditing bool   // true while the user is typing in the query bar
+	queryInput   string // text in the query bar; live-parsed every keystroke
+	queryError   string // last parse error; rendered next to the query bar
+	inSet        map[string]bool // pre-computed in:X closure for the active query, nil if no in: filter
+	visible      []int           // indexes into m.units after applying m.query
+	query        query.Query     // active query, applied to m.units to produce visible
 
 	// Detail log search
 	detailSearching  bool   // true = detail search input active
@@ -252,6 +273,11 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 		deployHost = ov.DeployHost
 	}
 
+	initialVisible := make([]int, len(units))
+	for i := range units {
+		initialVisible[i] = i
+	}
+
 	m := model{
 		proj:           proj,
 		projectDir:     projectDir,
@@ -267,6 +293,7 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 		deployHost:     deployHost,
 		loadOpts:       cfg.LoadOpts,
 		globalFlagArgs: cfg.GlobalFlagArgs,
+		visible:        initialVisible,
 	}
 	m.checkBinfmtWarning()
 
@@ -408,7 +435,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.detailSearching {
 			return m.updateDetailSearch(msg)
 		}
-		if m.searching {
+		if m.queryEditing {
 			return m.updateSearch(msg)
 		}
 		m.message = ""
@@ -644,9 +671,8 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "/":
-		m.searching = true
-		m.searchText = ""
-		m.filtered = nil
+		m.queryEditing = true
+		m.queryInput = ""
 		return m, nil
 
 	case "s":
@@ -669,22 +695,22 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		m.searching = false
-		m.searchText = ""
-		m.filtered = nil
+		m.queryEditing = false
+		m.queryInput = ""
+		m.applyFilter()
 		return m, nil
 
 	case "enter":
-		m.searching = false
+		m.queryEditing = false
 		// Keep filter active, cursor stays on first match
-		if len(m.filtered) > 0 {
-			m.cursor = m.filtered[0]
+		if len(m.visible) > 0 {
+			m.cursor = m.visible[0]
 		}
 		return m, nil
 
 	case "backspace":
-		if len(m.searchText) > 0 {
-			m.searchText = m.searchText[:len(m.searchText)-1]
+		if len(m.queryInput) > 0 {
+			m.queryInput = m.queryInput[:len(m.queryInput)-1]
 			m.applyFilter()
 		}
 		return m, nil
@@ -693,47 +719,87 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Single printable character
 		key := msg.String()
 		if len(key) == 1 && key[0] >= 32 && key[0] <= 126 {
-			m.searchText += key
+			m.queryInput += key
 			m.applyFilter()
 		}
 		return m, nil
 	}
 }
 
+// applyFilter (Task 6 transition): substring search over m.queryInput
+// against unit names, writing matches to m.visible. Task 7 replaces
+// this entirely with live query.Parse.
 func (m *model) applyFilter() {
-	m.filtered = nil
-	if m.searchText == "" {
+	if cap(m.visible) > 0 {
+		m.visible = m.visible[:0]
+	} else {
+		m.visible = make([]int, 0, len(m.units))
+	}
+	if m.queryInput == "" {
+		// Empty bar: show all (matching pre-refactor behavior).
+		for i := range m.units {
+			m.visible = append(m.visible, i)
+		}
 		return
 	}
-	query := strings.ToLower(m.searchText)
+	q := strings.ToLower(m.queryInput)
 	for i, name := range m.units {
-		if strings.Contains(strings.ToLower(name), query) {
-			m.filtered = append(m.filtered, i)
+		if strings.Contains(strings.ToLower(name), q) {
+			m.visible = append(m.visible, i)
 			continue
 		}
 		if u, ok := m.proj.Units[name]; ok {
-			if strings.Contains(strings.ToLower(u.Class), query) {
-				m.filtered = append(m.filtered, i)
+			if strings.Contains(strings.ToLower(u.Class), q) {
+				m.visible = append(m.visible, i)
 			}
 		}
 	}
-	// Move cursor to first match
-	if len(m.filtered) > 0 {
-		m.cursor = m.filtered[0]
+	if len(m.visible) > 0 {
+		m.cursor = m.visible[0]
+	}
+	m.listOffset = 0
+	m.adjustListOffset()
+}
+
+// applyQuery refreshes m.inSet and m.visible after m.query changes.
+// The cursor is moved to the first visible row when it falls outside
+// the new visible set; otherwise it is left alone (so live filtering
+// while typing doesn't yank the cursor).
+func (m *model) applyQuery() {
+	m.inSet = nil
+	if root := m.query.InRoot(); root != "" {
+		m.inSet = query.BuildInClosure(m.proj, root)
+	}
+	if cap(m.visible) > 0 {
+		m.visible = m.visible[:0]
+	} else {
+		m.visible = make([]int, 0, len(m.units))
+	}
+	for i, name := range m.units {
+		u := m.proj.Units[name]
+		if m.query.Matches(name, u, statusKey(m.statuses[name]), m.inSet) {
+			m.visible = append(m.visible, i)
+		}
+	}
+	// Keep cursor on a visible row if at all possible.
+	if len(m.visible) > 0 {
+		stillVisible := false
+		for _, i := range m.visible {
+			if i == m.cursor {
+				stillVisible = true
+				break
+			}
+		}
+		if !stillVisible {
+			m.cursor = m.visible[0]
+		}
 	}
 	m.listOffset = 0
 	m.adjustListOffset()
 }
 
 func (m model) visibleIndices() []int {
-	if m.searchText != "" && m.filtered != nil {
-		return m.filtered
-	}
-	idx := make([]int, len(m.units))
-	for i := range idx {
-		idx[i] = i
-	}
-	return idx
+	return m.visible
 }
 
 func (m model) prevVisible() int {
@@ -862,7 +928,9 @@ func (m model) updateSetupMachine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.recomputeStatuses()
 		m.checkBinfmtWarning()
-		if err := yoestar.WriteLocalOverrides(m.projectDir, yoestar.LocalOverrides{Machine: picked}); err != nil {
+		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+		ov.Machine = picked
+		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
 			m.message = fmt.Sprintf("Machine set to %s (warning: failed to save local.star: %v)", picked, err)
 		} else {
 			m.message = fmt.Sprintf("Machine set to %s (saved to local.star)", picked)
@@ -1139,15 +1207,8 @@ func (m model) viewUnits() string {
 		headerStyle.Render(fmt.Sprintf("%-12s", "CLASS")),
 		headerStyle.Render("STATUS")))
 
-	// Determine visible units — filtered if search active, all otherwise
-	visible := make([]int, 0, len(m.units))
-	if m.searchText != "" && m.filtered != nil {
-		visible = m.filtered
-	} else {
-		for i := range m.units {
-			visible = append(visible, i)
-		}
-	}
+	// Determine visible units — filtered by current query state
+	visible := m.visible
 
 	// Calculate visible window for unit list
 	maxRows := m.listViewportHeight()
@@ -1208,8 +1269,8 @@ func (m model) viewUnits() string {
 
 	// Search bar or help bar
 	b.WriteString("\n")
-	if m.searching {
-		b.WriteString(fmt.Sprintf("  /%s▌", m.searchText))
+	if m.queryEditing {
+		b.WriteString(fmt.Sprintf("  /%s▌", m.queryInput))
 	} else {
 		help := "  b build  D deploy  x cancel  e edit  d diagnose  l log  c clean  s setup  / search  q quit"
 		if m.cursor < len(m.units) {
@@ -1701,6 +1762,8 @@ func (m *model) recomputeStatuses() {
 			m.statuses[name] = statusNone
 		}
 	}
+	// Rebuild visible list to reflect the new unit set.
+	m.applyFilter()
 }
 
 // checkBinfmtWarning sets or clears the warning banner based on whether

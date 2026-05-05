@@ -88,6 +88,17 @@ func (q Query) IsEmpty() bool {
 	return len(q.fields) == 0 && len(q.bareTerms) == 0
 }
 
+// InRoot returns the value of the in: filter, or "" when no in: filter
+// is set or multiple in: filters were provided (which the matcher
+// already treats as "no match"; in that case the closure is irrelevant).
+func (q Query) InRoot() string {
+	vs := q.fields["in"]
+	if len(vs) != 1 {
+		return ""
+	}
+	return vs[0]
+}
+
 // String returns the canonical text form of q. Field filters first
 // (sorted by field name, values in declaration order), bare terms last.
 // Round-trips through Parse.

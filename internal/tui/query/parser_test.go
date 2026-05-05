@@ -115,6 +115,17 @@ func TestParse_EmptyFieldName(t *testing.T) {
 	}
 }
 
+func TestQuery_InRoot(t *testing.T) {
+	q := mustParse(t, "in:base-image foo")
+	if q.InRoot() != "base-image" {
+		t.Fatalf("InRoot: got %q", q.InRoot())
+	}
+	q2 := mustParse(t, "module:units-core")
+	if q2.InRoot() != "" {
+		t.Fatalf("expected empty InRoot")
+	}
+}
+
 func TestParse_RoundTrip(t *testing.T) {
 	inputs := []string{
 		"",
