@@ -8,11 +8,19 @@ and this project adheres to
 
 ## [Unreleased]
 
-- **TUI column headers are clickable to sort.** Click `NAME`, `CLASS`, `MODULE`,
-  `SIZE`, `DEPS`, or `STATUS` to sort the unit list; click again to flip the
-  direction. The active column is marked with `↑` or `↓` so you always know how
-  the list is ordered. Numeric columns default to descending so the largest
-  units land at the top; unbuilt rows stay at the bottom either way.
+- **TUI follows the active build.** When a build starts, the cursor jumps to
+  whatever unit is being compiled and the list scrolls to put it on screen, so
+  you can watch a long DAG without losing track or hunting for the spinner.
+  Press `enter` to drop straight into the detail/log view of the active unit. If
+  your current search filters the unit out, the cursor stays put — your filter
+  wins.
+- **TUI sort columns from the keyboard.** Press `o` to cycle through
+  `NAME → CLASS → MODULE → SIZE → DEPS → STATUS` (numeric columns default to
+  descending so the largest land at the top). Press `O` to flip direction of the
+  current column. The active column shows `↑` or `↓` next to its label so you
+  always know how the list is ordered, and unbuilt rows stay at the bottom
+  either way. Mouse capture is off so terminal text selection / copy-paste work
+  normally.
 - **TUI unit table shows module, size, and dependency-count columns.** Each row
   now reports the module that won shadow resolution (or `(local)` for project-
   root units), the on-disk install size after build (the `.img` file size for

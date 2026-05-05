@@ -56,7 +56,8 @@ var (
 var tuiProgram *tea.Program
 
 // Sort columns for the units table. Order matches the on-screen column
-// order and the indices stored in model.sortColumn.
+// order and the indices stored in model.sortColumn. The cycle order
+// driven by the `o` key follows this same sequence.
 const (
 	sortByName = iota
 	sortByClass
@@ -64,42 +65,8 @@ const (
 	sortBySize
 	sortByDeps
 	sortByStatus
+	numSortColumns
 )
-
-// columnLayout describes one column in the units table header. The x-range
-// is used to map mouse clicks back to a column index.
-type columnLayout struct {
-	id     int
-	label  string
-	xStart int // inclusive — column 0 in the rendered string
-	xEnd   int // exclusive
-}
-
-// unitColumns returns the columns in the order they're rendered, with x
-// coordinates that include the leading "  " gutter and inter-column spaces.
-// Keep these widths in sync with the row renderer in viewUnits().
-func unitColumns() []columnLayout {
-	const gutter = 2
-	cols := []struct {
-		id    int
-		label string
-		w     int
-	}{
-		{sortByName, "NAME", 28},
-		{sortByClass, "CLASS", 9},
-		{sortByModule, "MODULE", 14},
-		{sortBySize, "SIZE", 6},
-		{sortByDeps, "DEPS", 5},
-		{sortByStatus, "STATUS", 10},
-	}
-	out := make([]columnLayout, 0, len(cols))
-	x := gutter
-	for _, c := range cols {
-		out = append(out, columnLayout{id: c.id, label: c.label, xStart: x, xEnd: x + c.w})
-		x += c.w + 1 // single space separator between columns
-	}
-	return out
-}
 
 // Views
 type viewKind int
@@ -373,7 +340,7 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	defer stopFeed()
 	m.feedStatus = feedStatus
 
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(m, tea.WithAltScreen())
 	tuiProgram = p
 
 	yoe.OnNotify = func(msg string) {
@@ -421,6 +388,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statuses[msg.unit] = statusWaiting
 		case "building":
 			m.statuses[msg.unit] = statusBuilding
+			// When a build starts (often a transitive dep of the unit
+			// the user invoked), scroll its row into view so the user
+			// can see what's happening — but only if the current query
+			// doesn't already filter it out, and only if it's not
+			// already on screen. Cursor doesn't move; this is a pure
+			// viewport adjustment.
+			m.scrollUnitIntoView(msg.unit)
 		case "failed":
 			m.statuses[msg.unit] = statusFailed
 		}
@@ -452,19 +426,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case execDoneMsg:
 		if msg.err != nil {
 			m.message = fmt.Sprintf("Command error: %v", msg.err)
-		}
-		return m, nil
-
-	case tea.MouseMsg:
-		// Only act on units view, only on left-button presses (ignore
-		// release/motion/wheel so a single click toggles exactly once).
-		if m.view != viewUnits || msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
-			return m, nil
-		}
-		if msg.Y == m.columnHeaderRow() {
-			if col := columnAt(msg.X); col >= 0 {
-				m.setSortColumn(col)
-			}
 		}
 		return m, nil
 
@@ -805,8 +766,35 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.message = fmt.Sprintf("saved query: %s", m.query.String())
 		}
 		return m, nil
+
+	case "o":
+		// Cycle to the next sort column with its default direction.
+		next := (m.sortColumn + 1) % numSortColumns
+		m.sortColumn = next
+		m.sortDesc = next == sortBySize || next == sortByDeps
+		m.applySortReset()
+		return m, nil
+
+	case "O":
+		// Toggle direction of the current sort column.
+		m.sortDesc = !m.sortDesc
+		m.applySortReset()
+		return m, nil
 	}
 	return m, nil
+}
+
+// applySortReset re-applies the query (which re-sorts m.visible), then
+// snaps the cursor and viewport to the top so the freshly-ranked rows
+// are actually visible. Without the snap, adjustListOffset would scroll
+// back to wherever the cursor was sitting in the new order.
+func (m *model) applySortReset() {
+	m.applyQuery()
+	if len(m.visible) > 0 {
+		m.cursor = m.visible[0]
+	}
+	m.listOffset = 0
+	m.adjustListOffset()
 }
 
 func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1532,7 +1520,7 @@ func (m model) viewUnits() string {
 			b.WriteString(fmt.Sprintf("  /%s▌", m.queryInput))
 		}
 	} else {
-		help := "  b build  D deploy  x cancel  e edit  l log  s setup  / search  \\ home  S save  q quit"
+		help := "  b build  D deploy  x cancel  e edit  l log  s setup  / search  \\ home  S save  o sort  q quit"
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
 			if u, ok := m.proj.Units[name]; ok && u.Class == "image" {
@@ -2011,6 +1999,27 @@ func (m *model) adjustListOffset() {
 	}
 }
 
+// scrollUnitIntoView moves the cursor to `name` and scrolls the units
+// list so that row is visible. Used when a build starts on a unit the
+// user isn't looking at — cursor follows so `enter` opens the detail
+// view of whatever is actively building, and j/k continues from there.
+// No-op if the unit isn't in m.visible (current query filtered it out).
+func (m *model) scrollUnitIntoView(name string) {
+	visible := m.visibleIndices()
+	idx := -1
+	for _, i := range visible {
+		if m.units[i] == name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return
+	}
+	m.cursor = idx
+	m.adjustListOffset()
+}
+
 // sortVisible reorders m.visible according to the active sort column and
 // direction. Empty/zero values for size and deps sort last in ascending
 // mode, first in descending mode — i.e., always to the bottom — so unbuilt
@@ -2107,19 +2116,6 @@ func (m *model) sortVisible() {
 		}
 		return c < 0
 	})
-}
-
-// setSortColumn switches the sort to col. If col was already active, the
-// direction toggles; otherwise it picks a sensible default per column
-// (descending for numeric metrics, ascending elsewhere).
-func (m *model) setSortColumn(col int) {
-	if m.sortColumn == col {
-		m.sortDesc = !m.sortDesc
-	} else {
-		m.sortColumn = col
-		m.sortDesc = col == sortBySize || col == sortByDeps
-	}
-	m.applyQuery()
 }
 
 // recomputeMetrics rebuilds m.unitSize and m.unitDeps from the current
@@ -2265,36 +2261,6 @@ func (m *model) checkBinfmtWarning() {
 	} else {
 		m.warning = ""
 	}
-}
-
-// columnHeaderRow returns the 0-based screen row where the units-table
-// column header is rendered. Computed from the same banner state that
-// viewUnits() uses to lay out the page so the two stay in lockstep.
-func (m model) columnHeaderRow() int {
-	row := 1 // title is row 0
-	if m.warning != "" {
-		row++
-	}
-	if m.notification != "" {
-		row++
-	}
-	if m.feedStatus != "" {
-		row++
-	}
-	row++ // blank line after banners
-	row++ // query header
-	return row
-}
-
-// columnAt maps a screen x-coordinate on the column header row to a sort
-// column id. Returns -1 when x falls in a gutter or past the last column.
-func columnAt(x int) int {
-	for _, c := range unitColumns() {
-		if x >= c.xStart && x < c.xEnd {
-			return c.id
-		}
-	}
-	return -1
 }
 
 // listViewportHeight returns the number of unit rows that fit on screen.
