@@ -4,7 +4,7 @@
   </a>
 </p>
 
-# `[yoe]` Build
+# `[yoe]` Next Generation
 
 **Fast tooling and builds. No cross-compiling headaches. Easy to
 customize/upgrade/debug. One tool for both system engineers and application
@@ -394,7 +394,7 @@ regardless of whether a fresh build would produce identical bytes.
   Podman / containerd workloads on yoe-built devices
 - [libc, init, and the Rootfs Base](docs/libc-and-init.md) — the default base of
   musl, busybox, and OpenRC, and the path to glibc/systemd for edge-AI hardware
-- [units-alpine](docs/units-alpine.md) — wrapping prebuilt Alpine packages as
+- [module-alpine](docs/module-alpine.md) — wrapping prebuilt Alpine packages as
   yoe units
 - [Comparisons](docs/comparisons.md) — how `[yoe]` relates to Yocto, Buildroot,
   Alpine, Arch, and NixOS

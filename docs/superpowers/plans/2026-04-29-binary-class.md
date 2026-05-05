@@ -16,7 +16,7 @@
 binaries from upstream release URLs, plus the small Go-side source-prep support
 it needs (zip extraction and bare-binary copy).
 
-**Architecture:** Class lives at `modules/units-core/classes/binary.star` and
+**Architecture:** Class lives at `modules/module-core/classes/binary.star` and
 resolves URL+SHA per `ARCH` at Starlark eval time, then hands off to the
 existing `unit()` builtin. The fetcher already caches by URL hash and verifies
 SHA256; this plan extends `internal/source/workspace.go` so a fetched file can
@@ -26,7 +26,7 @@ that copies / symlinks files from the extracted source tree (`$SRCDIR`) into
 `$DESTDIR`.
 
 **Tech Stack:** Go (standard library `archive/zip`, `archive/tar`, `os`, `io`),
-Starlark (units-core classes), bash (generated install task), `toolchain-musl`
+Starlark (module-core classes), bash (generated install task), `toolchain-musl`
 container.
 
 **Spec:**
@@ -38,10 +38,10 @@ container.
 
 **New:**
 
-- `modules/units-core/classes/binary.star` — the class
-- `modules/units-core/units/build-tools/go.star` — Go toolchain example (covers
+- `modules/module-core/classes/binary.star` — the class
+- `modules/module-core/units/build-tools/go.star` — Go toolchain example (covers
   `install_tree`, multi-binary, `{version}`, `{arch}`, archive extraction)
-- `modules/units-core/units/debug/kubectl.star` — kubectl example (covers
+- `modules/module-core/units/debug/kubectl.star` — kubectl example (covers
   bare-binary, URL templating, default `binaries`)
 
 **Modify:**
@@ -560,7 +560,7 @@ git commit -m "source: dispatch extract by extension/magic, including bare and z
 
 **Files:**
 
-- Create: `modules/units-core/classes/binary.star`
+- Create: `modules/module-core/classes/binary.star`
 
 This is the user-facing class. It resolves URL+SHA at Starlark eval time based
 on `ARCH`, normalises `binaries` into `(install_name, src_path)` tuples,
@@ -568,7 +568,7 @@ generates a single install task, and calls `unit()` with the right typed fields.
 
 - [ ] **Step 1: Create the file with the full class implementation**
 
-Create `modules/units-core/classes/binary.star`:
+Create `modules/module-core/classes/binary.star`:
 
 ```python
 load("//classes/tasks.star", "merge_tasks")
@@ -772,8 +772,8 @@ tasks.)
 - [ ] **Step 3: Commit**
 
 ```bash
-git add modules/units-core/classes/binary.star
-git commit -m "units-core: add binary class for prebuilt-binary units"
+git add modules/module-core/classes/binary.star
+git commit -m "module-core: add binary class for prebuilt-binary units"
 ```
 
 ---
@@ -782,7 +782,7 @@ git commit -m "units-core: add binary class for prebuilt-binary units"
 
 **Files:**
 
-- Create: `modules/units-core/units/debug/kubectl.star`
+- Create: `modules/module-core/units/debug/kubectl.star`
 
 Smallest end-to-end exercise: bare binary, single arch token, default
 `binaries`. If this builds, the bare-binary code path through Go extraction +
@@ -806,7 +806,7 @@ curl -sL https://dl.k8s.io/release/v1.29.0/bin/linux/arm64/kubectl.sha256
 
 - [ ] **Step 2: Create the unit file**
 
-Create `modules/units-core/units/debug/kubectl.star`:
+Create `modules/module-core/units/debug/kubectl.star`:
 
 ```python
 load("//classes/binary.star", "binary")
@@ -857,7 +857,7 @@ Expected: ELF binary, prints client version `v1.29.0`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add modules/units-core/units/debug/kubectl.star
+git add modules/module-core/units/debug/kubectl.star
 git commit -m "kubectl: add unit using binary class"
 ```
 
@@ -867,7 +867,7 @@ git commit -m "kubectl: add unit using binary class"
 
 **Files:**
 
-- Create: `modules/units-core/units/build-tools/go.star`
+- Create: `modules/module-core/units/build-tools/go.star`
 
 Exercises the most complex class form: `install_tree`, multi-binary (go +
 gofmt), `{version}` + `{arch}` in the asset URL, archive extraction with
@@ -887,7 +887,7 @@ Record both hashes.
 
 - [ ] **Step 2: Create the unit file**
 
-Create `modules/units-core/units/build-tools/go.star`:
+Create `modules/module-core/units/build-tools/go.star`:
 
 ```python
 load("//classes/binary.star", "binary")
@@ -942,7 +942,7 @@ Expected: `go version go1.22.0 linux/<arch>`; gofmt prints help.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add modules/units-core/units/build-tools/go.star
+git add modules/module-core/units/build-tools/go.star
 git commit -m "go: add Go toolchain unit using binary class install_tree"
 ```
 
@@ -1044,7 +1044,7 @@ Expected: 7 task-aligned commits in order:
 1. `source: extract .zip archives with top-level-dir strip`
 2. `source: copy bare-binary downloads into srcDir`
 3. `source: dispatch extract by extension/magic, including bare and zip`
-4. `units-core: add binary class for prebuilt-binary units`
+4. `module-core: add binary class for prebuilt-binary units`
 5. `kubectl: add unit using binary class`
 6. `go: add Go toolchain unit using binary class install_tree`
 7. `docs: changelog and roadmap entry for binary class`

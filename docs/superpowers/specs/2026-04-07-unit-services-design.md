@@ -85,7 +85,7 @@ assembly, the image class:
 
 - `internal/artifact/apk.go` — `generatePKGINFO()` writes `service = <name>`
   lines from `unit.Services`
-- `modules/units-core/classes/image.star` — remove `services` parameter from
+- `modules/module-core/classes/image.star` — remove `services` parameter from
   `image()`. Replace the current services loop with logic that reads service
   metadata from installed APKs.
 

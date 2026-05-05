@@ -13,7 +13,7 @@ produces a Docker image.
 ### Module layout
 
 ```
-modules/units-core/
+modules/module-core/
   MODULE.star
   classes/
   containers/
@@ -272,7 +272,7 @@ gets overwritten and downstream units rebuild due to hash change.
 - `internal/resolve/hash.go` — include container hash in unit hash computation.
 - `internal/resolve/dag.go` — no changes needed (deps are explicit).
 
-### Starlark (units-core module)
+### Starlark (module-core module)
 
 - New: `classes/container.star` — the `container()` class function
 - New: `containers/toolchain-musl.star` + `containers/toolchain-musl/Dockerfile`
@@ -288,7 +288,7 @@ The Starlark loader's recursive file discovery currently scans `units/`,
 
 ## Breaking Change
 
-Existing external projects must use the updated `units-core` module that
+Existing external projects must use the updated `module-core` module that
 includes `toolchain-musl`. Older module versions without the container unit will
 fail at evaluation time.
 

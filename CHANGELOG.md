@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Modules renamed: `units-*` → `module-*`.** `units-core`, `units-rpi`,
+  `units-alpine`, and `units-jetson` are now `module-core`, `module-rpi`,
+  `module-alpine`, and `module-jetson`. Update `module(...)` URLs and any
+  `path = "modules/units-..."` entries in your `PROJECT.star`.
 - **`helix` actually runs on the device.** Was previously bundled as a
   glibc-linked binary that failed silently with `hx: not found`; now uses
   Alpine's musl build.

@@ -394,7 +394,7 @@ in the unit's cache hash — changing a patch triggers a rebuild.
 pattern:
 
 ```python
-# upstream: @units-core/busybox.star
+# upstream: @module-core/busybox.star
 def busybox(extra_patches=[], **overrides):
     unit(
         name = "busybox",
@@ -408,7 +408,7 @@ def busybox(extra_patches=[], **overrides):
     )
 
 # vendor module: adds a patch without modifying upstream
-load("@units-core//busybox.star", "busybox")
+load("@module-core//busybox.star", "busybox")
 busybox(extra_patches=["patches/vendor-busybox-audit.patch"])
 ```
 
@@ -423,7 +423,7 @@ busybox(extra_patches=["patches/vendor-busybox-audit.patch"])
 ### Tasks and Per-Task Containers (planned)
 
 > **Status:** `task()` and unit-level `container =` are _shipped_ — every
-> built-in class in `modules/units-core/classes/` (autotools, cmake, go,
+> built-in class in `modules/module-core/classes/` (autotools, cmake, go,
 > container, image) already generates `tasks = [task(...)]` and the build
 > executor (`internal/build/executor.go`) runs each task's steps inside the
 > unit's resolved container. The _per-task_ `container=` override described
@@ -524,7 +524,7 @@ go_binary(
 ```
 
 Merging is implemented by `merge_tasks(base, overrides)` in
-`modules/units-core/classes/tasks.star`. Custom classes that want the same
+`modules/module-core/classes/tasks.star`. Custom classes that want the same
 behavior should `load("//classes/tasks.star", "merge_tasks")` and call it before
 passing `tasks` to `unit()`.
 
@@ -556,7 +556,7 @@ go_binary(
 Language-specific classes handle the build details — `go_binary()` sets up
 `GOMODCACHE`, runs `go build`, and packages the result.
 
-> **Status:** Only `go_binary()` (in `modules/units-core/classes/go.star`) is
+> **Status:** Only `go_binary()` (in `modules/module-core/classes/go.star`) is
 > implemented today. Similar classes for Rust (`rust_binary()`), Zig
 > (`zig_binary()`), Python (`python_unit()`), and Node.js (`node_unit()`) are
 > _planned_ but not yet shipped. Applications in those languages can still be
@@ -595,7 +595,7 @@ project(
         # Module in a subdirectory of a repo — path specifies where MODULE.star is
         module("https://github.com/yoebuild/yoe.git",
               ref = "main",
-              path = "modules/units-core"),
+              path = "modules/module-core"),
         # Module at the root of its own repo
         module("git@github.com:vendor/bsp-units.git", ref = "main"),
     ],
@@ -610,7 +610,7 @@ _what to build_.
 
 ### Built-in Classes
 
-These ship with the `units-core` module (at `modules/units-core/classes/`) or
+These ship with the `module-core` module (at `modules/module-core/classes/`) or
 are under the `(planned)` roadmap:
 
 | Class           | Status  | Description                                   |
@@ -800,7 +800,7 @@ project(
         # Module in a subdirectory of a repo
         module("https://github.com/yoebuild/yoe.git",
               ref = "main",
-              path = "modules/units-core"),
+              path = "modules/module-core"),
         # Module at the root of its own repo
         module("git@github.com:vendor/bsp-imx8.git", ref = "v2.1.0"),
     ],
@@ -880,7 +880,7 @@ Add this to your PROJECT.star modules list:
 ```python
 # PROJECT.star
 modules = [
-    module("github.com/yoe/units-core", ref = "v1.0.0"),
+    module("github.com/yoe/module-core", ref = "v1.0.0"),
     module("github.com/vendor/bsp-imx8", ref = "v2.1.0"),
     # Override the version that bsp-imx8 requests (v1.3.0 → v1.4.0)
     module("github.com/vendor/hal-common", ref = "v1.4.0"),
@@ -897,7 +897,7 @@ modules = [
     # Local override — point at a checkout on disk instead of fetching
     module("https://github.com/yoebuild/yoe.git",
           local = "../yoe",
-          path = "modules/units-core"),
+          path = "modules/module-core"),
     # Local override for a standalone module
     module("git@github.com:vendor/bsp-imx8.git", local = "../bsp-imx8"),
 ]
@@ -918,11 +918,11 @@ load("//classes/autotools.star", "autotools")   # from project root
 load("//units/openssh.star", "openssh_config") # load shared config
 
 # External references (from modules)
-load("@units-core//openssh.star", "openssh")
+load("@module-core//openssh.star", "openssh")
 load("@vendor-bsp//kernel.star", "vendor_kernel")
 ```
 
-Module names (`@units-core`, `@vendor-bsp`) map to the modules declared in
+Module names (`@module-core`, `@vendor-bsp`) map to the modules declared in
 `PROJECT.star`. When `yoe` evaluates units, it fetches and caches external
 modules, then resolves all `load()` references to concrete files.
 
@@ -932,7 +932,7 @@ Modules enable the vendor BSP / product overlay pattern without modifying
 upstream units:
 
 ```python
-# Module 1: @units-core/openssh.star — base unit as a function
+# Module 1: @module-core/openssh.star — base unit as a function
 def openssh(extra_deps=[], extra_configure_args=[], **overrides):
     autotools(
         name = "openssh",
@@ -943,7 +943,7 @@ def openssh(extra_deps=[], extra_configure_args=[], **overrides):
     )
 
 # Module 2: @vendor-bsp/openssh.star — vendor extends it
-load("@units-core//openssh.star", "openssh")
+load("@module-core//openssh.star", "openssh")
 openssh(extra_deps=["vendor-crypto"])
 
 # Module 3: product unit — further customization

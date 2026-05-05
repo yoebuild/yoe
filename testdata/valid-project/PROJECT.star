@@ -12,6 +12,6 @@ project(
     ),
     sources = sources(go_proxy = "https://proxy.golang.org"),
     modules = [
-        module("github.com/yoe/units-core", ref = "v1.0.0"),
+        module("github.com/yoe/module-core", ref = "v1.0.0"),
     ],
 )

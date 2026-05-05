@@ -8,7 +8,7 @@ code in this repository.
 `[yoe]` is a next-generation embedded Linux distribution builder — a simpler
 alternative to Yocto. The project has a working Go CLI (`yoe`) that builds
 artifacts from Starlark units inside a Docker container, creates bootable disk
-images, and runs them in QEMU. A `units-core` module provides Starlark classes
+images, and runs them in QEMU. A `module-core` module provides Starlark classes
 and units for a minimal Linux system (busybox, kernel, openssl, openssh, etc.).
 
 Core design: Go CLI (`yoe`) + Starlark units/config + apk artifacts + bubblewrap
@@ -37,7 +37,7 @@ needed.**
 - `cmd/yoe/main.go` — CLI entry point with command dispatch
 - `internal/` — core Go packages (starlark, build, resolve, source, image,
   artifact, repo, device, tui, bootstrap, module, config)
-- `modules/units-core/` — base module with classes, units, machines, images,
+- `modules/module-core/` — base module with classes, units, machines, images,
   containers
 - `testdata/` — test fixtures including e2e-project
 - `envsetup.sh` — shell functions (source it, don't execute)
@@ -46,13 +46,13 @@ needed.**
 
 ### Module structure
 
-The `units-core` module lives at `modules/units-core/` in this repo. Projects
-reference it with `path = "modules/units-core"`:
+The `module-core` module lives at `modules/module-core/` in this repo. Projects
+reference it with `path = "modules/module-core"`:
 
 ```python
 module("https://github.com/yoebuild/yoe.git",
       ref = "main",
-      path = "modules/units-core")
+      path = "modules/module-core")
 ```
 
 The `path` field tells yoe the module's `MODULE.star` is in a subdirectory of
@@ -129,7 +129,7 @@ The GitHub Actions workflow (`doc-check.yaml`) runs `prettier --check` on all
   artifacts first
 - **Native builds only** — no cross-compilation
 - **Label-based references** —
-  `load("@units-core//classes/autotools.star", "autotools")`, `//` relative to
+  `load("@module-core//classes/autotools.star", "autotools")`, `//` relative to
   module root when inside a module
 - **Two-phase build** — resolve DAG then execute (inspired by GN)
 - **Content-addressed caching** — input hash determines output

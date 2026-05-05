@@ -10,11 +10,11 @@ import (
 // the matcher is expected to filter on.
 func fixtureProject() map[string]*yoestar.Unit {
 	return map[string]*yoestar.Unit{
-		"base-image":      {Name: "base-image", Class: "image", Module: "units-core"},
-		"toolchain-musl":  {Name: "toolchain-musl", Class: "container", Module: "units-core"},
-		"openssl":         {Name: "openssl", Class: "unit", Module: "units-core"},
-		"musl":            {Name: "musl", Class: "unit", Module: "units-alpine"},
-		"libcrypto3":      {Name: "libcrypto3", Class: "unit", Module: "units-alpine"},
+		"base-image":      {Name: "base-image", Class: "image", Module: "module-core"},
+		"toolchain-musl":  {Name: "toolchain-musl", Class: "container", Module: "module-core"},
+		"openssl":         {Name: "openssl", Class: "unit", Module: "module-core"},
+		"musl":            {Name: "musl", Class: "unit", Module: "module-alpine"},
+		"libcrypto3":      {Name: "libcrypto3", Class: "unit", Module: "module-alpine"},
 		"my-app":          {Name: "my-app", Class: "unit", Module: ""}, // project root
 	}
 }
@@ -74,7 +74,7 @@ func TestMatches_ImagesShortcut(t *testing.T) {
 
 func TestMatches_ModuleORWithin(t *testing.T) {
 	units := fixtureProject()
-	out := matchAll(mustParse(t, "module:units-core module:units-alpine"), units, nil, nil)
+	out := matchAll(mustParse(t, "module:module-core module:module-alpine"), units, nil, nil)
 	for _, want := range []string{"base-image", "toolchain-musl", "openssl", "musl", "libcrypto3"} {
 		if !has(out, want) {
 			t.Fatalf("expected %q in %v", want, out)
@@ -120,7 +120,7 @@ func TestMatches_BareSubstringCaseInsensitive(t *testing.T) {
 
 func TestMatches_AndAcrossFields(t *testing.T) {
 	units := fixtureProject()
-	out := matchAll(mustParse(t, "module:units-alpine type:unit"), units, nil, nil)
+	out := matchAll(mustParse(t, "module:module-alpine type:unit"), units, nil, nil)
 	for _, want := range []string{"musl", "libcrypto3"} {
 		if !has(out, want) {
 			t.Fatalf("expected %q in %v", want, out)

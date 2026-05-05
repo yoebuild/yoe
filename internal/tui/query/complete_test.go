@@ -7,7 +7,7 @@ import (
 
 func ctxFixture() Context {
 	return Context{
-		Modules: []string{"units-core", "units-alpine", "units-rpi"},
+		Modules: []string{"module-core", "module-alpine", "module-rpi"},
 		Units:   []string{"openssl", "openssh", "musl", "base-image"},
 	}
 }
@@ -59,8 +59,8 @@ func TestComplete_StatusValueAll(t *testing.T) {
 }
 
 func TestComplete_ModuleValue(t *testing.T) {
-	_, _, got := Complete("module:units-r", 14, ctxFixture())
-	if !reflect.DeepEqual(got, []string{"units-rpi"}) {
+	_, _, got := Complete("module:module-r", 15, ctxFixture())
+	if !reflect.DeepEqual(got, []string{"module-rpi"}) {
 		t.Fatalf("got %v", got)
 	}
 }

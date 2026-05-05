@@ -294,11 +294,11 @@ steps. Migrate all unit .star files.
 
 **Files:**
 
-- Modify: `modules/units-core/classes/autotools.star`
-- Modify: `modules/units-core/classes/cmake.star`
-- Modify: `modules/units-core/classes/go.star`
-- Modify: all `modules/units-core/units/**/*.star`
-- Modify: all `modules/units-rpi/units/**/*.star`
+- Modify: `modules/module-core/classes/autotools.star`
+- Modify: `modules/module-core/classes/cmake.star`
+- Modify: `modules/module-core/classes/go.star`
+- Modify: all `modules/module-core/units/**/*.star`
+- Modify: all `modules/module-rpi/units/**/*.star`
 
 - [ ] **Step 1: Rewrite autotools.star**
 
@@ -801,17 +801,17 @@ Move image assembly from Go (`internal/image/`) to a Starlark class that uses
 
 **Files:**
 
-- Rewrite: `modules/units-core/classes/image.star`
-- Modify: `modules/units-core/images/base-image.star`
-- Modify: `modules/units-core/images/dev-image.star`
-- Delete: `modules/units-rpi/images/rpi-image.star` (no longer needed)
+- Rewrite: `modules/module-core/classes/image.star`
+- Modify: `modules/module-core/images/base-image.star`
+- Modify: `modules/module-core/images/dev-image.star`
+- Delete: `modules/module-rpi/images/rpi-image.star` (no longer needed)
 - Modify: `internal/build/executor.go` (remove image special case)
 - Delete: `internal/image/rootfs.go` (moved to Starlark)
 - Delete: `internal/image/disk.go` (moved to Starlark)
 
 - [ ] **Step 1: Write the Starlark image class**
 
-`modules/units-core/classes/image.star`:
+`modules/module-core/classes/image.star`:
 
 ```python
 def image(name, artifacts=[], hostname="", timezone="", locale="",
@@ -969,12 +969,12 @@ image(
 
 - [ ] **Step 4: Delete rpi-image.star**
 
-`modules/units-rpi/images/rpi-image.star` is no longer needed — `base-image`
+`modules/module-rpi/images/rpi-image.star` is no longer needed — `base-image`
 works for RPi because MACHINE_CONFIG provides the kernel, firmware, and
 partition layout.
 
 ```bash
-rm modules/units-rpi/images/rpi-image.star
+rm modules/module-rpi/images/rpi-image.star
 ```
 
 - [ ] **Step 5: Remove Go image special case from executor.go**

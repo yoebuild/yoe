@@ -23,7 +23,7 @@ Examples of inline content today:
 Templates live in a directory named after the unit, alongside the `.star` file:
 
 ```
-modules/units-core/
+modules/module-core/
   units/
     base/
       base-files.star

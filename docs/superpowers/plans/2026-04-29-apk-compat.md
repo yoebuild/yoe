@@ -159,7 +159,7 @@ detection, depsolving, and `/lib/apk/db/installed` population for free.
 
 **Modified:**
 
-- `modules/units-core/classes/image.star` — replace the per-package `tar xzf`
+- `modules/module-core/classes/image.star` — replace the per-package `tar xzf`
   loop with a single `apk add` invocation
 - `internal/build/executor.go` (maybe) — surface apk's stderr to the user
   terminal so install errors are visible
@@ -259,7 +259,7 @@ on the target so `apk` runs without `--allow-untrusted`.
 
 - `internal/artifact/apk.go` — emit a third concatenated gzip stream containing
   the signature
-- `modules/units-core/units/base/base-files.star` — install the project's public
+- `modules/module-core/units/base/base-files.star` — install the project's public
   key into `/etc/apk/keys/<keyname>.rsa.pub`
 - `internal/repo/index.go` — sign `APKINDEX.tar.gz`'s control tar similarly
 
@@ -333,20 +333,20 @@ Booted systems can run `apk add`, `apk del`, `apk upgrade`, `apk info`,
 
 **New:**
 
-- `modules/units-core/units/base/apk-tools.star`
-- `modules/units-core/units/base/apk-tools/repositories` — default
+- `modules/module-core/units/base/apk-tools.star`
+- `modules/module-core/units/base/apk-tools/repositories` — default
   `/etc/apk/repositories` (project repo URL)
 
 **Modified:**
 
-- `modules/units-core/images/dev-image.star` — add `apk-tools` to artifacts
+- `modules/module-core/images/dev-image.star` — add `apk-tools` to artifacts
 - `docs/on-device-apk.md` — operator guide
 
 ### Task 4.1: apk-tools unit
 
 - [x] Pin `apk-tools 2.14.x` from
       `https://gitlab.alpinelinux.org/alpine/apk-tools.git`. Use a release tag.
-      _(`modules/units-core/units/base/apk-tools.star` pins v2.14.10.)_
+      _(`modules/module-core/units/base/apk-tools.star` pins v2.14.10.)_
 - [x] Build deps: `zlib`, `openssl` (both existing units). _(Wired through
       `deps` and `runtime_deps`.)_
 - [ ] Confirm musl compat — should be clean; Alpine itself is musl. _(Pending

@@ -12,14 +12,14 @@ and systemd are non-negotiable.
 The default and currently only fully-supported configuration is:
 
 - **musl libc.** All units build against musl. The build container
-  (`toolchain-musl`) is Alpine-based. The `units-alpine` module pulls prebuilt
+  (`toolchain-musl`) is Alpine-based. The `module-alpine` module pulls prebuilt
   apks from Alpine, which are themselves musl builds.
 - **busybox + a curated GNU userland on top.** The `replaces` mechanism manages
   file conflicts where util-linux, coreutils, etc. shadow busybox applets that
   ship a real implementation.
 - **OpenRC-style init scripts.** `network-config` and similar yoe-specific units
   ship `/etc/init.d/Sxxx` scripts. There is no systemd integration and no plan
-  to add one inside `units-core`.
+  to add one inside `module-core`.
 - **apk packaging.** All yoe units produce signed `.apk` artifacts. Packages are
   installed with apk-tools at image-assembly time.
 
@@ -174,8 +174,8 @@ project(
     base = alpine_rootfs(version = "v3.21"),
     machines = [...],
     modules = [
-        module("https://github.com/yoebuild/units-alpine.git", ref = "main"),
-        module("https://github.com/yoebuild/yoe.git", ref = "main", path = "modules/units-core"),
+        module("https://github.com/yoebuild/module-alpine.git", ref = "main"),
+        module("https://github.com/yoebuild/yoe.git", ref = "main", path = "modules/module-core"),
     ],
 )
 ```
@@ -430,7 +430,7 @@ Either pattern works. The decision is local to each unit.
 > **Status:** Forward design, not a commitment. The current focus remains
 > finishing the Alpine/musl path described in
 > [What yoe ships today](#what-yoe-ships-today) and
-> [units-alpine.md](units-alpine.md). The phases below describe the approximate
+> [module-alpine.md](module-alpine.md). The phases below describe the approximate
 > order in which the rootfs-base abstraction would be built, conditional on
 > demand.
 
@@ -439,7 +439,7 @@ Either pattern works. The decision is local to each unit.
    is the foundation that proves the dev-loop and image-assembly value before a
    second base is introduced.
 
-2. **Identify the Alpine-coupled seams.** Survey `units-core` and the internal
+2. **Identify the Alpine-coupled seams.** Survey `module-core` and the internal
    Go code for assumptions that won't survive a non-Alpine base: hardcoded
    apk-tool invocations, OpenRC-flavored init paths, busybox-shadow logic in
    `replaces`, the toolchain container's musl-only Dockerfile. Make these
@@ -480,11 +480,11 @@ a glibc/systemd target today is "yoe is not the right tool yet" — say it
 explicitly and revisit when the abstraction is real.
 
 For the Alpine path, the rubric stays as established in
-[units-alpine.md](units-alpine.md):
+[module-alpine.md](module-alpine.md):
 
 - Yoe builds the easy stuff (small libraries, small userland tools) to preserve
   libc-portability.
-- `units-alpine` ships Alpine-native (apk-tools, alpine-keys, musl) and
+- `module-alpine` ships Alpine-native (apk-tools, alpine-keys, musl) and
   hard-to-build packages (when added — openssl, curl, openssh, qtwebengine,
   python, llvm).
 - Project-level shadowing remains the override hook for any individual package

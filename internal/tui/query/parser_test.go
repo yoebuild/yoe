@@ -72,11 +72,11 @@ func TestParse_MultipleTerms(t *testing.T) {
 }
 
 func TestParse_RepeatedFieldOR(t *testing.T) {
-	q, err := Parse("module:units-core module:units-rpi")
+	q, err := Parse("module:module-core module:module-rpi")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if q.String() != "module:units-core module:units-rpi" {
+	if q.String() != "module:module-core module:module-rpi" {
 		t.Fatalf("canonical: got %q", q.String())
 	}
 }
@@ -120,7 +120,7 @@ func TestQuery_InRoot(t *testing.T) {
 	if q.InRoot() != "base-image" {
 		t.Fatalf("InRoot: got %q", q.InRoot())
 	}
-	q2 := mustParse(t, "module:units-core")
+	q2 := mustParse(t, "module:module-core")
 	if q2.InRoot() != "" {
 		t.Fatalf("expected empty InRoot")
 	}
@@ -142,7 +142,7 @@ func TestParse_RoundTrip(t *testing.T) {
 		"type:image",
 		"in:base-image",
 		"in:base-image status:failed",
-		"module:units-core module:units-rpi linux-firmware",
+		"module:module-core module:module-rpi linux-firmware",
 	}
 	for _, in := range inputs {
 		q, err := Parse(in)
