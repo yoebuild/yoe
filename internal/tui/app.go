@@ -700,6 +700,31 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+
+	case "\\":
+		// Snap-back: revert active query to whatever is saved as the default.
+		bootstrap, _ := query.Parse(m.savedQuery) // savedQuery is canonical, parse must succeed
+		m.query = bootstrap
+		m.queryInput = m.query.String()
+		m.queryError = ""
+		m.applyQuery()
+		return m, nil
+
+	case "S":
+		// Save the current active query to local.star as the new default.
+		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+		ov.Query = m.query.String()
+		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
+			m.message = fmt.Sprintf("save query failed: %v", err)
+			return m, nil
+		}
+		m.savedQuery = m.query.String()
+		if m.query.IsEmpty() {
+			m.message = "saved empty query (will show all units next session)"
+		} else {
+			m.message = fmt.Sprintf("saved query: %s", m.query.String())
+		}
+		return m, nil
 	}
 	return m, nil
 }
@@ -1363,14 +1388,14 @@ func (m model) viewUnits() string {
 			b.WriteString(fmt.Sprintf("  /%s▌", m.queryInput))
 		}
 	} else {
-		help := "  b build  D deploy  x cancel  e edit  d diagnose  l log  c clean  s setup  / search  q quit"
+		help := "  b build  D deploy  x cancel  e edit  l log  s setup  / search  \\ home  S save  q quit"
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
 			if u, ok := m.proj.Units[name]; ok && u.Class == "image" {
 				if m.statuses[name] == statusCached {
-					help = "  b build  x cancel  r run  f flash  e edit  d diagnose  l log  c clean  s setup  / search  q quit"
+					help = "  b build  x cancel  r run  f flash  e edit  l log  s setup  / search  \\ home  S save  q quit"
 				} else {
-					help = "  b build  x cancel  r run  e edit  d diagnose  l log  c clean  s setup  / search  q quit"
+					help = "  b build  x cancel  r run  e edit  l log  s setup  / search  \\ home  S save  q quit"
 				}
 			}
 		}
