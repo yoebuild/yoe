@@ -8,7 +8,10 @@
 
 ## Next
 
-- Edit module source, drop into directory with editor or shell
+- Display version on units tab
+- Open to unit source on web.
+- Shell into module source, drop into directory
+- Shell into unit source, drop into directory
 - Tab in unit to display files installed and sizes.
 - Side issue worth flagging (not fixing now): the doubled -r0-r0 in
   ca-certificates-bundle-20260413-r0-r0 is a real bug in units-alpine. Alpine's
