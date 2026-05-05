@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Images with `network-config` and busybox build again.** A path collision
+  on `/usr/share/udhcpc/default.script` (busybox ships an example script
+  there; network-config installs the real one) was aborting `apk add` at
+  image-assembly time.
+
 ## [0.10.1] - 2026-05-05
 
 - **TUI flash offers `sudo chown` on permission denied.** Previously the flash
