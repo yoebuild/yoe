@@ -8,17 +8,19 @@ and this project adheres to
 
 ## [Unreleased]
 
-- **TUI flash offers `sudo chown` on permission denied.** Previously the
-  flash view just showed "permission denied" and dead-ended — matching the
-  CLI's behavior, the TUI now prompts to run `sudo chown $USER /dev/...` and
-  retries the write automatically.
-- **TUI home screen has tabs.** Press `tab` to cycle between Units (the
-  existing list), Modules (declared modules with git status), and
-  Diagnostics (shadowed units and duplicate `provides`). The diagnostics
-  tab carries a count badge so issues are visible from any tab.
-- **`--allow-duplicate-provides` is on by default.** No more passing the flag
-  on every yoe invocation while the `linux-firmware-*` fan-out keeps tripping
-  the strict check.
+## [0.10.1] - 2026-05-05
+
+- **TUI flash offers `sudo chown` on permission denied.** Previously the flash
+  view just showed "permission denied" and dead-ended — matching the CLI's
+  behavior, the TUI now prompts to run `sudo chown $USER /dev/...` and retries
+  the write automatically.
+- **TUI home screen has tabs.** Press `tab` to cycle between Units (the existing
+  list), Modules (declared modules with git status), and Diagnostics (shadowed
+  units and duplicate `provides`). The diagnostics tab carries a count badge so
+  issues are visible from any tab.
+- **`--allow-duplicate-provides` is on by default.** No more passing the flag on
+  every yoe invocation while the `linux-firmware-*` fan-out keeps tripping the
+  strict check.
 - **Modules renamed: `units-*` → `module-*`.** `units-core`, `units-rpi`,
   `units-alpine`, and `units-jetson` are now `module-core`, `module-rpi`,
   `module-alpine`, and `module-jetson`. Update `module(...)` URLs and any
@@ -29,15 +31,15 @@ and this project adheres to
 - **Images that include `apk-tools` or `libcurl` build again.** A collision
   between the source-built `ca-certificates` and Alpine's
   `ca-certificates-bundle` was aborting `apk add` at image-assembly time.
-- **`SIZE` column in the TUI updates as each unit finishes.** No more
-  waiting for the whole image to complete before transitive deps show their
-  size, and partial sizes survive a mid-build failure.
+- **`SIZE` column in the TUI updates as each unit finishes.** No more waiting
+  for the whole image to complete before transitive deps show their size, and
+  partial sizes survive a mid-build failure.
 - **Modules show their declared name.** The TUI's `MODULE` column and any
   diagnostic that names a module now use the name set in `MODULE.star`'s
   `module_info(name = ...)` instead of the path basename — so a module
-  referenced via `path = "modules/units-core"` displays as `core` if that's
-  what it calls itself. Falls back to the path basename when no
-  `module_info` is declared.
+  referenced via `path = "modules/units-core"` displays as `core` if that's what
+  it calls itself. Falls back to the path basename when no `module_info` is
+  declared.
 - **`dev-image` ships `helix` instead of `vim`.** Drops the editor entry that
   was unintentionally resolving to Alpine's `gvim` (and its X11/GTK runtime
   closure), keeping the image lean.
