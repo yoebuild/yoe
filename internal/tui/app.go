@@ -729,6 +729,37 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case "tab":
+		ctx := query.Context{
+			Modules: m.moduleNames(),
+			Units:   m.units, // already sorted
+		}
+		start, end, cands := query.Complete(m.queryInput, len(m.queryInput), ctx)
+		switch len(cands) {
+		case 0:
+			// nothing to do
+		case 1:
+			// splice in the single candidate, preserving field: prefix when present
+			m.queryInput = spliceCompletion(m.queryInput, start, end, cands[0])
+			m.reparse()
+		default:
+			// longest common prefix
+			lcp := longestCommonPrefix(cands)
+			cur := m.queryInput[start:end]
+			// strip field: prefix from cur for comparison with value-only lcp
+			if i := strings.IndexByte(cur, ':'); i >= 0 {
+				cur = cur[i+1:]
+			}
+			if lcp != "" && lcp != cur {
+				m.queryInput = spliceCompletion(m.queryInput, start, end, lcp)
+				m.reparse()
+			}
+			// else: leave as-is. The "second tab shows ghost line" is
+			// deferred to a follow-up; v1 ships a single-tab completion,
+			// which already does the heavy lifting.
+		}
+		return m, nil
+
 	default:
 		// Single printable character
 		key := msg.String()
@@ -789,6 +820,50 @@ func (m *model) applyQuery() {
 	}
 	m.listOffset = 0
 	m.adjustListOffset()
+}
+
+// moduleNames returns the sorted set of module names in the project,
+// plus the synthetic "project" name used for project-root units.
+func (m model) moduleNames() []string {
+	set := map[string]bool{"project": true}
+	for _, u := range m.proj.Units {
+		if u.Module != "" {
+			set[u.Module] = true
+		}
+	}
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func longestCommonPrefix(ss []string) string {
+	if len(ss) == 0 {
+		return ""
+	}
+	p := ss[0]
+	for _, s := range ss[1:] {
+		for !strings.HasPrefix(s, p) {
+			if p == "" {
+				return ""
+			}
+			p = p[:len(p)-1]
+		}
+	}
+	return p
+}
+
+// spliceCompletion inserts cand into input, replacing input[start:end].
+// When input[start:end] contains a colon (field:value token), the
+// field: prefix is preserved and only the value portion is replaced.
+func spliceCompletion(input string, start, end int, cand string) string {
+	tok := input[start:end]
+	if i := strings.IndexByte(tok, ':'); i >= 0 {
+		return input[:start] + tok[:i+1] + cand + input[end:]
+	}
+	return input[:start] + cand + input[end:]
 }
 
 func (m model) visibleIndices() []int {
