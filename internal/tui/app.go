@@ -1692,40 +1692,41 @@ func (m model) renderStatus(name string) string {
 }
 
 // renderName styles `padded` with `base` and underlines/bolds any
-// substring that matches a bare term in the active query.
+// substring that matches a bare term in the active query. When multiple
+// terms could match at different positions, the leftmost match wins —
+// the algorithm scans every term at each position and picks the one
+// with the smallest start index.
 func (m model) renderName(padded string, base lipgloss.Style) string {
 	terms := m.query.BareTerms()
 	if len(terms) == 0 {
 		return base.Render(padded)
 	}
-	// Lowercase a parallel string for case-insensitive matching.
 	lower := strings.ToLower(padded)
 	var b strings.Builder
 	i := 0
 	for i < len(padded) {
-		// Find the earliest match of any term starting at i.
-		nextEnd := -1
+		bestStart, bestEnd := -1, -1
 		for _, t := range terms {
 			if t == "" {
 				continue
 			}
-			if idx := strings.Index(lower[i:], t); idx >= 0 {
-				end := i + idx + len(t)
-				start := i + idx
-				if nextEnd == -1 || start < nextEnd-len(t) {
-					// Prefer earliest start.
-					b.WriteString(base.Render(padded[i:start]))
-					b.WriteString(base.Inherit(matchHighlightStyle).Render(padded[start:end]))
-					i = end
-					nextEnd = end
-					break
-				}
+			idx := strings.Index(lower[i:], t)
+			if idx < 0 {
+				continue
+			}
+			start := i + idx
+			if bestStart == -1 || start < bestStart {
+				bestStart = start
+				bestEnd = start + len(t)
 			}
 		}
-		if nextEnd == -1 {
+		if bestStart == -1 {
 			b.WriteString(base.Render(padded[i:]))
 			break
 		}
+		b.WriteString(base.Render(padded[i:bestStart]))
+		b.WriteString(base.Inherit(matchHighlightStyle).Render(padded[bestStart:bestEnd]))
+		i = bestEnd
 	}
 	return b.String()
 }
