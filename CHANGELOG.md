@@ -8,6 +8,15 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **TUI search is now a query language; defaults to your image's working set.**
+  Press `/` to filter by `type:`, `module:`, `status:`, or `in:` (closure of any
+  unit), in addition to plain substring search. `Tab` completes field names and
+  values. The TUI starts filtered to `in:<your-default-image>`, so a project
+  with thousands of units shows just what your image needs. Press `S` to save
+  the current query to `local.star` as the new default; press `\` to snap back
+  to it. The header shows `Query: …  Units: N/M` so you always know how many of
+  the project's units the current filter is showing.
+- **Use `apk-tools` from alpine layer for now.** It is built with docs.
 - **`yoe repo clean` drops stale `.apk` files.** Removes any `.apk` in the
   project's local repo whose name+version no longer matches a current unit (unit
   deleted, version bumped, release suffix changed) and re-signs the regenerated
