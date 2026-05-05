@@ -46,6 +46,10 @@ var (
 	classUnitStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))   // muted blue
 	classImageStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("13"))  // muted magenta
 	classContainerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))   // muted cyan
+
+	// matchHighlightStyle draws the matched substring on top of whatever
+	// the row's existing color is.
+	matchHighlightStyle = lipgloss.NewStyle().Underline(true).Bold(true)
 )
 
 // Package-level program reference for sending messages from goroutines.
@@ -1367,7 +1371,7 @@ func (m model) viewUnits() string {
 		paddedClass := fmt.Sprintf("%-12s", class)
 		b.WriteString(fmt.Sprintf("%s%s %s %s\n",
 			cursor,
-			nameStyle.Render(paddedName),
+			m.renderName(paddedName, name, nameStyle),
 			classStyle.Render(paddedClass),
 			status))
 	}
@@ -1375,6 +1379,10 @@ func (m model) viewUnits() string {
 	if end < len(visible) {
 		b.WriteString(dimStyle.Render(fmt.Sprintf("  ↓ %d more", len(visible)-end)))
 		b.WriteString("\n")
+	}
+
+	if len(m.visible) == 0 {
+		b.WriteString(dimStyle.Render("  no units match\n"))
 	}
 
 	// Search bar or help bar
@@ -1681,6 +1689,45 @@ func (m model) renderStatus(name string) string {
 	default:
 		return ""
 	}
+}
+
+// renderName styles `padded` with `base` and underlines/bolds any
+// substring that matches a bare term in the active query.
+func (m model) renderName(padded, raw string, base lipgloss.Style) string {
+	terms := m.query.BareTerms()
+	if len(terms) == 0 {
+		return base.Render(padded)
+	}
+	// Lowercase a parallel string for case-insensitive matching.
+	lower := strings.ToLower(padded)
+	var b strings.Builder
+	i := 0
+	for i < len(padded) {
+		// Find the earliest match of any term starting at i.
+		nextEnd := -1
+		for _, t := range terms {
+			if t == "" {
+				continue
+			}
+			if idx := strings.Index(lower[i:], t); idx >= 0 {
+				end := i + idx + len(t)
+				start := i + idx
+				if nextEnd == -1 || start < nextEnd-len(t) {
+					// Prefer earliest start.
+					b.WriteString(base.Render(padded[i:start]))
+					b.WriteString(base.Inherit(matchHighlightStyle).Render(padded[start:end]))
+					i = end
+					nextEnd = end
+					break
+				}
+			}
+		}
+		if nextEnd == -1 {
+			b.WriteString(base.Render(padded[i:]))
+			break
+		}
+	}
+	return b.String()
 }
 
 // ----- Helpers -----

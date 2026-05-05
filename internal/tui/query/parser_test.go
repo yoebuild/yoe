@@ -126,6 +126,15 @@ func TestQuery_InRoot(t *testing.T) {
 	}
 }
 
+func TestQuery_BareTerms(t *testing.T) {
+	q := mustParse(t, "type:image foo bar")
+	got := q.BareTerms()
+	want := []string{"foo", "bar"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("BareTerms: got %v want %v", got, want)
+	}
+}
+
 func TestParse_RoundTrip(t *testing.T) {
 	inputs := []string{
 		"",

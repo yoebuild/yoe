@@ -99,6 +99,13 @@ func (q Query) InRoot() string {
 	return vs[0]
 }
 
+// BareTerms returns the parsed bare substring terms. Each is already
+// lowercased by Parse; callers should compare against a lowercased
+// haystack.
+func (q Query) BareTerms() []string {
+	return q.bareTerms
+}
+
 // String returns the canonical text form of q. Field filters first
 // (sorted by field name, values in declaration order), bare terms last.
 // Round-trips through Parse.
