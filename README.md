@@ -76,7 +76,7 @@ The TUI user interface:
 ![screenshot](assets/yoe-screenshot.png)
 
 `dev-image` is another included image with a few more things in it. Press the
-`s` key to and configure the image. The '/' key modifies the unit query to
+`s` key to and configure the image. The `/` key modifies the unit query to
 change what is displayed.
 
 There are also CLI variants of the above commands (`build`, `run`, etc.).
