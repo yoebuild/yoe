@@ -2,7 +2,6 @@ project(
     name = "e2e-test",
     version = "0.1.0",
     defaults = defaults(machine = "qemu-x86_64", image = "base-image"),
-    cache = cache(path = "build/cache"),
     # modules listed in priority order: later entries shadow earlier ones,
     # so module-core wins over module-rpi and the Alpine/Jetson prebuilts.
     modules = [
