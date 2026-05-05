@@ -55,6 +55,52 @@ var (
 // Package-level program reference for sending messages from goroutines.
 var tuiProgram *tea.Program
 
+// Sort columns for the units table. Order matches the on-screen column
+// order and the indices stored in model.sortColumn.
+const (
+	sortByName = iota
+	sortByClass
+	sortByModule
+	sortBySize
+	sortByDeps
+	sortByStatus
+)
+
+// columnLayout describes one column in the units table header. The x-range
+// is used to map mouse clicks back to a column index.
+type columnLayout struct {
+	id     int
+	label  string
+	xStart int // inclusive — column 0 in the rendered string
+	xEnd   int // exclusive
+}
+
+// unitColumns returns the columns in the order they're rendered, with x
+// coordinates that include the leading "  " gutter and inter-column spaces.
+// Keep these widths in sync with the row renderer in viewUnits().
+func unitColumns() []columnLayout {
+	const gutter = 2
+	cols := []struct {
+		id    int
+		label string
+		w     int
+	}{
+		{sortByName, "NAME", 28},
+		{sortByClass, "CLASS", 9},
+		{sortByModule, "MODULE", 14},
+		{sortBySize, "SIZE", 6},
+		{sortByDeps, "DEPS", 5},
+		{sortByStatus, "STATUS", 10},
+	}
+	out := make([]columnLayout, 0, len(cols))
+	x := gutter
+	for _, c := range cols {
+		out = append(out, columnLayout{id: c.id, label: c.label, xStart: x, xEnd: x + c.w})
+		x += c.w + 1 // single space separator between columns
+	}
+	return out
+}
+
 // Views
 type viewKind int
 
@@ -227,6 +273,11 @@ type model struct {
 	unitSize map[string]int64 // installed bytes (image units: .img file size)
 	unitDeps map[string]int   // runtime closure size, excluding the unit itself
 
+	// Column sort state. sortColumn picks the comparator (sortByName etc.).
+	// sortDesc inverts it. Click a header to switch column or toggle direction.
+	sortColumn int
+	sortDesc   bool
+
 	// loadOpts is the set of LoadOptions to apply when the TUI reloads the
 	// project (e.g. after editing a .star file or switching machines). The
 	// caller passes the same options used for the initial load so global
@@ -322,7 +373,7 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	defer stopFeed()
 	m.feedStatus = feedStatus
 
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	tuiProgram = p
 
 	yoe.OnNotify = func(msg string) {
@@ -390,12 +441,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statuses[msg.unit] = statusCached
 			m.message = fmt.Sprintf("Build complete: %s", msg.unit)
 			m.recomputeMetrics()
+			// Re-sort so newly-known size/deps land in the right place
+			// when the user is sorted by one of those columns.
+			if m.sortColumn == sortBySize || m.sortColumn == sortByDeps {
+				m.sortVisible()
+			}
 		}
 		return m, nil
 
 	case execDoneMsg:
 		if msg.err != nil {
 			m.message = fmt.Sprintf("Command error: %v", msg.err)
+		}
+		return m, nil
+
+	case tea.MouseMsg:
+		// Only act on units view, only on left-button presses (ignore
+		// release/motion/wheel so a single click toggles exactly once).
+		if m.view != viewUnits || msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+			return m, nil
+		}
+		if msg.Y == m.columnHeaderRow() {
+			if col := columnAt(msg.X); col >= 0 {
+				m.setSortColumn(col)
+			}
 		}
 		return m, nil
 
@@ -841,6 +910,7 @@ func (m *model) applyQuery() {
 			m.visible = append(m.visible, i)
 		}
 	}
+	m.sortVisible()
 	// Keep cursor on a visible row if at all possible.
 	if len(m.visible) > 0 {
 		stillVisible := false
@@ -906,22 +976,37 @@ func (m model) visibleIndices() []int {
 	return m.visible
 }
 
+// prevVisible returns the unit-index of the row immediately before the
+// cursor in the current display order. Walks m.visible directly rather
+// than comparing numeric indices so it works under any sort.
 func (m model) prevVisible() int {
 	vis := m.visibleIndices()
-	for i := len(vis) - 1; i >= 0; i-- {
-		if vis[i] < m.cursor {
-			return vis[i]
+	for i, idx := range vis {
+		if idx == m.cursor {
+			if i > 0 {
+				return vis[i-1]
+			}
+			return m.cursor
 		}
+	}
+	if len(vis) > 0 {
+		return vis[0]
 	}
 	return m.cursor
 }
 
 func (m model) nextVisible() int {
 	vis := m.visibleIndices()
-	for _, idx := range vis {
-		if idx > m.cursor {
-			return idx
+	for i, idx := range vis {
+		if idx == m.cursor {
+			if i+1 < len(vis) {
+				return vis[i+1]
+			}
+			return m.cursor
 		}
+	}
+	if len(vis) > 0 {
+		return vis[0]
 	}
 	return m.cursor
 }
@@ -1322,14 +1407,39 @@ func (m model) viewUnits() string {
 		style.Render(qBody),
 		queryDimStyle.Render(counter)))
 
-	// Column header
+	// Column header — pad widths match the rows below; clicking a label
+	// switches the sort. A trailing arrow marks the active column. Padding
+	// is by display cells (not bytes) since the arrow runes are multi-byte
+	// — fmt %*s would over-pad if we let it count bytes.
+	headerLabel := func(col int, label string, w int, rightAlign bool) string {
+		arrow := ""
+		if m.sortColumn == col {
+			if m.sortDesc {
+				arrow = "↓"
+			} else {
+				arrow = "↑"
+			}
+		}
+		displayW := len(label)
+		if arrow != "" {
+			displayW++
+		}
+		if displayW >= w {
+			return label + arrow
+		}
+		pad := strings.Repeat(" ", w-displayW)
+		if rightAlign {
+			return pad + label + arrow
+		}
+		return label + arrow + pad
+	}
 	b.WriteString(fmt.Sprintf("  %s %s %s %s %s %s\n",
-		headerStyle.Render(fmt.Sprintf("%-28s", "NAME")),
-		headerStyle.Render(fmt.Sprintf("%-9s", "CLASS")),
-		headerStyle.Render(fmt.Sprintf("%-14s", "MODULE")),
-		headerStyle.Render(fmt.Sprintf("%6s", "SIZE")),
-		headerStyle.Render(fmt.Sprintf("%4s", "DEPS")),
-		headerStyle.Render("STATUS")))
+		headerStyle.Render(headerLabel(sortByName, "NAME", 28, false)),
+		headerStyle.Render(headerLabel(sortByClass, "CLASS", 9, false)),
+		headerStyle.Render(headerLabel(sortByModule, "MODULE", 14, false)),
+		headerStyle.Render(headerLabel(sortBySize, "SIZE", 6, true)),
+		headerStyle.Render(headerLabel(sortByDeps, "DEPS", 5, true)),
+		headerStyle.Render(headerLabel(sortByStatus, "STATUS", 10, false))))
 
 	// Determine visible units — filtered by current query state
 	visible := m.visible
@@ -1391,7 +1501,7 @@ func (m model) viewUnits() string {
 		paddedClass := fmt.Sprintf("%-9s", truncate(class, 9))
 		paddedModule := fmt.Sprintf("%-14s", truncate(module, 14))
 		paddedSize := fmt.Sprintf("%6s", size)
-		paddedDeps := fmt.Sprintf("%4s", depsStr)
+		paddedDeps := fmt.Sprintf("%5s", depsStr)
 		b.WriteString(fmt.Sprintf("%s%s %s %s %s %s %s\n",
 			cursor,
 			m.renderName(paddedName, nameStyle),
@@ -1901,6 +2011,117 @@ func (m *model) adjustListOffset() {
 	}
 }
 
+// sortVisible reorders m.visible according to the active sort column and
+// direction. Empty/zero values for size and deps sort last in ascending
+// mode, first in descending mode — i.e., always to the bottom — so unbuilt
+// units never push real numbers off-screen. The unit name is the
+// tiebreaker so the order is deterministic.
+func (m *model) sortVisible() {
+	if len(m.visible) <= 1 {
+		return
+	}
+	col := m.sortColumn
+	desc := m.sortDesc
+
+	keyName := func(i int) string { return m.units[i] }
+	keyClass := func(i int) string {
+		if u, ok := m.proj.Units[m.units[i]]; ok {
+			return u.Class
+		}
+		return ""
+	}
+	keyModule := func(i int) string {
+		if u, ok := m.proj.Units[m.units[i]]; ok {
+			if u.Module == "" {
+				return "(local)"
+			}
+			return u.Module
+		}
+		return ""
+	}
+	keyStatus := func(i int) string { return statusKey(m.statuses[m.units[i]]) }
+
+	cmpString := func(a, b string) int {
+		switch {
+		case a < b:
+			return -1
+		case a > b:
+			return 1
+		}
+		return 0
+	}
+	cmpInt64 := func(a, b int64) int {
+		switch {
+		case a < b:
+			return -1
+		case a > b:
+			return 1
+		}
+		return 0
+	}
+
+	sort.SliceStable(m.visible, func(p, q int) bool {
+		i, j := m.visible[p], m.visible[q]
+		var c int
+		switch col {
+		case sortByClass:
+			c = cmpString(keyClass(i), keyClass(j))
+		case sortByModule:
+			c = cmpString(keyModule(i), keyModule(j))
+		case sortBySize:
+			a, b := m.unitSize[m.units[i]], m.unitSize[m.units[j]]
+			// Push zero (unbuilt) values to the bottom in both directions
+			// so the column always reads "real numbers, then blanks".
+			switch {
+			case a == 0 && b == 0:
+				c = 0
+			case a == 0:
+				return false
+			case b == 0:
+				return true
+			default:
+				c = cmpInt64(a, b)
+			}
+		case sortByDeps:
+			a, b := m.unitDeps[m.units[i]], m.unitDeps[m.units[j]]
+			switch {
+			case a == 0 && b == 0:
+				c = 0
+			case a == 0:
+				return false
+			case b == 0:
+				return true
+			default:
+				c = cmpInt64(int64(a), int64(b))
+			}
+		case sortByStatus:
+			c = cmpString(keyStatus(i), keyStatus(j))
+		default: // sortByName
+			c = cmpString(keyName(i), keyName(j))
+		}
+		if c == 0 {
+			c = cmpString(keyName(i), keyName(j))
+		}
+		if desc {
+			return c > 0
+		}
+		return c < 0
+	})
+}
+
+// setSortColumn switches the sort to col. If col was already active, the
+// direction toggles; otherwise it picks a sensible default per column
+// (descending for numeric metrics, ascending elsewhere).
+func (m *model) setSortColumn(col int) {
+	if m.sortColumn == col {
+		m.sortDesc = !m.sortDesc
+	} else {
+		m.sortColumn = col
+		m.sortDesc = col == sortBySize || col == sortByDeps
+	}
+	m.applyQuery()
+}
+
 // recomputeMetrics rebuilds m.unitSize and m.unitDeps from the current
 // project + arch + machine. Cheap enough to run on every project reload
 // or build completion: each unit walks its own runtime closure once and
@@ -2044,6 +2265,36 @@ func (m *model) checkBinfmtWarning() {
 	} else {
 		m.warning = ""
 	}
+}
+
+// columnHeaderRow returns the 0-based screen row where the units-table
+// column header is rendered. Computed from the same banner state that
+// viewUnits() uses to lay out the page so the two stay in lockstep.
+func (m model) columnHeaderRow() int {
+	row := 1 // title is row 0
+	if m.warning != "" {
+		row++
+	}
+	if m.notification != "" {
+		row++
+	}
+	if m.feedStatus != "" {
+		row++
+	}
+	row++ // blank line after banners
+	row++ // query header
+	return row
+}
+
+// columnAt maps a screen x-coordinate on the column header row to a sort
+// column id. Returns -1 when x falls in a gutter or past the last column.
+func columnAt(x int) int {
+	for _, c := range unitColumns() {
+		if x >= c.xStart && x < c.xEnd {
+			return c.id
+		}
+	}
+	return -1
 }
 
 // listViewportHeight returns the number of unit rows that fit on screen.

@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **TUI column headers are clickable to sort.** Click `NAME`, `CLASS`, `MODULE`,
+  `SIZE`, `DEPS`, or `STATUS` to sort the unit list; click again to flip the
+  direction. The active column is marked with `↑` or `↓` so you always know how
+  the list is ordered. Numeric columns default to descending so the largest
+  units land at the top; unbuilt rows stay at the bottom either way.
 - **TUI unit table shows module, size, and dependency-count columns.** Each row
   now reports the module that won shadow resolution (or `(local)` for project-
   root units), the on-disk install size after build (the `.img` file size for
