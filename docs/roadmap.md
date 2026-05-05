@@ -8,6 +8,8 @@
 
 ## Next
 
+- Can we display the machine in the units list?
+- Don't move cursor to building unit if there has been a keypress in the last 2s
 - Display version on units tab
 - Open to unit source on web.
 - Shell into module source, drop into directory
