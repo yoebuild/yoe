@@ -30,17 +30,19 @@ func RunInit(projectDir string, machine string) error {
     defaults = defaults(machine = %q, image = "base-image"),
     cache = cache(path = "build/cache"),
     sources = sources(go_proxy = "https://proxy.golang.org"),
+    # modules listed in priority order: later entries shadow earlier ones,
+    # so module-core wins over module-rpi and the Alpine/Jetson prebuilts.
     modules = [
-        module("https://github.com/yoebuild/yoe.git",
-               ref = "main",
-               path = "modules/module-core"),
-        module("https://github.com/yoebuild/yoe.git",
-               ref = "main",
-               path = "modules/module-rpi"),
         module("https://github.com/yoebuild/module-alpine.git",
                ref = "main"),
         module("https://github.com/yoebuild/module-jetson.git",
                ref = "main"),
+        module("https://github.com/yoebuild/yoe.git",
+               ref = "main",
+               path = "modules/module-rpi"),
+        module("https://github.com/yoebuild/yoe.git",
+               ref = "main",
+               path = "modules/module-core"),
     ],
 )
 `, name, defaultMachine)
