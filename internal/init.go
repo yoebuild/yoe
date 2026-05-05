@@ -24,6 +24,10 @@ func RunInit(projectDir string, machine string) error {
 		defaultMachine = "qemu-x86_64"
 	}
 
+	// module-alpine and module-jetson come first so module-core's source-built
+	// units (later in the list) win unit shadowing. Reversing this order pulls
+	// in Alpine's prebuilt apks for things like busybox, which ship extra
+	// files that collide with module-core packages at image-assembly time.
 	projectContent := fmt.Sprintf(`project(
     name = %q,
     version = "0.1.0",
@@ -31,16 +35,16 @@ func RunInit(projectDir string, machine string) error {
     cache = cache(path = "build/cache"),
     sources = sources(go_proxy = "https://proxy.golang.org"),
     modules = [
+        module("https://github.com/yoebuild/module-alpine.git",
+               ref = "main"),
+        module("https://github.com/yoebuild/module-jetson.git",
+               ref = "main"),
         module("https://github.com/yoebuild/yoe.git",
                ref = "main",
                path = "modules/module-core"),
         module("https://github.com/yoebuild/yoe.git",
                ref = "main",
                path = "modules/module-rpi"),
-        module("https://github.com/yoebuild/module-alpine.git",
-               ref = "main"),
-        module("https://github.com/yoebuild/module-jetson.git",
-               ref = "main"),
     ],
 )
 `, name, defaultMachine)
