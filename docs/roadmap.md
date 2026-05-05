@@ -38,6 +38,8 @@
 - rPI updater
 - Error reading OS version: searching /etc/os-release, got: field VERSION not
   found
+- Progress bar for build
+- Parallel build
 
 ## Bugs / Improvements
 
