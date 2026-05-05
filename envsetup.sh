@@ -59,11 +59,23 @@ yoe_e2e_arm64() {
 # --- Documentation site (mdBook) ----------------------------------------------
 # Requires: cargo install mdbook mdbook-toc
 
+# Generate docs/intro.md from README.md, rewriting paths so links work when
+# README is rendered as the docs site's intro page (which lives in docs/).
+yoe_gen_intro() {
+	(cd "${OE_BASE}" && sed \
+		-e 's|](docs/|](|g' \
+		-e 's|src="docs/|src="|g' \
+		-e 's|](LICENSE)|](https://github.com/yoebuild/yoe/blob/main/LICENSE)|g' \
+		README.md > docs/intro.md) || return 1
+}
+
 yoe_mdbook() {
+	yoe_gen_intro || return 1
 	(cd "${OE_BASE}" && mdbook serve -p 3333)
 }
 
 yoe_mdbook_build() {
+	yoe_gen_intro || return 1
 	(cd "${OE_BASE}" && mdbook build) || return 1
 }
 

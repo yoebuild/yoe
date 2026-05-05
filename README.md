@@ -4,17 +4,18 @@
   </a>
 </p>
 
-# `[yoe]` _Next Generation_
+# `[yoe]` _next generation_
 
 **Fast tooling and builds. No cross-compiling headaches. Easy to
 customize/upgrade/debug. One tool for both system engineers and application
 developers to ship products faster.**
 
-`[yoe]` is a build system (focused on Embedded Linux for now) for teams shipping
-modern edge products. Components in Go, Rust, Zig, Python, JS/TS, and C/C++ are
-supported. `[yoe]` releases often and tracks upstream closely. The configuration
-language is easily processed by humans and AI. Build on your laptop, on native
-hardware, or in cloud CI — one integrated tool, same config, same results.
+`[yoe]` _next generation_ is a build system (focused on Embedded Linux for now)
+for teams shipping modern edge products. Components in Go, Rust, Zig, Python,
+JS/TS, and C/C++ are supported. `[yoe]` releases often and tracks upstream
+closely. The configuration language is easily processed by humans and AI. Build
+on your laptop, on native hardware, or in cloud CI — one integrated tool, same
+config, same results.
 
 We took what we learned from many years of maintaining and building products
 with the [Yoe Distribution](https://yoedistro.org/), started over, and built the

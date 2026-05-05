@@ -8,7 +8,6 @@
 
 ## Next
 
-- Diagnostic page in TUI that displays shadowed and multiple provides
 - Side issue worth flagging (not fixing now): the doubled -r0-r0 in
   ca-certificates-bundle-20260413-r0-r0 is a real bug in module-alpine. Alpine's
   upstream version 20260413-r0 already contains the release suffix, but
@@ -18,13 +17,9 @@
   alpine_pkg unit. Not blocking the install (apk accepts the goofy name), so it
   can wait — but worth a separate issue.
 - alpine should have unit deps, not just runtime deps
-- alpine packages like gvim provides vim. This could be a source of pain.
+- alpine packages like gvim "provides" vim. This could be a source of pain.
 - document BSP and package moat
 - Better hostnames for targets.
-- units-xxx -> module-xxx in git
-- unit details, show dependency graph up to image (upstream), and then
-  (downstream) a tree of stuff it pulls in
-- long z
 - mDNS on target (we have a mdns component, why is it not working?)
 - base-files is modified by machine
   - machine package feed?
