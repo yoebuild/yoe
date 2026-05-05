@@ -259,8 +259,8 @@ on the target so `apk` runs without `--allow-untrusted`.
 
 - `internal/artifact/apk.go` — emit a third concatenated gzip stream containing
   the signature
-- `modules/module-core/units/base/base-files.star` — install the project's public
-  key into `/etc/apk/keys/<keyname>.rsa.pub`
+- `modules/module-core/units/base/base-files.star` — install the project's
+  public key into `/etc/apk/keys/<keyname>.rsa.pub`
 - `internal/repo/index.go` — sign `APKINDEX.tar.gz`'s control tar similarly
 
 ### Task 3.1: Key management

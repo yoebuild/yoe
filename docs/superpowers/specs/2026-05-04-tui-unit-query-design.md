@@ -91,17 +91,17 @@ root.
 
 ### Worked examples
 
-| Query                                | Meaning                                                                   |
-| ------------------------------------ | ------------------------------------------------------------------------- |
-| _(empty)_                            | All units — the current default behavior, kept as the empty case.         |
-| `in:base-image`                      | Working-set view: just what gets built when the image builds.             |
-| `in:base-image status:failed`        | What's broken in my image right now.                                      |
-| `in:base-image type:image`           | Just the image itself (degenerate but valid).                             |
-| `module:module-alpine`                | Browse what module-alpine ships.                                           |
-| `linux-firmware`                     | Old-style substring search across all units.                              |
-| `module:module-alpine linux-firmware` | linux-firmware-\* in module-alpine specifically.                           |
-| `failed`                             | Same as `status:failed`.                                                  |
-| `images`                             | Same as `type:image`. All images in the project, useful for choosing one. |
+| Query                                 | Meaning                                                                   |
+| ------------------------------------- | ------------------------------------------------------------------------- |
+| _(empty)_                             | All units — the current default behavior, kept as the empty case.         |
+| `in:base-image`                       | Working-set view: just what gets built when the image builds.             |
+| `in:base-image status:failed`         | What's broken in my image right now.                                      |
+| `in:base-image type:image`            | Just the image itself (degenerate but valid).                             |
+| `module:module-alpine`                | Browse what module-alpine ships.                                          |
+| `linux-firmware`                      | Old-style substring search across all units.                              |
+| `module:module-alpine linux-firmware` | linux-firmware-\* in module-alpine specifically.                          |
+| `failed`                              | Same as `status:failed`.                                                  |
+| `images`                              | Same as `type:image`. All images in the project, useful for choosing one. |
 
 ## `local.star` schema change
 

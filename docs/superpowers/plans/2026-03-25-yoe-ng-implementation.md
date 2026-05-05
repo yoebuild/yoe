@@ -32,9 +32,9 @@ on any dev machine). Phases 4+ require Linux with bubblewrap and apk-tools.
 | 1     | CLI Foundation                | —          | **DONE** — `yoe init/config/clean/module`, Starlark engine, all builtins               |
 | 2     | Dependency Resolution         | 1          | **DONE** — DAG, topo sort, hashing, `desc/refs/graph`, `dev`, custom commands, patches |
 | 2.5   | Module Management & Engine    | 1          | `yoe module sync`, load() resolution, remove class builtins, recursive discovery       |
-| 2.6   | module-core Module (Phase 1)   | 2.5        | Module skeleton, Starlark classes, toolchain units                                     |
-| 2.7   | module-core Module (Phase 2)   | 2.6, 6     | Base system units, QEMU machines, base/dev images                                      |
-| 2.8   | module-core Module (Phase 3)   | 2.7        | Essential libs, crypto/TLS, networking, debug tools                                    |
+| 2.6   | module-core Module (Phase 1)  | 2.5        | Module skeleton, Starlark classes, toolchain units                                     |
+| 2.7   | module-core Module (Phase 2)  | 2.6, 6     | Base system units, QEMU machines, base/dev images                                      |
+| 2.8   | module-core Module (Phase 3)  | 2.7        | Essential libs, crypto/TLS, networking, debug tools                                    |
 | 3     | Source Management             | 1          | `yoe source fetch/list/verify/clean`, content-addressed cache                          |
 | 4     | Build Execution               | 2, 3       | `yoe build` with bubblewrap isolation, build step execution                            |
 | 5     | Package Creation & Repository | 4          | APK package creation, `yoe repo` commands, local repository                            |
@@ -1779,7 +1779,8 @@ git commit -m "fix: integration test fixes for phase 1"
 and their transitive dependencies from `MODULE.star` files. Also make the engine
 changes required to support Starlark-based classes in modules.
 
-See [module-core Module Design](../specs/2026-03-26-recipes-core-layer-design.md)
+See
+[module-core Module Design](../specs/2026-03-26-recipes-core-layer-design.md)
 for the full specification of what the base module contains and the engine
 changes needed.
 
@@ -1970,7 +1971,8 @@ user namespaces (bubblewrap), mkfs.ext4, mkfs.vfat, systemd-repart
 all Starlark class files, and the toolchain/build-tool units. This is the
 foundation that all other units build on.
 
-See [module-core Module Design](../specs/2026-03-26-recipes-core-layer-design.md)
+See
+[module-core Module Design](../specs/2026-03-26-recipes-core-layer-design.md)
 for the full specification.
 
 **Key deliverables:**

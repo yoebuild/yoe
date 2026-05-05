@@ -430,9 +430,9 @@ Either pattern works. The decision is local to each unit.
 > **Status:** Forward design, not a commitment. The current focus remains
 > finishing the Alpine/musl path described in
 > [What yoe ships today](#what-yoe-ships-today) and
-> [module-alpine.md](module-alpine.md). The phases below describe the approximate
-> order in which the rootfs-base abstraction would be built, conditional on
-> demand.
+> [module-alpine.md](module-alpine.md). The phases below describe the
+> approximate order in which the rootfs-base abstraction would be built,
+> conditional on demand.
 
 1. **Solidify the Alpine path.** Ship enough that yoe is a viable choice for
    non-AI embedded products today. The same architecture carries forward; this

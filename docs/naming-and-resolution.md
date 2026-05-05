@@ -29,10 +29,10 @@ project(
 **Module name** is derived from the `path` field's last component if set,
 otherwise the URL's repository name. Examples:
 
-| URL                              | path                 | Derived name |
-| -------------------------------- | -------------------- | ------------ |
+| URL                              | path                  | Derived name  |
+| -------------------------------- | --------------------- | ------------- |
 | `github.com/yoebuild/yoe.git`    | `modules/module-core` | `module-core` |
-| `github.com/vendor/bsp-imx8.git` | (none)               | `bsp-imx8`   |
+| `github.com/vendor/bsp-imx8.git` | (none)                | `bsp-imx8`    |
 
 Module names are used in `load()` statements:
 `load("@module-core//classes/autotools.star", "autotools")`.
@@ -106,11 +106,11 @@ Runtime deps are resolved transitively by `apk` at install time.
 
 Starlark `load()` statements use three forms:
 
-| Form            | Resolves to                         | Example                                                    |
-| --------------- | ----------------------------------- | ---------------------------------------------------------- |
+| Form            | Resolves to                         | Example                                                     |
+| --------------- | ----------------------------------- | ----------------------------------------------------------- |
 | `@module//path` | Named module root                   | `load("@module-core//classes/autotools.star", "autotools")` |
-| `//path`        | Current module root (context-aware) | `load("//classes/cmake.star", "cmake")`                    |
-| `relative/path` | Relative to current file            | `load("../utils.star", "helper")`                          |
+| `//path`        | Current module root (context-aware) | `load("//classes/cmake.star", "cmake")`                     |
+| `relative/path` | Relative to current file            | `load("../utils.star", "helper")`                           |
 
 The `//` form is context-aware: if the file is inside a module, `//` resolves to
 that module's root. Otherwise it resolves to the project root. This means a unit

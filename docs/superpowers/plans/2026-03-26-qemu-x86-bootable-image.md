@@ -28,9 +28,9 @@ extlinux (bootloader), mkfs.ext4, mkfs.vfat
 | 1    | APKINDEX generation            | `apk` can resolve deps from our local repo          |
 | 2    | Starlark load() implementation | Units can import classes from modules               |
 | 3    | Recursive unit discovery       | `units/**/*.star` works for categorized layouts     |
-| 4    | module-core: classes            | Starlark autotools/cmake/go/image class files       |
-| 5    | module-core: base units         | Real zlib, busybox, linux kernel units              |
-| 6    | module-core: machines + images  | qemu-x86_64 machine, base-image definition          |
+| 4    | module-core: classes           | Starlark autotools/cmake/go/image class files       |
+| 5    | module-core: base units        | Real zlib, busybox, linux kernel units              |
+| 6    | module-core: machines + images | qemu-x86_64 machine, base-image definition          |
 | 7    | Disk image generation          | GPT partition table, ext4 rootfs, vfat boot, kernel |
 | 8    | Boot configuration             | extlinux.conf for QEMU serial console boot          |
 | 9    | End-to-end integration test    | `yoe build base-image` → `yoe run` boots to shell   |
@@ -1112,8 +1112,8 @@ git commit -m "feat: install extlinux boot config for QEMU serial console"
 
 ## Task 9: End-to-End Integration Test
 
-Wire everything together with a test project that uses the module-core module and
-builds a complete image.
+Wire everything together with a test project that uses the module-core module
+and builds a complete image.
 
 **Files:**
 
