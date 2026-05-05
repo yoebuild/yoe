@@ -8,6 +8,58 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-05-05
+
+_Errata: due to an issue in the alpine module, you must currently run with:
+`yoe --allow-duplicate-provides`._
+
+- **BREAKING CHANGE** This project has been moved to a new Github org:
+  https://github.com/yoebuild. `yoe update` from previous versions will not work
+  and you will need to download and manually install the 0.10.0 binary.
+- **TUI search is now a query language; defaults to your image's working set.**
+  Press `/` to filter by `type:`, `module:`, `status:`, or `in:` (closure of any
+  unit), in addition to plain substring search. `Tab` completes field names and
+  values. The TUI starts filtered to `in:<your-default-image>`, so a project
+  with thousands of units shows just what your image needs. Press `S` to save
+  the current query to `local.star` as the new default; press `\` to snap back
+  to it. The header shows `Query: …  Units: N/M` so you always know how many of
+  the project's units the current filter is showing.
+- **Use `apk-tools` from alpine layer for now.** It is built with docs.
+- **`yoe repo clean` drops stale `.apk` files.** Removes any `.apk` in the
+  project's local repo whose name+version no longer matches a current unit (unit
+  deleted, version bumped, release suffix changed) and re-signs the regenerated
+  APKINDEX. Without this, `apk add` happily picks the highest- versioned
+  candidate even when that candidate is leftover from a since-deleted unit —
+  which is how a `LUA=no`-built `apk-tools` ("apk has been built without help")
+  could keep winning over Alpine's prebuilt long after the source unit was
+  removed.
+- **Source-built `openssl` no longer collides with Alpine's `libcrypto3` /
+  `libssl3`.** The `openssl` unit in `units-core` now declares
+  `provides = ["libcrypto3", "libssl3"]`, so any package whose `runtime_deps`
+  reach `libcrypto3` or `libssl3` (e.g. `units-alpine`'s `apk-tools`) routes
+  back to the source-built openssl instead of pulling Alpine's split libcrypto3
+  /libssl3 packages alongside. Without this, image-time `apk add` aborted with
+  `trying to overwrite usr/lib/libcrypto.so.3 owned by openssl-3.4.1-r0`.
+- **`units-alpine` now lives in its own repo.** `yoe init` and the e2e project
+  pull `units-alpine` and `units-jetson` from `github.com/yoebuild/` instead of
+  carrying units-alpine inside this repo. Existing projects with
+  `path = "modules/units-alpine"` should switch to a remote `module(...)` ref.
+- **Shadow notices are off by default.** Cross-module unit shadowing and
+  `provides` overrides no longer print a stderr notice on every load. Pass
+  `--show-shadows` to see them when you actually want to audit which module won.
+- **`--allow-duplicate-provides` lets multiple units share a virtual.** When
+  set, units in the same module may declare the same `provides` (apk-style "any
+  of these satisfies"); the first one wins for `PROVIDES` lookup. Needed for
+  `units-alpine`'s `linux-firmware-*` fan-out, where ~100 packages all provide
+  `linux-firmware-any`.
+- **`patches=` resolves relative to the unit's own .star file directory.** A
+  unit can now ship its patches alongside its definition (e.g.
+  `units/bsp/foo/patches/0001-fix.patch` next to `units/bsp/foo.star`), and the
+  same `patches=["patches/foo/0001-fix.patch"]` works whether the unit is loaded
+  from a local module override or a fetched remote module. Previously patches
+  were resolved against the project root, which meant module-shipped patches
+  couldn't be found unless every consumer copied them.
+
 ## [0.9.1] - 2026-05-01
 
 - **`yoe deploy <unit>` now installs the package's runtime deps too.**

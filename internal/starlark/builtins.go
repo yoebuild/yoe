@@ -215,6 +215,7 @@ func kwStringMap(kwargs []starlark.Tuple, key string) map[string]string {
 var reservedUnitKwargs = map[string]bool{
 	"name": true, "version": true, "release": true, "scope": true,
 	"description": true, "license": true, "source": true, "sha256": true,
+	"apk_checksum": true,
 	"tag": true, "branch": true, "patches": true, "deps": true,
 	"runtime_deps": true, "container": true, "container_arch": true,
 	"sandbox": true, "shell": true, "tasks": true, "provides": true,
@@ -589,6 +590,7 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 		License:     kwString(kwargs, "license"),
 		Source:      kwString(kwargs, "source"),
 		SHA256:      kwString(kwargs, "sha256"),
+		APKChecksum: kwString(kwargs, "apk_checksum"),
 		Tag:         kwString(kwargs, "tag"),
 		Branch:      kwString(kwargs, "branch"),
 		Patches:     kwStringList(kwargs, "patches"),
@@ -682,15 +684,19 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 		}
 		if r.ModuleIndex < existing.ModuleIndex {
 			e.mu.Unlock()
-			fmt.Fprintf(os.Stderr,
-				"notice: unit %q from %s is shadowed by %s\n",
-				name, moduleSource(r.Module), moduleSource(existing.Module))
+			if e.showShadows {
+				fmt.Fprintf(os.Stderr,
+					"notice: unit %q from %s is shadowed by %s\n",
+					name, moduleSource(r.Module), moduleSource(existing.Module))
+			}
 			return existing, nil
 		}
 		// New unit has higher priority — replace, log the displacement.
-		fmt.Fprintf(os.Stderr,
-			"notice: unit %q from %s shadows the same name from %s\n",
-			name, moduleSource(r.Module), moduleSource(existing.Module))
+		if e.showShadows {
+			fmt.Fprintf(os.Stderr,
+				"notice: unit %q from %s shadows the same name from %s\n",
+				name, moduleSource(r.Module), moduleSource(existing.Module))
+		}
 	}
 	e.units[name] = r
 	e.mu.Unlock()

@@ -15,9 +15,11 @@ import (
 type LoadOption func(*loadConfig)
 
 type loadConfig struct {
-	moduleSync  func([]ModuleRef, io.Writer) error
-	machine     string // override default machine before evaluating units/images
-	projectFile string // alternative project file (instead of PROJECT.star)
+	moduleSync             func([]ModuleRef, io.Writer) error
+	machine                string // override default machine before evaluating units/images
+	projectFile            string // alternative project file (instead of PROJECT.star)
+	showShadows            bool   // emit shadow / provides-override notices (default off)
+	allowDuplicateProvides bool   // accept multiple intra-module providers of the same virtual
 }
 
 // WithModuleSync provides a callback that is invoked after PROJECT.star is
@@ -38,6 +40,21 @@ func WithMachine(name string) LoadOption {
 // of PROJECT.star at the project root.
 func WithProjectFile(path string) LoadOption {
 	return func(c *loadConfig) { c.projectFile = path }
+}
+
+// WithShowShadows enables stderr notices about cross-module unit shadowing
+// and intra-module `provides` overrides. Default is off; the shadowing/
+// override behavior itself is unchanged either way.
+func WithShowShadows(v bool) LoadOption {
+	return func(c *loadConfig) { c.showShadows = v }
+}
+
+// WithAllowDuplicateProvides relaxes the intra-module `provides` collision
+// check. When true, multiple units in the same module may declare the same
+// virtual; the first one registered wins for PROVIDES lookup, matching
+// apk's "any of these satisfies the dep" semantics.
+func WithAllowDuplicateProvides(v bool) LoadOption {
+	return func(c *loadConfig) { c.allowDuplicateProvides = v }
 }
 
 // LoadProject finds the project root, evaluates all .star files, and returns
@@ -85,6 +102,8 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 
 	eng := NewEngine()
 	eng.SetProjectRoot(root)
+	eng.SetShowShadows(cfg.showShadows)
+	eng.SetAllowDuplicateProvides(cfg.allowDuplicateProvides)
 
 	// Evaluate project file (PROJECT.star or --project override)
 	projFile := filepath.Join(root, "PROJECT.star")
@@ -317,12 +336,18 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 					// Look up the existing unit to compare module priority.
 					existingUnit := eng.Units()[existingName]
 					if existingUnit == nil || u.ModuleIndex == existingUnit.ModuleIndex {
-						return nil, fmt.Errorf("virtual package %q provided by both %q and %q",
-							virt, existingName, u.Name)
+						if !eng.allowDuplicateProvides {
+							return nil, fmt.Errorf("virtual package %q provided by both %q and %q",
+								virt, existingName, u.Name)
+						}
+						// First-wins: leave PROVIDES pointing at existingName.
+						continue
 					}
 					if u.ModuleIndex > existingUnit.ModuleIndex {
-						fmt.Fprintf(os.Stderr, "notice: %q from %s overrides %q via provides %q\n",
-							u.Name, moduleSource(u.Module), existingName, virt)
+						if eng.showShadows {
+							fmt.Fprintf(os.Stderr, "notice: %q from %s overrides %q via provides %q\n",
+								u.Name, moduleSource(u.Module), existingName, virt)
+						}
 						_ = prov.SetKey(starlark.String(virt), starlark.String(u.Name))
 					}
 					// If u.ModuleIndex < existingUnit.ModuleIndex, skip — higher priority already won.

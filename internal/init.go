@@ -37,6 +37,10 @@ func RunInit(projectDir string, machine string) error {
         module("https://github.com/yoebuild/yoe.git",
                ref = "main",
                path = "modules/units-rpi"),
+        module("https://github.com/yoebuild/units-alpine.git",
+               ref = "main"),
+        module("https://github.com/yoebuild/units-jetson.git",
+               ref = "main"),
     ],
 )
 `, name, defaultMachine)

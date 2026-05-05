@@ -189,6 +189,77 @@ func Info(repoDir, pkgName string, w io.Writer) error {
 	return fmt.Errorf("package %q not found in repository", pkgName)
 }
 
+// Clean drops .apk files in repoDir that are not produced by any current
+// project unit, then regenerates APKINDEX for every arch we touched. The
+// "expected" filename for a unit is `<name>-<version>-r<release>.apk`,
+// matching the convention CreateAPK uses on publish — see internal/artifact
+// /apk.go. Anything else is treated as stale (unit removed, version bumped,
+// build flags changed in a way that altered the release suffix) and
+// removed.
+//
+// Without this, the local repo accumulates old .apk files indefinitely,
+// and image-time `apk add` happily picks the highest-versioned candidate
+// — which can be a deleted unit's leftover (e.g. a yoe-built apk-tools
+// from before switching to the units-alpine prebuilt). The APKINDEX is
+// always rebuilt from the surviving files via GenerateIndex, so apk
+// resolves only what's actually on disk.
+func Clean(proj *yoestar.Project, repoDir string, signer *artifact.Signer, w io.Writer) error {
+	if proj == nil {
+		return fmt.Errorf("Clean requires a loaded project")
+	}
+
+	keep := make(map[string]struct{}, len(proj.Units))
+	for _, u := range proj.Units {
+		if u.Version == "" {
+			continue
+		}
+		keep[fmt.Sprintf("%s-%s-r%d.apk", u.Name, u.Version, u.Release)] = struct{}{}
+	}
+
+	archDirs, err := ArchDirs(repoDir)
+	if err != nil {
+		return err
+	}
+
+	removed := 0
+	dirtyArches := map[string]struct{}{}
+	for _, ad := range archDirs {
+		archPath := filepath.Join(repoDir, ad)
+		entries, err := os.ReadDir(archPath)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			name := e.Name()
+			if !strings.HasSuffix(name, ".apk") {
+				continue
+			}
+			if _, ok := keep[name]; ok {
+				continue
+			}
+			if err := os.Remove(filepath.Join(archPath, name)); err != nil {
+				return fmt.Errorf("removing %s/%s: %w", ad, name, err)
+			}
+			fmt.Fprintf(w, "Removed %s/%s\n", ad, name)
+			removed++
+			dirtyArches[ad] = struct{}{}
+		}
+	}
+
+	for ad := range dirtyArches {
+		if err := GenerateIndex(filepath.Join(repoDir, ad), signer); err != nil {
+			return fmt.Errorf("regenerating APKINDEX for %s: %w", ad, err)
+		}
+	}
+
+	if removed == 0 {
+		fmt.Fprintln(w, "Repository already clean")
+	} else {
+		fmt.Fprintf(w, "Removed %d stale .apk file(s)\n", removed)
+	}
+	return nil
+}
+
 // Remove deletes every matching package from the local repository, walking
 // each arch subdirectory. The APKINDEX is regenerated for every arch we
 // touch — using `signer` to keep the regenerated index signed and verifiable

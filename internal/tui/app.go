@@ -22,6 +22,7 @@ import (
 	"github.com/yoebuild/yoe/internal/device"
 	"github.com/yoebuild/yoe/internal/resolve"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
+	"github.com/yoebuild/yoe/internal/tui/query"
 )
 
 // Styles
@@ -36,10 +37,19 @@ var (
 	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	waitingStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // yellow
 
+	// Query-related styles
+	queryDimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	queryActiveStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
+	queryErrorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+
 	// Subtle per-class colors for unselected units
 	classUnitStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))   // muted blue
 	classImageStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("13"))  // muted magenta
 	classContainerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))   // muted cyan
+
+	// matchHighlightStyle draws the matched substring on top of whatever
+	// the row's existing color is.
+	matchHighlightStyle = lipgloss.NewStyle().Underline(true).Bold(true)
 )
 
 // Package-level program reference for sending messages from goroutines.
@@ -87,6 +97,23 @@ const (
 	statusBuilding // actively compiling
 	statusFailed
 )
+
+// statusKey maps the TUI's enum to the lowercase strings the query
+// language exposes via `status:`.
+func statusKey(s unitStatus) string {
+	switch s {
+	case statusCached:
+		return "cached"
+	case statusBuilding:
+		return "building"
+	case statusWaiting:
+		return "pending"
+	case statusFailed:
+		return "failed"
+	default:
+		return ""
+	}
+}
 
 // Messages
 type tickMsg time.Time
@@ -151,10 +178,15 @@ type model struct {
 	message    string
 	building   map[string]bool
 	cancels    map[string]context.CancelFunc // cancel funcs for active builds
-	confirm    string // non-empty = waiting for y/n confirmation
-	searching  bool   // true = search input active
-	searchText string // current search query
-	filtered   []int  // indices into units matching search
+	confirm      string // non-empty = waiting for y/n confirmation
+	queryEditing  bool            // true while the user is typing in the query bar
+	queryInput    string          // text in the query bar; live-parsed every keystroke
+	queryError    string          // last parse error; rendered next to the query bar
+	inSet         map[string]bool // pre-computed in:X closure for the active query, nil if no in: filter
+	visible       []int           // indexes into m.units after applying m.query
+	query         query.Query     // active query, applied to m.units to produce visible
+	queryRevertTo query.Query     // snapshot taken when the user opens `/`
+	savedQuery    string          // canonical form of the last user-saved query (or bootstrap)
 
 	// Detail log search
 	detailSearching  bool   // true = detail search input active
@@ -189,10 +221,30 @@ type model struct {
 
 	// Feed (yoe serve) status — set at startup by startProjectFeed.
 	feedStatus string
+
+	// loadOpts is the set of LoadOptions to apply when the TUI reloads the
+	// project (e.g. after editing a .star file or switching machines). The
+	// caller passes the same options used for the initial load so global
+	// flags like --allow-duplicate-provides survive reloads.
+	loadOpts []yoestar.LoadOption
+
+	// globalFlagArgs holds the parent yoe invocation's global flags as argv
+	// tokens (e.g. ["--allow-duplicate-provides"]). Re-execs of the yoe
+	// binary from inside the TUI (currently `yoe run` on image units)
+	// prepend these so the child sees the same load behavior.
+	globalFlagArgs []string
+}
+
+// Config carries the cross-cutting context the TUI needs from the cmd layer:
+// LoadOptions to use on every project reload, and the global flag tokens to
+// forward when re-execing the yoe binary for image runs.
+type Config struct {
+	LoadOpts       []yoestar.LoadOption
+	GlobalFlagArgs []string
 }
 
 // Run launches the TUI.
-func Run(proj *yoestar.Project, projectDir string) error {
+func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	dag, err := resolve.BuildDAG(proj)
 	if err != nil {
 		return fmt.Errorf("building DAG: %w", err)
@@ -226,26 +278,38 @@ func Run(proj *yoestar.Project, projectDir string) error {
 
 	machines := sortedKeys(proj.Machines)
 
-	// Pre-fill the deploy host from local.star if present.
-	deployHost := ""
-	if ov, err := yoestar.LoadLocalOverrides(projectDir); err == nil {
-		deployHost = ov.DeployHost
-	}
+	// Read local.star once for both deploy-host prefill and query bootstrap.
+	ov, _ := yoestar.LoadLocalOverrides(projectDir)
 
 	m := model{
-		proj:          proj,
-		projectDir:    projectDir,
-		arch:          arch,
-		dag:           dag,
-		units:         units,
-		hashes:        hashes,
-		statuses:      statuses,
-		building:      make(map[string]bool),
-		cancels:       make(map[string]context.CancelFunc),
-		machines:      machines,
-		flashProgress: progress.New(progress.WithDefaultGradient()),
-		deployHost:    deployHost,
+		proj:           proj,
+		projectDir:     projectDir,
+		arch:           arch,
+		dag:            dag,
+		units:          units,
+		hashes:         hashes,
+		statuses:       statuses,
+		building:       make(map[string]bool),
+		cancels:        make(map[string]context.CancelFunc),
+		machines:       machines,
+		flashProgress:  progress.New(progress.WithDefaultGradient()),
+		deployHost:     ov.DeployHost,
+		loadOpts:       cfg.LoadOpts,
+		globalFlagArgs: cfg.GlobalFlagArgs,
 	}
+
+	// Bootstrap query: prefer local.star, fall back to in:<defaults.image>.
+	bootstrap := ov.Query
+	if bootstrap == "" && proj.Defaults.Image != "" {
+		bootstrap = "in:" + proj.Defaults.Image
+	}
+	if q, err := query.Parse(bootstrap); err == nil {
+		m.query = q
+		m.queryInput = q.String()
+	}
+	m.savedQuery = m.query.String()
+	m.applyQuery()
+
 	m.checkBinfmtWarning()
 
 	stopFeed, feedStatus := startProjectFeed(proj, projectDir)
@@ -386,7 +450,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.detailSearching {
 			return m.updateDetailSearch(msg)
 		}
-		if m.searching {
+		if m.queryEditing {
 			return m.updateSearch(msg)
 		}
 		m.message = ""
@@ -552,7 +616,9 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
 			if u, ok := m.proj.Units[name]; ok && u.Class == "image" {
-				c := exec.Command(os.Args[0], "run", name, "--machine", m.proj.Defaults.Machine)
+				args := append([]string{}, m.globalFlagArgs...)
+				args = append(args, "run", name, "--machine", m.proj.Defaults.Machine)
+				c := exec.Command(os.Args[0], args...)
 				c.Dir = m.projectDir
 				return m, tea.ExecProcess(c, func(err error) tea.Msg {
 					return execDoneMsg{err: err}
@@ -620,9 +686,9 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "/":
-		m.searching = true
-		m.searchText = ""
-		m.filtered = nil
+		m.queryEditing = true
+		m.queryRevertTo = m.query
+		m.queryInput = m.query.String() // start the bar prefilled with the active query
 		return m, nil
 
 	case "s":
@@ -638,6 +704,31 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+
+	case "\\":
+		// Snap-back: revert active query to whatever is saved as the default.
+		bootstrap, _ := query.Parse(m.savedQuery) // savedQuery is canonical, parse must succeed
+		m.query = bootstrap
+		m.queryInput = m.query.String()
+		m.queryError = ""
+		m.applyQuery()
+		return m, nil
+
+	case "S":
+		// Save the current active query to local.star as the new default.
+		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+		ov.Query = m.query.String()
+		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
+			m.message = fmt.Sprintf("save query failed: %v", err)
+			return m, nil
+		}
+		m.savedQuery = m.query.String()
+		if m.query.IsEmpty() {
+			m.message = "saved empty query (next session will follow project defaults)"
+		} else {
+			m.message = fmt.Sprintf("saved query: %s", m.query.String())
+		}
+		return m, nil
 	}
 	return m, nil
 }
@@ -645,23 +736,56 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		m.searching = false
-		m.searchText = ""
-		m.filtered = nil
+		// Revert to whatever query was active when the bar opened.
+		m.queryEditing = false
+		m.query = m.queryRevertTo
+		m.queryInput = m.query.String()
+		m.queryError = ""
+		m.applyQuery()
 		return m, nil
 
 	case "enter":
-		m.searching = false
-		// Keep filter active, cursor stays on first match
-		if len(m.filtered) > 0 {
-			m.cursor = m.filtered[0]
-		}
+		m.queryEditing = false
+		// Keep current query active. If parse error, fall back to last
+		// valid (already in m.query); clear the error.
+		m.queryError = ""
 		return m, nil
 
 	case "backspace":
-		if len(m.searchText) > 0 {
-			m.searchText = m.searchText[:len(m.searchText)-1]
-			m.applyFilter()
+		if len(m.queryInput) > 0 {
+			m.queryInput = m.queryInput[:len(m.queryInput)-1]
+			m.reparse()
+		}
+		return m, nil
+
+	case "tab":
+		ctx := query.Context{
+			Modules: m.moduleNames(),
+			Units:   m.units, // already sorted
+		}
+		start, end, cands := query.Complete(m.queryInput, len(m.queryInput), ctx)
+		switch len(cands) {
+		case 0:
+			// nothing to do
+		case 1:
+			// splice in the single candidate, preserving field: prefix when present
+			m.queryInput = spliceCompletion(m.queryInput, start, end, cands[0])
+			m.reparse()
+		default:
+			// longest common prefix
+			lcp := longestCommonPrefix(cands)
+			cur := m.queryInput[start:end]
+			// strip field: prefix from cur for comparison with value-only lcp
+			if i := strings.IndexByte(cur, ':'); i >= 0 {
+				cur = cur[i+1:]
+			}
+			if lcp != "" && lcp != cur {
+				m.queryInput = spliceCompletion(m.queryInput, start, end, lcp)
+				m.reparse()
+			}
+			// else: leave as-is. The "second tab shows ghost line" is
+			// deferred to a follow-up; v1 ships a single-tab completion,
+			// which already does the heavy lifting.
 		}
 		return m, nil
 
@@ -669,47 +793,110 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Single printable character
 		key := msg.String()
 		if len(key) == 1 && key[0] >= 32 && key[0] <= 126 {
-			m.searchText += key
-			m.applyFilter()
+			m.queryInput += key
+			m.reparse()
 		}
 		return m, nil
 	}
 }
 
-func (m *model) applyFilter() {
-	m.filtered = nil
-	if m.searchText == "" {
+// reparse re-parses m.queryInput; on success updates m.query and
+// re-applies. On failure keeps m.query and m.visible at their last-valid
+// values and stores the error message for the bar.
+func (m *model) reparse() {
+	q, err := query.Parse(m.queryInput)
+	if err != nil {
+		m.queryError = err.Error()
 		return
 	}
-	query := strings.ToLower(m.searchText)
+	m.queryError = ""
+	m.query = q
+	m.applyQuery()
+}
+
+// applyQuery refreshes m.inSet and m.visible after m.query changes.
+// The cursor is moved to the first visible row when it falls outside
+// the new visible set; otherwise it is left alone (so live filtering
+// while typing doesn't yank the cursor).
+func (m *model) applyQuery() {
+	m.inSet = nil
+	if root := m.query.InRoot(); root != "" {
+		m.inSet = query.BuildInClosure(m.proj, root)
+	}
+	if cap(m.visible) > 0 {
+		m.visible = m.visible[:0]
+	} else {
+		m.visible = make([]int, 0, len(m.units))
+	}
 	for i, name := range m.units {
-		if strings.Contains(strings.ToLower(name), query) {
-			m.filtered = append(m.filtered, i)
-			continue
-		}
-		if u, ok := m.proj.Units[name]; ok {
-			if strings.Contains(strings.ToLower(u.Class), query) {
-				m.filtered = append(m.filtered, i)
-			}
+		u := m.proj.Units[name]
+		if m.query.Matches(name, u, statusKey(m.statuses[name]), m.inSet) {
+			m.visible = append(m.visible, i)
 		}
 	}
-	// Move cursor to first match
-	if len(m.filtered) > 0 {
-		m.cursor = m.filtered[0]
+	// Keep cursor on a visible row if at all possible.
+	if len(m.visible) > 0 {
+		stillVisible := false
+		for _, i := range m.visible {
+			if i == m.cursor {
+				stillVisible = true
+				break
+			}
+		}
+		if !stillVisible {
+			m.cursor = m.visible[0]
+		}
 	}
 	m.listOffset = 0
 	m.adjustListOffset()
 }
 
+// moduleNames returns the sorted set of module names in the project,
+// plus the synthetic "project" name used for project-root units.
+func (m model) moduleNames() []string {
+	set := map[string]bool{"project": true}
+	for _, u := range m.proj.Units {
+		if u.Module != "" {
+			set[u.Module] = true
+		}
+	}
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func longestCommonPrefix(ss []string) string {
+	if len(ss) == 0 {
+		return ""
+	}
+	p := ss[0]
+	for _, s := range ss[1:] {
+		for !strings.HasPrefix(s, p) {
+			if p == "" {
+				return ""
+			}
+			p = p[:len(p)-1]
+		}
+	}
+	return p
+}
+
+// spliceCompletion inserts cand into input, replacing input[start:end].
+// When input[start:end] contains a colon (field:value token), the
+// field: prefix is preserved and only the value portion is replaced.
+func spliceCompletion(input string, start, end int, cand string) string {
+	tok := input[start:end]
+	if i := strings.IndexByte(tok, ':'); i >= 0 {
+		return input[:start] + tok[:i+1] + cand + input[end:]
+	}
+	return input[:start] + cand + input[end:]
+}
+
 func (m model) visibleIndices() []int {
-	if m.searchText != "" && m.filtered != nil {
-		return m.filtered
-	}
-	idx := make([]int, len(m.units))
-	for i := range idx {
-		idx[i] = i
-	}
-	return idx
+	return m.visible
 }
 
 func (m model) prevVisible() int {
@@ -838,7 +1025,9 @@ func (m model) updateSetupMachine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.recomputeStatuses()
 		m.checkBinfmtWarning()
-		if err := yoestar.WriteLocalOverrides(m.projectDir, yoestar.LocalOverrides{Machine: picked}); err != nil {
+		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+		ov.Machine = picked
+		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
 			m.message = fmt.Sprintf("Machine set to %s (warning: failed to save local.star: %v)", picked, err)
 		} else {
 			m.message = fmt.Sprintf("Machine set to %s (saved to local.star)", picked)
@@ -950,7 +1139,9 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "r":
 		if u, ok := m.proj.Units[m.detailUnit]; ok && u.Class == "image" {
-			c := exec.Command(os.Args[0], "run", m.detailUnit, "--machine", m.proj.Defaults.Machine)
+			args := append([]string{}, m.globalFlagArgs...)
+			args = append(args, "run", m.detailUnit, "--machine", m.proj.Defaults.Machine)
+			c := exec.Command(os.Args[0], args...)
 			c.Dir = m.projectDir
 			return m, tea.ExecProcess(c, func(err error) tea.Msg {
 				return execDoneMsg{err: err}
@@ -1107,21 +1298,31 @@ func (m model) viewUnits() string {
 	}
 	b.WriteString("\n")
 
+	// Query header
+	qStr := m.query.String()
+	qLabel := "Query: "
+	qBody := qStr
+	if qBody == "" {
+		qBody = "(empty — showing all)"
+	}
+	style := queryDimStyle
+	if qStr != m.savedQuery {
+		style = queryActiveStyle
+	}
+	counter := fmt.Sprintf("Units: %d/%d", len(m.visible), len(m.units))
+	b.WriteString(fmt.Sprintf("  %s%s    %s\n",
+		queryDimStyle.Render(qLabel),
+		style.Render(qBody),
+		queryDimStyle.Render(counter)))
+
 	// Column header
 	b.WriteString(fmt.Sprintf("  %s %s %s\n",
 		headerStyle.Render(fmt.Sprintf("%-28s", "NAME")),
 		headerStyle.Render(fmt.Sprintf("%-12s", "CLASS")),
 		headerStyle.Render("STATUS")))
 
-	// Determine visible units — filtered if search active, all otherwise
-	visible := make([]int, 0, len(m.units))
-	if m.searchText != "" && m.filtered != nil {
-		visible = m.filtered
-	} else {
-		for i := range m.units {
-			visible = append(visible, i)
-		}
-	}
+	// Determine visible units — filtered by current query state
+	visible := m.visible
 
 	// Calculate visible window for unit list
 	maxRows := m.listViewportHeight()
@@ -1170,7 +1371,7 @@ func (m model) viewUnits() string {
 		paddedClass := fmt.Sprintf("%-12s", class)
 		b.WriteString(fmt.Sprintf("%s%s %s %s\n",
 			cursor,
-			nameStyle.Render(paddedName),
+			m.renderName(paddedName, nameStyle),
 			classStyle.Render(paddedClass),
 			status))
 	}
@@ -1180,19 +1381,29 @@ func (m model) viewUnits() string {
 		b.WriteString("\n")
 	}
 
+	if len(m.visible) == 0 {
+		b.WriteString(dimStyle.Render("  no units match\n"))
+	}
+
 	// Search bar or help bar
 	b.WriteString("\n")
-	if m.searching {
-		b.WriteString(fmt.Sprintf("  /%s▌", m.searchText))
+	if m.queryEditing {
+		if m.queryError != "" {
+			b.WriteString(fmt.Sprintf("  /%s    %s",
+				m.queryInput,
+				queryErrorStyle.Render(m.queryError)))
+		} else {
+			b.WriteString(fmt.Sprintf("  /%s▌", m.queryInput))
+		}
 	} else {
-		help := "  b build  D deploy  x cancel  e edit  d diagnose  l log  c clean  s setup  / search  q quit"
+		help := "  b build  D deploy  x cancel  e edit  l log  s setup  / search  \\ home  S save  q quit"
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
 			if u, ok := m.proj.Units[name]; ok && u.Class == "image" {
 				if m.statuses[name] == statusCached {
-					help = "  b build  x cancel  r run  f flash  e edit  d diagnose  l log  c clean  s setup  / search  q quit"
+					help = "  b build  x cancel  r run  f flash  e edit  l log  s setup  / search  \\ home  S save  q quit"
 				} else {
-					help = "  b build  x cancel  r run  e edit  d diagnose  l log  c clean  s setup  / search  q quit"
+					help = "  b build  x cancel  r run  e edit  l log  s setup  / search  \\ home  S save  q quit"
 				}
 			}
 		}
@@ -1480,6 +1691,46 @@ func (m model) renderStatus(name string) string {
 	}
 }
 
+// renderName styles `padded` with `base` and underlines/bolds any
+// substring that matches a bare term in the active query. When multiple
+// terms could match at different positions, the leftmost match wins —
+// the algorithm scans every term at each position and picks the one
+// with the smallest start index.
+func (m model) renderName(padded string, base lipgloss.Style) string {
+	terms := m.query.BareTerms()
+	if len(terms) == 0 {
+		return base.Render(padded)
+	}
+	lower := strings.ToLower(padded)
+	var b strings.Builder
+	i := 0
+	for i < len(padded) {
+		bestStart, bestEnd := -1, -1
+		for _, t := range terms {
+			if t == "" {
+				continue
+			}
+			idx := strings.Index(lower[i:], t)
+			if idx < 0 {
+				continue
+			}
+			start := i + idx
+			if bestStart == -1 || start < bestStart {
+				bestStart = start
+				bestEnd = start + len(t)
+			}
+		}
+		if bestStart == -1 {
+			b.WriteString(base.Render(padded[i:]))
+			break
+		}
+		b.WriteString(base.Render(padded[i:bestStart]))
+		b.WriteString(base.Inherit(matchHighlightStyle).Render(padded[bestStart:bestEnd]))
+		i = bestEnd
+	}
+	return b.String()
+}
+
 // ----- Helpers -----
 
 func (m *model) startBuild(name string) tea.Cmd {
@@ -1497,6 +1748,7 @@ func (m *model) startBuild(name string) tea.Cmd {
 	arch := m.arch
 	machine := m.proj.Defaults.Machine
 	unitName := name
+	loadOpts := append([]yoestar.LoadOption{}, m.loadOpts...)
 
 	// Write executor output to a log file so detail view can tail it
 	sd := arch
@@ -1517,7 +1769,7 @@ func (m *model) startBuild(name string) tea.Cmd {
 		// Reload project from .star files so we pick up any changes
 		// made since the TUI started (e.g., edited build steps).
 		freshProj, err := yoestar.LoadProject(projectDir,
-			yoestar.WithMachine(machine))
+			append(loadOpts, yoestar.WithMachine(machine))...)
 		if err != nil {
 			fmt.Fprintf(f, "warning: could not reload project: %v, using cached config\n", err)
 			freshProj = proj
@@ -1638,7 +1890,7 @@ func (m *model) recomputeStatuses() {
 	// Reload project with the new machine so MACHINE_CONFIG/PROVIDES/ARCH
 	// are correct for image definitions.
 	freshProj, err := yoestar.LoadProject(m.projectDir,
-		yoestar.WithMachine(m.proj.Defaults.Machine))
+		append(m.loadOpts, yoestar.WithMachine(m.proj.Defaults.Machine))...)
 	if err == nil {
 		m.proj = freshProj
 		// Rebuild DAG and unit list from fresh project
@@ -1649,6 +1901,11 @@ func (m *model) recomputeStatuses() {
 			m.listOffset = 0
 		}
 	}
+
+	// Rebuild visible list to reflect the new unit set before any early
+	// return. m.units may already have been replaced above; without this,
+	// m.visible would carry stale indices into the old slice.
+	m.applyQuery()
 
 	hashes, err := resolve.ComputeAllHashes(m.dag, m.arch, m.proj.Defaults.Machine)
 	if err != nil {

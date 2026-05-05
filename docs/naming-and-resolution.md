@@ -190,7 +190,7 @@ highest priority overall; among modules, later in the list wins:
 
 ```python
 project(name = "product", modules = [
-    module("...", path = "modules/units-alpine"),  # lowest priority
+    module("https://github.com/yoebuild/units-alpine.git", ref = "main"),  # lowest priority
     module("...", path = "modules/soc-module"),    # overrides units-alpine
     module("...", path = "modules/som-module"),    # highest priority among modules
 ])

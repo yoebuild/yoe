@@ -129,6 +129,11 @@ type Unit struct {
 	// Source
 	Source  string // URL or git repo
 	SHA256  string
+	// APKChecksum is Alpine's APKINDEX `C:` field — "Q1<base64-sha1>=".
+	// Mutually exclusive with SHA256: a unit declares one or the other.
+	// Used by units-alpine to verify against the hash Alpine itself
+	// publishes, avoiding a per-package sha256 download at unit-gen time.
+	APKChecksum string
 	Tag     string
 	Branch  string
 	Patches []string // patch files applied after source fetch, before build
