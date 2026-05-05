@@ -6,53 +6,68 @@ import (
 	"testing"
 )
 
-func TestLoadLocalOverridesAbsentFile(t *testing.T) {
+func TestLocalOverrides_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	ov, err := LoadLocalOverrides(dir)
-	if err != nil {
-		t.Fatalf("unexpected error for absent file: %v", err)
+	in := LocalOverrides{
+		Machine:    "qemu-x86_64",
+		DeployHost: "localhost:2222",
+		Query:      "in:base-image",
 	}
-	if ov.Machine != "" {
-		t.Errorf("expected empty Machine, got %q", ov.Machine)
+	if err := WriteLocalOverrides(dir, in); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := LoadLocalOverrides(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got != in {
+		t.Fatalf("round-trip mismatch:\n got %+v\nwant %+v", got, in)
 	}
 }
 
-func TestLoadLocalOverridesParsesMachine(t *testing.T) {
+func TestLocalOverrides_OnlyMachine(t *testing.T) {
 	dir := t.TempDir()
-	content := `local(machine = "raspberrypi4")` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "local.star"), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
+	in := LocalOverrides{Machine: "qemu-x86_64"}
+	if err := WriteLocalOverrides(dir, in); err != nil {
+		t.Fatalf("write: %v", err)
 	}
-	ov, err := LoadLocalOverrides(dir)
+	got, err := LoadLocalOverrides(dir)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("load: %v", err)
 	}
-	if ov.Machine != "raspberrypi4" {
-		t.Errorf("Machine = %q, want raspberrypi4", ov.Machine)
+	if got != in {
+		t.Fatalf("round-trip mismatch:\n got %+v\nwant %+v", got, in)
 	}
 }
 
-func TestLoadLocalOverridesUnknownKwarg(t *testing.T) {
+func TestLocalOverrides_NoFile(t *testing.T) {
 	dir := t.TempDir()
-	content := `local(arch = "arm64")` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "local.star"), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
+	got, err := LoadLocalOverrides(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
 	}
-	if _, err := LoadLocalOverrides(dir); err == nil {
-		t.Errorf("expected error for unknown kwarg, got nil")
+	if (got != LocalOverrides{}) {
+		t.Fatalf("expected zero overrides for missing file, got %+v", got)
 	}
 }
 
-func TestWriteLocalOverridesRoundTrip(t *testing.T) {
+func TestLocalOverrides_BackCompatNoQuery(t *testing.T) {
+	// A local.star written by an older yoe (no query field) must still
+	// load cleanly.
 	dir := t.TempDir()
-	if err := WriteLocalOverrides(dir, LocalOverrides{Machine: "qemu-arm64"}); err != nil {
-		t.Fatal(err)
+	path := filepath.Join(dir, "local.star")
+	content := "local(machine = \"qemu-arm64\", deploy_host = \"pi.local\")\n"
+	if err := writeFile(path, content); err != nil {
+		t.Fatalf("seed: %v", err)
 	}
-	ov, err := LoadLocalOverrides(dir)
+	got, err := LoadLocalOverrides(dir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("load: %v", err)
 	}
-	if ov.Machine != "qemu-arm64" {
-		t.Errorf("round-trip Machine = %q, want qemu-arm64", ov.Machine)
+	want := LocalOverrides{Machine: "qemu-arm64", DeployHost: "pi.local"}
+	if got != want {
+		t.Fatalf("got %+v want %+v", got, want)
 	}
 }
+
+func writeFile(p, s string) error { return os.WriteFile(p, []byte(s), 0o644) }
