@@ -126,40 +126,28 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		}
 	}
 
-	// Register module roots so load("@module//...") works.
-	// Check local overrides first, then the module cache.
+	// Resolve each declared module to a canonical name and on-disk path.
+	// Canonical name comes from MODULE.star's module_info(name=...) when
+	// present; otherwise it falls back to the path/URL basename. The same
+	// name is used for "@name//..." load references, u.Module tags, and
+	// TUI / diagnostic display.
+	type resolvedModule struct {
+		name string
+		path string
+	}
+	var resolvedModules []resolvedModule
 	if proj := eng.Project(); proj != nil {
 		for _, m := range proj.Modules {
-			// Derive module name: use Path's last component if set, otherwise URL's
-			name := filepath.Base(strings.TrimSuffix(m.URL, ".git"))
-			if m.Path != "" {
-				name = filepath.Base(m.Path)
-			}
-
-			if m.Local != "" {
-				modulePath := m.Local
-				if !filepath.IsAbs(modulePath) {
-					modulePath = filepath.Join(root, modulePath)
-				}
-				if m.Path != "" {
-					modulePath = filepath.Join(modulePath, m.Path)
-				}
-				eng.SetModuleRoot(name, modulePath)
+			modulePath, ok := locateModulePath(m, root)
+			if !ok {
 				continue
 			}
-
-			// Check module cache
-			cacheDir := os.Getenv("YOE_CACHE")
-			if cacheDir == "" {
-				cacheDir = "cache"
+			name := peekModuleName(modulePath)
+			if name == "" {
+				name = pathBasename(m)
 			}
-			moduleDir := filepath.Join(cacheDir, "modules", name)
-			if m.Path != "" {
-				moduleDir = filepath.Join(moduleDir, m.Path)
-			}
-			if _, err := os.Stat(moduleDir); err == nil {
-				eng.SetModuleRoot(name, moduleDir)
-			}
+			eng.SetModuleRoot(name, modulePath)
+			resolvedModules = append(resolvedModules, resolvedModule{name: name, path: modulePath})
 		}
 	}
 
@@ -167,10 +155,7 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	// project-level unit shadows the same name from any included module.
 	// Modules use 1..N (declaration order, last wins among modules); the
 	// project root uses N+1 — the highest priority overall.
-	projectIdx := 1
-	if proj := eng.Project(); proj != nil {
-		projectIdx = len(proj.Modules) + 1
-	}
+	projectIdx := len(resolvedModules) + 1
 
 	// Phase 1: Evaluate all machine definitions (project + modules).
 	// Machines must be loaded before units/images so that target_arch()
@@ -179,18 +164,10 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	if err := evalDir(eng, root, "machines"); err != nil {
 		return nil, err
 	}
-	if proj := eng.Project(); proj != nil {
-		for i, m := range proj.Modules {
-			name := filepath.Base(strings.TrimSuffix(m.URL, ".git"))
-			if m.Path != "" {
-				name = filepath.Base(m.Path)
-			}
-			if modulePath, ok := eng.moduleRoots[name]; ok {
-				eng.SetCurrentModule(name, i+1)
-				if err := evalDir(eng, modulePath, "machines"); err != nil {
-					return nil, err
-				}
-			}
+	for i, rm := range resolvedModules {
+		eng.SetCurrentModule(rm.name, i+1)
+		if err := evalDir(eng, rm.path, "machines"); err != nil {
+			return nil, err
 		}
 	}
 
@@ -284,18 +261,10 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	if err := evalDir(eng, root, "containers"); err != nil {
 		return nil, err
 	}
-	if proj := eng.Project(); proj != nil {
-		for i, m := range proj.Modules {
-			name := filepath.Base(strings.TrimSuffix(m.URL, ".git"))
-			if m.Path != "" {
-				name = filepath.Base(m.Path)
-			}
-			if modulePath, ok := eng.moduleRoots[name]; ok {
-				eng.SetCurrentModule(name, i+1)
-				if err := evalDir(eng, modulePath, "containers"); err != nil {
-					return nil, err
-				}
-			}
+	for i, rm := range resolvedModules {
+		eng.SetCurrentModule(rm.name, i+1)
+		if err := evalDir(eng, rm.path, "containers"); err != nil {
+			return nil, err
 		}
 	}
 
@@ -304,18 +273,10 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	if err := evalDir(eng, root, "units"); err != nil {
 		return nil, err
 	}
-	if proj := eng.Project(); proj != nil {
-		for i, m := range proj.Modules {
-			name := filepath.Base(strings.TrimSuffix(m.URL, ".git"))
-			if m.Path != "" {
-				name = filepath.Base(m.Path)
-			}
-			if modulePath, ok := eng.moduleRoots[name]; ok {
-				eng.SetCurrentModule(name, i+1)
-				if err := evalDir(eng, modulePath, "units"); err != nil {
-					return nil, err
-				}
-			}
+	for i, rm := range resolvedModules {
+		eng.SetCurrentModule(rm.name, i+1)
+		if err := evalDir(eng, rm.path, "units"); err != nil {
+			return nil, err
 		}
 	}
 
@@ -372,18 +333,10 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	if err := evalDir(eng, root, "images"); err != nil {
 		return nil, err
 	}
-	if proj := eng.Project(); proj != nil {
-		for i, m := range proj.Modules {
-			name := filepath.Base(strings.TrimSuffix(m.URL, ".git"))
-			if m.Path != "" {
-				name = filepath.Base(m.Path)
-			}
-			if modulePath, ok := eng.moduleRoots[name]; ok {
-				eng.SetCurrentModule(name, i+1)
-				if err := evalDir(eng, modulePath, "images"); err != nil {
-					return nil, err
-				}
-			}
+	for i, rm := range resolvedModules {
+		eng.SetCurrentModule(rm.name, i+1)
+		if err := evalDir(eng, rm.path, "images"); err != nil {
+			return nil, err
 		}
 	}
 
@@ -434,6 +387,81 @@ func toStarlarkStringList(ss []string) *starlark.List {
 		vals[i] = starlark.String(s)
 	}
 	return starlark.NewList(vals)
+}
+
+// pathBasename returns the fallback module name derived from a ModuleRef:
+// the last component of m.Path if set, otherwise the URL's basename with
+// any trailing .git stripped.
+func pathBasename(m ModuleRef) string {
+	if m.Path != "" {
+		return filepath.Base(m.Path)
+	}
+	return filepath.Base(strings.TrimSuffix(m.URL, ".git"))
+}
+
+// locateModulePath returns the on-disk directory for a module — either the
+// local override or the cache directory under YOE_CACHE/modules. The
+// boolean is false when neither location exists (the module hasn't been
+// synced yet).
+func locateModulePath(m ModuleRef, projectRoot string) (string, bool) {
+	base := pathBasename(m)
+	if m.Local != "" {
+		modulePath := m.Local
+		if !filepath.IsAbs(modulePath) {
+			modulePath = filepath.Join(projectRoot, modulePath)
+		}
+		if m.Path != "" {
+			modulePath = filepath.Join(modulePath, m.Path)
+		}
+		return modulePath, true
+	}
+	cacheDir := os.Getenv("YOE_CACHE")
+	if cacheDir == "" {
+		cacheDir = "cache"
+	}
+	moduleDir := filepath.Join(cacheDir, "modules", base)
+	if m.Path != "" {
+		moduleDir = filepath.Join(moduleDir, m.Path)
+	}
+	if _, err := os.Stat(moduleDir); err != nil {
+		return "", false
+	}
+	return moduleDir, true
+}
+
+// peekModuleName evaluates MODULE.star at modulePath in an isolated thread
+// and returns the name declared via module_info(name=...). Returns "" if
+// MODULE.star is missing, fails to parse, or doesn't call module_info.
+// This is intentionally separate from the main engine eval so the canonical
+// name is known before any registration happens.
+func peekModuleName(modulePath string) string {
+	file := filepath.Join(modulePath, "MODULE.star")
+	src, err := os.ReadFile(file)
+	if err != nil {
+		return ""
+	}
+	var captured string
+	moduleInfo := starlark.NewBuiltin("module_info",
+		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			for _, kv := range kwargs {
+				if k, ok := kv[0].(starlark.String); ok && string(k) == "name" {
+					if v, ok := kv[1].(starlark.String); ok {
+						captured = string(v)
+					}
+				}
+			}
+			return starlark.None, nil
+		})
+	moduleStub := starlark.NewBuiltin("module",
+		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
+			return starlark.None, nil
+		})
+	thread := &starlark.Thread{Name: file}
+	_, _ = starlark.ExecFileOptions(fileOpts, thread, file, src, starlark.StringDict{
+		"module_info": moduleInfo,
+		"module":      moduleStub,
+	})
+	return captured
 }
 
 func evalDir(eng *Engine, root, subdir string) error {

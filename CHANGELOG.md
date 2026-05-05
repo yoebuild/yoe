@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Modules show their declared name.** The TUI's `MODULE` column and any
+  diagnostic that names a module now use the name set in `MODULE.star`'s
+  `module_info(name = ...)` instead of the path basename — so a module
+  referenced via `path = "modules/units-core"` displays as `core` if that's
+  what it calls itself. Falls back to the path basename when no
+  `module_info` is declared.
 - **`dev-image` ships `helix` instead of `vim`.** Drops the editor entry that
   was unintentionally resolving to Alpine's `gvim` (and its X11/GTK runtime
   closure), keeping the image lean.
