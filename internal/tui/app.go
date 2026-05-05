@@ -1371,7 +1371,7 @@ func (m model) viewUnits() string {
 		paddedClass := fmt.Sprintf("%-12s", class)
 		b.WriteString(fmt.Sprintf("%s%s %s %s\n",
 			cursor,
-			m.renderName(paddedName, name, nameStyle),
+			m.renderName(paddedName, nameStyle),
 			classStyle.Render(paddedClass),
 			status))
 	}
@@ -1693,7 +1693,7 @@ func (m model) renderStatus(name string) string {
 
 // renderName styles `padded` with `base` and underlines/bolds any
 // substring that matches a bare term in the active query.
-func (m model) renderName(padded, raw string, base lipgloss.Style) string {
+func (m model) renderName(padded string, base lipgloss.Style) string {
 	terms := m.query.BareTerms()
 	if len(terms) == 0 {
 		return base.Render(padded)
