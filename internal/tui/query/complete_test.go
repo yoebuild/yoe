@@ -52,7 +52,7 @@ func TestComplete_TypeValue(t *testing.T) {
 
 func TestComplete_StatusValueAll(t *testing.T) {
 	_, _, got := Complete("status:", 7, ctxFixture())
-	want := []string{"building", "cached", "failed", "pending", "stale"}
+	want := []string{"building", "cached", "failed", "pending"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v want %v", got, want)
 	}

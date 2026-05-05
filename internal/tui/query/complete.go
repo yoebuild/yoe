@@ -18,7 +18,12 @@ var fieldCompletions = []string{"in:", "module:", "status:", "type:"}
 var shortcutCompletions = []string{"building", "containers", "failed", "images"}
 
 var typeValues = []string{"container", "image", "unit"}
-var statusValues = []string{"building", "cached", "failed", "pending", "stale"}
+
+// statusValues mirrors the lowercase strings statusKey() emits in the
+// TUI. "stale" is reserved for a planned status that isn't emitted yet
+// — leaving it out of completion avoids offering a value that silently
+// matches nothing.
+var statusValues = []string{"building", "cached", "failed", "pending"}
 
 // Complete returns candidate completions for the token under `cursor`.
 // start/end describe the byte range of the token to be replaced.
