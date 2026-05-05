@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Long unit names no longer break column alignment.** Names that exceed the
+  NAME column (e.g. `abseil-cpp-atomic-hook-test-helper`) are clipped with an
+  ellipsis instead of pushing the rest of the row off-screen. Same treatment for
+  class and module values that get unusually long.
 - **TUI layout no longer scrolls the title off the top.** Chrome (banners, query
   header, column header, ↑/↓ markers, blank, bottom row) is counted exactly so
   the unit list always fits inside the terminal. The ↑/↓ slots reserve a row

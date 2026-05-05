@@ -1579,9 +1579,9 @@ func (m model) viewUnits() string {
 			depsStr = fmt.Sprintf("%d", d)
 		}
 
-		paddedName := fmt.Sprintf("%-28s", name)
-		paddedClass := fmt.Sprintf("%-9s", truncate(class, 9))
-		paddedModule := fmt.Sprintf("%-14s", truncate(module, 14))
+		paddedName := clipFixed(name, 28)
+		paddedClass := clipFixed(class, 9)
+		paddedModule := clipFixed(module, 14)
 		paddedSize := fmt.Sprintf("%6s", size)
 		paddedDeps := fmt.Sprintf("%5s", depsStr)
 		b.WriteString(fmt.Sprintf("%s%s %s %s %s %s %s\n",
@@ -2287,13 +2287,16 @@ func installedSize(u *yoestar.Unit, buildDir string) int64 {
 	return 0
 }
 
-// truncate clips s to at most n runes so a wide column value (e.g. a
-// long module name) can't push the rest of the row off-screen.
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
+// clipFixed renders s in exactly w display cells: right-padded with
+// spaces when shorter, ellipsis-clipped when longer, so a long unit name
+// (e.g. abseil-cpp-atomic-hook-test-helper) can't push the rest of the
+// row off-screen. Assumes ASCII input — fine for unit/class/module
+// names today.
+func clipFixed(s string, w int) string {
+	if len(s) > w {
+		return s[:w-1] + "…"
 	}
-	return s[:n]
+	return fmt.Sprintf("%-*s", w, s)
 }
 
 // formatSize renders a byte count in a fixed-width, human-readable form
