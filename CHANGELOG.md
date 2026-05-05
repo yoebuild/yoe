@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **TUI flash offers `sudo chown` on permission denied.** Previously the
+  flash view just showed "permission denied" and dead-ended — matching the
+  CLI's behavior, the TUI now prompts to run `sudo chown $USER /dev/...` and
+  retries the write automatically.
 - **TUI home screen has tabs.** Press `tab` to cycle between Units (the
   existing list), Modules (declared modules with git status), and
   Diagnostics (shadowed units and duplicate `provides`). The diagnostics

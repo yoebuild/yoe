@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -118,11 +120,12 @@ func (t homeTab) String() string {
 type flashStage int
 
 const (
-	flashSelect  flashStage = iota // picking a device
-	flashConfirm                   // y/N confirmation
-	flashWriting                   // write in progress
-	flashDone                      // success
-	flashError                     // failed
+	flashSelect     flashStage = iota // picking a device
+	flashConfirm                      // y/N confirmation
+	flashWriting                      // write in progress
+	flashPermPrompt                   // permission denied; offer sudo chown
+	flashDone                         // success
+	flashError                        // failed
 )
 
 // Deploy view stages
@@ -189,6 +192,10 @@ type flashProgressMsg struct {
 }
 
 type flashDoneMsg struct {
+	err error
+}
+
+type flashChownDoneMsg struct {
 	err error
 }
 
@@ -500,6 +507,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case flashDoneMsg:
+		if errors.Is(msg.err, device.ErrPermission) {
+			m.flashStage = flashPermPrompt
+			m.flashErr = msg.err
+			return m, nil
+		}
 		if msg.err != nil {
 			m.flashStage = flashError
 			m.flashErr = msg.err
@@ -507,6 +519,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flashStage = flashDone
 		}
 		return m, nil
+
+	case flashChownDoneMsg:
+		if msg.err != nil {
+			m.flashStage = flashError
+			m.flashErr = fmt.Errorf("sudo chown failed: %w", msg.err)
+			return m, nil
+		}
+		cand := m.flashCandidates[m.flashCursor]
+		m.flashStage = flashWriting
+		m.flashWritten = 0
+		m.flashErr = nil
+		return m, m.flashWriteCmd(m.flashImagePath, cand.Path)
 
 	case deployOutputMsg:
 		m.deployOutput = append(m.deployOutput, msg.line)
@@ -3444,6 +3468,22 @@ func (m model) updateFlash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case flashWriting:
 		// no-op; ignore keys while writing
 		return m, nil
+	case flashPermPrompt:
+		switch strings.ToLower(msg.String()) {
+		case "y":
+			cand := m.flashCandidates[m.flashCursor]
+			username := flashChownUser()
+			c := exec.Command("sudo", "chown", username, cand.Path)
+			return m, tea.ExecProcess(c, func(err error) tea.Msg {
+				return flashChownDoneMsg{err: err}
+			})
+		case "esc", "n", "q":
+			cand := m.flashCandidates[m.flashCursor]
+			m.flashStage = flashError
+			m.flashErr = fmt.Errorf("permission denied — run: sudo chown %s %s", flashChownUser(), cand.Path)
+			return m, nil
+		}
+		return m, nil
 	case flashDone, flashError:
 		switch msg.String() {
 		case "esc", "q", "enter":
@@ -3513,6 +3553,14 @@ func (m model) viewFlash() string {
 			rate = fmt.Sprintf("%s / %s", device.FormatSize(m.flashWritten), device.FormatSize(m.flashTotal))
 		}
 		b.WriteString(dimStyle.Render(rate))
+	case flashPermPrompt:
+		cand := m.flashCandidates[m.flashCursor]
+		username := flashChownUser()
+		b.WriteString(failedStyle.Render(fmt.Sprintf("Permission denied writing %s.", cand.Path)))
+		b.WriteString("\n\n")
+		b.WriteString(fmt.Sprintf("Run sudo chown %s %s?", username, cand.Path))
+		b.WriteString("\n\n")
+		b.WriteString(helpStyle.Render("y to run sudo chown • n/esc to cancel"))
 	case flashDone:
 		b.WriteString(buildingStyle.Render("Flash complete."))
 		b.WriteString("\n\n")
@@ -3523,6 +3571,16 @@ func (m model) viewFlash() string {
 		b.WriteString(helpStyle.Render("press any key to return"))
 	}
 	return b.String()
+}
+
+// flashChownUser returns the username yoe should pass to `sudo chown`.
+// Resolved in the yoe process so the value isn't subject to sudo's
+// environment scrubbing.
+func flashChownUser() string {
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	return os.Getenv("USER")
 }
 
 // findImageForFlash locates the built image for an image unit at the
