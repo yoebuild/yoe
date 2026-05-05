@@ -27,9 +27,13 @@ import (
 var version = "dev"
 
 var (
-	globalProjectFile            string
-	globalShowShadows            bool
-	globalAllowDuplicateProvides bool
+	globalProjectFile string
+	globalShowShadows bool
+	// Default true while units-alpine's linux-firmware-* fan-out (~100
+	// packages all providing `linux-firmware-any`) keeps tripping the
+	// strict intra-module collision check. Flip back once that's fixed
+	// upstream.
+	globalAllowDuplicateProvides = true
 )
 
 // stringSlice implements flag.Value for repeatable string flags.

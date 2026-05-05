@@ -8,6 +8,9 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`--allow-duplicate-provides` is on by default.** No more passing the flag
+  on every yoe invocation while the `linux-firmware-*` fan-out keeps tripping
+  the strict check.
 - **Modules renamed: `units-*` → `module-*`.** `units-core`, `units-rpi`,
   `units-alpine`, and `units-jetson` are now `module-core`, `module-rpi`,
   `module-alpine`, and `module-jetson`. Update `module(...)` URLs and any
