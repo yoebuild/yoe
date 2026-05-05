@@ -24,8 +24,20 @@ func TestComplete_FieldName(t *testing.T) {
 
 func TestComplete_ViewShortcut(t *testing.T) {
 	_, _, got := Complete("im", 2, ctxFixture())
-	// "images" is a view shortcut, "in" is a field name. Both completable.
+	// Only "images" matches — "in:" doesn't share the "im" prefix.
 	want := []string{"images"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+}
+
+func TestComplete_EmptyInput(t *testing.T) {
+	// Tab on an empty bar suggests every field name and shortcut.
+	// LCP across them is "", so the TUI splice path is a no-op — but
+	// the candidates are still returned so a future ghost-line UI can
+	// render them.
+	_, _, got := Complete("", 0, ctxFixture())
+	want := []string{"building", "containers", "failed", "images", "in:", "module:", "status:", "type:"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v want %v", got, want)
 	}
