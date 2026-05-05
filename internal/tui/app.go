@@ -1799,6 +1799,16 @@ func (m model) viewSetup() string {
 func (m model) detailAllLines() []string {
 	var allLines []string
 
+	// Dependency context for the unit, above the build output: whether
+	// the current default image pulls it in (upstream) and what this
+	// unit transitively pulls in itself (downstream).
+	allLines = append(allLines, headerStyle.Render("  USED BY (upstream)"))
+	allLines = append(allLines, m.upstreamLines()...)
+	allLines = append(allLines, "")
+	allLines = append(allLines, headerStyle.Render("  PULLS IN (downstream)"))
+	allLines = append(allLines, m.renderUnitTree(m.detailUnit, m.downstreamChildren, 4)...)
+	allLines = append(allLines, "")
+
 	allLines = append(allLines, headerStyle.Render("  BUILD OUTPUT"))
 	if len(m.outputLines) == 0 {
 		allLines = append(allLines, dimStyle.Render("  (no output yet)"))
@@ -1820,6 +1830,93 @@ func (m model) detailAllLines() []string {
 	}
 
 	return allLines
+}
+
+// upstreamLines reports, in one line, whether the current default
+// image pulls in m.detailUnit. The full upstream tree got noisy fast
+// (every unit's dependents also depend on each other), and the
+// question that actually matters in practice is "does my image use
+// this?" — answer that and stop.
+func (m model) upstreamLines() []string {
+	img := m.proj.Defaults.Image
+	if img == "" {
+		return []string{dimStyle.Render("    (no default image set)")}
+	}
+	closure := query.BuildInClosure(m.proj, img)
+	if closure[m.detailUnit] {
+		return []string{"  └── " + img + dimStyle.Render(" (image)")}
+	}
+	return []string{dimStyle.Render("    (not in " + img + ")")}
+}
+
+// downstreamChildren returns the units that `name` pulls in at runtime —
+// runtime_deps with virtual provides routed through proj.Provides, so
+// the tree shows the concrete unit that wins override resolution.
+func (m model) downstreamChildren(name string) []string {
+	u, ok := m.proj.Units[name]
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, dep := range u.RuntimeDeps {
+		if real, ok := m.proj.Provides[dep]; ok {
+			dep = real
+		}
+		if _, ok := m.proj.Units[dep]; ok {
+			out = append(out, dep)
+		}
+	}
+	return out
+}
+
+// renderUnitTree walks `getChildren` from root and returns the tree
+// formatted with ├── / └── connectors. Repeated nodes are listed but
+// not re-expanded so trees with shared subtrees (musl is everywhere)
+// stay readable. Walking stops at maxDepth and at image-class leaves.
+func (m model) renderUnitTree(root string, getChildren func(string) []string, maxDepth int) []string {
+	children := getChildren(root)
+	if len(children) == 0 {
+		return []string{dimStyle.Render("    (none)")}
+	}
+	seen := map[string]bool{}
+	var out []string
+	var walk func(name, prefix string, isLast bool, depth int)
+	walk = func(name, prefix string, isLast bool, depth int) {
+		connector := "├── "
+		if isLast {
+			connector = "└── "
+		}
+		label := name
+		if u, ok := m.proj.Units[name]; ok {
+			switch u.Class {
+			case "image":
+				label += dimStyle.Render(" (image)")
+			case "container":
+				label += dimStyle.Render(" (container)")
+			}
+		}
+		dup := ""
+		if seen[name] {
+			dup = dimStyle.Render(" …")
+		}
+		out = append(out, "  "+prefix+connector+label+dup)
+		if seen[name] || depth >= maxDepth {
+			return
+		}
+		seen[name] = true
+		grandkids := getChildren(name)
+		childPrefix := prefix + "    "
+		if !isLast {
+			childPrefix = prefix + "│   "
+		}
+		for i, c := range grandkids {
+			walk(c, childPrefix, i == len(grandkids)-1, depth+1)
+		}
+	}
+	for i, c := range children {
+		walk(c, "", i == len(children)-1, 1)
+	}
+	return out
 }
 
 // wrapLine hard-wraps a single logical line into one or more display lines

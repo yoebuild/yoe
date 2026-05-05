@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Unit detail shows what uses it and what it pulls in.** The detail page now
+  opens with two new sections above the build log: **USED BY** says whether the
+  current default image pulls this unit in, and **PULLS IN** shows the runtime
+  closure of the unit as a tree. Quick way to answer "why is this in my image?"
+  and "what does this drag onto the device?"
 - **TUI layout overhaul.** Title and banners stay put when the list is long, the
   help bar is always the last line, status messages flash in its place, and
   pressing `/` turns the `Query:` header itself into the search input. Long unit
