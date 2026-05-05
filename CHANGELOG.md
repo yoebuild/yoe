@@ -8,6 +8,17 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Default image is configurable per developer.** `local.star` now accepts an
+  `image = "..."` field that overrides `defaults.image` from `PROJECT.star`, the
+  same way `machine` already does. The TUI's Setup screen (`s`) has a new
+  **Image** entry — pick one and the choice is saved to `local.star`. The
+  override flows through `yoe run` (which builds the image when called with no
+  args), `yoe config show`, and the TUI bootstrap query / cursor placement.
+- **TUI opens with the cursor on the default image.** Whatever
+  `proj.Defaults.Image` resolves to (PROJECT.star or your local.star override)
+  is highlighted at startup and scrolled into view, so the most relevant
+  artifact is one keystroke away from a build or `enter` for detail. If the
+  bootstrap query filters that image out, the cursor stays at the top.
 - **TUI follows the active build.** When a build starts, the cursor jumps to
   whatever unit is being compiled and the list scrolls to put it on screen, so
   you can watch a long DAG without losing track or hunting for the spinner.

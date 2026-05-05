@@ -210,8 +210,9 @@ type model struct {
 	// Setup view
 	machines    []string // sorted machine names
 	setupCursor int      // cursor within setup options
-	setupField  string   // "" = top-level, "machine" = picking machine
+	setupField  string   // "" = top-level, "machine" / "image" = picker active
 	machineCursor int    // cursor within machine list
+	imageCursor   int    // cursor within image list
 
 	// Flash view
 	flashUnit       string
@@ -333,6 +334,12 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	m.savedQuery = m.query.String()
 	m.applyQuery()
 	m.recomputeMetrics()
+	// Park the cursor on the default image so the table opens centered
+	// on the artifact most users care about. scrollUnitIntoView is a
+	// no-op when the active query filters that image out.
+	if proj.Defaults.Image != "" {
+		m.scrollUnitIntoView(proj.Defaults.Image)
+	}
 
 	m.checkBinfmtWarning()
 
@@ -1045,11 +1052,14 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // Setup option names — add new options here.
-var setupOptions = []string{"Machine"}
+var setupOptions = []string{"Machine", "Image"}
 
 func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.setupField == "machine" {
+	switch m.setupField {
+	case "machine":
 		return m.updateSetupMachine(msg)
+	case "image":
+		return m.updateSetupImage(msg)
 	}
 
 	switch msg.String() {
@@ -1073,7 +1083,76 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch setupOptions[m.setupCursor] {
 		case "Machine":
 			m.setupField = "machine"
+			// Land the picker cursor on the active machine.
+			for i, name := range m.machines {
+				if name == m.proj.Defaults.Machine {
+					m.machineCursor = i
+					break
+				}
+			}
+		case "Image":
+			m.setupField = "image"
+			m.imageCursor = 0
+			imgs := m.imageUnits()
+			for i, name := range imgs {
+				if name == m.proj.Defaults.Image {
+					m.imageCursor = i
+					break
+				}
+			}
 		}
+		return m, nil
+	}
+	return m, nil
+}
+
+// imageUnits returns the sorted names of all image-class units in the project.
+func (m model) imageUnits() []string {
+	var out []string
+	for name, u := range m.proj.Units {
+		if u.Class == "image" {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (m model) updateSetupImage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	imgs := m.imageUnits()
+	switch msg.String() {
+	case "esc":
+		m.setupField = ""
+		return m, nil
+
+	case "up", "k":
+		if m.imageCursor > 0 {
+			m.imageCursor--
+		}
+		return m, nil
+
+	case "down", "j":
+		if m.imageCursor < len(imgs)-1 {
+			m.imageCursor++
+		}
+		return m, nil
+
+	case "enter":
+		if len(imgs) == 0 {
+			return m, nil
+		}
+		picked := imgs[m.imageCursor]
+		m.proj.Defaults.Image = picked
+		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+		ov.Image = picked
+		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
+			m.message = fmt.Sprintf("Image set to %s (warning: failed to save local.star: %v)", picked, err)
+		} else {
+			m.message = fmt.Sprintf("Image set to %s (saved to local.star)", picked)
+		}
+		m.setupField = ""
+		m.view = viewUnits
+		m.scrollUnitIntoView(picked)
 		return m, nil
 	}
 	return m, nil
@@ -1550,7 +1629,8 @@ func (m model) viewSetup() string {
 
 	b.WriteString(fmt.Sprintf("  %s\n\n", titleStyle.Render("Setup")))
 
-	if m.setupField == "machine" {
+	switch m.setupField {
+	case "machine":
 		// Machine picker
 		b.WriteString(headerStyle.Render("  Select Machine"))
 		b.WriteString("\n\n")
@@ -1576,7 +1656,35 @@ func (m model) viewSetup() string {
 		b.WriteString("\n")
 		b.WriteString(helpStyle.Render("  enter select  esc back"))
 		b.WriteString("\n")
-	} else {
+
+	case "image":
+		// Image picker
+		b.WriteString(headerStyle.Render("  Select Default Image"))
+		b.WriteString("\n\n")
+
+		imgs := m.imageUnits()
+		if len(imgs) == 0 {
+			b.WriteString(dimStyle.Render("  no image() units defined in this project\n"))
+		}
+		for i, name := range imgs {
+			cursor := "  "
+			style := dimStyle
+			if i == m.imageCursor {
+				cursor = "→ "
+				style = selectedStyle
+			}
+			current := ""
+			if name == m.proj.Defaults.Image {
+				current = cachedStyle.Render(" (current)")
+			}
+			b.WriteString(fmt.Sprintf("%s%s%s\n", cursor, style.Render(name), current))
+		}
+
+		b.WriteString("\n")
+		b.WriteString(helpStyle.Render("  enter select  esc back"))
+		b.WriteString("\n")
+
+	default:
 		// Top-level setup menu
 		for i, opt := range setupOptions {
 			cursor := "  "
@@ -1589,6 +1697,8 @@ func (m model) viewSetup() string {
 			switch opt {
 			case "Machine":
 				value = headerStyle.Render(m.proj.Defaults.Machine)
+			case "Image":
+				value = headerStyle.Render(m.proj.Defaults.Image)
 			}
 			b.WriteString(fmt.Sprintf("%s%s  %s\n", cursor, style.Render(opt), value))
 		}

@@ -10,6 +10,7 @@ func TestLocalOverrides_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	in := LocalOverrides{
 		Machine:    "qemu-x86_64",
+		Image:      "dev-image",
 		DeployHost: "localhost:2222",
 		Query:      "in:base-image",
 	}

@@ -503,12 +503,16 @@ func loadProjectWithMachine(machineName string) *yoestar.Project {
 		dir = "."
 	}
 	// Precedence: --machine flag > local.star > PROJECT.star defaults.
+	// Local image override is also captured here and applied below — it
+	// doesn't affect Starlark eval, so we just patch proj.Defaults.Image.
+	var ovImage string
 	if machineName == "" {
 		absDir, err := filepath.Abs(dir)
 		if err == nil {
 			if root, err := findProjectRootForLocal(absDir); err == nil {
 				if ov, err := yoestar.LoadLocalOverrides(root); err == nil {
 					machineName = ov.Machine
+					ovImage = ov.Image
 				} else {
 					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 				}
@@ -523,6 +527,13 @@ func loadProjectWithMachine(machineName string) *yoestar.Project {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
+	}
+	if ovImage != "" {
+		if _, ok := proj.Units[ovImage]; ok {
+			proj.Defaults.Image = ovImage
+		} else {
+			fmt.Fprintf(os.Stderr, "Warning: local.star image %q not found in project; ignoring\n", ovImage)
+		}
 	}
 	return proj
 }

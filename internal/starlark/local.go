@@ -15,6 +15,7 @@ const localStarFile = "local.star"
 // Empty fields mean the file did not specify that value (or did not exist).
 type LocalOverrides struct {
 	Machine    string
+	Image      string // overrides PROJECT.star defaults.image (e.g. for `yoe run` and TUI bootstrap)
 	DeployHost string // last-used target for `yoe deploy` from the TUI
 	Query      string // last-saved TUI search query (in:base-image, etc.)
 }
@@ -44,6 +45,8 @@ func LoadLocalOverrides(projectDir string) (LocalOverrides, error) {
 			switch string(key) {
 			case "machine":
 				captured.Machine = string(v)
+			case "image":
+				captured.Image = string(v)
 			case "deploy_host":
 				captured.DeployHost = string(v)
 			case "query":
@@ -74,6 +77,9 @@ func WriteLocalOverrides(projectDir string, ov LocalOverrides) error {
 	b.WriteString("local(\n")
 	if ov.Machine != "" {
 		fmt.Fprintf(&b, "    machine = %q,\n", ov.Machine)
+	}
+	if ov.Image != "" {
+		fmt.Fprintf(&b, "    image = %q,\n", ov.Image)
 	}
 	if ov.DeployHost != "" {
 		fmt.Fprintf(&b, "    deploy_host = %q,\n", ov.DeployHost)
