@@ -32,9 +32,9 @@ on any dev machine). Phases 4+ require Linux with bubblewrap and apk-tools.
 | 1     | CLI Foundation                | —          | **DONE** — `yoe init/config/clean/module`, Starlark engine, all builtins               |
 | 2     | Dependency Resolution         | 1          | **DONE** — DAG, topo sort, hashing, `desc/refs/graph`, `dev`, custom commands, patches |
 | 2.5   | Module Management & Engine    | 1          | `yoe module sync`, load() resolution, remove class builtins, recursive discovery       |
-| 2.6   | units-core Module (Phase 1)   | 2.5        | Module skeleton, Starlark classes, toolchain units                                     |
-| 2.7   | units-core Module (Phase 2)   | 2.6, 6     | Base system units, QEMU machines, base/dev images                                      |
-| 2.8   | units-core Module (Phase 3)   | 2.7        | Essential libs, crypto/TLS, networking, debug tools                                    |
+| 2.6   | module-core Module (Phase 1)  | 2.5        | Module skeleton, Starlark classes, toolchain units                                     |
+| 2.7   | module-core Module (Phase 2)  | 2.6, 6     | Base system units, QEMU machines, base/dev images                                      |
+| 2.8   | module-core Module (Phase 3)  | 2.7        | Essential libs, crypto/TLS, networking, debug tools                                    |
 | 3     | Source Management             | 1          | `yoe source fetch/list/verify/clean`, content-addressed cache                          |
 | 4     | Build Execution               | 2, 3       | `yoe build` with bubblewrap isolation, build step execution                            |
 | 5     | Package Creation & Repository | 4          | APK package creation, `yoe repo` commands, local repository                            |
@@ -1092,7 +1092,7 @@ project(
     ),
     sources = sources(go_proxy = "https://proxy.golang.org"),
     layers = [
-        layer("github.com/yoe/units-core", ref = "v1.0.0"),
+        layer("github.com/yoe/module-core", ref = "v1.0.0"),
     ],
 )
 ```
@@ -1779,7 +1779,8 @@ git commit -m "fix: integration test fixes for phase 1"
 and their transitive dependencies from `MODULE.star` files. Also make the engine
 changes required to support Starlark-based classes in modules.
 
-See [units-core Module Design](../specs/2026-03-26-recipes-core-layer-design.md)
+See
+[module-core Module Design](../specs/2026-03-26-recipes-core-layer-design.md)
 for the full specification of what the base module contains and the engine
 changes needed.
 
@@ -1964,18 +1965,19 @@ user namespaces (bubblewrap), mkfs.ext4, mkfs.vfat, systemd-repart
 
 ---
 
-## Phase 2.6: units-core Module Phase 1 — Skeleton + Classes + Toolchain (detailed plan TBD)
+## Phase 2.6: module-core Module Phase 1 — Skeleton + Classes + Toolchain (detailed plan TBD)
 
-**Goal:** Create the `modules/units-core/` directory with the module manifest,
+**Goal:** Create the `modules/module-core/` directory with the module manifest,
 all Starlark class files, and the toolchain/build-tool units. This is the
 foundation that all other units build on.
 
-See [units-core Module Design](../specs/2026-03-26-recipes-core-layer-design.md)
+See
+[module-core Module Design](../specs/2026-03-26-recipes-core-layer-design.md)
 for the full specification.
 
 **Key deliverables:**
 
-- `modules/units-core/MODULE.star` — module manifest
+- `modules/module-core/MODULE.star` — module manifest
 - 10 class files: `autotools`, `cmake`, `meson`, `go`, `rust`, `python`, `node`,
   `image`, `sdk`, `systemd`
 - Toolchain units: `gcc`, `binutils`, `glibc`, `linux-headers`
@@ -1990,7 +1992,7 @@ root.
 
 ---
 
-## Phase 2.7: units-core Module Phase 2 — Base System + QEMU Machines (detailed plan TBD)
+## Phase 2.7: module-core Module Phase 2 — Base System + QEMU Machines (detailed plan TBD)
 
 **Goal:** Add the base system packages, kernel, bootloaders, QEMU machine
 definitions, and image units needed to produce a bootable system.
@@ -2011,7 +2013,7 @@ bootable image.
 
 ---
 
-## Phase 2.8: units-core Module Phase 3 — Essential Libs + Networking (detailed plan TBD)
+## Phase 2.8: module-core Module Phase 3 — Essential Libs + Networking (detailed plan TBD)
 
 **Goal:** Add the libraries and networking packages that most embedded projects
 need.
@@ -2041,12 +2043,12 @@ an existing toolchain, then rebuild with own toolchain.
 - `internal/bootstrap/stage0.go` — cross-pollination from Alpine
 - `internal/bootstrap/stage1.go` — self-hosting rebuild
 - `cmd/yoe/main.go` — add `bootstrap` command to switch statement
-- Bootstrap unit set from `modules/units-core/units/toolchain/` — units with
+- Bootstrap unit set from `modules/module-core/units/toolchain/` — units with
   `bootstrap = True` (glibc, binutils, gcc, linux-headers) plus base units
   (busybox, apk-tools, bubblewrap)
 
 **Depends on:** Phase 5 (package creation and repository), Phase 2.6 (toolchain
-units exist in units-core)
+units exist in module-core)
 
 **This is the most complex phase** — building a C library and compiler toolchain
 is non-trivial. Consider starting with pre-built packages and implementing

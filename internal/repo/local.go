@@ -200,7 +200,7 @@ func Info(repoDir, pkgName string, w io.Writer) error {
 // Without this, the local repo accumulates old .apk files indefinitely,
 // and image-time `apk add` happily picks the highest-versioned candidate
 // — which can be a deleted unit's leftover (e.g. a yoe-built apk-tools
-// from before switching to the units-alpine prebuilt). The APKINDEX is
+// from before switching to the module-alpine prebuilt). The APKINDEX is
 // always rebuilt from the surviving files via GenerateIndex, so apk
 // resolves only what's actually on disk.
 func Clean(proj *yoestar.Project, repoDir string, signer *artifact.Signer, w io.Writer) error {

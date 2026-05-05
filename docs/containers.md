@@ -148,7 +148,7 @@ glibc and pull in `libseccomp`/`libdevmapper` dynamically on some releases — s
 they will not run on a musl-based yoe rootfs. Building from source is the only
 serious path.
 
-The toolchain side is already solved: `modules/units-core/units/dev/go.star`
+The toolchain side is already solved: `modules/module-core/units/dev/go.star`
 provides a Go toolchain (currently Go 1.26.2) and `classes/go.star` gives Go
 units a build class. The component breakdown:
 

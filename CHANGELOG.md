@@ -8,6 +8,74 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-05-05
+
+- **TUI flash offers `sudo chown` on permission denied.** Previously the flash
+  view just showed "permission denied" and dead-ended — matching the CLI's
+  behavior, the TUI now prompts to run `sudo chown $USER /dev/...` and retries
+  the write automatically.
+- **TUI home screen has tabs.** Press `tab` to cycle between Units (the existing
+  list), Modules (declared modules with git status), and Diagnostics (shadowed
+  units and duplicate `provides`). The diagnostics tab carries a count badge so
+  issues are visible from any tab.
+- **`--allow-duplicate-provides` is on by default.** No more passing the flag on
+  every yoe invocation while the `linux-firmware-*` fan-out keeps tripping the
+  strict check.
+- **Modules renamed: `units-*` → `module-*`.** `units-core`, `units-rpi`,
+  `units-alpine`, and `units-jetson` are now `module-core`, `module-rpi`,
+  `module-alpine`, and `module-jetson`. Update `module(...)` URLs and any
+  `path = "modules/units-..."` entries in your `PROJECT.star`.
+- **`helix` actually runs on the device.** Was previously bundled as a
+  glibc-linked binary that failed silently with `hx: not found`; now uses
+  Alpine's musl build.
+- **Images that include `apk-tools` or `libcurl` build again.** A collision
+  between the source-built `ca-certificates` and Alpine's
+  `ca-certificates-bundle` was aborting `apk add` at image-assembly time.
+- **`SIZE` column in the TUI updates as each unit finishes.** No more waiting
+  for the whole image to complete before transitive deps show their size, and
+  partial sizes survive a mid-build failure.
+- **Modules show their declared name.** The TUI's `MODULE` column and any
+  diagnostic that names a module now use the name set in `MODULE.star`'s
+  `module_info(name = ...)` instead of the path basename — so a module
+  referenced via `path = "modules/units-core"` displays as `core` if that's what
+  it calls itself. Falls back to the path basename when no `module_info` is
+  declared.
+- **`dev-image` ships `helix` instead of `vim`.** Drops the editor entry that
+  was unintentionally resolving to Alpine's `gvim` (and its X11/GTK runtime
+  closure), keeping the image lean.
+- **Unit detail shows what uses it and what it pulls in.** The detail page now
+  opens with two new sections above the build log: **USED BY** traces back
+  through runtime_deps to show which packages you wrote in `image()` pulled this
+  unit in, e.g. `dev-image → yazi → libpango → cairo`, so you can answer "why is
+  this on my device?" at a glance. **PULLS IN** shows the unit's runtime-deps as
+  a tree. Drilling into an image starts from exactly the packages you wrote in
+  `image()` (plus machine packages), then expands each one to show what it drags
+  in transitively.
+- **TUI layout overhaul.** Title and banners stay put when the list is long, the
+  help bar is always the last line, status messages flash in its place, and
+  pressing `/` turns the `Query:` header itself into the search input. Long unit
+  names get an ellipsis instead of breaking column alignment.
+- **Sort columns from the keyboard.** Press `o` to cycle the unit table through
+  `NAME → CLASS → MODULE → SIZE → DEPS → STATUS`; `O` flips direction. The
+  active column shows `↑` or `↓` next to its label.
+- **Help bar highlights shortcut keys.** Each shortcut letter renders in amber
+  matching `[yoe]`, so you can scan keys without reading every word.
+- **Cursor follows the work.** The TUI opens with the cursor on the default
+  image, jumps to whatever unit is currently building, and the cursor's full
+  unit name is always visible just above the help bar.
+- **Configure the default image per developer.** `local.star` accepts
+  `image = "..."` to override `defaults.image`. Pick an image from the new
+  **Image** entry in Setup (`s`) and the choice is saved — and the active search
+  re-anchors to `in:<image>`. Flows through `yoe run`, `yoe config show`, and
+  the TUI.
+- **More columns in the unit table.** Each row now also shows the module that
+  owns the unit (after shadow resolution), its install size after build (`.img`
+  size for images), and how many units it pulls into a runtime closure — so
+  bloat is easy to spot before flashing.
+- **`yoe --help` works and lists global options.** `--help`, `-h`, and `help`
+  all print usage, including `--project`, `--show-shadows`, and
+  `--allow-duplicate-provides`.
+
 ## [0.10.0] - 2026-05-05
 
 _Errata: due to an issue in the alpine module, you must currently run with:

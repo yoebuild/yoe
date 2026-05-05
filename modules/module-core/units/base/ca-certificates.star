@@ -7,6 +7,14 @@ unit(
     description = "Mozilla CA certificates bundle for TLS verification",
     deps = ["openssl", "toolchain-musl"],
     runtime_deps = ["openssl"],
+    # Source-built ca-certificates ships both the cert bundle (cert.pem,
+    # certs/ca-certificates.crt) and the individual certs that Alpine
+    # splits into a separate `ca-certificates-bundle` package. Declaring
+    # the bundle here routes any package whose runtime_deps reach
+    # `ca-certificates-bundle` (apk-tools, libcurl, libretls, …) back to
+    # this unit, instead of pulling Alpine's bundle alongside and tripping
+    # `apk add` on `trying to overwrite etc/ssl/cert.pem`.
+    provides = ["ca-certificates-bundle"],
     container = "toolchain-musl",
     container_arch = "target",
     tasks = [

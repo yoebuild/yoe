@@ -8,8 +8,24 @@
 
 ## Next
 
+- Edit module source, drop into directory with editor or shell
+- Tab in unit to display files installed and sizes.
+- Side issue worth flagging (not fixing now): the doubled -r0-r0 in
+  ca-certificates-bundle-20260413-r0-r0 is a real bug in units-alpine. Alpine's
+  upstream version 20260413-r0 already contains the release suffix, but
+  units-alpine declares it as version = "20260413-r0" and yoe's apk packaging
+  then appends another -r<release> (default 0). The clean fix lives upstream in
+  units-alpine: split version = "20260413" and release = 0. Affects every
+  alpine_pkg unit. Not blocking the install (apk accepts the goofy name), so it
+  can wait — but worth a separate issue.
+- alpine should have unit deps, not just runtime deps
+- alpine packages like gvim provides vim. This could be a source of pain.
 - document BSP and package moat
 - Better hostnames for targets.
+- units-xxx -> module-xxx in git
+- unit details, show dependency graph up to image (upstream), and then
+  (downstream) a tree of stuff it pulls in
+- long z
 - mDNS on target (we have a mdns component, why is it not working?)
 - base-files is modified by machine
   - machine package feed?

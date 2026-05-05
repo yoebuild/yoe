@@ -4,7 +4,7 @@
 
 The TUI's unit list is a single flat alphabetical column with substring-only
 search (`/<text>`). This worked when a project had ~50 units. With external
-modules in play (`units-alpine` ships ~3000 units alone, including ~100
+modules in play (`module-alpine` ships ~3000 units alone, including ~100
 `linux-firmware-*` packages), the list is now too long to scroll and too
 undifferentiated to skim. There is no way to:
 
@@ -44,7 +44,7 @@ bare-term := WORD          // substring match against unit name
 - Field names and values are case-insensitive. Unit names match
   case-insensitively.
 - Repeated field filters with the same name are OR-ed within the field, then
-  AND-ed with everything else: `module:units-core module:units-rpi` matches
+  AND-ed with everything else: `module:module-core module:module-rpi` matches
   units from either module.
 - Bare terms are substring matches on the unit name (the existing behavior of
   `/`).
@@ -91,17 +91,17 @@ root.
 
 ### Worked examples
 
-| Query                                | Meaning                                                                   |
-| ------------------------------------ | ------------------------------------------------------------------------- |
-| _(empty)_                            | All units — the current default behavior, kept as the empty case.         |
-| `in:base-image`                      | Working-set view: just what gets built when the image builds.             |
-| `in:base-image status:failed`        | What's broken in my image right now.                                      |
-| `in:base-image type:image`           | Just the image itself (degenerate but valid).                             |
-| `module:units-alpine`                | Browse what units-alpine ships.                                           |
-| `linux-firmware`                     | Old-style substring search across all units.                              |
-| `module:units-alpine linux-firmware` | linux-firmware-\* in units-alpine specifically.                           |
-| `failed`                             | Same as `status:failed`.                                                  |
-| `images`                             | Same as `type:image`. All images in the project, useful for choosing one. |
+| Query                                 | Meaning                                                                   |
+| ------------------------------------- | ------------------------------------------------------------------------- |
+| _(empty)_                             | All units — the current default behavior, kept as the empty case.         |
+| `in:base-image`                       | Working-set view: just what gets built when the image builds.             |
+| `in:base-image status:failed`         | What's broken in my image right now.                                      |
+| `in:base-image type:image`            | Just the image itself (degenerate but valid).                             |
+| `module:module-alpine`                | Browse what module-alpine ships.                                          |
+| `linux-firmware`                      | Old-style substring search across all units.                              |
+| `module:module-alpine linux-firmware` | linux-firmware-\* in module-alpine specifically.                          |
+| `failed`                              | Same as `status:failed`.                                                  |
+| `images`                              | Same as `type:image`. All images in the project, useful for choosing one. |
 
 ## `local.star` schema change
 

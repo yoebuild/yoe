@@ -27,23 +27,23 @@ func TestE2E_DryRun(t *testing.T) {
 		t.Fatalf("LoadProject: %v", err)
 	}
 
-	// Should have machine from units-core module
+	// Should have machine from module-core module
 	if _, ok := proj.Machines["qemu-x86_64"]; !ok {
-		t.Error("expected qemu-x86_64 machine from units-core module")
+		t.Error("expected qemu-x86_64 machine from module-core module")
 	}
 
-	// Should have units from units-core module
+	// Should have units from module-core module
 	if _, ok := proj.Units["busybox"]; !ok {
-		t.Error("expected busybox unit from units-core module")
+		t.Error("expected busybox unit from module-core module")
 	}
 	if _, ok := proj.Units["linux"]; !ok {
-		t.Error("expected linux unit from units-core module")
+		t.Error("expected linux unit from module-core module")
 	}
 	if _, ok := proj.Units["base-image"]; !ok {
-		t.Error("expected base-image from units-core module")
+		t.Error("expected base-image from module-core module")
 	}
 	if _, ok := proj.Units["zlib"]; !ok {
-		t.Error("expected zlib unit from units-core module")
+		t.Error("expected zlib unit from module-core module")
 	}
 
 	// zlib should have been loaded via a class (autotools or similar).

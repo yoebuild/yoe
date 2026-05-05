@@ -454,7 +454,7 @@ When a `run()` call fails inside a Starlark build function:
 ```
 Error building base-image:
   task "rootfs" failed:
-  modules/units-core/classes/image.star:24  in assemble_rootfs
+  modules/module-core/classes/image.star:24  in assemble_rootfs
     run("tar xzf $REPO/busybox-*.apk ...") failed: exit code 1
 
   stderr:
@@ -474,7 +474,7 @@ if result.exit_code != 0:
 ## What This Replaces
 
 - **`internal/image/rootfs.go`** — image assembly moves to
-  `modules/units-core/classes/image.star`
+  `modules/module-core/classes/image.star`
 - **`internal/image/disk.go`** — disk image creation moves to Starlark
   `create_disk_image()` function using shell commands
 - **Per-image `MACHINE == ...` conditionals** — replaced by `MACHINE_CONFIG` and

@@ -50,6 +50,10 @@ type Engine struct {
 	// the PROVIDES lookup; subsequent providers are silently accepted (apk
 	// "any of these satisfies" semantics).
 	allowDuplicateProvides bool
+
+	// shadows accumulates cross-module unit name collisions in registration
+	// order. Surfaced via Project.Diagnostics for the TUI's Diagnostics tab.
+	shadows []ShadowEvent
 }
 
 func NewEngine() *Engine {
@@ -88,6 +92,10 @@ func (e *Engine) SetShowShadows(v bool) { e.showShadows = v }
 // handling. When true, multiple units in the same module may declare the
 // same virtual without erroring (first-wins for PROVIDES lookup).
 func (e *Engine) SetAllowDuplicateProvides(v bool) { e.allowDuplicateProvides = v }
+
+// Shadows returns the cross-module unit name collisions observed during
+// evaluation, in registration order.
+func (e *Engine) Shadows() []ShadowEvent { return e.shadows }
 
 // ExecString evaluates Starlark source code with built-in functions available.
 func (e *Engine) ExecString(filename, src string) error {

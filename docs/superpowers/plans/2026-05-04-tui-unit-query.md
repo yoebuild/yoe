@@ -262,11 +262,11 @@ func TestParse_MultipleTerms(t *testing.T) {
 }
 
 func TestParse_RepeatedFieldOR(t *testing.T) {
-	q, err := Parse("module:units-core module:units-rpi")
+	q, err := Parse("module:module-core module:module-rpi")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if q.String() != "module:units-core module:units-rpi" {
+	if q.String() != "module:module-core module:module-rpi" {
 		t.Fatalf("canonical: got %q", q.String())
 	}
 }
@@ -312,7 +312,7 @@ func TestParse_RoundTrip(t *testing.T) {
 		"type:image",
 		"in:base-image",
 		"in:base-image status:failed",
-		"module:units-core module:units-rpi linux-firmware",
+		"module:module-core module:module-rpi linux-firmware",
 	}
 	for _, in := range inputs {
 		q, err := Parse(in)
@@ -513,11 +513,11 @@ import (
 // the matcher is expected to filter on.
 func fixtureProject() map[string]*yoestar.Unit {
 	return map[string]*yoestar.Unit{
-		"base-image":      {Name: "base-image", Class: "image", Module: "units-core"},
-		"toolchain-musl":  {Name: "toolchain-musl", Class: "container", Module: "units-core"},
-		"openssl":         {Name: "openssl", Class: "unit", Module: "units-core"},
-		"musl":            {Name: "musl", Class: "unit", Module: "units-alpine"},
-		"libcrypto3":      {Name: "libcrypto3", Class: "unit", Module: "units-alpine"},
+		"base-image":      {Name: "base-image", Class: "image", Module: "module-core"},
+		"toolchain-musl":  {Name: "toolchain-musl", Class: "container", Module: "module-core"},
+		"openssl":         {Name: "openssl", Class: "unit", Module: "module-core"},
+		"musl":            {Name: "musl", Class: "unit", Module: "module-alpine"},
+		"libcrypto3":      {Name: "libcrypto3", Class: "unit", Module: "module-alpine"},
 		"my-app":          {Name: "my-app", Class: "unit", Module: ""}, // project root
 	}
 }
@@ -577,7 +577,7 @@ func TestMatches_ImagesShortcut(t *testing.T) {
 
 func TestMatches_ModuleORWithin(t *testing.T) {
 	units := fixtureProject()
-	out := matchAll(mustParse(t, "module:units-core module:units-alpine"), units, nil, nil)
+	out := matchAll(mustParse(t, "module:module-core module:module-alpine"), units, nil, nil)
 	for _, want := range []string{"base-image", "toolchain-musl", "openssl", "musl", "libcrypto3"} {
 		if !has(out, want) {
 			t.Fatalf("expected %q in %v", want, out)
@@ -623,7 +623,7 @@ func TestMatches_BareSubstringCaseInsensitive(t *testing.T) {
 
 func TestMatches_AndAcrossFields(t *testing.T) {
 	units := fixtureProject()
-	out := matchAll(mustParse(t, "module:units-alpine type:unit"), units, nil, nil)
+	out := matchAll(mustParse(t, "module:module-alpine type:unit"), units, nil, nil)
 	for _, want := range []string{"musl", "libcrypto3"} {
 		if !has(out, want) {
 			t.Fatalf("expected %q in %v", want, out)
@@ -1330,7 +1330,7 @@ func TestQuery_InRoot(t *testing.T) {
 	if q.InRoot() != "base-image" {
 		t.Fatalf("InRoot: got %q", q.InRoot())
 	}
-	q2 := mustParse(t, "module:units-core")
+	q2 := mustParse(t, "module:module-core")
 	if q2.InRoot() != "" {
 		t.Fatalf("expected empty InRoot")
 	}
@@ -1664,7 +1664,7 @@ import (
 
 func ctxFixture() Context {
 	return Context{
-		Modules: []string{"units-core", "units-alpine", "units-rpi"},
+		Modules: []string{"module-core", "module-alpine", "module-rpi"},
 		Units:   []string{"openssl", "openssh", "musl", "base-image"},
 	}
 }
@@ -1705,7 +1705,7 @@ func TestComplete_StatusValueAll(t *testing.T) {
 
 func TestComplete_ModuleValue(t *testing.T) {
 	_, _, got := Complete("module:units-r", 14, ctxFixture())
-	if !reflect.DeepEqual(got, []string{"units-rpi"}) {
+	if !reflect.DeepEqual(got, []string{"module-rpi"}) {
 		t.Fatalf("got %v", got)
 	}
 }
@@ -1974,7 +1974,7 @@ cd testdata/e2e-project && /scratch4/yoe/yoe/yoe --allow-duplicate-provides
 
 Expected: in the TUI, press `/`, type `mo`, press `Tab` → bar reads `module:`.
 Type `unit`, press `Tab` → completes longest common prefix `units-`. Type `c`
-then `Tab` → `units-core`. List filters live.
+then `Tab` → `module-core`. List filters live.
 
 - [ ] **Step 8: Commit**
 
@@ -2237,7 +2237,7 @@ Walk through the spec's worked-examples table:
 
 - Default view shows units in `base-image`'s closure (header dim).
 - `/in:openssl Enter` → openssl + zlib + toolchain-musl.
-- `/module:units-alpine Enter` → ~3000 entries; counter says e.g.
+- `/module:module-alpine Enter` → ~3000 entries; counter says e.g.
   `Units: 2987/3104`.
 - `/type:image Enter` → just images.
 - `/fizz:foo` → bar turns red, list freezes.

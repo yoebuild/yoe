@@ -1,4 +1,4 @@
-# Raspberry Pi BSP Module (units-rpi)
+# Raspberry Pi BSP Module (module-rpi)
 
 **Date:** 2026-03-31 **Status:** Draft
 
@@ -10,7 +10,7 @@ a BSP module enables building bootable SD card images for real hardware.
 
 ## Solution
 
-A new `units-rpi` module providing machine definitions, a Raspberry Pi kernel
+A new `module-rpi` module providing machine definitions, a Raspberry Pi kernel
 fork, GPU firmware, boot configuration, and a bootable image definition for RPi
 4 and RPi 5.
 
@@ -33,7 +33,7 @@ fork, GPU firmware, boot configuration, and a bootable image definition for RPi
 ## Module Structure
 
 ```
-modules/units-rpi/
+modules/module-rpi/
 ├── MODULE.star
 ├── machines/
 │   ├── raspberrypi4.star
@@ -265,7 +265,7 @@ Projects reference the module in `PROJECT.star`:
 ```python
 module("https://github.com/YoeDistro/yoe-ng.git",
       ref = "main",
-      path = "modules/units-rpi")
+      path = "modules/module-rpi")
 ```
 
 ## What's Not Included (Future Work)

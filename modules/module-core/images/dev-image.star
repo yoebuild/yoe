@@ -17,8 +17,8 @@ image(
         "e2fsprogs", "eudev", "linux", "network-config", "iproute2",
         "dhcpcd", "ntp-client", "mdnsd", "openssh", "ca-certificates",
         "curl", "simpleiot", "bash", "less", "file", "procps-ng",
-        "htop", "strace", "vim", "apk-tools",
-        "yazi", "zellij"
+        "htop", "strace", "apk-tools",
+        "yazi", "zellij", "helix"
     ],
     hostname = "yoe-dev",
 )

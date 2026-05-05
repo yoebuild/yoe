@@ -931,7 +931,7 @@ first-class concern.
   equivalent of what Alpine's `abuild` gets from `fakeroot` and what Debian gets
   from `dpkg-buildpackage` under fakeroot — just implemented in the build tool
   rather than via LD_PRELOAD, because Go writes the tar anyway.
-- **Rootfs assembly** (`modules/units-core/classes/image.star`) currently runs
+- **Rootfs assembly** (`modules/module-core/classes/image.star`) currently runs
   inside the Docker build container, which is already privileged. The image
   class `chown -R 0:0`s the assembled rootfs before `mkfs.ext4 -d`, and chowns
   `$DESTDIR` back to the host build user at the end so the next build's

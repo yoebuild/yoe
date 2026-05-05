@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -30,11 +32,19 @@ var (
 	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#e8863a")).Background(lipgloss.Color("#000000"))
 	headerStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
 	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#5fff5f"))
+	// Faded variant of selectedStyle for the always-on "cursor unit name"
+	// line above the bottom row — same green so the eye links it to the
+	// highlighted row, but dimmed and not bold so it doesn't compete.
+	cursorNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#5fff5f")).Faint(true)
 	dimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	cachedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("12")) // blue
 	failedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	buildingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	// Amber, matching the [yoe] logo, for the keyboard shortcut letter
+	// in each help-bar item — the description stays helpStyle gray so
+	// the eye can scan keys at a glance.
+	helpKeyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#e8863a")).Bold(true)
 	waitingStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // yellow
 
 	// Query-related styles
@@ -50,10 +60,28 @@ var (
 	// matchHighlightStyle draws the matched substring on top of whatever
 	// the row's existing color is.
 	matchHighlightStyle = lipgloss.NewStyle().Underline(true).Bold(true)
+
+	// Tab bar styling: active tab in amber-bold to match the [yoe] logo,
+	// inactive tabs faded so the eye is drawn to the current selection.
+	tabActiveStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#e8863a")).Bold(true)
+	tabInactiveStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 )
 
 // Package-level program reference for sending messages from goroutines.
 var tuiProgram *tea.Program
+
+// Sort columns for the units table. Order matches the on-screen column
+// order and the indices stored in model.sortColumn. The cycle order
+// driven by the `o` key follows this same sequence.
+const (
+	sortByName = iota
+	sortByClass
+	sortByModule
+	sortBySize
+	sortByDeps
+	sortByStatus
+	numSortColumns
+)
 
 // Views
 type viewKind int
@@ -66,15 +94,38 @@ const (
 	viewDeploy
 )
 
+// Tabs that share the home screen. Tab key cycles forward.
+type homeTab int
+
+const (
+	tabUnits homeTab = iota
+	tabModules
+	tabDiagnostics
+	numHomeTabs
+)
+
+func (t homeTab) String() string {
+	switch t {
+	case tabUnits:
+		return "Units"
+	case tabModules:
+		return "Modules"
+	case tabDiagnostics:
+		return "Diagnostics"
+	}
+	return ""
+}
+
 // Flash view stages
 type flashStage int
 
 const (
-	flashSelect  flashStage = iota // picking a device
-	flashConfirm                   // y/N confirmation
-	flashWriting                   // write in progress
-	flashDone                      // success
-	flashError                     // failed
+	flashSelect     flashStage = iota // picking a device
+	flashConfirm                      // y/N confirmation
+	flashWriting                      // write in progress
+	flashPermPrompt                   // permission denied; offer sudo chown
+	flashDone                         // success
+	flashError                        // failed
 )
 
 // Deploy view stages
@@ -144,6 +195,10 @@ type flashDoneMsg struct {
 	err error
 }
 
+type flashChownDoneMsg struct {
+	err error
+}
+
 // Deploy messages
 type deployOutputMsg struct {
 	line string
@@ -166,6 +221,10 @@ type model struct {
 	statuses   map[string]unitStatus
 	cursor     int
 	view       viewKind
+	activeTab  homeTab // which tab is showing on the home screen
+	modulesCursor    int // cursor row in the Modules tab
+	diagnosticsCursor int // cursor row in the Diagnostics tab
+	moduleStatus map[string]string // module name -> "clean" / "dirty (N)" / "missing" / err; populated lazily
 	detailUnit   string
 	outputLines  []string // executor output (executor.log)
 	logLines     []string // build log (build.log)
@@ -197,8 +256,9 @@ type model struct {
 	// Setup view
 	machines    []string // sorted machine names
 	setupCursor int      // cursor within setup options
-	setupField  string   // "" = top-level, "machine" = picking machine
+	setupField  string   // "" = top-level, "machine" / "image" = picker active
 	machineCursor int    // cursor within machine list
+	imageCursor   int    // cursor within image list
 
 	// Flash view
 	flashUnit       string
@@ -221,6 +281,16 @@ type model struct {
 
 	// Feed (yoe serve) status — set at startup by startProjectFeed.
 	feedStatus string
+
+	// Per-unit display metrics — recomputed on project reload and after
+	// builds so the unit table reflects fresh on-disk state.
+	unitSize map[string]int64 // installed bytes (image units: .img file size)
+	unitDeps map[string]int   // runtime closure size, excluding the unit itself
+
+	// Column sort state. sortColumn picks the comparator (sortByName etc.).
+	// sortDesc inverts it. Click a header to switch column or toggle direction.
+	sortColumn int
+	sortDesc   bool
 
 	// loadOpts is the set of LoadOptions to apply when the TUI reloads the
 	// project (e.g. after editing a .star file or switching machines). The
@@ -309,6 +379,13 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	}
 	m.savedQuery = m.query.String()
 	m.applyQuery()
+	m.recomputeMetrics()
+	// Park the cursor on the default image so the table opens centered
+	// on the artifact most users care about. scrollUnitIntoView is a
+	// no-op when the active query filters that image out.
+	if proj.Defaults.Image != "" {
+		m.scrollUnitIntoView(proj.Defaults.Image)
+	}
 
 	m.checkBinfmtWarning()
 
@@ -358,12 +435,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case buildEventMsg:
 		switch msg.status {
-		case "cached", "done":
+		case "cached":
 			m.statuses[msg.unit] = statusCached
+		case "done":
+			m.statuses[msg.unit] = statusCached
+			// Build just finished writing this unit's build.json (or
+			// destdir/<name>.img for images), so refresh the SIZE column
+			// now instead of waiting for the parent build's final
+			// recomputeMetrics — otherwise sizes for transitive deps stay
+			// blank for the entire duration of a multi-unit image build.
+			m.refreshUnitSize(msg.unit)
 		case "waiting":
 			m.statuses[msg.unit] = statusWaiting
 		case "building":
 			m.statuses[msg.unit] = statusBuilding
+			// When a build starts (often a transitive dep of the unit
+			// the user invoked), scroll its row into view so the user
+			// can see what's happening — but only if the current query
+			// doesn't already filter it out, and only if it's not
+			// already on screen. Cursor doesn't move; this is a pure
+			// viewport adjustment.
+			m.scrollUnitIntoView(msg.unit)
 		case "failed":
 			m.statuses[msg.unit] = statusFailed
 		}
@@ -383,6 +475,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.statuses[msg.unit] = statusCached
 			m.message = fmt.Sprintf("Build complete: %s", msg.unit)
+			m.recomputeMetrics()
+			// Re-sort so newly-known size/deps land in the right place
+			// when the user is sorted by one of those columns.
+			if m.sortColumn == sortBySize || m.sortColumn == sortByDeps {
+				m.sortVisible()
+			}
 		}
 		return m, nil
 
@@ -409,6 +507,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case flashDoneMsg:
+		if errors.Is(msg.err, device.ErrPermission) {
+			m.flashStage = flashPermPrompt
+			m.flashErr = msg.err
+			return m, nil
+		}
 		if msg.err != nil {
 			m.flashStage = flashError
 			m.flashErr = msg.err
@@ -416,6 +519,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flashStage = flashDone
 		}
 		return m, nil
+
+	case flashChownDoneMsg:
+		if msg.err != nil {
+			m.flashStage = flashError
+			m.flashErr = fmt.Errorf("sudo chown failed: %w", msg.err)
+			return m, nil
+		}
+		cand := m.flashCandidates[m.flashCursor]
+		m.flashStage = flashWriting
+		m.flashWritten = 0
+		m.flashErr = nil
+		return m, m.flashWriteCmd(m.flashImagePath, cand.Path)
 
 	case deployOutputMsg:
 		m.deployOutput = append(m.deployOutput, msg.line)
@@ -471,6 +586,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Tab cycles between home-screen tabs regardless of which one is
+	// active. Quit is also valid on every tab.
+	switch msg.String() {
+	case "tab":
+		m.activeTab = (m.activeTab + 1) % numHomeTabs
+		if m.activeTab == tabModules {
+			m.refreshModuleStatus()
+		}
+		m.message = ""
+		return m, nil
+	case "shift+tab":
+		m.activeTab = (m.activeTab + numHomeTabs - 1) % numHomeTabs
+		if m.activeTab == tabModules {
+			m.refreshModuleStatus()
+		}
+		m.message = ""
+		return m, nil
+	}
+
+	switch m.activeTab {
+	case tabModules:
+		return m.updateModulesTab(msg)
+	case tabDiagnostics:
+		return m.updateDiagnosticsTab(msg)
+	}
+
 	switch msg.String() {
 	case "q", "ctrl+c":
 		if len(m.cancels) > 0 {
@@ -729,8 +870,210 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.message = fmt.Sprintf("saved query: %s", m.query.String())
 		}
 		return m, nil
+
+	case "o":
+		// Cycle to the next sort column with its default direction.
+		next := (m.sortColumn + 1) % numSortColumns
+		m.sortColumn = next
+		m.sortDesc = next == sortBySize || next == sortByDeps
+		m.applySortReset()
+		return m, nil
+
+	case "O":
+		// Toggle direction of the current sort column.
+		m.sortDesc = !m.sortDesc
+		m.applySortReset()
+		return m, nil
 	}
 	return m, nil
+}
+
+// updateModulesTab handles keys when the Modules tab is active. It only
+// consumes navigation and tab/quit keys — most unit-tab actions don't
+// apply when looking at modules.
+func (m model) updateModulesTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	maxRow := len(m.proj.ResolvedModules) - 1
+	if maxRow < 0 {
+		maxRow = 0
+	}
+	switch msg.String() {
+	case "q", "ctrl+c":
+		if len(m.cancels) > 0 {
+			m.confirm = "quit"
+			m.message = "Builds are running. Quit and cancel them? (y/n)"
+			return m, nil
+		}
+		return m, tea.Quit
+	case "up", "k":
+		if m.modulesCursor > 0 {
+			m.modulesCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.modulesCursor < maxRow {
+			m.modulesCursor++
+		}
+		return m, nil
+	case "pgup", "ctrl+b":
+		page := m.modulesViewportHeight()
+		m.modulesCursor -= page
+		if m.modulesCursor < 0 {
+			m.modulesCursor = 0
+		}
+		return m, nil
+	case "pgdown", "ctrl+f":
+		page := m.modulesViewportHeight()
+		m.modulesCursor += page
+		if m.modulesCursor > maxRow {
+			m.modulesCursor = maxRow
+		}
+		return m, nil
+	case "g":
+		m.modulesCursor = 0
+		return m, nil
+	case "G":
+		m.modulesCursor = maxRow
+		return m, nil
+	case "r":
+		m.refreshModuleStatus()
+		m.message = "Module status refreshed"
+		return m, nil
+	}
+	return m, nil
+}
+
+// modulesViewportHeight returns the number of module rows that fit on
+// screen. Subtracts the home header, summary line, column header, and
+// a help/message row.
+func (m model) modulesViewportHeight() int {
+	chrome := m.homeHeaderLines()
+	chrome++ // summary line
+	chrome++ // column header
+	chrome++ // ↑ more
+	chrome++ // ↓ more
+	chrome++ // detail strip "dir: ..."
+	chrome++ // detail strip "url: ..."
+	chrome++ // blank before bottom row
+	chrome++ // help / message
+	h := m.height - chrome
+	if h < 3 {
+		h = 3
+	}
+	return h
+}
+
+// diagnosticsViewportHeight returns the number of content lines that
+// fit in the Diagnostics tab body. Mirrors the layout of viewUnitsTab
+// so a tab switch keeps the body in the same screen region.
+func (m model) diagnosticsViewportHeight() int {
+	chrome := m.homeHeaderLines()
+	chrome++ // summary line
+	chrome++ // ↑ more (always reserved)
+	chrome++ // ↓ more (always reserved)
+	chrome++ // blank before bottom row
+	chrome++ // help / message
+	h := m.height - chrome
+	if h < 3 {
+		h = 3
+	}
+	return h
+}
+
+// updateDiagnosticsTab handles keys when the Diagnostics tab is active.
+// Read-only navigation: j/k/up/down step rows, pgup/pgdown jump a page.
+func (m model) updateDiagnosticsTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	rows := m.diagnosticsRowCount()
+	maxRow := rows - 1
+	if maxRow < 0 {
+		maxRow = 0
+	}
+	switch msg.String() {
+	case "q", "ctrl+c":
+		if len(m.cancels) > 0 {
+			m.confirm = "quit"
+			m.message = "Builds are running. Quit and cancel them? (y/n)"
+			return m, nil
+		}
+		return m, tea.Quit
+	case "up", "k":
+		if m.diagnosticsCursor > 0 {
+			m.diagnosticsCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.diagnosticsCursor < maxRow {
+			m.diagnosticsCursor++
+		}
+		return m, nil
+	case "pgup", "ctrl+b":
+		page := m.diagnosticsViewportHeight()
+		m.diagnosticsCursor -= page
+		if m.diagnosticsCursor < 0 {
+			m.diagnosticsCursor = 0
+		}
+		return m, nil
+	case "pgdown", "ctrl+f":
+		page := m.diagnosticsViewportHeight()
+		m.diagnosticsCursor += page
+		if m.diagnosticsCursor > maxRow {
+			m.diagnosticsCursor = maxRow
+		}
+		return m, nil
+	case "g":
+		m.diagnosticsCursor = 0
+		return m, nil
+	case "G":
+		m.diagnosticsCursor = maxRow
+		return m, nil
+	}
+	return m, nil
+}
+
+// diagnosticsRowCount returns the total number of rows shown in the
+// Diagnostics tab — sum of shadow rows and duplicate-provides rows.
+func (m model) diagnosticsRowCount() int {
+	return len(m.proj.Diagnostics.Shadows) + len(m.proj.Diagnostics.DuplicateProvides)
+}
+
+// refreshModuleStatus runs `git status --porcelain` in each resolved
+// module's directory and stores a summary string in m.moduleStatus.
+// Cheap enough to call on every tab switch — the worst case is a few
+// dozen short git invocations.
+func (m *model) refreshModuleStatus() {
+	if m.moduleStatus == nil {
+		m.moduleStatus = make(map[string]string)
+	}
+	for _, rm := range m.proj.ResolvedModules {
+		if !rm.Available {
+			m.moduleStatus[rm.Name] = "missing"
+			continue
+		}
+		out, err := exec.Command("git", "-C", rm.Dir, "status", "--porcelain").Output()
+		if err != nil {
+			m.moduleStatus[rm.Name] = "no-git"
+			continue
+		}
+		s := strings.TrimSpace(string(out))
+		if s == "" {
+			m.moduleStatus[rm.Name] = "clean"
+			continue
+		}
+		n := strings.Count(s, "\n") + 1
+		m.moduleStatus[rm.Name] = fmt.Sprintf("dirty (%d)", n)
+	}
+}
+
+// applySortReset re-applies the query (which re-sorts m.visible), then
+// snaps the cursor and viewport to the top so the freshly-ranked rows
+// are actually visible. Without the snap, adjustListOffset would scroll
+// back to wherever the cursor was sitting in the new order.
+func (m *model) applySortReset() {
+	m.applyQuery()
+	if len(m.visible) > 0 {
+		m.cursor = m.visible[0]
+	}
+	m.listOffset = 0
+	m.adjustListOffset()
 }
 
 func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -834,6 +1177,7 @@ func (m *model) applyQuery() {
 			m.visible = append(m.visible, i)
 		}
 	}
+	m.sortVisible()
 	// Keep cursor on a visible row if at all possible.
 	if len(m.visible) > 0 {
 		stillVisible := false
@@ -899,22 +1243,37 @@ func (m model) visibleIndices() []int {
 	return m.visible
 }
 
+// prevVisible returns the unit-index of the row immediately before the
+// cursor in the current display order. Walks m.visible directly rather
+// than comparing numeric indices so it works under any sort.
 func (m model) prevVisible() int {
 	vis := m.visibleIndices()
-	for i := len(vis) - 1; i >= 0; i-- {
-		if vis[i] < m.cursor {
-			return vis[i]
+	for i, idx := range vis {
+		if idx == m.cursor {
+			if i > 0 {
+				return vis[i-1]
+			}
+			return m.cursor
 		}
+	}
+	if len(vis) > 0 {
+		return vis[0]
 	}
 	return m.cursor
 }
 
 func (m model) nextVisible() int {
 	vis := m.visibleIndices()
-	for _, idx := range vis {
-		if idx > m.cursor {
-			return idx
+	for i, idx := range vis {
+		if idx == m.cursor {
+			if i+1 < len(vis) {
+				return vis[i+1]
+			}
+			return m.cursor
 		}
+	}
+	if len(vis) > 0 {
+		return vis[0]
 	}
 	return m.cursor
 }
@@ -965,11 +1324,14 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // Setup option names — add new options here.
-var setupOptions = []string{"Machine"}
+var setupOptions = []string{"Machine", "Image"}
 
 func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.setupField == "machine" {
+	switch m.setupField {
+	case "machine":
 		return m.updateSetupMachine(msg)
+	case "image":
+		return m.updateSetupImage(msg)
 	}
 
 	switch msg.String() {
@@ -993,7 +1355,88 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch setupOptions[m.setupCursor] {
 		case "Machine":
 			m.setupField = "machine"
+			// Land the picker cursor on the active machine.
+			for i, name := range m.machines {
+				if name == m.proj.Defaults.Machine {
+					m.machineCursor = i
+					break
+				}
+			}
+		case "Image":
+			m.setupField = "image"
+			m.imageCursor = 0
+			imgs := m.imageUnits()
+			for i, name := range imgs {
+				if name == m.proj.Defaults.Image {
+					m.imageCursor = i
+					break
+				}
+			}
 		}
+		return m, nil
+	}
+	return m, nil
+}
+
+// imageUnits returns the sorted names of all image-class units in the project.
+func (m model) imageUnits() []string {
+	var out []string
+	for name, u := range m.proj.Units {
+		if u.Class == "image" {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (m model) updateSetupImage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	imgs := m.imageUnits()
+	switch msg.String() {
+	case "esc":
+		m.setupField = ""
+		return m, nil
+
+	case "up", "k":
+		if m.imageCursor > 0 {
+			m.imageCursor--
+		}
+		return m, nil
+
+	case "down", "j":
+		if m.imageCursor < len(imgs)-1 {
+			m.imageCursor++
+		}
+		return m, nil
+
+	case "enter":
+		if len(imgs) == 0 {
+			return m, nil
+		}
+		picked := imgs[m.imageCursor]
+		m.proj.Defaults.Image = picked
+		// Re-anchor the search to the new image's closure: both the
+		// active query and the saved default switch to in:<picked> so
+		// the table filters to what the new image actually pulls in.
+		newQ := "in:" + picked
+		if q, err := query.Parse(newQ); err == nil {
+			m.query = q
+			m.queryInput = q.String()
+			m.queryError = ""
+			m.savedQuery = m.query.String()
+		}
+		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+		ov.Image = picked
+		ov.Query = newQ
+		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
+			m.message = fmt.Sprintf("Image set to %s (warning: failed to save local.star: %v)", picked, err)
+		} else {
+			m.message = fmt.Sprintf("Image set to %s (saved to local.star)", picked)
+		}
+		m.applyQuery()
+		m.setupField = ""
+		m.view = viewUnits
+		m.scrollUnitIntoView(picked)
 		return m, nil
 	}
 	return m, nil
@@ -1270,56 +1713,137 @@ func (m model) View() string {
 	}
 }
 
-func (m model) viewUnits() string {
+// renderHomeHeader renders the title + warning + notification + feed
+// banners + the tab bar. Shared by all home-screen tabs so the chrome
+// is identical across them.
+func (m model) renderHomeHeader() string {
 	var b strings.Builder
-
-	// Header
 	machine := m.proj.Defaults.Machine
 	image := m.proj.Defaults.Image
-	b.WriteString(fmt.Sprintf("  %s  Machine: %s  Image: %s\n",
+	fmt.Fprintf(&b, "  %s  Machine: %s  Image: %s\n",
 		titleStyle.Render("[yoe]"),
 		headerStyle.Render(machine),
-		headerStyle.Render(image)))
+		headerStyle.Render(image))
 
-	// Warning banner
 	if m.warning != "" {
 		warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Bold(true)
-		b.WriteString(fmt.Sprintf("  %s\n", warnStyle.Render(m.warning)))
+		fmt.Fprintf(&b, "  %s\n", warnStyle.Render(m.warning))
 	}
-	// Global notification (e.g., container rebuild)
 	if m.notification != "" {
 		notifyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Bold(true)
-		b.WriteString(fmt.Sprintf("  %s\n", notifyStyle.Render("⏳ "+m.notification)))
+		fmt.Fprintf(&b, "  %s\n", notifyStyle.Render("⏳ "+m.notification))
 	}
-	// Feed status (yoe serve)
 	if m.feedStatus != "" {
 		feedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-		b.WriteString(fmt.Sprintf("  %s\n", feedStyle.Render("feed: "+m.feedStatus)))
+		fmt.Fprintf(&b, "  %s\n", feedStyle.Render("feed: "+m.feedStatus))
 	}
-	b.WriteString("\n")
 
-	// Query header
-	qStr := m.query.String()
-	qLabel := "Query: "
-	qBody := qStr
-	if qBody == "" {
-		qBody = "(empty — showing all)"
+	// Tab bar with diagnostics-count badge so the user notices when
+	// shadows or duplicate provides exist without leaving the Units tab.
+	// Active tab is wrapped in `[ ... ]` and styled bold/amber so it
+	// reads as selected even on terminals that don't render underline.
+	var tabs []string
+	for t := homeTab(0); t < numHomeTabs; t++ {
+		label := t.String()
+		if t == tabDiagnostics {
+			n := m.diagnosticsRowCount()
+			if n > 0 {
+				label = fmt.Sprintf("%s (%d)", label, n)
+			}
+		}
+		if t == m.activeTab {
+			tabs = append(tabs, tabActiveStyle.Render("[ "+label+" ]"))
+		} else {
+			tabs = append(tabs, tabInactiveStyle.Render("  "+label+"  "))
+		}
 	}
-	style := queryDimStyle
-	if qStr != m.savedQuery {
-		style = queryActiveStyle
+	fmt.Fprintf(&b, "  %s    %s%s\n",
+		strings.Join(tabs, " "),
+		helpKeyStyle.Render("tab"),
+		helpStyle.Render(": switch"))
+	return b.String()
+}
+
+func (m model) viewUnits() string {
+	switch m.activeTab {
+	case tabModules:
+		return m.viewModulesTab()
+	case tabDiagnostics:
+		return m.viewDiagnosticsTab()
 	}
+	return m.viewUnitsTab()
+}
+
+func (m model) viewUnitsTab() string {
+	var b strings.Builder
+	b.WriteString(m.renderHomeHeader())
+
+	// Query header — when the user presses `/`, the input editor replaces
+	// the query body in place rather than opening a separate input row at
+	// the bottom of the screen, so the eye stays on one Query: ... line.
 	counter := fmt.Sprintf("Units: %d/%d", len(m.visible), len(m.units))
-	b.WriteString(fmt.Sprintf("  %s%s    %s\n",
-		queryDimStyle.Render(qLabel),
-		style.Render(qBody),
-		queryDimStyle.Render(counter)))
+	if m.queryEditing {
+		var body string
+		if m.queryError != "" {
+			body = fmt.Sprintf("/%s    %s",
+				m.queryInput,
+				queryErrorStyle.Render(m.queryError))
+		} else {
+			body = fmt.Sprintf("/%s▌", m.queryInput)
+		}
+		b.WriteString(fmt.Sprintf("  %s%s    %s\n",
+			queryDimStyle.Render("Query: "),
+			body,
+			queryDimStyle.Render(counter)))
+	} else {
+		qStr := m.query.String()
+		qBody := qStr
+		if qBody == "" {
+			qBody = "(empty — showing all)"
+		}
+		style := queryDimStyle
+		if qStr != m.savedQuery {
+			style = queryActiveStyle
+		}
+		b.WriteString(fmt.Sprintf("  %s%s    %s\n",
+			queryDimStyle.Render("Query: "),
+			style.Render(qBody),
+			queryDimStyle.Render(counter)))
+	}
 
-	// Column header
-	b.WriteString(fmt.Sprintf("  %s %s %s\n",
-		headerStyle.Render(fmt.Sprintf("%-28s", "NAME")),
-		headerStyle.Render(fmt.Sprintf("%-12s", "CLASS")),
-		headerStyle.Render("STATUS")))
+	// Column header — pad widths match the rows below; clicking a label
+	// switches the sort. A trailing arrow marks the active column. Padding
+	// is by display cells (not bytes) since the arrow runes are multi-byte
+	// — fmt %*s would over-pad if we let it count bytes.
+	headerLabel := func(col int, label string, w int, rightAlign bool) string {
+		arrow := ""
+		if m.sortColumn == col {
+			if m.sortDesc {
+				arrow = "↓"
+			} else {
+				arrow = "↑"
+			}
+		}
+		displayW := len(label)
+		if arrow != "" {
+			displayW++
+		}
+		if displayW >= w {
+			return label + arrow
+		}
+		pad := strings.Repeat(" ", w-displayW)
+		if rightAlign {
+			return pad + label + arrow
+		}
+		return label + arrow + pad
+	}
+	b.WriteString(fmt.Sprintf("  %s %s %s %s %s %s\n",
+		headerStyle.Render(headerLabel(sortByName, "NAME", 28, false)),
+		headerStyle.Render(headerLabel(sortByClass, "CLASS", 9, false)),
+		headerStyle.Render(headerLabel(sortByModule, "MODULE", 14, false)),
+		headerStyle.Render(headerLabel(sortBySize, "SIZE", 6, true)),
+		headerStyle.Render(headerLabel(sortByDeps, "DEPS", 5, true)),
+		headerStyle.Render(headerLabel(sortByStatus, "STATUS", 10, false))))
 
 	// Determine visible units — filtered by current query state
 	visible := m.visible
@@ -1331,10 +1855,13 @@ func (m model) viewUnits() string {
 		end = len(visible)
 	}
 
+	// Always emit a row here — either the "↑ N more" indicator when
+	// scrolled, or a blank line — so the bottom of the screen doesn't
+	// shift up by one when the user is at the top of the list.
 	if m.listOffset > 0 {
 		b.WriteString(dimStyle.Render(fmt.Sprintf("  ↑ %d more", m.listOffset)))
-		b.WriteString("\n")
 	}
+	b.WriteString("\n")
 
 	for _, i := range visible[m.listOffset:end] {
 		name := m.units[i]
@@ -1348,8 +1875,13 @@ func (m model) viewUnits() string {
 		}
 
 		class := ""
+		module := ""
 		if u, ok := m.proj.Units[name]; ok {
 			class = u.Class
+			module = u.Module
+			if module == "" {
+				module = "(local)"
+			}
 			if i != m.cursor {
 				switch class {
 				case "image":
@@ -1366,67 +1898,394 @@ func (m model) viewUnits() string {
 		}
 
 		status := m.renderStatus(name)
+		size := formatSize(m.unitSize[name])
+		depsStr := ""
+		if d, ok := m.unitDeps[name]; ok && d > 0 {
+			depsStr = fmt.Sprintf("%d", d)
+		}
 
-		paddedName := fmt.Sprintf("%-28s", name)
-		paddedClass := fmt.Sprintf("%-12s", class)
-		b.WriteString(fmt.Sprintf("%s%s %s %s\n",
+		paddedName := clipFixed(name, 28)
+		paddedClass := clipFixed(class, 9)
+		paddedModule := clipFixed(module, 14)
+		paddedSize := fmt.Sprintf("%6s", size)
+		paddedDeps := fmt.Sprintf("%5s", depsStr)
+		b.WriteString(fmt.Sprintf("%s%s %s %s %s %s %s\n",
 			cursor,
 			m.renderName(paddedName, nameStyle),
 			classStyle.Render(paddedClass),
+			classStyle.Render(paddedModule),
+			classStyle.Render(paddedSize),
+			classStyle.Render(paddedDeps),
 			status))
 	}
 
+	// Same treatment as ↑ above — always one line, blank when there
+	// isn't more below — so the bottom row's position is independent
+	// of the scroll state.
 	if end < len(visible) {
 		b.WriteString(dimStyle.Render(fmt.Sprintf("  ↓ %d more", len(visible)-end)))
-		b.WriteString("\n")
 	}
+	b.WriteString("\n")
 
 	if len(m.visible) == 0 {
 		b.WriteString(dimStyle.Render("  no units match\n"))
 	}
 
-	// Search bar or help bar
+	// Spare line above the bottom row — always shows the full name of
+	// the cursor's unit in a faded version of the cursor green. Useful
+	// when the name is longer than the NAME column, and a quiet
+	// confirmation of which unit the cursor is on the rest of the time.
+	if m.cursor < len(m.units) {
+		b.WriteString(cursorNameStyle.Render("  " + m.units[m.cursor]))
+	}
 	b.WriteString("\n")
-	if m.queryEditing {
-		if m.queryError != "" {
-			b.WriteString(fmt.Sprintf("  /%s    %s",
-				m.queryInput,
-				queryErrorStyle.Render(m.queryError)))
-		} else {
-			b.WriteString(fmt.Sprintf("  /%s▌", m.queryInput))
-		}
+	if m.message != "" {
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
 	} else {
-		help := "  b build  D deploy  x cancel  e edit  l log  s setup  / search  \\ home  S save  q quit"
+		items := defaultHelpItems
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
 			if u, ok := m.proj.Units[name]; ok && u.Class == "image" {
 				if m.statuses[name] == statusCached {
-					help = "  b build  x cancel  r run  f flash  e edit  l log  s setup  / search  \\ home  S save  q quit"
+					items = imageCachedHelpItems
 				} else {
-					help = "  b build  x cancel  r run  e edit  l log  s setup  / search  \\ home  S save  q quit"
+					items = imageHelpItems
 				}
 			}
 		}
-		b.WriteString(helpStyle.Render(help))
-	}
-	b.WriteString("\n")
-
-	// Status message
-	if m.message != "" {
-		b.WriteString("\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  "+m.message))
-		b.WriteString("\n")
+		b.WriteString(renderHelp(items))
 	}
 
 	return b.String()
 }
+
+// helpItem is one keyboard shortcut + its label, rendered as
+// "<amber key> <gray label>" in the bottom help bar.
+type helpItem struct {
+	key   string
+	label string
+}
+
+var (
+	defaultHelpItems = []helpItem{
+		{"b", "build"}, {"D", "deploy"}, {"x", "cancel"}, {"e", "edit"},
+		{"l", "log"}, {"s", "setup"}, {"/", "search"}, {`\`, "home"},
+		{"S", "save"}, {"o", "sort"}, {"q", "quit"},
+	}
+	imageHelpItems = []helpItem{
+		{"b", "build"}, {"x", "cancel"}, {"r", "run"}, {"e", "edit"},
+		{"l", "log"}, {"s", "setup"}, {"/", "search"}, {`\`, "home"},
+		{"S", "save"}, {"q", "quit"},
+	}
+	imageCachedHelpItems = []helpItem{
+		{"b", "build"}, {"x", "cancel"}, {"r", "run"}, {"f", "flash"},
+		{"e", "edit"}, {"l", "log"}, {"s", "setup"}, {"/", "search"},
+		{`\`, "home"}, {"S", "save"}, {"q", "quit"},
+	}
+	detailHelpItems = []helpItem{
+		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
+		{"/", "search"}, {"b", "build"}, {"d", "diagnose"}, {"l", "log"},
+	}
+	detailImageHelpItems = []helpItem{
+		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
+		{"/", "search"}, {"b", "build"}, {"r", "run"}, {"d", "diagnose"}, {"l", "log"},
+	}
+)
+
+// renderHelp formats a list of shortcuts as "  k1 label1  k2 label2 …"
+// with the shortcut key in amber and the label in dim gray.
+func renderHelp(items []helpItem) string {
+	var b strings.Builder
+	for _, it := range items {
+		b.WriteString("  ")
+		b.WriteString(helpKeyStyle.Render(it.key))
+		b.WriteString(" ")
+		b.WriteString(helpStyle.Render(it.label))
+	}
+	return b.String()
+}
+
+// viewModulesTab renders the Modules tab — one row per resolved module
+// with declared metadata and live git status.
+func (m model) viewModulesTab() string {
+	var b strings.Builder
+	b.WriteString(m.renderHomeHeader())
+
+	mods := m.proj.ResolvedModules
+	fmt.Fprintf(&b, "  %s%s\n",
+		queryDimStyle.Render("Modules: "),
+		queryDimStyle.Render(fmt.Sprintf("%d declared", len(mods))))
+	fmt.Fprintf(&b, "  %s\n", headerStyle.Render(fmt.Sprintf("%-22s %-10s %-32s %-32s %s",
+		"NAME", "REF", "URL", "PATH", "STATUS")))
+
+	viewH := m.modulesViewportHeight()
+
+	// Render each module row into a flat list, then scroll-window it
+	// the same way viewUnitsTab handles its visible slice.
+	rendered := make([]string, 0, len(mods))
+	for i, rm := range mods {
+		cursorMark := "  "
+		nameStyle := classUnitStyle
+		if i == m.modulesCursor {
+			cursorMark = "→ "
+			nameStyle = selectedStyle
+		}
+		ref := rm.Ref
+		if ref == "" {
+			ref = "-"
+		}
+		url := rm.URL
+		if url == "" {
+			url = "(unset)"
+		}
+		path := rm.Path
+		if rm.Local != "" {
+			path = "local:" + rm.Local
+			if rm.Path != "" {
+				path += "/" + rm.Path
+			}
+		}
+		if path == "" {
+			path = "(root)"
+		}
+		status := m.moduleStatus[rm.Name]
+		if status == "" {
+			status = "?"
+		}
+		statusStyle := dimStyle
+		switch status {
+		case "clean":
+			statusStyle = cachedStyle
+		case "missing":
+			statusStyle = failedStyle
+		case "no-git":
+			statusStyle = dimStyle
+		default:
+			if strings.HasPrefix(status, "dirty") {
+				statusStyle = waitingStyle
+			}
+		}
+		rendered = append(rendered, fmt.Sprintf("%s%s %s %s %s %s",
+			cursorMark,
+			nameStyle.Render(clipFixed(rm.Name, 22)),
+			classUnitStyle.Render(clipFixed(ref, 10)),
+			dimStyle.Render(clipFixed(url, 32)),
+			dimStyle.Render(clipFixed(path, 32)),
+			statusStyle.Render(status)))
+	}
+
+	// Cursor-driven scroll offset: smallest offset that keeps the
+	// cursor row in the viewport.
+	offset := 0
+	if m.modulesCursor >= viewH {
+		offset = m.modulesCursor - viewH + 1
+	}
+	end := offset + viewH
+	if end > len(rendered) {
+		end = len(rendered)
+	}
+
+	// Top "more" indicator (always one line).
+	if offset > 0 {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  ↑ %d more", offset)))
+	}
+	b.WriteString("\n")
+
+	for i := offset; i < end; i++ {
+		b.WriteString(rendered[i])
+		b.WriteString("\n")
+	}
+	for i := end - offset; i < viewH; i++ {
+		b.WriteString("\n")
+	}
+
+	// Bottom "more" indicator.
+	if end < len(rendered) {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  ↓ %d more", len(rendered)-end)))
+	}
+	b.WriteString("\n")
+
+	if len(mods) == 0 {
+		b.WriteString(dimStyle.Render("  (no modules declared in PROJECT.star)\n"))
+	}
+
+	// Detail strip for the cursor row — useful when fields are clipped.
+	if m.modulesCursor >= 0 && m.modulesCursor < len(mods) {
+		rm := mods[m.modulesCursor]
+		dir := rm.Dir
+		if dir == "" {
+			dir = "(not synced)"
+		}
+		fmt.Fprintf(&b, "  %s %s\n", dimStyle.Render("dir:"), dim(dir))
+		if rm.URL != "" {
+			fmt.Fprintf(&b, "  %s %s\n", dimStyle.Render("url:"), dim(rm.URL))
+		}
+	} else {
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString("\n") // blank before help/message
+	if m.message != "" {
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
+	} else {
+		b.WriteString(renderHelp([]helpItem{
+			{"tab", "next tab"}, {"j/k", "move"}, {"g/G", "top/bottom"}, {"r", "refresh"}, {"q", "quit"},
+		}))
+	}
+	return b.String()
+}
+
+// viewDiagnosticsTab renders the Diagnostics tab: shadowed units and
+// duplicate provides surfaced from Project.Diagnostics. The content
+// scrolls when it exceeds the available height; section/column headers
+// scroll with the rows so the user can see what they belong to.
+func (m model) viewDiagnosticsTab() string {
+	var b strings.Builder
+	b.WriteString(m.renderHomeHeader())
+
+	diag := m.proj.Diagnostics
+	fmt.Fprintf(&b, "  %s%s\n",
+		queryDimStyle.Render("Diagnostics: "),
+		queryDimStyle.Render(fmt.Sprintf("%d shadowed, %d duplicate provides",
+			len(diag.Shadows), len(diag.DuplicateProvides))))
+
+	viewH := m.diagnosticsViewportHeight()
+
+	if len(diag.Shadows) == 0 && len(diag.DuplicateProvides) == 0 {
+		b.WriteString("\n") // ↑ more (reserved)
+		b.WriteString(dimStyle.Render("  no diagnostic issues — every unit name and `provides` claim is unique.\n"))
+		for i := 1; i < viewH; i++ {
+			b.WriteString("\n")
+		}
+		b.WriteString("\n") // ↓ more (reserved)
+		b.WriteString("\n") // blank
+		b.WriteString(renderHelp([]helpItem{
+			{"tab", "next tab"}, {"q", "quit"},
+		}))
+		return b.String()
+	}
+
+	// Build content as a flat list of pre-rendered lines plus a parallel
+	// mapping from row index to line index so we can scroll the cursor
+	// into view.
+	var lines []string
+	rowLine := make([]int, 0, m.diagnosticsRowCount())
+	row := 0
+
+	if len(diag.Shadows) > 0 {
+		lines = append(lines, "  "+headerStyle.Render(fmt.Sprintf("SHADOWED UNITS (%d)", len(diag.Shadows))))
+		lines = append(lines, "  "+dimStyle.Render(fmt.Sprintf("%-28s %-22s %s", "UNIT", "WINNER", "SHADOWED FROM")))
+		for _, s := range diag.Shadows {
+			cursor := "  "
+			style := classUnitStyle
+			if row == m.diagnosticsCursor {
+				cursor = "→ "
+				style = selectedStyle
+			}
+			rowLine = append(rowLine, len(lines))
+			lines = append(lines, fmt.Sprintf("%s%s %s %s",
+				cursor,
+				style.Render(clipFixed(s.Unit, 28)),
+				dimStyle.Render(clipFixed(displayModule(s.WinnerModule), 22)),
+				dimStyle.Render(displayModule(s.LoserModule))))
+			row++
+		}
+	}
+	if len(diag.DuplicateProvides) > 0 {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, "  "+headerStyle.Render(fmt.Sprintf("DUPLICATE PROVIDES (%d)", len(diag.DuplicateProvides))))
+		lines = append(lines, "  "+dimStyle.Render(fmt.Sprintf("%-22s %-28s %s", "VIRTUAL", "ACTIVE", "ALSO PROVIDED BY")))
+		for _, p := range diag.DuplicateProvides {
+			cursor := "  "
+			style := classUnitStyle
+			if row == m.diagnosticsCursor {
+				cursor = "→ "
+				style = selectedStyle
+			}
+			others := strings.Join(p.Others, ", ")
+			rowLine = append(rowLine, len(lines))
+			lines = append(lines, fmt.Sprintf("%s%s %s %s",
+				cursor,
+				style.Render(clipFixed(p.Virtual, 22)),
+				cachedStyle.Render(clipFixed(p.Active, 28)),
+				dimStyle.Render(others)))
+			row++
+		}
+	}
+
+	// Derive the scroll offset from the cursor: pick the smallest
+	// offset that keeps the cursor row visible.
+	cursorLine := -1
+	if m.diagnosticsCursor >= 0 && m.diagnosticsCursor < len(rowLine) {
+		cursorLine = rowLine[m.diagnosticsCursor]
+	}
+	offset := 0
+	if cursorLine >= viewH {
+		offset = cursorLine - viewH + 1
+	}
+	if offset > len(lines)-viewH {
+		offset = len(lines) - viewH
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	end := offset + viewH
+	if end > len(lines) {
+		end = len(lines)
+	}
+
+	// Top "more" indicator (always one line, blank when at top).
+	if offset > 0 {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  ↑ %d more", offset)))
+	}
+	b.WriteString("\n")
+
+	for i := offset; i < end; i++ {
+		b.WriteString(lines[i])
+		b.WriteString("\n")
+	}
+	for i := end - offset; i < viewH; i++ {
+		b.WriteString("\n")
+	}
+
+	// Bottom "more" indicator.
+	if end < len(lines) {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  ↓ %d more", len(lines)-end)))
+	}
+	b.WriteString("\n")
+	b.WriteString("\n") // blank before help/message
+
+	if m.message != "" {
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
+	} else {
+		b.WriteString(renderHelp([]helpItem{
+			{"tab", "next tab"}, {"j/k", "move"}, {"g/G", "top/bottom"}, {"q", "quit"},
+		}))
+	}
+	return b.String()
+}
+
+// displayModule formats a module name for display ("project root" for
+// the empty string, the literal name otherwise).
+func displayModule(name string) string {
+	if name == "" {
+		return "project root"
+	}
+	return name
+}
+
+// dim renders a string in the dim style, used inline within format strings.
+func dim(s string) string { return dimStyle.Render(s) }
 
 func (m model) viewSetup() string {
 	var b strings.Builder
 
 	b.WriteString(fmt.Sprintf("  %s\n\n", titleStyle.Render("Setup")))
 
-	if m.setupField == "machine" {
+	switch m.setupField {
+	case "machine":
 		// Machine picker
 		b.WriteString(headerStyle.Render("  Select Machine"))
 		b.WriteString("\n\n")
@@ -1452,7 +2311,35 @@ func (m model) viewSetup() string {
 		b.WriteString("\n")
 		b.WriteString(helpStyle.Render("  enter select  esc back"))
 		b.WriteString("\n")
-	} else {
+
+	case "image":
+		// Image picker
+		b.WriteString(headerStyle.Render("  Select Default Image"))
+		b.WriteString("\n\n")
+
+		imgs := m.imageUnits()
+		if len(imgs) == 0 {
+			b.WriteString(dimStyle.Render("  no image() units defined in this project\n"))
+		}
+		for i, name := range imgs {
+			cursor := "  "
+			style := dimStyle
+			if i == m.imageCursor {
+				cursor = "→ "
+				style = selectedStyle
+			}
+			current := ""
+			if name == m.proj.Defaults.Image {
+				current = cachedStyle.Render(" (current)")
+			}
+			b.WriteString(fmt.Sprintf("%s%s%s\n", cursor, style.Render(name), current))
+		}
+
+		b.WriteString("\n")
+		b.WriteString(helpStyle.Render("  enter select  esc back"))
+		b.WriteString("\n")
+
+	default:
 		// Top-level setup menu
 		for i, opt := range setupOptions {
 			cursor := "  "
@@ -1465,6 +2352,8 @@ func (m model) viewSetup() string {
 			switch opt {
 			case "Machine":
 				value = headerStyle.Render(m.proj.Defaults.Machine)
+			case "Image":
+				value = headerStyle.Render(m.proj.Defaults.Image)
 			}
 			b.WriteString(fmt.Sprintf("%s%s  %s\n", cursor, style.Render(opt), value))
 		}
@@ -1485,6 +2374,16 @@ func (m model) viewSetup() string {
 
 func (m model) detailAllLines() []string {
 	var allLines []string
+
+	// Dependency context for the unit, above the build output: whether
+	// the current default image pulls it in (upstream) and what this
+	// unit transitively pulls in itself (downstream).
+	allLines = append(allLines, headerStyle.Render("  USED BY (upstream)"))
+	allLines = append(allLines, m.upstreamLines()...)
+	allLines = append(allLines, "")
+	allLines = append(allLines, headerStyle.Render("  PULLS IN (downstream)"))
+	allLines = append(allLines, m.renderUnitTree(m.detailUnit, m.downstreamChildren, 4)...)
+	allLines = append(allLines, "")
 
 	allLines = append(allLines, headerStyle.Render("  BUILD OUTPUT"))
 	if len(m.outputLines) == 0 {
@@ -1507,6 +2406,195 @@ func (m model) detailAllLines() []string {
 	}
 
 	return allLines
+}
+
+// upstreamLines surfaces *why* the current default image ships
+// m.detailUnit, by walking back through runtime_deps to the explicit
+// pick(s) the user wrote in image(). Three states:
+//
+//   - The unit itself is in the explicit list: "└── <image> (explicit)"
+//   - It's pulled in transitively: list each explicit pick with the
+//     runtime-dep chain that bridges them, e.g.
+//       └── dev-image (image)
+//             ├── x11 → libx11 → cairo
+//             └── yazi → libpango → cairo
+//   - Nothing in the explicit list reaches it: "(not in <image>)"
+func (m model) upstreamLines() []string {
+	imgName := m.proj.Defaults.Image
+	if imgName == "" {
+		return []string{dimStyle.Render("    (no default image set)")}
+	}
+	img, ok := m.proj.Units[imgName]
+	if !ok || img.Class != "image" {
+		return []string{dimStyle.Render("    (default image " + imgName + " not found)")}
+	}
+	if len(img.ArtifactsExplicit) == 0 {
+		// Older image() output without artifacts_explicit. We can't
+		// distinguish explicit from transitive — report rootfs
+		// membership only, without claiming "explicit".
+		for _, a := range img.Artifacts {
+			if a == m.detailUnit {
+				return []string{"  └── " + imgName + dimStyle.Render(" (image)")}
+			}
+		}
+		return []string{dimStyle.Render("    (not in " + imgName + ")")}
+	}
+
+	// Direct: unit is itself an explicit pick.
+	for _, a := range img.ArtifactsExplicit {
+		if a == m.detailUnit {
+			return []string{"  └── " + imgName + dimStyle.Render(" (image, explicit)")}
+		}
+	}
+
+	// Indirect: find a runtime-dep path from each explicit pick to
+	// the unit. Picks that don't reach it are skipped.
+	type chain struct {
+		pick string
+		path []string
+	}
+	var chains []chain
+	for _, pick := range img.ArtifactsExplicit {
+		if path := m.findRuntimePath(pick, m.detailUnit); path != nil {
+			chains = append(chains, chain{pick, path})
+		}
+	}
+	if len(chains) == 0 {
+		return []string{dimStyle.Render("    (not in " + imgName + ")")}
+	}
+	sort.Slice(chains, func(i, j int) bool { return chains[i].pick < chains[j].pick })
+
+	out := []string{"  └── " + imgName + dimStyle.Render(" (image)")}
+	for i, c := range chains {
+		connector := "├── "
+		if i == len(chains)-1 {
+			connector = "└── "
+		}
+		out = append(out, "      "+connector+strings.Join(c.path, " → "))
+	}
+	return out
+}
+
+// findRuntimePath returns the shortest chain from->...->to via
+// runtime_deps (with provides routing), or nil if `to` isn't
+// reachable from `from`. The returned slice includes both endpoints.
+func (m model) findRuntimePath(from, to string) []string {
+	if from == to {
+		return []string{from}
+	}
+	type state struct {
+		name string
+		path []string
+	}
+	visited := map[string]bool{from: true}
+	queue := []state{{from, []string{from}}}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		u, ok := m.proj.Units[cur.name]
+		if !ok {
+			continue
+		}
+		for _, dep := range u.RuntimeDeps {
+			if real, ok := m.proj.Provides[dep]; ok {
+				dep = real
+			}
+			if visited[dep] {
+				continue
+			}
+			next := append(append([]string{}, cur.path...), dep)
+			if dep == to {
+				return next
+			}
+			visited[dep] = true
+			queue = append(queue, state{dep, next})
+		}
+	}
+	return nil
+}
+
+// downstreamChildren returns the units that `name` pulls in at runtime
+// — runtime_deps with virtual provides routed through proj.Provides,
+// so the tree shows the concrete unit that wins override resolution.
+// For image units the user's explicit artifact list (pre-closure
+// expansion) takes the place of runtime_deps, so the top of the tree
+// matches what the user actually wrote in image() rather than the
+// fully flattened runtime closure.
+func (m model) downstreamChildren(name string) []string {
+	u, ok := m.proj.Units[name]
+	if !ok {
+		return nil
+	}
+	deps := u.RuntimeDeps
+	if u.Class == "image" {
+		deps = u.ArtifactsExplicit
+		if len(deps) == 0 {
+			// Older image() output without artifacts_explicit — fall
+			// back to the resolved artifact list so the tree still
+			// renders something.
+			deps = u.Artifacts
+		}
+	}
+	var out []string
+	for _, dep := range deps {
+		if real, ok := m.proj.Provides[dep]; ok {
+			dep = real
+		}
+		if _, ok := m.proj.Units[dep]; ok {
+			out = append(out, dep)
+		}
+	}
+	return out
+}
+
+// renderUnitTree walks `getChildren` from root and returns the tree
+// formatted with ├── / └── connectors. Repeated nodes are listed but
+// not re-expanded so trees with shared subtrees (musl is everywhere)
+// stay readable. Walking stops at maxDepth and at image-class leaves.
+func (m model) renderUnitTree(root string, getChildren func(string) []string, maxDepth int) []string {
+	children := getChildren(root)
+	if len(children) == 0 {
+		return []string{dimStyle.Render("    (none)")}
+	}
+	seen := map[string]bool{}
+	var out []string
+	var walk func(name, prefix string, isLast bool, depth int)
+	walk = func(name, prefix string, isLast bool, depth int) {
+		connector := "├── "
+		if isLast {
+			connector = "└── "
+		}
+		label := name
+		if u, ok := m.proj.Units[name]; ok {
+			switch u.Class {
+			case "image":
+				label += dimStyle.Render(" (image)")
+			case "container":
+				label += dimStyle.Render(" (container)")
+			}
+		}
+		dup := ""
+		if seen[name] {
+			dup = dimStyle.Render(" …")
+		}
+		out = append(out, "  "+prefix+connector+label+dup)
+		if seen[name] || depth >= maxDepth {
+			return
+		}
+		seen[name] = true
+		grandkids := getChildren(name)
+		childPrefix := prefix + "    "
+		if !isLast {
+			childPrefix = prefix + "│   "
+		}
+		for i, c := range grandkids {
+			walk(c, childPrefix, i == len(grandkids)-1, depth+1)
+		}
+	}
+	for i, c := range children {
+		walk(c, "", i == len(children)-1, 1)
+	}
+	return out
 }
 
 // wrapLine hard-wraps a single logical line into one or more display lines
@@ -1652,22 +2740,25 @@ func (m model) viewDetail() string {
 		}
 		b.WriteString(fmt.Sprintf("  /%s%s\n", m.detailSearchText, dimStyle.Render(matchInfo)))
 	} else if m.detailSearchText != "" && len(m.detailMatches) > 0 {
-		b.WriteString(dimStyle.Render(fmt.Sprintf("  /%s [%d/%d]  n next  N prev\n",
+		// \n is appended OUTSIDE the lipgloss Render — when the
+		// newline is inside the styled string, the trailing reset
+		// escape lands on the next line and pushes the help bar to
+		// the right by a few cells in some terminals.
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  /%s [%d/%d]  n next  N prev",
 			m.detailSearchText, m.detailMatchIdx+1, len(m.detailMatches))))
+		b.WriteString("\n")
 	}
 
-	// Help bar
-	help := "  esc back  j/k scroll  g top  G bottom  / search  b build  d diagnose  l log"
-	if u, ok := m.proj.Units[m.detailUnit]; ok && u.Class == "image" {
-		help = "  esc back  j/k scroll  g top  G bottom  / search  b build  r run  d diagnose  l log"
-	}
-	b.WriteString(helpStyle.Render(help))
-	b.WriteString("\n")
-
+	// Bottom row: status message replaces the help bar, same pattern as
+	// the units view, so the detail page never trails extra blank lines.
 	if m.message != "" {
-		b.WriteString("\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  "+m.message))
-		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
+	} else {
+		items := detailHelpItems
+		if u, ok := m.proj.Units[m.detailUnit]; ok && u.Class == "image" {
+			items = detailImageHelpItems
+		}
+		b.WriteString(renderHelp(items))
 	}
 
 	return b.String()
@@ -1816,10 +2907,18 @@ func (m *model) refreshDetail() {
 	}
 }
 
-// detailViewportHeight returns the number of content lines visible in detail view.
-// Reserves lines for: header (2) + scroll indicator (1) + help bar (1) + message (2) + padding (1).
+// detailViewportHeight returns the number of content lines visible in
+// detail view. Chrome is counted exactly so the page doesn't trail
+// extra blank lines below the help bar: title + metadata + scroll
+// indicator + (search bar) + bottom row (help OR status message).
 func (m model) detailViewportHeight() int {
-	h := m.height - 7
+	chrome := 2 // title + metadata/blank
+	chrome++    // scroll indicator (always one line, blank when not scrolled)
+	if m.detailSearching || (m.detailSearchText != "" && len(m.detailMatches) > 0) {
+		chrome++ // search bar
+	}
+	chrome++ // bottom row (help or message, single line)
+	h := m.height - chrome
 	if h < 5 {
 		h = 5
 	}
@@ -1872,6 +2971,232 @@ func (m *model) adjustListOffset() {
 	}
 	if m.listOffset < 0 {
 		m.listOffset = 0
+	}
+}
+
+// scrollUnitIntoView moves the cursor to `name` and scrolls the units
+// list so that row is visible. Used when a build starts on a unit the
+// user isn't looking at — cursor follows so `enter` opens the detail
+// view of whatever is actively building, and j/k continues from there.
+// No-op if the unit isn't in m.visible (current query filtered it out).
+func (m *model) scrollUnitIntoView(name string) {
+	visible := m.visibleIndices()
+	idx := -1
+	for _, i := range visible {
+		if m.units[i] == name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return
+	}
+	m.cursor = idx
+	m.adjustListOffset()
+}
+
+// sortVisible reorders m.visible according to the active sort column and
+// direction. Empty/zero values for size and deps sort last in ascending
+// mode, first in descending mode — i.e., always to the bottom — so unbuilt
+// units never push real numbers off-screen. The unit name is the
+// tiebreaker so the order is deterministic.
+func (m *model) sortVisible() {
+	if len(m.visible) <= 1 {
+		return
+	}
+	col := m.sortColumn
+	desc := m.sortDesc
+
+	keyName := func(i int) string { return m.units[i] }
+	keyClass := func(i int) string {
+		if u, ok := m.proj.Units[m.units[i]]; ok {
+			return u.Class
+		}
+		return ""
+	}
+	keyModule := func(i int) string {
+		if u, ok := m.proj.Units[m.units[i]]; ok {
+			if u.Module == "" {
+				return "(local)"
+			}
+			return u.Module
+		}
+		return ""
+	}
+	keyStatus := func(i int) string { return statusKey(m.statuses[m.units[i]]) }
+
+	cmpString := func(a, b string) int {
+		switch {
+		case a < b:
+			return -1
+		case a > b:
+			return 1
+		}
+		return 0
+	}
+	cmpInt64 := func(a, b int64) int {
+		switch {
+		case a < b:
+			return -1
+		case a > b:
+			return 1
+		}
+		return 0
+	}
+
+	sort.SliceStable(m.visible, func(p, q int) bool {
+		i, j := m.visible[p], m.visible[q]
+		var c int
+		switch col {
+		case sortByClass:
+			c = cmpString(keyClass(i), keyClass(j))
+		case sortByModule:
+			c = cmpString(keyModule(i), keyModule(j))
+		case sortBySize:
+			a, b := m.unitSize[m.units[i]], m.unitSize[m.units[j]]
+			// Push zero (unbuilt) values to the bottom in both directions
+			// so the column always reads "real numbers, then blanks".
+			switch {
+			case a == 0 && b == 0:
+				c = 0
+			case a == 0:
+				return false
+			case b == 0:
+				return true
+			default:
+				c = cmpInt64(a, b)
+			}
+		case sortByDeps:
+			a, b := m.unitDeps[m.units[i]], m.unitDeps[m.units[j]]
+			switch {
+			case a == 0 && b == 0:
+				c = 0
+			case a == 0:
+				return false
+			case b == 0:
+				return true
+			default:
+				c = cmpInt64(int64(a), int64(b))
+			}
+		case sortByStatus:
+			c = cmpString(keyStatus(i), keyStatus(j))
+		default: // sortByName
+			c = cmpString(keyName(i), keyName(j))
+		}
+		if c == 0 {
+			c = cmpString(keyName(i), keyName(j))
+		}
+		if desc {
+			return c > 0
+		}
+		return c < 0
+	})
+}
+
+// recomputeMetrics rebuilds m.unitSize and m.unitDeps from the current
+// project + arch + machine. Cheap enough to run on every project reload
+// or build completion: each unit walks its own runtime closure once and
+// stats one or two files.
+func (m *model) recomputeMetrics() {
+	size := make(map[string]int64, len(m.units))
+	deps := make(map[string]int, len(m.units))
+	for _, name := range m.units {
+		u := m.proj.Units[name]
+		if u == nil {
+			continue
+		}
+		sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
+		buildDir := build.UnitBuildDir(m.projectDir, sd, name)
+		size[name] = installedSize(u, buildDir)
+
+		// Runtime closure of what the unit pulls in. For image units the
+		// package list lives in Artifacts (image.RuntimeDeps is empty
+		// by convention), so walk from the artifact roots instead — the
+		// number then reflects what actually ships on the device.
+		var roots []string
+		if u.Class == "image" {
+			roots = u.Artifacts
+		} else {
+			roots = []string{name}
+		}
+		closure := resolve.RuntimeClosure(m.proj, roots)
+		count := len(closure)
+		if u.Class != "image" && count > 0 {
+			count-- // don't count the unit itself for non-image units
+		}
+		deps[name] = count
+	}
+	m.unitSize = size
+	m.unitDeps = deps
+}
+
+// refreshUnitSize re-reads a single unit's installed size from disk.
+// Called when a unit's build just finished, so the SIZE column updates
+// incrementally during a multi-unit build instead of waiting for the
+// final recomputeMetrics. Skips the runtime-closure walk because deps
+// don't change just because the unit got built.
+func (m *model) refreshUnitSize(name string) {
+	u, ok := m.proj.Units[name]
+	if !ok {
+		return
+	}
+	sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
+	buildDir := build.UnitBuildDir(m.projectDir, sd, name)
+	if m.unitSize == nil {
+		m.unitSize = make(map[string]int64)
+	}
+	m.unitSize[name] = installedSize(u, buildDir)
+}
+
+// installedSize returns the on-disk size for a built unit. For image
+// units we report the .img file directly; everything else uses
+// BuildMeta.InstalledBytes (the destdir size that goes into the .apk).
+// Returns 0 when the unit has not been built yet.
+func installedSize(u *yoestar.Unit, buildDir string) int64 {
+	if u.Class == "image" {
+		if info, err := os.Stat(filepath.Join(buildDir, "destdir", u.Name+".img")); err == nil {
+			return info.Size()
+		}
+	}
+	if meta := build.ReadMeta(buildDir); meta != nil {
+		return meta.InstalledBytes
+	}
+	return 0
+}
+
+// clipFixed renders s in exactly w display cells: right-padded with
+// spaces when shorter, ellipsis-clipped when longer, so a long unit name
+// (e.g. abseil-cpp-atomic-hook-test-helper) can't push the rest of the
+// row off-screen. Assumes ASCII input — fine for unit/class/module
+// names today.
+func clipFixed(s string, w int) string {
+	if len(s) > w {
+		return s[:w-1] + "…"
+	}
+	return fmt.Sprintf("%-*s", w, s)
+}
+
+// formatSize renders a byte count in a fixed-width, human-readable form
+// using KiB/MiB/GiB. Empty string for unbuilt units (size == 0) so the
+// column reads as cleanly absent rather than misleading "0 B".
+func formatSize(b int64) string {
+	if b <= 0 {
+		return ""
+	}
+	const (
+		kib = 1024
+		mib = 1024 * kib
+		gib = 1024 * mib
+	)
+	switch {
+	case b >= gib:
+		return fmt.Sprintf("%.1fG", float64(b)/float64(gib))
+	case b >= mib:
+		return fmt.Sprintf("%.1fM", float64(b)/float64(mib))
+	case b >= kib:
+		return fmt.Sprintf("%.1fK", float64(b)/float64(kib))
+	default:
+		return fmt.Sprintf("%dB", b)
 	}
 }
 
@@ -1931,6 +3256,7 @@ func (m *model) recomputeStatuses() {
 			m.statuses[name] = statusNone
 		}
 	}
+	m.recomputeMetrics()
 }
 
 // checkBinfmtWarning sets or clears the warning banner based on whether
@@ -1944,12 +3270,44 @@ func (m *model) checkBinfmtWarning() {
 }
 
 // listViewportHeight returns the number of unit rows that fit on screen.
+// Chrome is counted exactly so the unit list never pushes the title and
+// banner lines off the top: when the rendered output exceeds the
+// terminal height, the terminal scrolls and the topmost lines disappear.
+//
+// The ↑/↓ "more" indicators are always reserved even when not currently
+// rendered (single-page state) so the row count doesn't jump by 1 the
+// moment the user crosses into multi-page territory.
 func (m model) listViewportHeight() int {
-	h := m.height - 8
-	if h < 5 {
-		h = 5
+	chrome := m.homeHeaderLines()
+	chrome++ // query header
+	chrome++ // column header
+	chrome++ // ↑ more (always reserved)
+	chrome++ // ↓ more (always reserved)
+	chrome++ // blank line before bottom row
+	chrome++ // bottom row: help / search / message — always one line
+	h := m.height - chrome
+	if h < 3 {
+		h = 3
 	}
 	return h
+}
+
+// homeHeaderLines returns the number of lines renderHomeHeader outputs.
+// Counted exactly so each tab can subtract chrome from m.height when
+// sizing its own scrollable region.
+func (m model) homeHeaderLines() int {
+	n := 1 // title
+	if m.warning != "" {
+		n++
+	}
+	if m.notification != "" {
+		n++
+	}
+	if m.feedStatus != "" {
+		n++
+	}
+	n++ // tab bar
+	return n
 }
 
 func findUnitFile(projectDir, name string) string {
@@ -2110,6 +3468,22 @@ func (m model) updateFlash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case flashWriting:
 		// no-op; ignore keys while writing
 		return m, nil
+	case flashPermPrompt:
+		switch strings.ToLower(msg.String()) {
+		case "y":
+			cand := m.flashCandidates[m.flashCursor]
+			username := flashChownUser()
+			c := exec.Command("sudo", "chown", username, cand.Path)
+			return m, tea.ExecProcess(c, func(err error) tea.Msg {
+				return flashChownDoneMsg{err: err}
+			})
+		case "esc", "n", "q":
+			cand := m.flashCandidates[m.flashCursor]
+			m.flashStage = flashError
+			m.flashErr = fmt.Errorf("permission denied — run: sudo chown %s %s", flashChownUser(), cand.Path)
+			return m, nil
+		}
+		return m, nil
 	case flashDone, flashError:
 		switch msg.String() {
 		case "esc", "q", "enter":
@@ -2179,6 +3553,14 @@ func (m model) viewFlash() string {
 			rate = fmt.Sprintf("%s / %s", device.FormatSize(m.flashWritten), device.FormatSize(m.flashTotal))
 		}
 		b.WriteString(dimStyle.Render(rate))
+	case flashPermPrompt:
+		cand := m.flashCandidates[m.flashCursor]
+		username := flashChownUser()
+		b.WriteString(failedStyle.Render(fmt.Sprintf("Permission denied writing %s.", cand.Path)))
+		b.WriteString("\n\n")
+		b.WriteString(fmt.Sprintf("Run sudo chown %s %s?", username, cand.Path))
+		b.WriteString("\n\n")
+		b.WriteString(helpStyle.Render("y to run sudo chown • n/esc to cancel"))
 	case flashDone:
 		b.WriteString(buildingStyle.Render("Flash complete."))
 		b.WriteString("\n\n")
@@ -2189,6 +3571,16 @@ func (m model) viewFlash() string {
 		b.WriteString(helpStyle.Render("press any key to return"))
 	}
 	return b.String()
+}
+
+// flashChownUser returns the username yoe should pass to `sudo chown`.
+// Resolved in the yoe process so the value isn't subject to sudo's
+// environment scrubbing.
+func flashChownUser() string {
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	return os.Getenv("USER")
 }
 
 // findImageForFlash locates the built image for an image unit at the

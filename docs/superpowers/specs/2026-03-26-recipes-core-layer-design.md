@@ -1,4 +1,4 @@
-# units-core Module Design
+# module-core Module Design
 
 The base metadata module for Yoe-NG. Contains the toolchain, base system,
 essential libraries, build classes, and QEMU machine definitions that every
@@ -6,21 +6,21 @@ Yoe-NG project depends on.
 
 ## Location
 
-`modules/units-core/` in the main yoe-ng repository. Will be extracted to its
-own Git repo (`github.com/yoe/units-core`) once stable. During development,
+`modules/module-core/` in the main yoe-ng repository. Will be extracted to its
+own Git repo (`github.com/yoe/module-core`) once stable. During development,
 projects reference it as a local module override:
 
 ```python
 # PROJECT.star
 modules = [
-    module("github.com/yoe/units-core", local = "../modules/units-core"),
+    module("github.com/yoe/module-core", local = "../modules/module-core"),
 ]
 ```
 
 ## Directory Structure
 
 ```
-modules/units-core/
+modules/module-core/
 ├── MODULE.star
 ├── classes/
 │   ├── autotools.star
@@ -99,7 +99,7 @@ flat layout as the module grows toward 100+ units.
 
 ```python
 module_info(
-    name = "units-core",
+    name = "module-core",
     description = "Yoe-NG base module: toolchain, base system, essential libraries, and QEMU machines",
     # No deps — this is the root module. All other modules depend on this one.
 )
@@ -258,7 +258,7 @@ directly or use the class wrapper.
    ```
 
    Within the module, `//` is relative to the module root. Downstream projects
-   loading from this module use `@units-core//classes/autotools.star`.
+   loading from this module use `@module-core//classes/autotools.star`.
 
 3. **Default sub-packages** apply automatically (`-dev`, `-doc`, `-dbg`). Units
    only declare `subpackages` for custom splits (e.g., openssh-server vs.

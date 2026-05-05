@@ -19,7 +19,7 @@ project(
     modules = [
         module("https://github.com/yoebuild/yoe.git",
               ref = "main",
-              path = "modules/units-core"),
+              path = "modules/module-core"),
         module("https://github.com/vendor/bsp-imx8.git",
               ref = "v2.1.0"),
     ],
@@ -29,13 +29,13 @@ project(
 **Module name** is derived from the `path` field's last component if set,
 otherwise the URL's repository name. Examples:
 
-| URL                              | path                 | Derived name |
-| -------------------------------- | -------------------- | ------------ |
-| `github.com/yoebuild/yoe.git`    | `modules/units-core` | `units-core` |
-| `github.com/vendor/bsp-imx8.git` | (none)               | `bsp-imx8`   |
+| URL                              | path                  | Derived name  |
+| -------------------------------- | --------------------- | ------------- |
+| `github.com/yoebuild/yoe.git`    | `modules/module-core` | `module-core` |
+| `github.com/vendor/bsp-imx8.git` | (none)                | `bsp-imx8`    |
 
 Module names are used in `load()` statements:
-`load("@units-core//classes/autotools.star", "autotools")`.
+`load("@module-core//classes/autotools.star", "autotools")`.
 
 ### Module directory structure
 
@@ -106,16 +106,16 @@ Runtime deps are resolved transitively by `apk` at install time.
 
 Starlark `load()` statements use three forms:
 
-| Form            | Resolves to                         | Example                                                    |
-| --------------- | ----------------------------------- | ---------------------------------------------------------- |
-| `@module//path` | Named module root                   | `load("@units-core//classes/autotools.star", "autotools")` |
-| `//path`        | Current module root (context-aware) | `load("//classes/cmake.star", "cmake")`                    |
-| `relative/path` | Relative to current file            | `load("../utils.star", "helper")`                          |
+| Form            | Resolves to                         | Example                                                     |
+| --------------- | ----------------------------------- | ----------------------------------------------------------- |
+| `@module//path` | Named module root                   | `load("@module-core//classes/autotools.star", "autotools")` |
+| `//path`        | Current module root (context-aware) | `load("//classes/cmake.star", "cmake")`                     |
+| `relative/path` | Relative to current file            | `load("../utils.star", "helper")`                           |
 
 The `//` form is context-aware: if the file is inside a module, `//` resolves to
 that module's root. Otherwise it resolves to the project root. This means a unit
-in `units-core` can `load("//classes/autotools.star", ...)` and it resolves
-within `units-core`, not the project root.
+in `module-core` can `load("//classes/autotools.star", ...)` and it resolves
+within `module-core`, not the project root.
 
 ## Virtual packages (PROVIDES)
 
@@ -157,13 +157,13 @@ module:
 ```python
 # projects/product-a.star
 project(name = "product-a", modules = [
-    module("...", path = "modules/units-core"),
+    module("...", path = "modules/module-core"),
     module("...", path = "modules/config-systemd"),
 ])
 
 # projects/product-b.star
 project(name = "product-b", modules = [
-    module("...", path = "modules/units-core"),
+    module("...", path = "modules/module-core"),
     module("...", path = "modules/config-busybox-init"),
 ])
 ```
@@ -190,8 +190,8 @@ highest priority overall; among modules, later in the list wins:
 
 ```python
 project(name = "product", modules = [
-    module("https://github.com/yoebuild/units-alpine.git", ref = "main"),  # lowest priority
-    module("...", path = "modules/soc-module"),    # overrides units-alpine
+    module("https://github.com/yoebuild/module-alpine.git", ref = "main"),  # lowest priority
+    module("...", path = "modules/soc-module"),    # overrides module-alpine
     module("...", path = "modules/som-module"),    # highest priority among modules
 ])
 # Project root (units/ in the project directory) overrides all three.
@@ -200,10 +200,10 @@ project(name = "product", modules = [
 Concrete example — replacing Alpine's prebuilt `musl` with a from-source build:
 
 ```python
-# @units-alpine//units/musl.star
+# @module-alpine//units/musl.star
 alpine_pkg(name = "musl", version = "1.2.5-r0", ...)
 
-# @my-overrides//units/musl.star  (listed after units-alpine)
+# @my-overrides//units/musl.star  (listed after module-alpine)
 unit(name = "musl", source = "https://git.musl-libc.org/git/musl",
      tag = "v1.2.5", tasks = [...])
 ```
@@ -213,7 +213,7 @@ the winner automatically — there is nothing to change in consumers when an
 override happens. The build emits:
 
 ```
-notice: unit "musl" from module "my-overrides" shadows the same name from module "units-alpine"
+notice: unit "musl" from module "my-overrides" shadows the same name from module "module-alpine"
 ```
 
 Use shadowing for **1:1 replacement** — "my musl instead of yours." It is the
@@ -229,7 +229,7 @@ kernel — a single module ships `linux-rpi4` and `linux-bb`, both declaring
 `provides = ["linux"]`, and the active machine picks one.
 
 ```python
-# @units-core//units/kernels.star
+# @module-core//units/kernels.star
 unit(name = "linux-rpi4", provides = ["linux"], ...)
 unit(name = "linux-bb",   provides = ["linux"], ...)
 
@@ -377,14 +377,14 @@ Modules extend upstream units without modifying them by importing the unit as a
 callable function:
 
 ```python
-# @units-core provides openssh as a function with a default name
+# @module-core provides openssh as a function with a default name
 def openssh(name="openssh", extra_deps=[], **overrides):
     autotools(name = name, deps = ["zlib", "openssl"] + extra_deps, **overrides)
 
-openssh()  # registers "openssh" — units-core works standalone
+openssh()  # registers "openssh" — module-core works standalone
 
 # @vendor-bsp extends it with a different name
-load("@units-core//units/openssh.star", "openssh")
+load("@module-core//units/openssh.star", "openssh")
 openssh(name = "openssh-vendor", extra_deps = ["vendor-crypto"])
 ```
 
@@ -404,7 +404,7 @@ Within a single module (or within the project root), defining two units with the
 same name is a hard error at evaluation time:
 
 ```
-unit "zstd" already defined (first defined in module "units-core")
+unit "zstd" already defined (first defined in module "module-core")
 ```
 
 Across modules, a same-named unit is treated as a **shadow**: the
@@ -462,7 +462,7 @@ or build configurations:
 project(
     name = "dev",
     modules = [
-        module("...", path = "modules/units-core"),
+        module("...", path = "modules/module-core"),
         module("...", path = "modules/dev-tools"),
     ],
 )
@@ -471,7 +471,7 @@ project(
 project(
     name = "customer-a",
     modules = [
-        module("...", path = "modules/units-core"),
+        module("...", path = "modules/module-core"),
         module("...", path = "modules/vendor-bsp"),
         module("...", path = "modules/customer-a"),
     ],
@@ -499,7 +499,7 @@ build on it:
 ```python
 # projects/customer-a.star
 MODULES = [
-    module("...", path = "modules/units-core"),
+    module("...", path = "modules/module-core"),
     module("...", path = "modules/vendor-bsp"),
     module("...", path = "modules/customer-a"),
 ]

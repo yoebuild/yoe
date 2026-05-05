@@ -33,13 +33,13 @@ func RunInit(projectDir string, machine string) error {
     modules = [
         module("https://github.com/yoebuild/yoe.git",
                ref = "main",
-               path = "modules/units-core"),
+               path = "modules/module-core"),
         module("https://github.com/yoebuild/yoe.git",
                ref = "main",
-               path = "modules/units-rpi"),
-        module("https://github.com/yoebuild/units-alpine.git",
+               path = "modules/module-rpi"),
+        module("https://github.com/yoebuild/module-alpine.git",
                ref = "main"),
-        module("https://github.com/yoebuild/units-jetson.git",
+        module("https://github.com/yoebuild/module-jetson.git",
                ref = "main"),
     ],
 )

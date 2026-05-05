@@ -26,6 +26,66 @@ type Project struct {
 	// public key (.rsa.pub next to it) is shipped on-device under
 	// /etc/apk/keys/ so apk verifies signatures without --allow-untrusted.
 	SigningKey string
+
+	// ResolvedModules is the list of modules from PROJECT.star after the
+	// loader has resolved each ModuleRef to a canonical name and on-disk
+	// path. Populated in declaration order. Modules that failed to locate
+	// (not synced yet) are still listed but with Available=false and an
+	// empty Dir.
+	ResolvedModules []ResolvedModule
+
+	// Diagnostics records non-fatal events the loader observed — currently
+	// cross-module unit shadowing and duplicate `provides` claims. Surfaced
+	// in the TUI's Diagnostics tab so the user can see when an included
+	// module's unit is being overridden by another module or the project
+	// root, or when multiple units claim the same virtual.
+	Diagnostics Diagnostics
+}
+
+// ResolvedModule is one entry from project.modules after the loader has
+// located it on disk and read its canonical name from MODULE.star.
+type ResolvedModule struct {
+	Name      string // canonical name (from module_info(name=...) or basename)
+	URL       string // declared URL
+	Ref       string // declared git ref / branch / tag
+	Path      string // sub-path within the repo (declared)
+	Local     string // local override path (declared)
+	Dir       string // resolved on-disk directory; empty when not synced
+	Available bool   // false when the module has not been synced
+}
+
+// Diagnostics summarizes loader events the user may want to inspect.
+type Diagnostics struct {
+	// Shadows lists units that lost a name collision to a higher-priority
+	// module's unit of the same name. The active unit is Winner; the
+	// shadowed unit is Loser. Same-priority collisions are hard errors and
+	// never reach this list.
+	Shadows []ShadowEvent
+
+	// DuplicateProvides lists every virtual package name claimed by more
+	// than one unit. Active is the unit currently routed to by
+	// proj.Provides; Others lists the alternate claimants in declaration
+	// order.
+	DuplicateProvides []ProvidesEvent
+}
+
+// ShadowEvent records that Loser was registered with the same name as
+// Winner from a different module. WinnerModule and LoserModule are the
+// module names ("" for project root). DefinedIn fields point at the
+// directory of the .star file that registered each unit.
+type ShadowEvent struct {
+	Unit         string
+	WinnerModule string
+	WinnerDir    string
+	LoserModule  string
+	LoserDir     string
+}
+
+// ProvidesEvent records that more than one unit claimed Virtual.
+type ProvidesEvent struct {
+	Virtual string
+	Active  string   // the unit currently selected in proj.Provides
+	Others  []string // alternate claimants, sorted
 }
 
 type Defaults struct {
@@ -131,7 +191,7 @@ type Unit struct {
 	SHA256  string
 	// APKChecksum is Alpine's APKINDEX `C:` field — "Q1<base64-sha1>=".
 	// Mutually exclusive with SHA256: a unit declares one or the other.
-	// Used by units-alpine to verify against the hash Alpine itself
+	// Used by module-alpine to verify against the hash Alpine itself
 	// publishes, avoiding a per-package sha256 download at unit-gen time.
 	APKChecksum string
 	Tag     string
@@ -161,7 +221,8 @@ type Unit struct {
 	CacheDirs   map[string]string // container_path:host_subdir cache mounts
 
 	// Image-specific (class == "image")
-	Artifacts  []string // artifacts to install in rootfs
+	Artifacts          []string // artifacts to install in rootfs (full runtime closure, resolved by image())
+	ArtifactsExplicit  []string // user-specified artifacts before runtime-closure expansion; for UX (TUI tree, etc.)
 	Exclude    []string
 	Hostname   string
 	Timezone   string

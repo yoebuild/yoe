@@ -606,8 +606,9 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 		Conffiles:   kwStringList(kwargs, "conffiles"),
 		Environment: kwStringMap(kwargs, "environment"),
 		CacheDirs:   kwStringMap(kwargs, "cache_dirs"),
-		Artifacts:   kwStringList(kwargs, "artifacts"),
-		Exclude:     kwStringList(kwargs, "exclude"),
+		Artifacts:         kwStringList(kwargs, "artifacts"),
+		ArtifactsExplicit: kwStringList(kwargs, "artifacts_explicit"),
+		Exclude:           kwStringList(kwargs, "exclude"),
 		Hostname:    kwString(kwargs, "hostname"),
 		Timezone:    kwString(kwargs, "timezone"),
 		Locale:      kwString(kwargs, "locale"),
@@ -683,6 +684,13 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 				name, moduleSource(existing.Module))
 		}
 		if r.ModuleIndex < existing.ModuleIndex {
+			e.shadows = append(e.shadows, ShadowEvent{
+				Unit:         name,
+				WinnerModule: existing.Module,
+				WinnerDir:    existing.DefinedIn,
+				LoserModule:  r.Module,
+				LoserDir:     r.DefinedIn,
+			})
 			e.mu.Unlock()
 			if e.showShadows {
 				fmt.Fprintf(os.Stderr,
@@ -692,6 +700,13 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 			return existing, nil
 		}
 		// New unit has higher priority — replace, log the displacement.
+		e.shadows = append(e.shadows, ShadowEvent{
+			Unit:         name,
+			WinnerModule: r.Module,
+			WinnerDir:    r.DefinedIn,
+			LoserModule:  existing.Module,
+			LoserDir:     existing.DefinedIn,
+		})
 		if e.showShadows {
 			fmt.Fprintf(os.Stderr,
 				"notice: unit %q from %s shadows the same name from %s\n",
