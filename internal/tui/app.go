@@ -222,6 +222,11 @@ type model struct {
 	// Feed (yoe serve) status — set at startup by startProjectFeed.
 	feedStatus string
 
+	// Per-unit display metrics — recomputed on project reload and after
+	// builds so the unit table reflects fresh on-disk state.
+	unitSize map[string]int64 // installed bytes (image units: .img file size)
+	unitDeps map[string]int   // runtime closure size, excluding the unit itself
+
 	// loadOpts is the set of LoadOptions to apply when the TUI reloads the
 	// project (e.g. after editing a .star file or switching machines). The
 	// caller passes the same options used for the initial load so global
@@ -309,6 +314,7 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	}
 	m.savedQuery = m.query.String()
 	m.applyQuery()
+	m.recomputeMetrics()
 
 	m.checkBinfmtWarning()
 
@@ -383,6 +389,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.statuses[msg.unit] = statusCached
 			m.message = fmt.Sprintf("Build complete: %s", msg.unit)
+			m.recomputeMetrics()
 		}
 		return m, nil
 
@@ -1316,9 +1323,12 @@ func (m model) viewUnits() string {
 		queryDimStyle.Render(counter)))
 
 	// Column header
-	b.WriteString(fmt.Sprintf("  %s %s %s\n",
+	b.WriteString(fmt.Sprintf("  %s %s %s %s %s %s\n",
 		headerStyle.Render(fmt.Sprintf("%-28s", "NAME")),
-		headerStyle.Render(fmt.Sprintf("%-12s", "CLASS")),
+		headerStyle.Render(fmt.Sprintf("%-9s", "CLASS")),
+		headerStyle.Render(fmt.Sprintf("%-14s", "MODULE")),
+		headerStyle.Render(fmt.Sprintf("%6s", "SIZE")),
+		headerStyle.Render(fmt.Sprintf("%4s", "DEPS")),
 		headerStyle.Render("STATUS")))
 
 	// Determine visible units — filtered by current query state
@@ -1348,8 +1358,13 @@ func (m model) viewUnits() string {
 		}
 
 		class := ""
+		module := ""
 		if u, ok := m.proj.Units[name]; ok {
 			class = u.Class
+			module = u.Module
+			if module == "" {
+				module = "(local)"
+			}
 			if i != m.cursor {
 				switch class {
 				case "image":
@@ -1366,13 +1381,24 @@ func (m model) viewUnits() string {
 		}
 
 		status := m.renderStatus(name)
+		size := formatSize(m.unitSize[name])
+		depsStr := ""
+		if d, ok := m.unitDeps[name]; ok && d > 0 {
+			depsStr = fmt.Sprintf("%d", d)
+		}
 
 		paddedName := fmt.Sprintf("%-28s", name)
-		paddedClass := fmt.Sprintf("%-12s", class)
-		b.WriteString(fmt.Sprintf("%s%s %s %s\n",
+		paddedClass := fmt.Sprintf("%-9s", truncate(class, 9))
+		paddedModule := fmt.Sprintf("%-14s", truncate(module, 14))
+		paddedSize := fmt.Sprintf("%6s", size)
+		paddedDeps := fmt.Sprintf("%4s", depsStr)
+		b.WriteString(fmt.Sprintf("%s%s %s %s %s %s %s\n",
 			cursor,
 			m.renderName(paddedName, nameStyle),
 			classStyle.Render(paddedClass),
+			classStyle.Render(paddedModule),
+			classStyle.Render(paddedSize),
+			classStyle.Render(paddedDeps),
 			status))
 	}
 
@@ -1875,6 +1901,82 @@ func (m *model) adjustListOffset() {
 	}
 }
 
+// recomputeMetrics rebuilds m.unitSize and m.unitDeps from the current
+// project + arch + machine. Cheap enough to run on every project reload
+// or build completion: each unit walks its own runtime closure once and
+// stats one or two files.
+func (m *model) recomputeMetrics() {
+	size := make(map[string]int64, len(m.units))
+	deps := make(map[string]int, len(m.units))
+	for _, name := range m.units {
+		u := m.proj.Units[name]
+		if u == nil {
+			continue
+		}
+		sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
+		buildDir := build.UnitBuildDir(m.projectDir, sd, name)
+		size[name] = installedSize(u, buildDir)
+
+		// Runtime closure includes the unit itself; subtract one so the
+		// number reflects what this unit drags in beyond itself.
+		closure := resolve.RuntimeClosure(m.proj, []string{name})
+		if len(closure) > 0 {
+			deps[name] = len(closure) - 1
+		}
+	}
+	m.unitSize = size
+	m.unitDeps = deps
+}
+
+// installedSize returns the on-disk size for a built unit. For image
+// units we report the .img file directly; everything else uses
+// BuildMeta.InstalledBytes (the destdir size that goes into the .apk).
+// Returns 0 when the unit has not been built yet.
+func installedSize(u *yoestar.Unit, buildDir string) int64 {
+	if u.Class == "image" {
+		if info, err := os.Stat(filepath.Join(buildDir, "destdir", u.Name+".img")); err == nil {
+			return info.Size()
+		}
+	}
+	if meta := build.ReadMeta(buildDir); meta != nil {
+		return meta.InstalledBytes
+	}
+	return 0
+}
+
+// truncate clips s to at most n runes so a wide column value (e.g. a
+// long module name) can't push the rest of the row off-screen.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
+}
+
+// formatSize renders a byte count in a fixed-width, human-readable form
+// using KiB/MiB/GiB. Empty string for unbuilt units (size == 0) so the
+// column reads as cleanly absent rather than misleading "0 B".
+func formatSize(b int64) string {
+	if b <= 0 {
+		return ""
+	}
+	const (
+		kib = 1024
+		mib = 1024 * kib
+		gib = 1024 * mib
+	)
+	switch {
+	case b >= gib:
+		return fmt.Sprintf("%.1fG", float64(b)/float64(gib))
+	case b >= mib:
+		return fmt.Sprintf("%.1fM", float64(b)/float64(mib))
+	case b >= kib:
+		return fmt.Sprintf("%.1fK", float64(b)/float64(kib))
+	default:
+		return fmt.Sprintf("%dB", b)
+	}
+}
+
 // unitScopeDir returns the scope directory for a unit (arch, machine name, or noarch).
 func (m model) unitScopeDir(name string) string {
 	if u, ok := m.proj.Units[name]; ok {
@@ -1931,6 +2033,7 @@ func (m *model) recomputeStatuses() {
 			m.statuses[name] = statusNone
 		}
 	}
+	m.recomputeMetrics()
 }
 
 // checkBinfmtWarning sets or clears the warning banner based on whether

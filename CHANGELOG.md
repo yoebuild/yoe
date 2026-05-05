@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **TUI unit table shows module, size, and dependency-count columns.** Each row
+  now reports the module that won shadow resolution (or `(local)` for project-
+  root units), the on-disk install size after build (the `.img` file size for
+  images, destdir size for everything else, blank when not built), and how many
+  units this one drags into a runtime closure. Useful for spotting bloat before
+  flashing and for seeing at a glance which module is actually providing each
+  unit.
 - **`yoe --help` now works and lists global options.** `yoe --help`, `-h`, and
   `help` all print usage, including the `--project`, `--show-shadows`, and
   `--allow-duplicate-provides` flags that were previously undocumented in the
