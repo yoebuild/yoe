@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-05-05
+
 - **`yoe init` lists module-core last so it wins shadowing.** New projects
   now order modules so module-core's source-built units (busybox, openssl,
   …) take precedence over Alpine prebuilts and over module-rpi, avoiding
