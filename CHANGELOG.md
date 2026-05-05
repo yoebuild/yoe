@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Search edits in place on the Query: line.** Pressing `/` now turns the
+  existing `Query:` header into the input editor instead of opening a separate
+  row at the bottom of the screen, so your eye stays in one spot while you type
+  and the bottom row is always either the help bar or a transient status
+  message.
 - **Long unit names no longer break column alignment.** Names that exceed the
   NAME column (e.g. `abseil-cpp-atomic-hook-test-helper`) are clipped with an
   ellipsis instead of pushing the rest of the row off-screen. Same treatment for

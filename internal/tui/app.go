@@ -1469,22 +1469,38 @@ func (m model) viewUnits() string {
 	}
 	b.WriteString("\n")
 
-	// Query header
-	qStr := m.query.String()
-	qLabel := "Query: "
-	qBody := qStr
-	if qBody == "" {
-		qBody = "(empty — showing all)"
-	}
-	style := queryDimStyle
-	if qStr != m.savedQuery {
-		style = queryActiveStyle
-	}
+	// Query header — when the user presses `/`, the input editor replaces
+	// the query body in place rather than opening a separate input row at
+	// the bottom of the screen, so the eye stays on one Query: ... line.
 	counter := fmt.Sprintf("Units: %d/%d", len(m.visible), len(m.units))
-	b.WriteString(fmt.Sprintf("  %s%s    %s\n",
-		queryDimStyle.Render(qLabel),
-		style.Render(qBody),
-		queryDimStyle.Render(counter)))
+	if m.queryEditing {
+		var body string
+		if m.queryError != "" {
+			body = fmt.Sprintf("/%s    %s",
+				m.queryInput,
+				queryErrorStyle.Render(m.queryError))
+		} else {
+			body = fmt.Sprintf("/%s▌", m.queryInput)
+		}
+		b.WriteString(fmt.Sprintf("  %s%s    %s\n",
+			queryDimStyle.Render("Query: "),
+			body,
+			queryDimStyle.Render(counter)))
+	} else {
+		qStr := m.query.String()
+		qBody := qStr
+		if qBody == "" {
+			qBody = "(empty — showing all)"
+		}
+		style := queryDimStyle
+		if qStr != m.savedQuery {
+			style = queryActiveStyle
+		}
+		b.WriteString(fmt.Sprintf("  %s%s    %s\n",
+			queryDimStyle.Render("Query: "),
+			style.Render(qBody),
+			queryDimStyle.Render(counter)))
+	}
 
 	// Column header — pad widths match the rows below; clicking a label
 	// switches the sort. A trailing arrow marks the active column. Padding
@@ -1606,23 +1622,12 @@ func (m model) viewUnits() string {
 		b.WriteString(dimStyle.Render("  no units match\n"))
 	}
 
-	// Bottom line: search bar > status message > help bar.
-	// The status message replaces the help bar instead of stacking
-	// below it, so the keyboard shortcuts (or the live message) are
-	// always the last visible row and the table never overflows.
+	// Bottom line: status message takes priority, otherwise the help bar.
+	// The query editor lives in the Query: header now, not down here.
 	b.WriteString("\n")
-	switch {
-	case m.queryEditing:
-		if m.queryError != "" {
-			b.WriteString(fmt.Sprintf("  /%s    %s",
-				m.queryInput,
-				queryErrorStyle.Render(m.queryError)))
-		} else {
-			b.WriteString(fmt.Sprintf("  /%s▌", m.queryInput))
-		}
-	case m.message != "":
+	if m.message != "" {
 		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
-	default:
+	} else {
 		help := "  b build  D deploy  x cancel  e edit  l log  s setup  / search  \\ home  S save  o sort  q quit"
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
