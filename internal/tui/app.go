@@ -673,6 +673,7 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		m.queryEditing = true
 		m.queryInput = ""
+		m.applyFilter()
 		return m, nil
 
 	case "s":
@@ -1738,6 +1739,11 @@ func (m *model) recomputeStatuses() {
 		}
 	}
 
+	// Rebuild visible list to reflect the new unit set before any early
+	// return. m.units may already have been replaced above; without this,
+	// m.visible would carry stale indices into the old slice.
+	m.applyFilter()
+
 	hashes, err := resolve.ComputeAllHashes(m.dag, m.arch, m.proj.Defaults.Machine)
 	if err != nil {
 		return
@@ -1762,8 +1768,6 @@ func (m *model) recomputeStatuses() {
 			m.statuses[name] = statusNone
 		}
 	}
-	// Rebuild visible list to reflect the new unit set.
-	m.applyFilter()
 }
 
 // checkBinfmtWarning sets or clears the warning banner based on whether
