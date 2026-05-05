@@ -1143,13 +1143,25 @@ func (m model) updateSetupImage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		picked := imgs[m.imageCursor]
 		m.proj.Defaults.Image = picked
+		// Re-anchor the search to the new image's closure: both the
+		// active query and the saved default switch to in:<picked> so
+		// the table filters to what the new image actually pulls in.
+		newQ := "in:" + picked
+		if q, err := query.Parse(newQ); err == nil {
+			m.query = q
+			m.queryInput = q.String()
+			m.queryError = ""
+			m.savedQuery = m.query.String()
+		}
 		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
 		ov.Image = picked
+		ov.Query = newQ
 		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
 			m.message = fmt.Sprintf("Image set to %s (warning: failed to save local.star: %v)", picked, err)
 		} else {
 			m.message = fmt.Sprintf("Image set to %s (saved to local.star)", picked)
 		}
+		m.applyQuery()
 		m.setupField = ""
 		m.view = viewUnits
 		m.scrollUnitIntoView(picked)
@@ -1518,10 +1530,13 @@ func (m model) viewUnits() string {
 		end = len(visible)
 	}
 
+	// Always emit a row here — either the "↑ N more" indicator when
+	// scrolled, or a blank line — so the bottom of the screen doesn't
+	// shift up by one when the user is at the top of the list.
 	if m.listOffset > 0 {
 		b.WriteString(dimStyle.Render(fmt.Sprintf("  ↑ %d more", m.listOffset)))
-		b.WriteString("\n")
 	}
+	b.WriteString("\n")
 
 	for _, i := range visible[m.listOffset:end] {
 		name := m.units[i]
@@ -1579,18 +1594,25 @@ func (m model) viewUnits() string {
 			status))
 	}
 
+	// Same treatment as ↑ above — always one line, blank when there
+	// isn't more below — so the bottom row's position is independent
+	// of the scroll state.
 	if end < len(visible) {
 		b.WriteString(dimStyle.Render(fmt.Sprintf("  ↓ %d more", len(visible)-end)))
-		b.WriteString("\n")
 	}
+	b.WriteString("\n")
 
 	if len(m.visible) == 0 {
 		b.WriteString(dimStyle.Render("  no units match\n"))
 	}
 
-	// Search bar or help bar
+	// Bottom line: search bar > status message > help bar.
+	// The status message replaces the help bar instead of stacking
+	// below it, so the keyboard shortcuts (or the live message) are
+	// always the last visible row and the table never overflows.
 	b.WriteString("\n")
-	if m.queryEditing {
+	switch {
+	case m.queryEditing:
 		if m.queryError != "" {
 			b.WriteString(fmt.Sprintf("  /%s    %s",
 				m.queryInput,
@@ -1598,7 +1620,9 @@ func (m model) viewUnits() string {
 		} else {
 			b.WriteString(fmt.Sprintf("  /%s▌", m.queryInput))
 		}
-	} else {
+	case m.message != "":
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
+	default:
 		help := "  b build  D deploy  x cancel  e edit  l log  s setup  / search  \\ home  S save  o sort  q quit"
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
@@ -1611,14 +1635,6 @@ func (m model) viewUnits() string {
 			}
 		}
 		b.WriteString(helpStyle.Render(help))
-	}
-	b.WriteString("\n")
-
-	// Status message
-	if m.message != "" {
-		b.WriteString("\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  "+m.message))
-		b.WriteString("\n")
 	}
 
 	return b.String()
@@ -2374,10 +2390,34 @@ func (m *model) checkBinfmtWarning() {
 }
 
 // listViewportHeight returns the number of unit rows that fit on screen.
+// Chrome is counted exactly so the unit list never pushes the title and
+// banner lines off the top: when the rendered output exceeds the
+// terminal height, the terminal scrolls and the topmost lines disappear.
+//
+// The ↑/↓ "more" indicators are always reserved even when not currently
+// rendered (single-page state) so the row count doesn't jump by 1 the
+// moment the user crosses into multi-page territory.
 func (m model) listViewportHeight() int {
-	h := m.height - 8
-	if h < 5 {
-		h = 5
+	chrome := 1 // title
+	if m.warning != "" {
+		chrome++
+	}
+	if m.notification != "" {
+		chrome++
+	}
+	if m.feedStatus != "" {
+		chrome++
+	}
+	chrome++ // blank line after banners
+	chrome++ // query header
+	chrome++ // column header
+	chrome++ // ↑ more (always reserved)
+	chrome++ // ↓ more (always reserved)
+	chrome++ // blank line before bottom row
+	chrome++ // bottom row: help / search / message — always one line
+	h := m.height - chrome
+	if h < 3 {
+		h = 3
 	}
 	return h
 }

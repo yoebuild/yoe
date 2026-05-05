@@ -8,6 +8,18 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **TUI layout no longer scrolls the title off the top.** Chrome (banners, query
+  header, column header, ↑/↓ markers, blank, bottom row) is counted exactly so
+  the unit list always fits inside the terminal. The ↑/↓ slots reserve a row
+  even when empty, so the bottom row's position is fixed regardless of scroll
+  state.
+- **Status messages replace the help bar.** Build/clean/save messages now render
+  in place of the keyboard shortcuts on a single bottom line instead of stacking
+  below it; the help bar reappears as soon as you press the next key.
+- **Switching the image re-anchors the search.** Picking a new image in Setup
+  updates the active query and the saved default to `in:<image>`, so the unit
+  table immediately filters to what the new image pulls in and the next session
+  opens with the same view.
 - **Default image is configurable per developer.** `local.star` now accepts an
   `image = "..."` field that overrides `defaults.image` from `PROJECT.star`, the
   same way `machine` already does. The TUI's Setup screen (`s`) has a new
