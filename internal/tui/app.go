@@ -720,7 +720,7 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.savedQuery = m.query.String()
 		if m.query.IsEmpty() {
-			m.message = "saved empty query (will show all units next session)"
+			m.message = "saved empty query (next session will follow project defaults)"
 		} else {
 			m.message = fmt.Sprintf("saved query: %s", m.query.String())
 		}
