@@ -37,6 +37,11 @@ var (
 	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	waitingStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // yellow
 
+	// Query-related styles
+	queryDimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	queryActiveStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
+	queryErrorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+
 	// Subtle per-class colors for unselected units
 	classUnitStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))   // muted blue
 	classImageStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("13"))  // muted magenta
@@ -1189,6 +1194,23 @@ func (m model) viewUnits() string {
 	}
 	b.WriteString("\n")
 
+	// Query header
+	qStr := m.query.String()
+	qLabel := "Query: "
+	qBody := qStr
+	if qBody == "" {
+		qBody = "(empty — showing all)"
+	}
+	style := queryDimStyle
+	if qStr != m.savedQuery {
+		style = queryActiveStyle
+	}
+	counter := fmt.Sprintf("Units: %d/%d", len(m.visible), len(m.units))
+	b.WriteString(fmt.Sprintf("  %s%s    %s\n",
+		queryDimStyle.Render(qLabel),
+		style.Render(qBody),
+		queryDimStyle.Render(counter)))
+
 	// Column header
 	b.WriteString(fmt.Sprintf("  %s %s %s\n",
 		headerStyle.Render(fmt.Sprintf("%-28s", "NAME")),
@@ -1258,7 +1280,13 @@ func (m model) viewUnits() string {
 	// Search bar or help bar
 	b.WriteString("\n")
 	if m.queryEditing {
-		b.WriteString(fmt.Sprintf("  /%s▌", m.queryInput))
+		if m.queryError != "" {
+			b.WriteString(fmt.Sprintf("  /%s    %s",
+				m.queryInput,
+				queryErrorStyle.Render(m.queryError)))
+		} else {
+			b.WriteString(fmt.Sprintf("  /%s▌", m.queryInput))
+		}
 	} else {
 		help := "  b build  D deploy  x cancel  e edit  d diagnose  l log  c clean  s setup  / search  q quit"
 		if m.cursor < len(m.units) {
