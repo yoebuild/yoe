@@ -30,11 +30,19 @@ var (
 	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#e8863a")).Background(lipgloss.Color("#000000"))
 	headerStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
 	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#5fff5f"))
+	// Faded variant of selectedStyle for the always-on "cursor unit name"
+	// line above the bottom row — same green so the eye links it to the
+	// highlighted row, but dimmed and not bold so it doesn't compete.
+	cursorNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#5fff5f")).Faint(true)
 	dimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	cachedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("12")) // blue
 	failedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	buildingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	// Amber, matching the [yoe] logo, for the keyboard shortcut letter
+	// in each help-bar item — the description stays helpStyle gray so
+	// the eye can scan keys at a glance.
+	helpKeyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#e8863a")).Bold(true)
 	waitingStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // yellow
 
 	// Query-related styles
@@ -1467,7 +1475,6 @@ func (m model) viewUnits() string {
 		feedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 		b.WriteString(fmt.Sprintf("  %s\n", feedStyle.Render("feed: "+m.feedStatus)))
 	}
-	b.WriteString("\n")
 
 	// Query header — when the user presses `/`, the input editor replaces
 	// the query body in place rather than opening a separate input row at
@@ -1622,26 +1629,77 @@ func (m model) viewUnits() string {
 		b.WriteString(dimStyle.Render("  no units match\n"))
 	}
 
-	// Bottom line: status message takes priority, otherwise the help bar.
-	// The query editor lives in the Query: header now, not down here.
+	// Spare line above the bottom row — always shows the full name of
+	// the cursor's unit in a faded version of the cursor green. Useful
+	// when the name is longer than the NAME column, and a quiet
+	// confirmation of which unit the cursor is on the rest of the time.
+	if m.cursor < len(m.units) {
+		b.WriteString(cursorNameStyle.Render("  " + m.units[m.cursor]))
+	}
 	b.WriteString("\n")
 	if m.message != "" {
 		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
 	} else {
-		help := "  b build  D deploy  x cancel  e edit  l log  s setup  / search  \\ home  S save  o sort  q quit"
+		items := defaultHelpItems
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
 			if u, ok := m.proj.Units[name]; ok && u.Class == "image" {
 				if m.statuses[name] == statusCached {
-					help = "  b build  x cancel  r run  f flash  e edit  l log  s setup  / search  \\ home  S save  q quit"
+					items = imageCachedHelpItems
 				} else {
-					help = "  b build  x cancel  r run  e edit  l log  s setup  / search  \\ home  S save  q quit"
+					items = imageHelpItems
 				}
 			}
 		}
-		b.WriteString(helpStyle.Render(help))
+		b.WriteString(renderHelp(items))
 	}
 
+	return b.String()
+}
+
+// helpItem is one keyboard shortcut + its label, rendered as
+// "<amber key> <gray label>" in the bottom help bar.
+type helpItem struct {
+	key   string
+	label string
+}
+
+var (
+	defaultHelpItems = []helpItem{
+		{"b", "build"}, {"D", "deploy"}, {"x", "cancel"}, {"e", "edit"},
+		{"l", "log"}, {"s", "setup"}, {"/", "search"}, {`\`, "home"},
+		{"S", "save"}, {"o", "sort"}, {"q", "quit"},
+	}
+	imageHelpItems = []helpItem{
+		{"b", "build"}, {"x", "cancel"}, {"r", "run"}, {"e", "edit"},
+		{"l", "log"}, {"s", "setup"}, {"/", "search"}, {`\`, "home"},
+		{"S", "save"}, {"q", "quit"},
+	}
+	imageCachedHelpItems = []helpItem{
+		{"b", "build"}, {"x", "cancel"}, {"r", "run"}, {"f", "flash"},
+		{"e", "edit"}, {"l", "log"}, {"s", "setup"}, {"/", "search"},
+		{`\`, "home"}, {"S", "save"}, {"q", "quit"},
+	}
+	detailHelpItems = []helpItem{
+		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
+		{"/", "search"}, {"b", "build"}, {"d", "diagnose"}, {"l", "log"},
+	}
+	detailImageHelpItems = []helpItem{
+		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
+		{"/", "search"}, {"b", "build"}, {"r", "run"}, {"d", "diagnose"}, {"l", "log"},
+	}
+)
+
+// renderHelp formats a list of shortcuts as "  k1 label1  k2 label2 …"
+// with the shortcut key in amber and the label in dim gray.
+func renderHelp(items []helpItem) string {
+	var b strings.Builder
+	for _, it := range items {
+		b.WriteString("  ")
+		b.WriteString(helpKeyStyle.Render(it.key))
+		b.WriteString(" ")
+		b.WriteString(helpStyle.Render(it.label))
+	}
 	return b.String()
 }
 
@@ -1907,22 +1965,25 @@ func (m model) viewDetail() string {
 		}
 		b.WriteString(fmt.Sprintf("  /%s%s\n", m.detailSearchText, dimStyle.Render(matchInfo)))
 	} else if m.detailSearchText != "" && len(m.detailMatches) > 0 {
-		b.WriteString(dimStyle.Render(fmt.Sprintf("  /%s [%d/%d]  n next  N prev\n",
+		// \n is appended OUTSIDE the lipgloss Render — when the
+		// newline is inside the styled string, the trailing reset
+		// escape lands on the next line and pushes the help bar to
+		// the right by a few cells in some terminals.
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  /%s [%d/%d]  n next  N prev",
 			m.detailSearchText, m.detailMatchIdx+1, len(m.detailMatches))))
+		b.WriteString("\n")
 	}
 
-	// Help bar
-	help := "  esc back  j/k scroll  g top  G bottom  / search  b build  d diagnose  l log"
-	if u, ok := m.proj.Units[m.detailUnit]; ok && u.Class == "image" {
-		help = "  esc back  j/k scroll  g top  G bottom  / search  b build  r run  d diagnose  l log"
-	}
-	b.WriteString(helpStyle.Render(help))
-	b.WriteString("\n")
-
+	// Bottom row: status message replaces the help bar, same pattern as
+	// the units view, so the detail page never trails extra blank lines.
 	if m.message != "" {
-		b.WriteString("\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  "+m.message))
-		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
+	} else {
+		items := detailHelpItems
+		if u, ok := m.proj.Units[m.detailUnit]; ok && u.Class == "image" {
+			items = detailImageHelpItems
+		}
+		b.WriteString(renderHelp(items))
 	}
 
 	return b.String()
@@ -2071,10 +2132,18 @@ func (m *model) refreshDetail() {
 	}
 }
 
-// detailViewportHeight returns the number of content lines visible in detail view.
-// Reserves lines for: header (2) + scroll indicator (1) + help bar (1) + message (2) + padding (1).
+// detailViewportHeight returns the number of content lines visible in
+// detail view. Chrome is counted exactly so the page doesn't trail
+// extra blank lines below the help bar: title + metadata + scroll
+// indicator + (search bar) + bottom row (help OR status message).
 func (m model) detailViewportHeight() int {
-	h := m.height - 7
+	chrome := 2 // title + metadata/blank
+	chrome++    // scroll indicator (always one line, blank when not scrolled)
+	if m.detailSearching || (m.detailSearchText != "" && len(m.detailMatches) > 0) {
+		chrome++ // search bar
+	}
+	chrome++ // bottom row (help or message, single line)
+	h := m.height - chrome
 	if h < 5 {
 		h = 5
 	}
@@ -2416,7 +2485,6 @@ func (m model) listViewportHeight() int {
 	if m.feedStatus != "" {
 		chrome++
 	}
-	chrome++ // blank line after banners
 	chrome++ // query header
 	chrome++ // column header
 	chrome++ // ↑ more (always reserved)

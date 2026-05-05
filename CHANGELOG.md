@@ -8,6 +8,25 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Help bar highlights shortcut keys in amber.** Each shortcut letter now
+  renders in the same amber as the `[yoe]` logo so the eye can pick out keys
+  without reading every word — same treatment on the detail page.
+- **Detail page no longer trails blank lines.** Chrome (title, metadata, scroll
+  indicator, optional search bar, bottom row) is counted exactly like the units
+  view, so the help bar sits flush at the bottom instead of with two or three
+  blank lines below it. Status messages also replace the help bar inline,
+  matching the units view.
+- **Detail search no longer pushes the help bar right.** The trailing newline on
+  the post-search match indicator now lives outside the `lipgloss.Render` call,
+  so the trailing ANSI reset doesn't land on the next row and offset the help
+  bar by a few cells.
+- **Cursor unit name always visible.** The spare line above the bottom row shows
+  the full name of the cursor's unit in a faded version of the cursor green —
+  useful when the name is wider than the NAME column, and a quiet confirmation
+  of which unit is selected the rest of the time.
+- **Banner block sits flush against the Query line.** Dropped the blank line
+  between feed/notification banners and the Query header, freeing up a row for
+  the unit list.
 - **Search edits in place on the Query: line.** Pressing `/` now turns the
   existing `Query:` header into the input editor instead of opening a separate
   row at the bottom of the screen, so your eye stays in one spot while you type
