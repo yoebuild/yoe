@@ -170,12 +170,14 @@ type model struct {
 	building   map[string]bool
 	cancels    map[string]context.CancelFunc // cancel funcs for active builds
 	confirm      string // non-empty = waiting for y/n confirmation
-	queryEditing bool   // true while the user is typing in the query bar
-	queryInput   string // text in the query bar; live-parsed every keystroke
-	queryError   string // last parse error; rendered next to the query bar
-	inSet        map[string]bool // pre-computed in:X closure for the active query, nil if no in: filter
-	visible      []int           // indexes into m.units after applying m.query
-	query        query.Query     // active query, applied to m.units to produce visible
+	queryEditing  bool            // true while the user is typing in the query bar
+	queryInput    string          // text in the query bar; live-parsed every keystroke
+	queryError    string          // last parse error; rendered next to the query bar
+	inSet         map[string]bool // pre-computed in:X closure for the active query, nil if no in: filter
+	visible       []int           // indexes into m.units after applying m.query
+	query         query.Query     // active query, applied to m.units to produce visible
+	queryRevertTo query.Query     // snapshot taken when the user opens `/`
+	savedQuery    string          // canonical form of the last user-saved query (or bootstrap)
 
 	// Detail log search
 	detailSearching  bool   // true = detail search input active
@@ -273,11 +275,6 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 		deployHost = ov.DeployHost
 	}
 
-	initialVisible := make([]int, len(units))
-	for i := range units {
-		initialVisible[i] = i
-	}
-
 	m := model{
 		proj:           proj,
 		projectDir:     projectDir,
@@ -293,8 +290,27 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 		deployHost:     deployHost,
 		loadOpts:       cfg.LoadOpts,
 		globalFlagArgs: cfg.GlobalFlagArgs,
-		visible:        initialVisible,
 	}
+
+	// Bootstrap query: prefer local.star, fall back to in:<defaults.image>.
+	if ov, err := yoestar.LoadLocalOverrides(projectDir); err == nil {
+		bootstrap := ov.Query
+		if bootstrap == "" && proj.Defaults.Image != "" {
+			bootstrap = "in:" + proj.Defaults.Image
+		}
+		if q, err := query.Parse(bootstrap); err == nil {
+			m.query = q
+			m.queryInput = q.String()
+		}
+	} else if proj.Defaults.Image != "" {
+		if q, err := query.Parse("in:" + proj.Defaults.Image); err == nil {
+			m.query = q
+			m.queryInput = q.String()
+		}
+	}
+	m.savedQuery = m.query.String()
+	m.applyQuery()
+
 	m.checkBinfmtWarning()
 
 	stopFeed, feedStatus := startProjectFeed(proj, projectDir)
@@ -672,8 +688,8 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "/":
 		m.queryEditing = true
-		m.queryInput = ""
-		m.applyFilter()
+		m.queryRevertTo = m.query
+		m.queryInput = m.query.String() // start the bar prefilled with the active query
 		return m, nil
 
 	case "s":
@@ -696,23 +712,25 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		// Revert to whatever query was active when the bar opened.
 		m.queryEditing = false
-		m.queryInput = ""
-		m.applyFilter()
+		m.query = m.queryRevertTo
+		m.queryInput = m.query.String()
+		m.queryError = ""
+		m.applyQuery()
 		return m, nil
 
 	case "enter":
 		m.queryEditing = false
-		// Keep filter active, cursor stays on first match
-		if len(m.visible) > 0 {
-			m.cursor = m.visible[0]
-		}
+		// Keep current query active. If parse error, fall back to last
+		// valid (already in m.query); clear the error.
+		m.queryError = ""
 		return m, nil
 
 	case "backspace":
 		if len(m.queryInput) > 0 {
 			m.queryInput = m.queryInput[:len(m.queryInput)-1]
-			m.applyFilter()
+			m.reparse()
 		}
 		return m, nil
 
@@ -721,45 +739,24 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		key := msg.String()
 		if len(key) == 1 && key[0] >= 32 && key[0] <= 126 {
 			m.queryInput += key
-			m.applyFilter()
+			m.reparse()
 		}
 		return m, nil
 	}
 }
 
-// applyFilter (Task 6 transition): substring search over m.queryInput
-// against unit names, writing matches to m.visible. Task 7 replaces
-// this entirely with live query.Parse.
-func (m *model) applyFilter() {
-	if cap(m.visible) > 0 {
-		m.visible = m.visible[:0]
-	} else {
-		m.visible = make([]int, 0, len(m.units))
-	}
-	if m.queryInput == "" {
-		// Empty bar: show all (matching pre-refactor behavior).
-		for i := range m.units {
-			m.visible = append(m.visible, i)
-		}
+// reparse re-parses m.queryInput; on success updates m.query and
+// re-applies. On failure keeps m.query and m.visible at their last-valid
+// values and stores the error message for the bar.
+func (m *model) reparse() {
+	q, err := query.Parse(m.queryInput)
+	if err != nil {
+		m.queryError = err.Error()
 		return
 	}
-	q := strings.ToLower(m.queryInput)
-	for i, name := range m.units {
-		if strings.Contains(strings.ToLower(name), q) {
-			m.visible = append(m.visible, i)
-			continue
-		}
-		if u, ok := m.proj.Units[name]; ok {
-			if strings.Contains(strings.ToLower(u.Class), q) {
-				m.visible = append(m.visible, i)
-			}
-		}
-	}
-	if len(m.visible) > 0 {
-		m.cursor = m.visible[0]
-	}
-	m.listOffset = 0
-	m.adjustListOffset()
+	m.queryError = ""
+	m.query = q
+	m.applyQuery()
 }
 
 // applyQuery refreshes m.inSet and m.visible after m.query changes.
@@ -1742,7 +1739,7 @@ func (m *model) recomputeStatuses() {
 	// Rebuild visible list to reflect the new unit set before any early
 	// return. m.units may already have been replaced above; without this,
 	// m.visible would carry stale indices into the old slice.
-	m.applyFilter()
+	m.applyQuery()
 
 	hashes, err := resolve.ComputeAllHashes(m.dag, m.arch, m.proj.Defaults.Machine)
 	if err != nil {
