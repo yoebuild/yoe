@@ -4,7 +4,7 @@
   </a>
 </p>
 
-# `[yoe]` Next Generation
+# `[yoe]` _Next Generation_
 
 **Fast tooling and builds. No cross-compiling headaches. Easy to
 customize/upgrade/debug. One tool for both system engineers and application
