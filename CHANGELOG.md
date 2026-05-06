@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **TUI auto-follow no longer yanks the cursor mid-navigation.** The units list
+  scrolls to whatever is actively building only when you're idle — pressing j/k
+  or typing a query keeps the cursor where you put it, while `b` still hands
+  control back to the build so you can watch what's compiling.
+
 ## [0.10.2] - 2026-05-05
 
 - **`yoe init` lists module-core last so it wins shadowing.** New projects now

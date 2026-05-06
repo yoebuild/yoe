@@ -70,6 +70,13 @@ var (
 // Package-level program reference for sending messages from goroutines.
 var tuiProgram *tea.Program
 
+// autoFollowIdleThreshold is how long after the most recent keypress the
+// units table will auto-follow a newly building unit by moving the cursor
+// and scrolling it into view. Within the window the user is presumed to be
+// actively navigating, so auto-follow is suppressed to avoid yanking their
+// cursor and viewport mid-keystroke.
+const autoFollowIdleThreshold = 2 * time.Second
+
 // Sort columns for the units table. Order matches the on-screen column
 // order and the indices stored in model.sortColumn. The cycle order
 // driven by the `o` key follows this same sequence.
@@ -303,6 +310,12 @@ type model struct {
 	// binary from inside the TUI (currently `yoe run` on image units)
 	// prepend these so the child sees the same load behavior.
 	globalFlagArgs []string
+
+	// lastKeypress is the time the user last pressed a key. The auto-follow
+	// path that scrolls a newly building unit into view checks this against
+	// autoFollowIdleThreshold so it doesn't yank the cursor and viewport
+	// while the user is actively navigating.
+	lastKeypress time.Time
 }
 
 // Config carries the cross-cutting context the TUI needs from the cmd layer:
@@ -451,11 +464,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statuses[msg.unit] = statusBuilding
 			// When a build starts (often a transitive dep of the unit
 			// the user invoked), scroll its row into view so the user
-			// can see what's happening — but only if the current query
-			// doesn't already filter it out, and only if it's not
-			// already on screen. Cursor doesn't move; this is a pure
-			// viewport adjustment.
-			m.scrollUnitIntoView(msg.unit)
+			// can see what's happening. Suppressed while the user is
+			// actively navigating — otherwise transitive build events
+			// would yank the cursor and viewport out from under them.
+			if time.Since(m.lastKeypress) >= autoFollowIdleThreshold {
+				m.scrollUnitIntoView(msg.unit)
+			}
 		case "failed":
 			m.statuses[msg.unit] = statusFailed
 		}
@@ -557,6 +571,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Record the keypress timestamp before any sub-handler runs so the
+		// auto-follow gate sees a fresh time even when the key is consumed
+		// by a modal handler (confirm prompt, search, etc.).
+		m.lastKeypress = time.Now()
 		// Handle confirmation prompt
 		if m.confirm != "" {
 			return m.updateConfirm(msg)
@@ -687,6 +705,10 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "b":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
+			// Build is an action, not navigation: clear the idle timer
+			// so the upcoming cascade of "building" events can auto-
+			// follow the actively compiling unit into view.
+			m.lastKeypress = time.Time{}
 			return m, m.startBuild(name)
 		}
 		return m, nil
@@ -710,6 +732,10 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		// Build is an action, not navigation: clear the idle timer
+		// so the upcoming cascade of "building" events can auto-
+		// follow the actively compiling unit into view.
+		m.lastKeypress = time.Time{}
 		return m, tea.Batch(cmds...)
 
 	case "e":
