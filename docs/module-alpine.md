@@ -1,7 +1,7 @@
-# units-alpine — wrapping prebuilt Alpine packages
+# module-alpine — wrapping prebuilt Alpine packages
 
-`units-alpine` is a yoe module that wraps prebuilt Alpine Linux `.apk` files as
-yoe units. Where `units-core` builds packages from upstream source, units in
+`module-alpine` is a yoe module that wraps prebuilt Alpine Linux `.apk` files as
+yoe units. Where `module-core` builds packages from upstream source, units in
 this module fetch a binary apk from a pinned Alpine release, verify its sha256,
 and repack it as a yoe artifact. The unit's "build" is just extracting the apk
 into `$DESTDIR`.
@@ -12,10 +12,10 @@ The policy yoe follows:
 
 1. **Yoe builds the easy stuff.** Small leaf libraries (`zlib`, `xz`, `expat`,
    `libffi`, `readline`, `ncurses`, …) and small userland tools (`less`, `htop`,
-   `vim`, `procps-ng`, `iproute2`, …) stay in `units-core` even though Alpine
+   `vim`, `procps-ng`, `iproute2`, …) stay in `module-core` even though Alpine
    ships them too. Their build is cheap, and keeping them in yoe preserves the
    option to retarget glibc or a different init system later.
-2. **`units-alpine` ships Alpine-native and hard-to-build packages.**
+2. **`module-alpine` ships Alpine-native and hard-to-build packages.**
    Alpine-native means `musl`, `apk-tools`, `alpine-keys`, `alpine-baselayout` —
    things that only make sense from Alpine. Hard-to-build means packages where
    Alpine's expertise (configure flags, security review, codec/license
@@ -34,7 +34,7 @@ targets in the future — see [libc-and-init.md](libc-and-init.md).
 The Alpine release pinned in `classes/alpine_pkg.star`
 (`_ALPINE_RELEASE = "v3.21"` at the time of writing) **must** match the
 `FROM alpine:<release>` line in
-`@units-core//containers/toolchain-musl/Dockerfile`. Both currently point at
+`@module-core//containers/toolchain-musl/Dockerfile`. Both currently point at
 `v3.21`.
 
 The coupling is not aesthetic. Three things tie them together:
@@ -54,19 +54,21 @@ The coupling is not aesthetic. Three things tie them together:
    from one release and `package-B` from another lands you with conflicting
    `so:` constraints that `apk` will refuse to install.
 
-When bumping the Alpine release, do all three in the same commit:
+When bumping the Alpine release, do all three in lockstep across the yoe repo
+and the [module-alpine repo](https://github.com/yoebuild/module-alpine):
 
 1. Update `FROM alpine:<release>` in
-   `modules/units-core/containers/toolchain-musl/Dockerfile`.
-2. Update `_ALPINE_RELEASE` in `modules/units-alpine/classes/alpine_pkg.star`.
-3. Update `version` and `sha256` on every unit in `modules/units-alpine/units/`.
-   The version comes from the new release's APKINDEX; the sha256 is the SHA-256
-   of the apk file itself.
+   `modules/module-core/containers/toolchain-musl/Dockerfile` in the yoe repo.
+2. Update `_ALPINE_RELEASE` in `classes/alpine_pkg.star` in the module-alpine
+   repo.
+3. Update `version` and `sha256` on every unit under `units/` in the
+   module-alpine repo. The version comes from the new release's APKINDEX; the
+   sha256 is the SHA-256 of the apk file itself.
 
 ## Writing a new alpine_pkg unit
 
 ```python
-load("@units-alpine//classes/alpine_pkg.star", "alpine_pkg")
+load("@module-alpine//classes/alpine_pkg.star", "alpine_pkg")
 
 alpine_pkg(
     name = "sqlite-libs",
@@ -107,7 +109,7 @@ dependency to be listed explicitly in `runtime_deps`.
 
 This is deliberate. Auto-following Alpine's dep closure would silently import
 dozens of packages (busybox, openrc, ssl-client, …) that yoe either ships from
-`units-core` already or doesn't want at all. Forcing explicit `runtime_deps`
+`module-core` already or doesn't want at all. Forcing explicit `runtime_deps`
 keeps the imported surface visible and small. When you add a new alpine_pkg,
 look at its `D:` line in APKINDEX and either declare the corresponding yoe units
 in `runtime_deps`, or, for deps you don't need on the target image, just leave
@@ -115,7 +117,7 @@ them out.
 
 ## Override with a from-source unit
 
-Because units in `units-alpine` use the bare names (`musl`, `sqlite-libs`, …),
+Because units in `module-alpine` use the bare names (`musl`, `sqlite-libs`, …),
 any later-priority module — including the project itself — can override them by
 defining a unit with the same name. See
 [naming-and-resolution.md](naming-and-resolution.md#unit-replacement-via-name-shadowing).
@@ -123,8 +125,8 @@ defining a unit with the same name. See
 ```python
 # PROJECT.star
 modules = [
-    module(..., path = "modules/units-alpine"),  # ships musl, sqlite-libs, …
-    module(..., path = "modules/units-core"),    # source-built kernel, busybox, …
+    module("https://github.com/yoebuild/module-alpine.git", ref = "main"),  # ships musl, sqlite-libs, …
+    module("https://github.com/yoebuild/yoe.git", ref = "main", path = "modules/module-core"),  # source-built kernel, busybox, …
     module(..., path = "modules/my-overrides"),  # last → wins
 ]
 

@@ -14,7 +14,7 @@ to a bootable image fast. Self-built packages replace Alpine's incrementally via
 the bootstrap process later.
 
 The critical path is: APKINDEX generation → load() for module imports →
-units-core module with real units → disk image generation → boot in QEMU.
+module-core module with real units → disk image generation → boot in QEMU.
 
 **Tech Stack:** Go, go.starlark.net, apk-tools, bubblewrap, QEMU, syslinux/
 extlinux (bootloader), mkfs.ext4, mkfs.vfat
@@ -28,9 +28,9 @@ extlinux (bootloader), mkfs.ext4, mkfs.vfat
 | 1    | APKINDEX generation            | `apk` can resolve deps from our local repo          |
 | 2    | Starlark load() implementation | Units can import classes from modules               |
 | 3    | Recursive unit discovery       | `units/**/*.star` works for categorized layouts     |
-| 4    | units-core: classes            | Starlark autotools/cmake/go/image class files       |
-| 5    | units-core: base units         | Real zlib, busybox, linux kernel units              |
-| 6    | units-core: machines + images  | qemu-x86_64 machine, base-image definition          |
+| 4    | module-core: classes           | Starlark autotools/cmake/go/image class files       |
+| 5    | module-core: base units        | Real zlib, busybox, linux kernel units              |
+| 6    | module-core: machines + images | qemu-x86_64 machine, base-image definition          |
 | 7    | Disk image generation          | GPT partition table, ext4 rootfs, vfat boot, kernel |
 | 8    | Boot configuration             | extlinux.conf for QEMU serial console boot          |
 | 9    | End-to-end integration test    | `yoe build base-image` → `yoe run` boots to shell   |
@@ -555,7 +555,7 @@ git commit -m "feat: implement Starlark load() for class imports and module refe
 
 ## Task 3: Recursive Unit Discovery
 
-The units-core module organizes units in subdirectories (`units/toolchain/`,
+The module-core module organizes units in subdirectories (`units/toolchain/`,
 `units/base/`, etc.). The loader needs to glob `units/**/*.star` instead of just
 `units/*.star`.
 
@@ -630,24 +630,24 @@ git commit -m "feat: recursive unit discovery (units/**/*.star)"
 
 ---
 
-## Task 4: units-core Module — Starlark Classes
+## Task 4: module-core Module — Starlark Classes
 
 Create the class files as pure Starlark functions that call the `unit()`
 primitive.
 
 **Files:**
 
-- Create: `modules/units-core/MODULE.star`
-- Create: `modules/units-core/classes/autotools.star`
-- Create: `modules/units-core/classes/cmake.star`
-- Create: `modules/units-core/classes/go.star`
-- Create: `modules/units-core/classes/image.star`
+- Create: `modules/module-core/MODULE.star`
+- Create: `modules/module-core/classes/autotools.star`
+- Create: `modules/module-core/classes/cmake.star`
+- Create: `modules/module-core/classes/go.star`
+- Create: `modules/module-core/classes/image.star`
 
 - [ ] **Step 1: Create MODULE.star**
 
 ```python
 module_info(
-    name = "units-core",
+    name = "module-core",
     description = "Yoe-NG base module: toolchain, base system, essential libraries",
 )
 ```
@@ -728,26 +728,26 @@ def yoe_image(name, version, description="", packages=[], hostname="yoe",
 - [ ] **Step 6: Commit**
 
 ```bash
-git add modules/units-core/
-git commit -m "feat: add units-core module with Starlark classes"
+git add modules/module-core/
+git commit -m "feat: add module-core module with Starlark classes"
 ```
 
 ---
 
-## Task 5: units-core — Base Units
+## Task 5: module-core — Base Units
 
 Real units for the packages needed in a minimal bootable image. For the first
 pass, these use simple build steps. The sources must be real URLs.
 
 **Files:**
 
-- Create: `modules/units-core/units/libs/zlib.star`
-- Create: `modules/units-core/units/base/busybox.star`
-- Create: `modules/units-core/units/base/linux.star`
+- Create: `modules/module-core/units/libs/zlib.star`
+- Create: `modules/module-core/units/base/busybox.star`
+- Create: `modules/module-core/units/base/linux.star`
 
 - [ ] **Step 1: Create zlib unit**
 
-`modules/units-core/units/libs/zlib.star`:
+`modules/module-core/units/libs/zlib.star`:
 
 ```python
 load("//classes/autotools.star", "autotools")
@@ -764,7 +764,7 @@ autotools(
 
 - [ ] **Step 2: Create busybox unit**
 
-`modules/units-core/units/base/busybox.star`:
+`modules/module-core/units/base/busybox.star`:
 
 ```python
 unit(
@@ -784,7 +784,7 @@ unit(
 
 - [ ] **Step 3: Create linux kernel unit**
 
-`modules/units-core/units/base/linux.star`:
+`modules/module-core/units/base/linux.star`:
 
 ```python
 unit(
@@ -806,22 +806,22 @@ unit(
 - [ ] **Step 4: Commit**
 
 ```bash
-git add modules/units-core/units/
+git add modules/module-core/units/
 git commit -m "feat: add base units (zlib, busybox, linux kernel)"
 ```
 
 ---
 
-## Task 6: units-core — Machines and Images
+## Task 6: module-core — Machines and Images
 
 **Files:**
 
-- Create: `modules/units-core/machines/qemu-x86_64.star`
-- Create: `modules/units-core/images/base-image.star`
+- Create: `modules/module-core/machines/qemu-x86_64.star`
+- Create: `modules/module-core/images/base-image.star`
 
 - [ ] **Step 1: Create QEMU x86_64 machine**
 
-`modules/units-core/machines/qemu-x86_64.star`:
+`modules/module-core/machines/qemu-x86_64.star`:
 
 ```python
 machine(
@@ -845,7 +845,7 @@ machine(
 
 - [ ] **Step 2: Create base image**
 
-`modules/units-core/images/base-image.star`:
+`modules/module-core/images/base-image.star`:
 
 ```python
 image(
@@ -869,7 +869,7 @@ image(
 - [ ] **Step 3: Commit**
 
 ```bash
-git add modules/units-core/machines/ modules/units-core/images/
+git add modules/module-core/machines/ modules/module-core/images/
 git commit -m "feat: add qemu-x86_64 machine and base-image definitions"
 ```
 
@@ -1112,8 +1112,8 @@ git commit -m "feat: install extlinux boot config for QEMU serial console"
 
 ## Task 9: End-to-End Integration Test
 
-Wire everything together with a test project that uses the units-core module and
-builds a complete image.
+Wire everything together with a test project that uses the module-core module
+and builds a complete image.
 
 **Files:**
 
@@ -1132,8 +1132,8 @@ project(
     repository = repository(path = "build/repo"),
     cache = cache(path = "build/cache"),
     layers = [
-        layer("github.com/yoe/units-core",
-              local = "../../layers/units-core"),
+        layer("github.com/yoe/module-core",
+              local = "../../layers/module-core"),
     ],
 )
 ```
@@ -1167,20 +1167,20 @@ func TestE2E_DryRun(t *testing.T) {
 		t.Fatalf("LoadProject: %v", err)
 	}
 
-	// Should have machines from units-core layer
+	// Should have machines from module-core layer
 	if _, ok := proj.Machines["qemu-x86_64"]; !ok {
-		t.Error("expected qemu-x86_64 machine from units-core layer")
+		t.Error("expected qemu-x86_64 machine from module-core layer")
 	}
 
-	// Should have units from units-core layer
+	// Should have units from module-core layer
 	if _, ok := proj.Units["busybox"]; !ok {
-		t.Error("expected busybox unit from units-core layer")
+		t.Error("expected busybox unit from module-core layer")
 	}
 	if _, ok := proj.Units["linux"]; !ok {
-		t.Error("expected linux unit from units-core layer")
+		t.Error("expected linux unit from module-core layer")
 	}
 	if _, ok := proj.Units["base-image"]; !ok {
-		t.Error("expected base-image from units-core layer")
+		t.Error("expected base-image from module-core layer")
 	}
 
 	// Dry run should work
@@ -1241,7 +1241,7 @@ After completing all 9 tasks:
 1. `apk` can resolve dependencies from our repo (APKINDEX)
 2. Units can `load()` classes from modules
 3. Subdirectory unit layout works
-4. units-core provides real Starlark classes
+4. module-core provides real Starlark classes
 5. Real units exist for zlib, busybox, linux kernel
 6. QEMU x86_64 machine and base-image are defined
 7. Disk images have real partitions (GPT, ext4, vfat)

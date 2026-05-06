@@ -197,7 +197,7 @@ Compare two versions of a module. Show what units changed, what versions bumped,
 what new units were added, and what was removed.
 
 ```
-/module-diff @units-core v1.0.0 v1.1.0
+/module-diff @module-core v1.0.0 v1.1.0
 ```
 
 ### Development Environment

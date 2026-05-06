@@ -8,7 +8,27 @@
 
 ## Next
 
+- Display version on units tab
+- Open to unit source on web.
+- Shell into module source, drop into directory
+- Shell into unit source, drop into directory
+- Tab in unit to display files installed and sizes.
+- Side issue worth flagging (not fixing now): the doubled -r0-r0 in
+  ca-certificates-bundle-20260413-r0-r0 is a real bug in units-alpine. Alpine's
+  upstream version 20260413-r0 already contains the release suffix, but
+  units-alpine declares it as version = "20260413-r0" and yoe's apk packaging
+  then appends another -r<release> (default 0). The clean fix lives upstream in
+  units-alpine: split version = "20260413" and release = 0. Affects every
+  alpine_pkg unit. Not blocking the install (apk accepts the goofy name), so it
+  can wait — but worth a separate issue.
+- alpine should have unit deps, not just runtime deps
+- alpine packages like gvim provides vim. This could be a source of pain.
+- document BSP and package moat
 - Better hostnames for targets.
+- units-xxx -> module-xxx in git
+- unit details, show dependency graph up to image (upstream), and then
+  (downstream) a tree of stuff it pulls in
+- long z
 - mDNS on target (we have a mdns component, why is it not working?)
 - base-files is modified by machine
   - machine package feed?
@@ -193,6 +213,14 @@ sections.
 - Sub-packages — one unit producing multiple `.apks`.
 - `MODULE.star` manifests for module versioning and inter-module deps.
 - Per-task container overrides.
+- Track the Starlark class function used to define each unit on the resolved
+  `Unit` (e.g., `Unit.BuiltVia = "autotools"`, `"cmake"`, `"alpine_pkg"`,
+  `"go_binary"`). Today `Unit.Class` only carries the unit's _type_ (`image` /
+  `container` / `unit`); the build-pattern function that wrapped the `unit()`
+  call leaves no fingerprint on the resolved data. With a separate field, the
+  TUI query language (and `yoe build` flags) can distinguish `type:autotools` —
+  meaningless today — from `type:image`, and we can answer questions like "what
+  alpine_pkg units are in this image" without scraping `.star` files.
 
 See [metadata-format.md](metadata-format.md).
 

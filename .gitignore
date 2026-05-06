@@ -6,3 +6,4 @@
 local.star
 /.claude/scheduled_tasks.lock
 /book
+/docs/intro.md

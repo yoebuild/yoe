@@ -340,7 +340,7 @@ setting ownership, creating device nodes) and a partitioning tool (`sfdisk` +
 ### Reducing Dependence on Docker's `/dev` (planned)
 
 > **Status:** Today, `yoe` uses option 5 below. The `mknod /dev/loop0..31`
-> workaround is implemented in `modules/units-core/classes/image.star`
+> workaround is implemented in `modules/module-core/classes/image.star`
 > (`_install_syslinux`) and mirrored in `internal/image/disk.go`. Options 1–4
 > are future directions — none are implemented yet.
 

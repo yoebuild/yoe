@@ -436,7 +436,7 @@ entirely and use the local directory. `yoe module list` shows these as
 
 ```
 Module                             Ref        Status
-@units-core                      v1.0.0     up to date
+@module-core                      v1.0.0     up to date
 @vendor-bsp-imx8                   v2.1.0     up to date
   └─ @hal-common                   v1.3.0     up to date (transitive)
   └─ @firmware-imx                 v5.4       up to date (transitive)

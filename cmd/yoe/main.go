@@ -26,7 +26,15 @@ import (
 
 var version = "dev"
 
-var globalProjectFile string
+var (
+	globalProjectFile string
+	globalShowShadows bool
+	// Default true while units-alpine's linux-firmware-* fan-out (~100
+	// packages all providing `linux-firmware-any`) keeps tripping the
+	// strict intra-module collision check. Flip back once that's fixed
+	// upstream.
+	globalAllowDuplicateProvides = true
+)
 
 // stringSlice implements flag.Value for repeatable string flags.
 type stringSlice []string
@@ -40,11 +48,19 @@ func (s *stringSlice) Set(v string) error {
 func main() {
 	// Parse global flags before command dispatch
 	args := os.Args[1:]
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--project" && i+1 < len(args) {
+	for i := 0; i < len(args); {
+		switch {
+		case args[i] == "--project" && i+1 < len(args):
 			globalProjectFile = args[i+1]
 			args = append(args[:i], args[i+2:]...)
-			break
+		case args[i] == "--show-shadows":
+			globalShowShadows = true
+			args = append(args[:i], args[i+1:]...)
+		case args[i] == "--allow-duplicate-provides":
+			globalAllowDuplicateProvides = true
+			args = append(args[:i], args[i+1:]...)
+		default:
+			i++
 		}
 	}
 
@@ -57,6 +73,9 @@ func main() {
 	cmdArgs := args[1:]
 
 	switch command {
+	case "--help", "-h", "help":
+		printUsage()
+		return
 	case "version":
 		fmt.Println(version)
 	case "update":
@@ -113,8 +132,15 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, "Usage: %s COMMAND [OPTIONS]\n\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "Usage: %s [GLOBAL OPTIONS] COMMAND [OPTIONS]\n\n", os.Args[0])
 	fmt.Fprintf(os.Stderr, "Yoe embedded Linux distribution builder\n\n")
+	fmt.Fprintf(os.Stderr, "Global Options:\n")
+	fmt.Fprintf(os.Stderr, "  --project <file>            Use an alternative project file instead of PROJECT.star\n")
+	fmt.Fprintf(os.Stderr, "  --show-shadows              Print stderr notices about cross-module unit shadowing\n")
+	fmt.Fprintf(os.Stderr, "                              and intra-module provides overrides\n")
+	fmt.Fprintf(os.Stderr, "  --allow-duplicate-provides  Allow multiple units in the same module to declare\n")
+	fmt.Fprintf(os.Stderr, "                              the same virtual provide (first registered wins)\n")
+	fmt.Fprintf(os.Stderr, "\n")
 	fmt.Fprintf(os.Stderr, "Commands:\n")
 	fmt.Fprintf(os.Stderr, "  (no args)               Launch the interactive TUI\n")
 	fmt.Fprintf(os.Stderr, "  init <project-dir>      Create a new Yoe project\n")
@@ -431,18 +457,44 @@ func loadProject() *yoestar.Project {
 // tryLoadProject returns nil if no project is loadable from the cwd
 // (rather than os.Exit'ing like loadProject). Useful for commands that
 // can run inside or outside a project, like `yoe device repo list`.
+// projectLoadOpts returns the LoadOptions derived from global CLI flags. The
+// TUI also needs these so reloads (after editing .star files or switching
+// machines) honor flags like --allow-duplicate-provides.
+func projectLoadOpts() []yoestar.LoadOption {
+	opts := []yoestar.LoadOption{
+		yoestar.WithModuleSync(module.SyncIfNeeded),
+		yoestar.WithShowShadows(globalShowShadows),
+		yoestar.WithAllowDuplicateProvides(globalAllowDuplicateProvides),
+	}
+	if globalProjectFile != "" {
+		opts = append(opts, yoestar.WithProjectFile(globalProjectFile))
+	}
+	return opts
+}
+
+// globalFlagArgs returns the global flags as argv tokens, suitable for
+// prepending to a re-exec of the yoe binary so the child inherits the same
+// load behavior as the parent (TUI re-execs `yoe run` for image launches).
+func globalFlagArgs() []string {
+	var args []string
+	if globalProjectFile != "" {
+		args = append(args, "--project", globalProjectFile)
+	}
+	if globalShowShadows {
+		args = append(args, "--show-shadows")
+	}
+	if globalAllowDuplicateProvides {
+		args = append(args, "--allow-duplicate-provides")
+	}
+	return args
+}
+
 func tryLoadProject() *yoestar.Project {
 	dir := os.Getenv("YOE_PROJECT")
 	if dir == "" {
 		dir = "."
 	}
-	opts := []yoestar.LoadOption{
-		yoestar.WithModuleSync(module.SyncIfNeeded),
-	}
-	if globalProjectFile != "" {
-		opts = append(opts, yoestar.WithProjectFile(globalProjectFile))
-	}
-	proj, err := yoestar.LoadProject(dir, opts...)
+	proj, err := yoestar.LoadProject(dir, projectLoadOpts()...)
 	if err != nil {
 		return nil
 	}
@@ -455,31 +507,37 @@ func loadProjectWithMachine(machineName string) *yoestar.Project {
 		dir = "."
 	}
 	// Precedence: --machine flag > local.star > PROJECT.star defaults.
+	// Local image override is also captured here and applied below — it
+	// doesn't affect Starlark eval, so we just patch proj.Defaults.Image.
+	var ovImage string
 	if machineName == "" {
 		absDir, err := filepath.Abs(dir)
 		if err == nil {
 			if root, err := findProjectRootForLocal(absDir); err == nil {
 				if ov, err := yoestar.LoadLocalOverrides(root); err == nil {
 					machineName = ov.Machine
+					ovImage = ov.Image
 				} else {
 					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 				}
 			}
 		}
 	}
-	opts := []yoestar.LoadOption{
-		yoestar.WithModuleSync(module.SyncIfNeeded),
-	}
+	opts := projectLoadOpts()
 	if machineName != "" {
 		opts = append(opts, yoestar.WithMachine(machineName))
-	}
-	if globalProjectFile != "" {
-		opts = append(opts, yoestar.WithProjectFile(globalProjectFile))
 	}
 	proj, err := yoestar.LoadProject(dir, opts...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
+	}
+	if ovImage != "" {
+		if _, ok := proj.Units[ovImage]; ok {
+			proj.Defaults.Image = ovImage
+		} else {
+			fmt.Fprintf(os.Stderr, "Warning: local.star image %q not found in project; ignoring\n", ovImage)
+		}
 	}
 	return proj
 }
@@ -755,7 +813,11 @@ func cmdUpdate() {
 
 func cmdTUI(_ []string) {
 	proj := loadProject()
-	if err := tui.Run(proj, projectDir()); err != nil {
+	cfg := tui.Config{
+		LoadOpts:        projectLoadOpts(),
+		GlobalFlagArgs:  globalFlagArgs(),
+	}
+	if err := tui.Run(proj, projectDir(), cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
@@ -846,7 +908,7 @@ func cmdRun(args []string) {
 
 func cmdRepo(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s repo <list|info|remove> [args...]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s repo <list|info|remove|clean> [args...]\n", os.Args[0])
 		os.Exit(1)
 	}
 
@@ -882,6 +944,18 @@ func cmdRepo(args []string) {
 			os.Exit(1)
 		}
 		if err := repo.Remove(repoDir, args[1], signer, os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	case "clean":
+		// Drops .apk files no current unit produces, then re-signs the
+		// regenerated APKINDEX. Same signer concern as `remove`.
+		signer, err := artifact.LoadOrGenerateSigner(proj.Name, proj.SigningKey)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: loading signing key: %v\n", err)
+			os.Exit(1)
+		}
+		if err := repo.Clean(proj, repoDir, signer, os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}

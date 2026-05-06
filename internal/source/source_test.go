@@ -173,6 +173,56 @@ func TestPrepare_WithPatches(t *testing.T) {
 	}
 }
 
+// TestPrepare_PatchesRelativeToDefinedIn verifies that patches resolve
+// relative to the unit's .star file directory (unit.DefinedIn) rather than
+// the project root. This lets a module ship patches alongside its units.
+func TestPrepare_PatchesRelativeToDefinedIn(t *testing.T) {
+	content := createTestTarball(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(content)
+	}))
+	defer srv.Close()
+
+	projectDir := t.TempDir()
+	t.Setenv("YOE_CACHE", filepath.Join(projectDir, "cache"))
+
+	// Module lives outside the project (typical local-module layout).
+	moduleDir := t.TempDir()
+	unitDir := filepath.Join(moduleDir, "units", "bsp")
+	patchDir := filepath.Join(unitDir, "patches", "test-pkg")
+	if err := os.MkdirAll(patchDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	patchContent := `--- a/hello.txt
++++ b/hello.txt
+@@ -1 +1 @@
+-hello world
++hello patched world
+`
+	os.WriteFile(filepath.Join(patchDir, "fix.patch"), []byte(patchContent), 0644)
+
+	unit := &yoestar.Unit{
+		Name:      "test-pkg",
+		Version:   "1.0",
+		Source:    srv.URL + "/test-1.0.tar.gz",
+		Patches:   []string{"patches/test-pkg/fix.patch"},
+		DefinedIn: unitDir,
+	}
+
+	srcDir, err := Prepare(projectDir, "x86_64", unit, os.Stdout)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(srcDir, "hello.txt"))
+	if err != nil {
+		t.Fatalf("reading hello.txt: %v", err)
+	}
+	if !strings.Contains(string(data), "patched") {
+		t.Errorf("module-relative patch not applied: content = %q", string(data))
+	}
+}
+
 func TestPrepare_DevMode(t *testing.T) {
 	projectDir := t.TempDir()
 	srcDir := filepath.Join(projectDir, "build", "test-pkg.x86_64", "src")
@@ -412,4 +462,67 @@ func createTestZip(t *testing.T, path string, entries []zipEntry) {
 			}
 		}
 	}
+}
+
+func TestAPKChecksumVerify(t *testing.T) {
+	// Use a real Alpine apk from the cache populated by module-alpine's
+	// gen-unit.py runs. Skip cleanly when it isn't there (CI without
+	// the cache).
+	apkPath := filepath.Join(os.Getenv("HOME"),
+		".cache/module-alpine-gen/v3.21/main/x86_64/musl-1.2.5-r11.apk")
+	if _, err := os.Stat(apkPath); err != nil {
+		t.Skip("test apk not in cache; run gen-unit.py first")
+	}
+	apk, err := os.ReadFile(apkPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(apk)
+	}))
+	defer srv.Close()
+
+	tmpCache := t.TempDir()
+	t.Setenv("YOE_CACHE", tmpCache)
+
+	// Good apk_checksum from APKINDEX `C:` for musl-1.2.5-r11.
+	goodCsum := "Q1KuzxE7sFBvldrt+RbsBErcpFyrM="
+
+	t.Run("matches", func(t *testing.T) {
+		u := &yoestar.Unit{
+			Name: "musl", Source: srv.URL + "/musl.apk",
+			APKChecksum: goodCsum,
+		}
+		var buf bytes.Buffer
+		if _, err := Fetch(u, &buf); err != nil {
+			t.Fatalf("fetch failed for valid apk_checksum: %v", err)
+		}
+	})
+
+	t.Run("mismatch detected", func(t *testing.T) {
+		u := &yoestar.Unit{
+			Name: "musl", Source: srv.URL + "/musl-bad.apk",
+			APKChecksum: "Q1AAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		}
+		var buf bytes.Buffer
+		_, err := Fetch(u, &buf)
+		if err == nil {
+			t.Fatal("expected mismatch error, got nil")
+		}
+		if !strings.Contains(err.Error(), "apk_checksum mismatch") {
+			t.Fatalf("expected mismatch error, got: %v", err)
+		}
+	})
+
+	t.Run("malformed prefix rejected", func(t *testing.T) {
+		u := &yoestar.Unit{
+			Name: "musl", Source: srv.URL + "/musl-mal.apk",
+			APKChecksum: "X1somethingnotsha1=",
+		}
+		var buf bytes.Buffer
+		_, err := Fetch(u, &buf)
+		if err == nil || !strings.Contains(err.Error(), "Q1") {
+			t.Fatalf("expected Q1 prefix error, got: %v", err)
+		}
+	})
 }

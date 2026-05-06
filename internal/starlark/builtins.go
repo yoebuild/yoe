@@ -215,6 +215,7 @@ func kwStringMap(kwargs []starlark.Tuple, key string) map[string]string {
 var reservedUnitKwargs = map[string]bool{
 	"name": true, "version": true, "release": true, "scope": true,
 	"description": true, "license": true, "source": true, "sha256": true,
+	"apk_checksum": true,
 	"tag": true, "branch": true, "patches": true, "deps": true,
 	"runtime_deps": true, "container": true, "container_arch": true,
 	"sandbox": true, "shell": true, "tasks": true, "provides": true,
@@ -589,6 +590,7 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 		License:     kwString(kwargs, "license"),
 		Source:      kwString(kwargs, "source"),
 		SHA256:      kwString(kwargs, "sha256"),
+		APKChecksum: kwString(kwargs, "apk_checksum"),
 		Tag:         kwString(kwargs, "tag"),
 		Branch:      kwString(kwargs, "branch"),
 		Patches:     kwStringList(kwargs, "patches"),
@@ -604,8 +606,9 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 		Conffiles:   kwStringList(kwargs, "conffiles"),
 		Environment: kwStringMap(kwargs, "environment"),
 		CacheDirs:   kwStringMap(kwargs, "cache_dirs"),
-		Artifacts:   kwStringList(kwargs, "artifacts"),
-		Exclude:     kwStringList(kwargs, "exclude"),
+		Artifacts:         kwStringList(kwargs, "artifacts"),
+		ArtifactsExplicit: kwStringList(kwargs, "artifacts_explicit"),
+		Exclude:           kwStringList(kwargs, "exclude"),
 		Hostname:    kwString(kwargs, "hostname"),
 		Timezone:    kwString(kwargs, "timezone"),
 		Locale:      kwString(kwargs, "locale"),
@@ -681,16 +684,34 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 				name, moduleSource(existing.Module))
 		}
 		if r.ModuleIndex < existing.ModuleIndex {
+			e.shadows = append(e.shadows, ShadowEvent{
+				Unit:         name,
+				WinnerModule: existing.Module,
+				WinnerDir:    existing.DefinedIn,
+				LoserModule:  r.Module,
+				LoserDir:     r.DefinedIn,
+			})
 			e.mu.Unlock()
-			fmt.Fprintf(os.Stderr,
-				"notice: unit %q from %s is shadowed by %s\n",
-				name, moduleSource(r.Module), moduleSource(existing.Module))
+			if e.showShadows {
+				fmt.Fprintf(os.Stderr,
+					"notice: unit %q from %s is shadowed by %s\n",
+					name, moduleSource(r.Module), moduleSource(existing.Module))
+			}
 			return existing, nil
 		}
 		// New unit has higher priority — replace, log the displacement.
-		fmt.Fprintf(os.Stderr,
-			"notice: unit %q from %s shadows the same name from %s\n",
-			name, moduleSource(r.Module), moduleSource(existing.Module))
+		e.shadows = append(e.shadows, ShadowEvent{
+			Unit:         name,
+			WinnerModule: r.Module,
+			WinnerDir:    r.DefinedIn,
+			LoserModule:  existing.Module,
+			LoserDir:     existing.DefinedIn,
+		})
+		if e.showShadows {
+			fmt.Fprintf(os.Stderr,
+				"notice: unit %q from %s shadows the same name from %s\n",
+				name, moduleSource(r.Module), moduleSource(existing.Module))
+		}
 	}
 	e.units[name] = r
 	e.mu.Unlock()

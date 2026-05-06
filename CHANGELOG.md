@@ -8,6 +8,138 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-05-05
+
+- **`yoe init` lists module-core last so it wins shadowing.** New projects now
+  order modules so module-core's source-built units (busybox, openssl, …) take
+  precedence over Alpine prebuilts and over module-rpi, avoiding image-assembly
+  path collisions. Existing projects can move `module-core` to the end of their
+  `modules = [...]` list in `PROJECT.star` to get the same behavior.
+- **Images with `network-config` and busybox build again.** A path collision on
+  `/usr/share/udhcpc/default.script` (busybox ships an example script there;
+  network-config installs the real one) was aborting `apk add` at image-assembly
+  time.
+
+## [0.10.1] - 2026-05-05
+
+- **TUI flash offers `sudo chown` on permission denied.** Previously the flash
+  view just showed "permission denied" and dead-ended — matching the CLI's
+  behavior, the TUI now prompts to run `sudo chown $USER /dev/...` and retries
+  the write automatically.
+- **TUI home screen has tabs.** Press `tab` to cycle between Units (the existing
+  list), Modules (declared modules with git status), and Diagnostics (shadowed
+  units and duplicate `provides`). The diagnostics tab carries a count badge so
+  issues are visible from any tab.
+- **`--allow-duplicate-provides` is on by default.** No more passing the flag on
+  every yoe invocation while the `linux-firmware-*` fan-out keeps tripping the
+  strict check.
+- **Modules renamed: `units-*` → `module-*`.** `units-core`, `units-rpi`,
+  `units-alpine`, and `units-jetson` are now `module-core`, `module-rpi`,
+  `module-alpine`, and `module-jetson`. Update `module(...)` URLs and any
+  `path = "modules/units-..."` entries in your `PROJECT.star`.
+- **`helix` actually runs on the device.** Was previously bundled as a
+  glibc-linked binary that failed silently with `hx: not found`; now uses
+  Alpine's musl build.
+- **Images that include `apk-tools` or `libcurl` build again.** A collision
+  between the source-built `ca-certificates` and Alpine's
+  `ca-certificates-bundle` was aborting `apk add` at image-assembly time.
+- **`SIZE` column in the TUI updates as each unit finishes.** No more waiting
+  for the whole image to complete before transitive deps show their size, and
+  partial sizes survive a mid-build failure.
+- **Modules show their declared name.** The TUI's `MODULE` column and any
+  diagnostic that names a module now use the name set in `MODULE.star`'s
+  `module_info(name = ...)` instead of the path basename — so a module
+  referenced via `path = "modules/units-core"` displays as `core` if that's what
+  it calls itself. Falls back to the path basename when no `module_info` is
+  declared.
+- **`dev-image` ships `helix` instead of `vim`.** Drops the editor entry that
+  was unintentionally resolving to Alpine's `gvim` (and its X11/GTK runtime
+  closure), keeping the image lean.
+- **Unit detail shows what uses it and what it pulls in.** The detail page now
+  opens with two new sections above the build log: **USED BY** traces back
+  through runtime_deps to show which packages you wrote in `image()` pulled this
+  unit in, e.g. `dev-image → yazi → libpango → cairo`, so you can answer "why is
+  this on my device?" at a glance. **PULLS IN** shows the unit's runtime-deps as
+  a tree. Drilling into an image starts from exactly the packages you wrote in
+  `image()` (plus machine packages), then expands each one to show what it drags
+  in transitively.
+- **TUI layout overhaul.** Title and banners stay put when the list is long, the
+  help bar is always the last line, status messages flash in its place, and
+  pressing `/` turns the `Query:` header itself into the search input. Long unit
+  names get an ellipsis instead of breaking column alignment.
+- **Sort columns from the keyboard.** Press `o` to cycle the unit table through
+  `NAME → CLASS → MODULE → SIZE → DEPS → STATUS`; `O` flips direction. The
+  active column shows `↑` or `↓` next to its label.
+- **Help bar highlights shortcut keys.** Each shortcut letter renders in amber
+  matching `[yoe]`, so you can scan keys without reading every word.
+- **Cursor follows the work.** The TUI opens with the cursor on the default
+  image, jumps to whatever unit is currently building, and the cursor's full
+  unit name is always visible just above the help bar.
+- **Configure the default image per developer.** `local.star` accepts
+  `image = "..."` to override `defaults.image`. Pick an image from the new
+  **Image** entry in Setup (`s`) and the choice is saved — and the active search
+  re-anchors to `in:<image>`. Flows through `yoe run`, `yoe config show`, and
+  the TUI.
+- **More columns in the unit table.** Each row now also shows the module that
+  owns the unit (after shadow resolution), its install size after build (`.img`
+  size for images), and how many units it pulls into a runtime closure — so
+  bloat is easy to spot before flashing.
+- **`yoe --help` works and lists global options.** `--help`, `-h`, and `help`
+  all print usage, including `--project`, `--show-shadows`, and
+  `--allow-duplicate-provides`.
+
+## [0.10.0] - 2026-05-05
+
+_Errata: due to an issue in the alpine module, you must currently run with:
+`yoe --allow-duplicate-provides`._
+
+- **BREAKING CHANGE** This project has been moved to a new Github org:
+  https://github.com/yoebuild. `yoe update` from previous versions will not work
+  and you will need to download and manually install the 0.10.0 binary.
+- **TUI search is now a query language; defaults to your image's working set.**
+  Press `/` to filter by `type:`, `module:`, `status:`, or `in:` (closure of any
+  unit), in addition to plain substring search. `Tab` completes field names and
+  values. The TUI starts filtered to `in:<your-default-image>`, so a project
+  with thousands of units shows just what your image needs. Press `S` to save
+  the current query to `local.star` as the new default; press `\` to snap back
+  to it. The header shows `Query: …  Units: N/M` so you always know how many of
+  the project's units the current filter is showing.
+- **Use `apk-tools` from alpine layer for now.** It is built with docs.
+- **`yoe repo clean` drops stale `.apk` files.** Removes any `.apk` in the
+  project's local repo whose name+version no longer matches a current unit (unit
+  deleted, version bumped, release suffix changed) and re-signs the regenerated
+  APKINDEX. Without this, `apk add` happily picks the highest- versioned
+  candidate even when that candidate is leftover from a since-deleted unit —
+  which is how a `LUA=no`-built `apk-tools` ("apk has been built without help")
+  could keep winning over Alpine's prebuilt long after the source unit was
+  removed.
+- **Source-built `openssl` no longer collides with Alpine's `libcrypto3` /
+  `libssl3`.** The `openssl` unit in `units-core` now declares
+  `provides = ["libcrypto3", "libssl3"]`, so any package whose `runtime_deps`
+  reach `libcrypto3` or `libssl3` (e.g. `units-alpine`'s `apk-tools`) routes
+  back to the source-built openssl instead of pulling Alpine's split libcrypto3
+  /libssl3 packages alongside. Without this, image-time `apk add` aborted with
+  `trying to overwrite usr/lib/libcrypto.so.3 owned by openssl-3.4.1-r0`.
+- **`units-alpine` now lives in its own repo.** `yoe init` and the e2e project
+  pull `units-alpine` and `units-jetson` from `github.com/yoebuild/` instead of
+  carrying units-alpine inside this repo. Existing projects with
+  `path = "modules/units-alpine"` should switch to a remote `module(...)` ref.
+- **Shadow notices are off by default.** Cross-module unit shadowing and
+  `provides` overrides no longer print a stderr notice on every load. Pass
+  `--show-shadows` to see them when you actually want to audit which module won.
+- **`--allow-duplicate-provides` lets multiple units share a virtual.** When
+  set, units in the same module may declare the same `provides` (apk-style "any
+  of these satisfies"); the first one wins for `PROVIDES` lookup. Needed for
+  `units-alpine`'s `linux-firmware-*` fan-out, where ~100 packages all provide
+  `linux-firmware-any`.
+- **`patches=` resolves relative to the unit's own .star file directory.** A
+  unit can now ship its patches alongside its definition (e.g.
+  `units/bsp/foo/patches/0001-fix.patch` next to `units/bsp/foo.star`), and the
+  same `patches=["patches/foo/0001-fix.patch"]` works whether the unit is loaded
+  from a local module override or a fetched remote module. Previously patches
+  were resolved against the project root, which meant module-shipped patches
+  couldn't be found unless every consumer copied them.
+
 ## [0.9.1] - 2026-05-01
 
 - **`yoe deploy <unit>` now installs the package's runtime deps too.**

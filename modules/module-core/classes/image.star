@@ -6,13 +6,16 @@ def image(name, artifacts=[], hostname="", timezone="", locale="",
     all_artifacts = list(artifacts) + list(MACHINE_CONFIG.packages)
 
     # Resolve provides (e.g., "linux" → "linux-rpi4")
-    resolved = []
+    explicit = []
     for a in all_artifacts:
         r = PROVIDES.get(a, None)
-        resolved.append(r if r != None else a)
+        explicit.append(r if r != None else a)
 
-    # Resolve transitive runtime dependencies
-    resolved = _resolve_runtime_deps(resolved)
+    # Resolve transitive runtime dependencies for the rootfs / build path.
+    # `explicit` (above) is preserved separately for UX surfaces like the
+    # TUI tree, where seeing the user's pre-closure list rather than the
+    # flattened set is much less misleading.
+    resolved = _resolve_runtime_deps(explicit)
 
     # Use machine partitions if image doesn't specify its own
     all_partitions = partitions if partitions else list(MACHINE_CONFIG.partitions)
@@ -27,6 +30,7 @@ def image(name, artifacts=[], hostname="", timezone="", locale="",
         scope = scope,
         unit_class = "image",
         artifacts = resolved,
+        artifacts_explicit = explicit,
         partitions = all_partitions,
         container = container,
         container_arch = container_arch,

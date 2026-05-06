@@ -53,13 +53,13 @@ revised plan.
 
 - `internal/starlark/install_step.go` — `InstallStepValue` Starlark type +
   `fnInstallFile` / `fnInstallTemplate` constructors
-- `modules/units-core/units/base/base-files/inittab.tmpl`
-- `modules/units-core/units/base/base-files/rcS`
-- `modules/units-core/units/base/base-files/os-release.tmpl`
-- `modules/units-core/units/base/base-files/extlinux.conf`
-- `modules/units-core/units/net/network-config/udhcpc-default.script`
-- `modules/units-core/units/net/network-config/S10network`
-- `modules/units-core/units/net/simpleiot/simpleiot.init`
+- `modules/module-core/units/base/base-files/inittab.tmpl`
+- `modules/module-core/units/base/base-files/rcS`
+- `modules/module-core/units/base/base-files/os-release.tmpl`
+- `modules/module-core/units/base/base-files/extlinux.conf`
+- `modules/module-core/units/net/network-config/udhcpc-default.script`
+- `modules/module-core/units/net/network-config/S10network`
+- `modules/module-core/units/net/simpleiot/simpleiot.init`
 
 **Modified:**
 
@@ -82,9 +82,9 @@ revised plan.
 - `internal/resolve/hash.go` — include `Extra` JSON and files-dir contents in
   unit hash
 - `internal/resolve/hash_test.go` — tests for new hash inputs
-- `modules/units-core/units/base/base-files.star` — step-value form
-- `modules/units-core/units/net/network-config.star` — step-value form
-- `modules/units-core/units/net/simpleiot.star` — step-value form
+- `modules/module-core/units/base/base-files.star` — step-value form
+- `modules/module-core/units/net/network-config.star` — step-value form
+- `modules/module-core/units/net/simpleiot.star` — step-value form
 - `docs/file-templates.md` — remove `## Status: Spec`
 - `CHANGELOG.md` — Unreleased entry
 
@@ -865,11 +865,11 @@ git commit -m "resolve: hash Unit.Extra and files directory contents"
 
 **Files:**
 
-- Create: `modules/units-core/units/base/base-files/inittab.tmpl`
-- Create: `modules/units-core/units/base/base-files/rcS`
-- Create: `modules/units-core/units/base/base-files/os-release.tmpl`
-- Create: `modules/units-core/units/base/base-files/extlinux.conf`
-- Modify: `modules/units-core/units/base/base-files.star`
+- Create: `modules/module-core/units/base/base-files/inittab.tmpl`
+- Create: `modules/module-core/units/base/base-files/rcS`
+- Create: `modules/module-core/units/base/base-files/os-release.tmpl`
+- Create: `modules/module-core/units/base/base-files/extlinux.conf`
+- Modify: `modules/module-core/units/base/base-files.star`
 
 - [ ] **Step 1: Create inittab.tmpl**
 
@@ -913,7 +913,7 @@ LABEL yoe
 
 - [ ] **Step 5: Rewrite base-files.star**
 
-Replace the contents of `modules/units-core/units/base/base-files.star` with:
+Replace the contents of `modules/module-core/units/base/base-files.star` with:
 
 ```python
 load("//classes/users.star", "user", "users_commands")
@@ -994,7 +994,7 @@ Expected: `inittab` has `ttyS0::respawn:...`; `os-release` has
 
 ```bash
 cd /scratch4/yoe/yoe-ng
-git add modules/units-core/units/base/base-files/ modules/units-core/units/base/base-files.star
+git add modules/module-core/units/base/base-files/ modules/module-core/units/base/base-files.star
 git commit -m "units: migrate base-files to install_template and install_file"
 ```
 
@@ -1004,9 +1004,9 @@ git commit -m "units: migrate base-files to install_template and install_file"
 
 **Files:**
 
-- Create: `modules/units-core/units/net/network-config/udhcpc-default.script`
-- Create: `modules/units-core/units/net/network-config/S10network`
-- Modify: `modules/units-core/units/net/network-config.star`
+- Create: `modules/module-core/units/net/network-config/udhcpc-default.script`
+- Create: `modules/module-core/units/net/network-config/S10network`
+- Modify: `modules/module-core/units/net/network-config.star`
 
 - [ ] **Step 1: Create udhcpc-default.script**
 
@@ -1078,7 +1078,7 @@ Expected: both files present and mode 0o755.
 
 ```bash
 cd /scratch4/yoe/yoe-ng
-git add modules/units-core/units/net/network-config/ modules/units-core/units/net/network-config.star
+git add modules/module-core/units/net/network-config/ modules/module-core/units/net/network-config.star
 git commit -m "units: migrate network-config to install_file"
 ```
 
@@ -1088,8 +1088,8 @@ git commit -m "units: migrate network-config to install_file"
 
 **Files:**
 
-- Create: `modules/units-core/units/net/simpleiot/simpleiot.init`
-- Modify: `modules/units-core/units/net/simpleiot.star`
+- Create: `modules/module-core/units/net/simpleiot/simpleiot.init`
+- Modify: `modules/module-core/units/net/simpleiot.star`
 
 - [ ] **Step 1: Create simpleiot.init**
 
@@ -1103,7 +1103,7 @@ esac
 
 - [ ] **Step 2: Replace the `init-script` task**
 
-In `modules/units-core/units/net/simpleiot.star`, change the `init-script` task
+In `modules/module-core/units/net/simpleiot.star`, change the `init-script` task
 from the current heredoc form to:
 
 ```python
@@ -1130,7 +1130,7 @@ network on first build; may be slow.)
 
 ```bash
 cd /scratch4/yoe/yoe-ng
-git add modules/units-core/units/net/simpleiot/ modules/units-core/units/net/simpleiot.star
+git add modules/module-core/units/net/simpleiot/ modules/module-core/units/net/simpleiot.star
 git commit -m "units: migrate simpleiot init-script to install_file"
 ```
 

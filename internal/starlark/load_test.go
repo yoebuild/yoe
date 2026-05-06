@@ -174,7 +174,7 @@ func TestMergeTasks(t *testing.T) {
 	if err := os.MkdirAll(classesDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	helperSrc, err := os.ReadFile("../../modules/units-core/classes/tasks.star")
+	helperSrc, err := os.ReadFile("../../modules/module-core/classes/tasks.star")
 	if err != nil {
 		t.Fatal(err)
 	}

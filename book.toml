@@ -4,7 +4,7 @@
 authors = ["Cliff Brake"]
 language = "en"
 src = "docs"
-title = "[yoe] Build"
+title = "[yoe] next generation"
 
 [preprocessor.toc]
 optional = true

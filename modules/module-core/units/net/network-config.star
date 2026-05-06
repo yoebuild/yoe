@@ -5,6 +5,10 @@ unit(
     description = "DHCP networking on eth0 — uses dhcpcd if installed, else busybox udhcpc",
     services = ["S10network"],
     runtime_deps = ["busybox"],
+    # busybox ships its own /usr/share/udhcpc/default.script (an example
+    # script bundled by `make install`); we install a real one tailored to
+    # this distro and need apk to let us take ownership of that path.
+    replaces = ["busybox"],
     deps = ["toolchain-musl"],
     container = "toolchain-musl",
     container_arch = "target",

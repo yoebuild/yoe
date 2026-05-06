@@ -4,17 +4,18 @@
   </a>
 </p>
 
-# `[yoe]` Build
+# `[yoe]` _next generation_
 
 **Fast tooling and builds. No cross-compiling headaches. Easy to
 customize/upgrade/debug. One tool for both system engineers and application
 developers to ship products faster.**
 
-`[yoe]` is a build system (focused on Embedded Linux for now) for teams shipping
-modern edge products. Components in Go, Rust, Zig, Python, JS/TS, and C/C++ are
-supported. `[yoe]` releases often and tracks upstream closely. The configuration
-language is easily processed by humans and AI. Build on your laptop, on native
-hardware, or in cloud CI — one integrated tool, same config, same results.
+`[yoe]` _next generation_ is a build system (focused on Embedded Linux for now)
+for teams shipping modern edge products. Components in Go, Rust, Zig, Python,
+JS/TS, and C/C++ are supported. `[yoe]` releases often and tracks upstream
+closely. The configuration language is easily processed by humans and AI. Build
+on your laptop, on native hardware, or in cloud CI — one integrated tool, same
+config, same results.
 
 We took what we learned from many years of maintaining and building products
 with the [Yoe Distribution](https://yoedistro.org/), started over, and built the
@@ -70,11 +71,15 @@ yoe
 poweroff
 ```
 
-There are also CLI variants of the above commands (`build`, `run`, etc.).
+The TUI user interface:
 
 ![screenshot](assets/yoe-screenshot.png)
 
-`dev-image` is another included image with a few more things in it.
+`dev-image` is another included image with a few more things in it. Press the
+`s` key to and configure the image. The `/` key modifies the unit query to
+change what is displayed.
+
+There are also CLI variants of the above commands (`build`, `run`, etc.).
 
 **What just happened:**
 
@@ -394,7 +399,7 @@ regardless of whether a fresh build would produce identical bytes.
   Podman / containerd workloads on yoe-built devices
 - [libc, init, and the Rootfs Base](docs/libc-and-init.md) — the default base of
   musl, busybox, and OpenRC, and the path to glibc/systemd for edge-AI hardware
-- [units-alpine](docs/units-alpine.md) — wrapping prebuilt Alpine packages as
+- [module-alpine](docs/module-alpine.md) — wrapping prebuilt Alpine packages as
   yoe units
 - [Comparisons](docs/comparisons.md) — how `[yoe]` relates to Yocto, Buildroot,
   Alpine, Arch, and NixOS

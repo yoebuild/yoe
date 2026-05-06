@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"go.starlark.net/starlark"
@@ -15,9 +16,11 @@ import (
 type LoadOption func(*loadConfig)
 
 type loadConfig struct {
-	moduleSync  func([]ModuleRef, io.Writer) error
-	machine     string // override default machine before evaluating units/images
-	projectFile string // alternative project file (instead of PROJECT.star)
+	moduleSync             func([]ModuleRef, io.Writer) error
+	machine                string // override default machine before evaluating units/images
+	projectFile            string // alternative project file (instead of PROJECT.star)
+	showShadows            bool   // emit shadow / provides-override notices (default off)
+	allowDuplicateProvides bool   // accept multiple intra-module providers of the same virtual
 }
 
 // WithModuleSync provides a callback that is invoked after PROJECT.star is
@@ -38,6 +41,21 @@ func WithMachine(name string) LoadOption {
 // of PROJECT.star at the project root.
 func WithProjectFile(path string) LoadOption {
 	return func(c *loadConfig) { c.projectFile = path }
+}
+
+// WithShowShadows enables stderr notices about cross-module unit shadowing
+// and intra-module `provides` overrides. Default is off; the shadowing/
+// override behavior itself is unchanged either way.
+func WithShowShadows(v bool) LoadOption {
+	return func(c *loadConfig) { c.showShadows = v }
+}
+
+// WithAllowDuplicateProvides relaxes the intra-module `provides` collision
+// check. When true, multiple units in the same module may declare the same
+// virtual; the first one registered wins for PROVIDES lookup, matching
+// apk's "any of these satisfies the dep" semantics.
+func WithAllowDuplicateProvides(v bool) LoadOption {
+	return func(c *loadConfig) { c.allowDuplicateProvides = v }
 }
 
 // LoadProject finds the project root, evaluates all .star files, and returns
@@ -85,6 +103,8 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 
 	eng := NewEngine()
 	eng.SetProjectRoot(root)
+	eng.SetShowShadows(cfg.showShadows)
+	eng.SetAllowDuplicateProvides(cfg.allowDuplicateProvides)
 
 	// Evaluate project file (PROJECT.star or --project override)
 	projFile := filepath.Join(root, "PROJECT.star")
@@ -107,40 +127,41 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		}
 	}
 
-	// Register module roots so load("@module//...") works.
-	// Check local overrides first, then the module cache.
+	// Resolve each declared module to a canonical name and on-disk path.
+	// Canonical name comes from MODULE.star's module_info(name=...) when
+	// present; otherwise it falls back to the path/URL basename. The same
+	// name is used for "@name//..." load references, u.Module tags, and
+	// TUI / diagnostic display.
+	type resolvedModule struct {
+		name string
+		path string
+	}
+	var resolvedModules []resolvedModule
+	var resolvedForProject []ResolvedModule
 	if proj := eng.Project(); proj != nil {
 		for _, m := range proj.Modules {
-			// Derive module name: use Path's last component if set, otherwise URL's
-			name := filepath.Base(strings.TrimSuffix(m.URL, ".git"))
-			if m.Path != "" {
-				name = filepath.Base(m.Path)
+			modulePath, ok := locateModulePath(m, root)
+			rm := ResolvedModule{
+				URL:       m.URL,
+				Ref:       m.Ref,
+				Path:      m.Path,
+				Local:     m.Local,
+				Available: ok,
 			}
-
-			if m.Local != "" {
-				modulePath := m.Local
-				if !filepath.IsAbs(modulePath) {
-					modulePath = filepath.Join(root, modulePath)
-				}
-				if m.Path != "" {
-					modulePath = filepath.Join(modulePath, m.Path)
-				}
-				eng.SetModuleRoot(name, modulePath)
+			if !ok {
+				rm.Name = pathBasename(m)
+				resolvedForProject = append(resolvedForProject, rm)
 				continue
 			}
-
-			// Check module cache
-			cacheDir := os.Getenv("YOE_CACHE")
-			if cacheDir == "" {
-				cacheDir = "cache"
+			name := peekModuleName(modulePath)
+			if name == "" {
+				name = pathBasename(m)
 			}
-			moduleDir := filepath.Join(cacheDir, "modules", name)
-			if m.Path != "" {
-				moduleDir = filepath.Join(moduleDir, m.Path)
-			}
-			if _, err := os.Stat(moduleDir); err == nil {
-				eng.SetModuleRoot(name, moduleDir)
-			}
+			rm.Name = name
+			rm.Dir = modulePath
+			resolvedForProject = append(resolvedForProject, rm)
+			eng.SetModuleRoot(name, modulePath)
+			resolvedModules = append(resolvedModules, resolvedModule{name: name, path: modulePath})
 		}
 	}
 
@@ -148,10 +169,7 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	// project-level unit shadows the same name from any included module.
 	// Modules use 1..N (declaration order, last wins among modules); the
 	// project root uses N+1 — the highest priority overall.
-	projectIdx := 1
-	if proj := eng.Project(); proj != nil {
-		projectIdx = len(proj.Modules) + 1
-	}
+	projectIdx := len(resolvedModules) + 1
 
 	// Phase 1: Evaluate all machine definitions (project + modules).
 	// Machines must be loaded before units/images so that target_arch()
@@ -160,18 +178,10 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	if err := evalDir(eng, root, "machines"); err != nil {
 		return nil, err
 	}
-	if proj := eng.Project(); proj != nil {
-		for i, m := range proj.Modules {
-			name := filepath.Base(strings.TrimSuffix(m.URL, ".git"))
-			if m.Path != "" {
-				name = filepath.Base(m.Path)
-			}
-			if modulePath, ok := eng.moduleRoots[name]; ok {
-				eng.SetCurrentModule(name, i+1)
-				if err := evalDir(eng, modulePath, "machines"); err != nil {
-					return nil, err
-				}
-			}
+	for i, rm := range resolvedModules {
+		eng.SetCurrentModule(rm.name, i+1)
+		if err := evalDir(eng, rm.path, "machines"); err != nil {
+			return nil, err
 		}
 	}
 
@@ -265,18 +275,10 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	if err := evalDir(eng, root, "containers"); err != nil {
 		return nil, err
 	}
-	if proj := eng.Project(); proj != nil {
-		for i, m := range proj.Modules {
-			name := filepath.Base(strings.TrimSuffix(m.URL, ".git"))
-			if m.Path != "" {
-				name = filepath.Base(m.Path)
-			}
-			if modulePath, ok := eng.moduleRoots[name]; ok {
-				eng.SetCurrentModule(name, i+1)
-				if err := evalDir(eng, modulePath, "containers"); err != nil {
-					return nil, err
-				}
-			}
+	for i, rm := range resolvedModules {
+		eng.SetCurrentModule(rm.name, i+1)
+		if err := evalDir(eng, rm.path, "containers"); err != nil {
+			return nil, err
 		}
 	}
 
@@ -285,18 +287,10 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	if err := evalDir(eng, root, "units"); err != nil {
 		return nil, err
 	}
-	if proj := eng.Project(); proj != nil {
-		for i, m := range proj.Modules {
-			name := filepath.Base(strings.TrimSuffix(m.URL, ".git"))
-			if m.Path != "" {
-				name = filepath.Base(m.Path)
-			}
-			if modulePath, ok := eng.moduleRoots[name]; ok {
-				eng.SetCurrentModule(name, i+1)
-				if err := evalDir(eng, modulePath, "units"); err != nil {
-					return nil, err
-				}
-			}
+	for i, rm := range resolvedModules {
+		eng.SetCurrentModule(rm.name, i+1)
+		if err := evalDir(eng, rm.path, "units"); err != nil {
+			return nil, err
 		}
 	}
 
@@ -317,12 +311,18 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 					// Look up the existing unit to compare module priority.
 					existingUnit := eng.Units()[existingName]
 					if existingUnit == nil || u.ModuleIndex == existingUnit.ModuleIndex {
-						return nil, fmt.Errorf("virtual package %q provided by both %q and %q",
-							virt, existingName, u.Name)
+						if !eng.allowDuplicateProvides {
+							return nil, fmt.Errorf("virtual package %q provided by both %q and %q",
+								virt, existingName, u.Name)
+						}
+						// First-wins: leave PROVIDES pointing at existingName.
+						continue
 					}
 					if u.ModuleIndex > existingUnit.ModuleIndex {
-						fmt.Fprintf(os.Stderr, "notice: %q from %s overrides %q via provides %q\n",
-							u.Name, moduleSource(u.Module), existingName, virt)
+						if eng.showShadows {
+							fmt.Fprintf(os.Stderr, "notice: %q from %s overrides %q via provides %q\n",
+								u.Name, moduleSource(u.Module), existingName, virt)
+						}
 						_ = prov.SetKey(starlark.String(virt), starlark.String(u.Name))
 					}
 					// If u.ModuleIndex < existingUnit.ModuleIndex, skip — higher priority already won.
@@ -347,18 +347,10 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	if err := evalDir(eng, root, "images"); err != nil {
 		return nil, err
 	}
-	if proj := eng.Project(); proj != nil {
-		for i, m := range proj.Modules {
-			name := filepath.Base(strings.TrimSuffix(m.URL, ".git"))
-			if m.Path != "" {
-				name = filepath.Base(m.Path)
-			}
-			if modulePath, ok := eng.moduleRoots[name]; ok {
-				eng.SetCurrentModule(name, i+1)
-				if err := evalDir(eng, modulePath, "images"); err != nil {
-					return nil, err
-				}
-			}
+	for i, rm := range resolvedModules {
+		eng.SetCurrentModule(rm.name, i+1)
+		if err := evalDir(eng, rm.path, "images"); err != nil {
+			return nil, err
 		}
 	}
 
@@ -369,6 +361,8 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 
 	proj.Machines = eng.Machines()
 	proj.Units = eng.Units()
+	proj.ResolvedModules = resolvedForProject
+	proj.Diagnostics.Shadows = eng.Shadows()
 
 	// Mirror the Starlark PROVIDES dict onto the Go side so callers that
 	// don't run inside a Starlark thread (the build executor, deploy path,
@@ -382,6 +376,43 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 				proj.Provides[string(k)] = string(v)
 			}
 		}
+	}
+
+	// Compute duplicate-provides diagnostics: every virtual claimed by
+	// more than one unit. The active provider in proj.Provides is the
+	// winner; the rest go in Others. Sorted by virtual name and then by
+	// unit name so the diagnostics tab is deterministic.
+	virtToUnits := map[string][]string{}
+	for _, u := range proj.Units {
+		for _, virt := range u.Provides {
+			if virt == "" {
+				continue
+			}
+			virtToUnits[virt] = append(virtToUnits[virt], u.Name)
+		}
+	}
+	var virts []string
+	for v := range virtToUnits {
+		if len(virtToUnits[v]) > 1 {
+			virts = append(virts, v)
+		}
+	}
+	sort.Strings(virts)
+	for _, v := range virts {
+		claimants := virtToUnits[v]
+		sort.Strings(claimants)
+		active := proj.Provides[v]
+		var others []string
+		for _, c := range claimants {
+			if c != active {
+				others = append(others, c)
+			}
+		}
+		proj.Diagnostics.DuplicateProvides = append(proj.Diagnostics.DuplicateProvides, ProvidesEvent{
+			Virtual: v,
+			Active:  active,
+			Others:  others,
+		})
 	}
 
 	// Validate: units with tasks must have container and container_arch.
@@ -409,6 +440,81 @@ func toStarlarkStringList(ss []string) *starlark.List {
 		vals[i] = starlark.String(s)
 	}
 	return starlark.NewList(vals)
+}
+
+// pathBasename returns the fallback module name derived from a ModuleRef:
+// the last component of m.Path if set, otherwise the URL's basename with
+// any trailing .git stripped.
+func pathBasename(m ModuleRef) string {
+	if m.Path != "" {
+		return filepath.Base(m.Path)
+	}
+	return filepath.Base(strings.TrimSuffix(m.URL, ".git"))
+}
+
+// locateModulePath returns the on-disk directory for a module — either the
+// local override or the cache directory under YOE_CACHE/modules. The
+// boolean is false when neither location exists (the module hasn't been
+// synced yet).
+func locateModulePath(m ModuleRef, projectRoot string) (string, bool) {
+	base := pathBasename(m)
+	if m.Local != "" {
+		modulePath := m.Local
+		if !filepath.IsAbs(modulePath) {
+			modulePath = filepath.Join(projectRoot, modulePath)
+		}
+		if m.Path != "" {
+			modulePath = filepath.Join(modulePath, m.Path)
+		}
+		return modulePath, true
+	}
+	cacheDir := os.Getenv("YOE_CACHE")
+	if cacheDir == "" {
+		cacheDir = "cache"
+	}
+	moduleDir := filepath.Join(cacheDir, "modules", base)
+	if m.Path != "" {
+		moduleDir = filepath.Join(moduleDir, m.Path)
+	}
+	if _, err := os.Stat(moduleDir); err != nil {
+		return "", false
+	}
+	return moduleDir, true
+}
+
+// peekModuleName evaluates MODULE.star at modulePath in an isolated thread
+// and returns the name declared via module_info(name=...). Returns "" if
+// MODULE.star is missing, fails to parse, or doesn't call module_info.
+// This is intentionally separate from the main engine eval so the canonical
+// name is known before any registration happens.
+func peekModuleName(modulePath string) string {
+	file := filepath.Join(modulePath, "MODULE.star")
+	src, err := os.ReadFile(file)
+	if err != nil {
+		return ""
+	}
+	var captured string
+	moduleInfo := starlark.NewBuiltin("module_info",
+		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			for _, kv := range kwargs {
+				if k, ok := kv[0].(starlark.String); ok && string(k) == "name" {
+					if v, ok := kv[1].(starlark.String); ok {
+						captured = string(v)
+					}
+				}
+			}
+			return starlark.None, nil
+		})
+	moduleStub := starlark.NewBuiltin("module",
+		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
+			return starlark.None, nil
+		})
+	thread := &starlark.Thread{Name: file}
+	_, _ = starlark.ExecFileOptions(fileOpts, thread, file, src, starlark.StringDict{
+		"module_info": moduleInfo,
+		"module":      moduleStub,
+	})
+	return captured
 }
 
 func evalDir(eng *Engine, root, subdir string) error {

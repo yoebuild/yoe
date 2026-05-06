@@ -166,8 +166,8 @@ func ResolveModulePaths(proj *yoestar.Project, projectRoot string) (map[string]s
 }
 
 // ModuleName derives the module name from a ModuleRef.
-// If Path is set, uses the last component of Path (e.g., "modules/units-core" -> "units-core").
-// Otherwise uses the last component of URL (e.g., "github.com/yoe/units-core" -> "units-core").
+// If Path is set, uses the last component of Path (e.g., "modules/module-core" -> "module-core").
+// Otherwise uses the last component of URL (e.g., "github.com/yoe/module-core" -> "module-core").
 func ModuleName(m yoestar.ModuleRef) string {
 	if m.Path != "" {
 		return filepath.Base(m.Path)

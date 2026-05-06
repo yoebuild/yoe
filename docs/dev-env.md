@@ -108,7 +108,7 @@ The pieces above support three repo layouts:
 
 ```
 my-app/
-├── PROJECT.star      # references units-core for the base system
+├── PROJECT.star      # references module-core for the base system
 ├── unit.star         # source = path("./")
 └── src/...
 ```

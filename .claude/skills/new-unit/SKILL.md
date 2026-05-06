@@ -153,7 +153,7 @@ unit(
 ### Step 6: Choose the File Location
 
 Place the unit in the appropriate category directory within the project's module
-or the units-core module:
+or the module-core module:
 
 | Category    | Directory            | Examples               |
 | ----------- | -------------------- | ---------------------- |
@@ -230,7 +230,7 @@ and build tool the unit needs must exist as a unit:
   distributions' units to find them.
 - Do not hardcode absolute paths in build commands — use `$PREFIX`, `$DESTDIR`,
   `$NPROC` environment variables.
-- Do not add a unit to `units-core` unless it's truly a core system component.
+- Do not add a unit to `module-core` unless it's truly a core system component.
   Project-specific units go in the project's own module.
 - Do not skip the test build step.
 - Do not install missing tools or libraries in the Dockerfile — create units for

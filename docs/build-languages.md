@@ -83,7 +83,7 @@ autotools(
 configurable function; modules call it with overrides. Explicit but verbose:
 
 ```python
-# units-core/openssh.star — base unit as a function
+# module-core/openssh.star — base unit as a function
 def openssh(extra_deps=[], extra_configure_args=[], **overrides):
     autotools(
         name = "openssh",
@@ -94,7 +94,7 @@ def openssh(extra_deps=[], extra_configure_args=[], **overrides):
     )
 
 # vendor-bsp/openssh.star — vendor module extends it
-load("//units-core/openssh.star", "openssh")
+load("//module-core/openssh.star", "openssh")
 openssh(extra_deps=["vendor-crypto"])
 ```
 
@@ -208,7 +208,7 @@ functions, and object composition via the `+` operator.
 **Example unit:**
 
 ```jsonnet
-local base = import 'units-core/openssh.jsonnet';
+local base = import 'module-core/openssh.jsonnet';
 
 base {
   deps+: ['vendor-crypto'],
@@ -380,7 +380,7 @@ indirection makes debugging non-trivial.
 Starlark's function composition:
 
 ```python
-# Module 1: units-core/openssh.star
+# Module 1: module-core/openssh.star
 def openssh(extra_deps=[], **overrides):
     unit(
         name = "openssh",
@@ -390,7 +390,7 @@ def openssh(extra_deps=[], **overrides):
     )
 
 # Module 2: vendor-bsp/openssh.star
-load("//units-core/openssh.star", "openssh")
+load("//module-core/openssh.star", "openssh")
 openssh(extra_deps=["vendor-crypto"])
 
 # Module 3: product/openssh.star (further customization)

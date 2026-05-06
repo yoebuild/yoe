@@ -403,8 +403,16 @@ func initGitRepo(srcDir string) error {
 }
 
 func applyPatches(projectDir, srcDir string, unit *yoestar.Unit) error {
+	// Patches resolve relative to the directory containing the unit's .star
+	// file (unit.DefinedIn). This lets a module ship patches alongside the
+	// unit that uses them. We fall back to projectDir only when DefinedIn
+	// is unset (e.g., units constructed programmatically in tests).
+	baseDir := unit.DefinedIn
+	if baseDir == "" {
+		baseDir = projectDir
+	}
 	for _, patchFile := range unit.Patches {
-		patchPath := filepath.Join(projectDir, patchFile)
+		patchPath := filepath.Join(baseDir, patchFile)
 		if _, err := os.Stat(patchPath); os.IsNotExist(err) {
 			return fmt.Errorf("patch file not found: %s", patchFile)
 		}
