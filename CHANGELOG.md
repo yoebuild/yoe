@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Drop into a shell on the source.** Press `$` in the units tab or detail page
+  to open a shell in the unit's checked-out source directory, or in the Modules
+  tab to open a shell in a module's clone — handy for `git status`, spot-edits,
+  or running an out-of-tree command without leaving the TUI.
 - **`VERSION` column in the unit table.** Each row now shows the unit's declared
   version next to its module, sortable from the `o` cycle, and the same version
   appears next to the unit name on the detail page — so spotting a stale pin or

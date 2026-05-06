@@ -750,6 +750,18 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case "$":
+		if m.cursor < len(m.units) {
+			name := m.units[m.cursor]
+			srcDir := m.unitSrcDir(name)
+			if srcDir == "" {
+				m.message = fmt.Sprintf("No source for %s — build it first (b) or it has no source", name)
+				return m, nil
+			}
+			return m, m.execShell(srcDir)
+		}
+		return m, nil
+
 	case "l":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
@@ -965,6 +977,17 @@ func (m model) updateModulesTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.refreshModuleStatus()
 		m.message = "Module status refreshed"
 		return m, nil
+	case "$":
+		mods := m.proj.ResolvedModules
+		if m.modulesCursor < 0 || m.modulesCursor >= len(mods) {
+			return m, nil
+		}
+		rm := mods[m.modulesCursor]
+		if rm.Dir == "" {
+			m.message = fmt.Sprintf("Module %s is not synced — run `yoe sync`", rm.Name)
+			return m, nil
+		}
+		return m, m.execShell(rm.Dir)
 	}
 	return m, nil
 }
@@ -1586,6 +1609,14 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.autoFollow = true
 		return m, m.startBuild(m.detailUnit)
 
+	case "$":
+		srcDir := m.unitSrcDir(m.detailUnit)
+		if srcDir == "" {
+			m.message = fmt.Sprintf("No source for %s — build it first (b) or it has no source", m.detailUnit)
+			return m, nil
+		}
+		return m, m.execShell(srcDir)
+
 	case "d":
 		logPath := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit), "build.log")
 		c := exec.Command("claude", fmt.Sprintf("diagnose %s", logPath))
@@ -2001,26 +2032,28 @@ type helpItem struct {
 var (
 	defaultHelpItems = []helpItem{
 		{"b", "build"}, {"D", "deploy"}, {"x", "cancel"}, {"e", "edit"},
-		{"l", "log"}, {"s", "setup"}, {"/", "search"}, {`\`, "home"},
-		{"S", "save"}, {"o", "sort"}, {"q", "quit"},
+		{"$", "shell"}, {"l", "log"}, {"s", "setup"}, {"/", "search"},
+		{`\`, "home"}, {"S", "save"}, {"o", "sort"}, {"q", "quit"},
 	}
 	imageHelpItems = []helpItem{
 		{"b", "build"}, {"x", "cancel"}, {"r", "run"}, {"e", "edit"},
-		{"l", "log"}, {"s", "setup"}, {"/", "search"}, {`\`, "home"},
-		{"S", "save"}, {"q", "quit"},
+		{"$", "shell"}, {"l", "log"}, {"s", "setup"}, {"/", "search"},
+		{`\`, "home"}, {"S", "save"}, {"q", "quit"},
 	}
 	imageCachedHelpItems = []helpItem{
 		{"b", "build"}, {"x", "cancel"}, {"r", "run"}, {"f", "flash"},
-		{"e", "edit"}, {"l", "log"}, {"s", "setup"}, {"/", "search"},
-		{`\`, "home"}, {"S", "save"}, {"q", "quit"},
+		{"e", "edit"}, {"$", "shell"}, {"l", "log"}, {"s", "setup"},
+		{"/", "search"}, {`\`, "home"}, {"S", "save"}, {"q", "quit"},
 	}
 	detailHelpItems = []helpItem{
 		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
-		{"/", "search"}, {"b", "build"}, {"d", "diagnose"}, {"l", "log"},
+		{"/", "search"}, {"b", "build"}, {"$", "shell"}, {"d", "diagnose"},
+		{"l", "log"},
 	}
 	detailImageHelpItems = []helpItem{
 		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
-		{"/", "search"}, {"b", "build"}, {"r", "run"}, {"d", "diagnose"}, {"l", "log"},
+		{"/", "search"}, {"b", "build"}, {"r", "run"}, {"$", "shell"},
+		{"d", "diagnose"}, {"l", "log"},
 	}
 )
 
@@ -2161,7 +2194,8 @@ func (m model) viewModulesTab() string {
 		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
 	} else {
 		b.WriteString(renderHelp([]helpItem{
-			{"tab", "next tab"}, {"j/k", "move"}, {"g/G", "top/bottom"}, {"r", "refresh"}, {"q", "quit"},
+			{"tab", "next tab"}, {"j/k", "move"}, {"g/G", "top/bottom"},
+			{"$", "shell"}, {"r", "refresh"}, {"q", "quit"},
 		}))
 	}
 	return b.String()
@@ -2931,6 +2965,37 @@ func (m model) execEditor(path string) tea.Cmd {
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return execDoneMsg{err: err}
 	})
+}
+
+// execShell suspends the TUI and drops the user into $SHELL (or sh) in
+// dir. Used by the `$` shortcut to inspect or hack on a unit's checked-
+// out source or a module's clone. The caller is responsible for
+// ensuring dir exists; an empty path or missing directory falls back to
+// $HOME so the shell is at least usable.
+func (m model) execShell(dir string) tea.Cmd {
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+	c := exec.Command(shell)
+	c.Dir = dir
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return execDoneMsg{err: err}
+	})
+}
+
+// unitSrcDir returns the per-unit checked-out source directory under
+// build/, or "" if the unit hasn't been fetched yet (so the caller can
+// surface a helpful message instead of dropping into a phantom path).
+func (m model) unitSrcDir(name string) string {
+	if _, ok := m.proj.Units[name]; !ok {
+		return ""
+	}
+	srcDir := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name), "src")
+	if _, err := os.Stat(srcDir); err != nil {
+		return ""
+	}
+	return srcDir
 }
 
 func (m *model) refreshDetail() {
