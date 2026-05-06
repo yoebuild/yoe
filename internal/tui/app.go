@@ -84,6 +84,7 @@ const (
 	sortByName = iota
 	sortByClass
 	sortByModule
+	sortByVersion
 	sortBySize
 	sortByDeps
 	sortByStatus
@@ -1863,10 +1864,11 @@ func (m model) viewUnitsTab() string {
 		}
 		return label + arrow + pad
 	}
-	b.WriteString(fmt.Sprintf("  %s %s %s %s %s %s\n",
+	b.WriteString(fmt.Sprintf("  %s %s %s %s %s %s %s\n",
 		headerStyle.Render(headerLabel(sortByName, "NAME", 28, false)),
 		headerStyle.Render(headerLabel(sortByClass, "CLASS", 9, false)),
 		headerStyle.Render(headerLabel(sortByModule, "MODULE", 14, false)),
+		headerStyle.Render(headerLabel(sortByVersion, "VERSION", 11, false)),
 		headerStyle.Render(headerLabel(sortBySize, "SIZE", 6, true)),
 		headerStyle.Render(headerLabel(sortByDeps, "DEPS", 5, true)),
 		headerStyle.Render(headerLabel(sortByStatus, "STATUS", 10, false))))
@@ -1902,9 +1904,11 @@ func (m model) viewUnitsTab() string {
 
 		class := ""
 		module := ""
+		version := ""
 		if u, ok := m.proj.Units[name]; ok {
 			class = u.Class
 			module = u.Module
+			version = u.Version
 			if module == "" {
 				module = "(local)"
 			}
@@ -1933,13 +1937,15 @@ func (m model) viewUnitsTab() string {
 		paddedName := clipFixed(name, 28)
 		paddedClass := clipFixed(class, 9)
 		paddedModule := clipFixed(module, 14)
+		paddedVersion := clipFixed(version, 11)
 		paddedSize := fmt.Sprintf("%6s", size)
 		paddedDeps := fmt.Sprintf("%5s", depsStr)
-		b.WriteString(fmt.Sprintf("%s%s %s %s %s %s %s\n",
+		b.WriteString(fmt.Sprintf("%s%s %s %s %s %s %s %s\n",
 			cursor,
 			m.renderName(paddedName, nameStyle),
 			classStyle.Render(paddedClass),
 			classStyle.Render(paddedModule),
+			classStyle.Render(paddedVersion),
 			classStyle.Render(paddedSize),
 			classStyle.Render(paddedDeps),
 			status))
@@ -2651,8 +2657,13 @@ func (m model) viewDetail() string {
 	var b strings.Builder
 
 	status := m.renderStatus(m.detailUnit)
-	b.WriteString(fmt.Sprintf("  ← %s %s\n",
+	titleVersion := ""
+	if u, ok := m.proj.Units[m.detailUnit]; ok && u.Version != "" {
+		titleVersion = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(u.Version)
+	}
+	b.WriteString(fmt.Sprintf("  ← %s%s %s\n",
 		titleStyle.Render(m.detailUnit),
+		titleVersion,
 		status))
 
 	// Show build metadata if available
@@ -3049,6 +3060,12 @@ func (m *model) sortVisible() {
 		}
 		return ""
 	}
+	keyVersion := func(i int) string {
+		if u, ok := m.proj.Units[m.units[i]]; ok {
+			return u.Version
+		}
+		return ""
+	}
 	keyStatus := func(i int) string { return statusKey(m.statuses[m.units[i]]) }
 
 	cmpString := func(a, b string) int {
@@ -3078,6 +3095,20 @@ func (m *model) sortVisible() {
 			c = cmpString(keyClass(i), keyClass(j))
 		case sortByModule:
 			c = cmpString(keyModule(i), keyModule(j))
+		case sortByVersion:
+			a, b := keyVersion(i), keyVersion(j)
+			// Empty versions (rare; mostly image units) sort to the bottom
+			// in both directions, mirroring how SIZE/DEPS treat zero values.
+			switch {
+			case a == "" && b == "":
+				c = 0
+			case a == "":
+				return false
+			case b == "":
+				return true
+			default:
+				c = cmpString(a, b)
+			}
 		case sortBySize:
 			a, b := m.unitSize[m.units[i]], m.unitSize[m.units[j]]
 			// Push zero (unbuilt) values to the bottom in both directions

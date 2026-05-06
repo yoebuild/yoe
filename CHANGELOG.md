@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`VERSION` column in the unit table.** Each row now shows the unit's declared
+  version next to its module, sortable from the `o` cycle, and the same version
+  appears next to the unit name on the detail page — so spotting a stale pin or
+  confirming what's about to build is a glance, not a file open.
 - **TUI auto-follow no longer yanks the cursor mid-navigation.** The units list
   scrolls to whatever is actively building only when you're idle — pressing j/k
   or typing a query keeps the cursor where you put it, while `b` still hands
