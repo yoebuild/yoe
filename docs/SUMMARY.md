@@ -13,6 +13,7 @@
 - [Naming and Resolution](naming-and-resolution.md)
 - [File Templates](file-templates.md)
 - [Starlark Packaging and Image Assembly](starlark-packaging-images.md)
+- [Build & Configuration Languages](build-languages.md)
 
 # Build System
 
@@ -27,6 +28,7 @@
 - [On-Device Package Management](on-device-apk.md)
 - [Feed Server and yoe deploy](feed-server.md)
 - [module-alpine](module-alpine.md)
+- [Alpine apk Passthrough](apk-passthrough.md)
 
 # Base System
 
