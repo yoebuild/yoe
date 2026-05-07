@@ -8,6 +8,9 @@
 
 ## Next
 
+- docker running
+- is there any advantage in sources to storing filename as a hash? What is this
+  a hash of?
 - On unit detail page, provide a way to switch the Git URL to the upstream
   source and record this in the unit build state file. Display this state on
   main unit and unit detail page. Thinking several states: nothing, up,
