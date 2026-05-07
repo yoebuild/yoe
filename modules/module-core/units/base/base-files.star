@@ -6,11 +6,16 @@ load("//classes/users.star", "user", "users_commands")
 # baseline every yoe image inherits. Per-unit `services = [...]` adds
 # additional default-runlevel entries on top of these.
 _RUNLEVELS = {
-    # `cgroups` mounts /sys/fs/cgroup before anything else looks at it —
-    # required for container runtimes (dockerd, containerd) which refuse
-    # to start with "Devices cgroup isn't mounted" otherwise. Harmless on
-    # non-container images.
-    "sysinit": ["cgroups", "devfs", "dmesg"],
+    # `sysfs` mounts /sys (and must run before `cgroups`, which mounts
+    # /sys/fs/cgroup but only if /sys/fs/cgroup already exists as a
+    # directory — created by the kernel when /sys is mounted). cgroups'
+    # depend() uses `after sysfs`, which only orders execution when both
+    # are in the same runlevel, so sysfs has to live here too.
+    #
+    # `cgroups` is required for container runtimes (dockerd, containerd)
+    # which refuse to start with "Devices cgroup isn't mounted"
+    # otherwise. Harmless on non-container images.
+    "sysinit": ["sysfs", "cgroups", "devfs", "dmesg"],
     "boot":    ["bootmisc", "hostname", "modules", "sysctl"],
     "shutdown": ["mount-ro", "killprocs"],
 }
@@ -50,7 +55,7 @@ def base_files(name = "base-files", users = None):
     unit(
         name = name,
         version = "1.0.0",
-        release = 9,
+        release = 10,
         scope = "machine",
         license = "MIT",
         description = "Base filesystem skeleton: users, groups, dirs, inittab, boot config",

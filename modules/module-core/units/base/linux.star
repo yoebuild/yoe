@@ -1,6 +1,7 @@
 unit(
     name = "linux",
     version = "6.6.87",
+    release = 1,
     source = "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git",
     tag = "v6.6.87",
     license = "GPL-2.0",
@@ -10,6 +11,7 @@ unit(
     container_arch = "target",
     tasks = [
         task("build", steps=[
+            install_file("container.cfg", "$SRCDIR/.yoe-container.cfg"),
             # Use arch-appropriate defconfig and kernel image target.
             # ARCH is set by the build system (x86_64, arm64, riscv64).
             """
@@ -20,6 +22,11 @@ case $ARCH in
     *)       echo "unsupported ARCH=$ARCH"; exit 1 ;;
 esac
 make ARCH=$KARCH $DEFCONFIG
+# Merge in container-runtime CONFIG fragment (overlayfs, netfilter,
+# namespaces, eBPF cgroup support) so dockerd/podman/runc work out of
+# the box. ALLNOCONFIG_Y disables verbose merge_config output.
+scripts/kconfig/merge_config.sh -m -O . .config .yoe-container.cfg
+make ARCH=$KARCH olddefconfig
 """,
             """
 case $ARCH in
