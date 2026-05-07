@@ -13,6 +13,13 @@ type Project struct {
 	Machines  map[string]*Machine
 	Units     map[string]*Unit
 
+	// PreferModules pins a unit name to a specific module, overriding the
+	// default last-module-wins shadow resolution. Set in PROJECT.star via
+	// `prefer_modules = {"xz": "alpine", ...}`. The keyed unit registers
+	// only from the named module; same-named units from other modules are
+	// silently shadowed even if they have higher module priority.
+	PreferModules map[string]string
+
 	// Provides maps a virtual package name (e.g. "linux") to the concrete
 	// unit name that provides it after override resolution. Populated by
 	// the loader after all units and the active machine's kernel have been

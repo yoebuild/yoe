@@ -469,6 +469,30 @@ func (e *Engine) fnProject(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.T
 		}
 	}
 
+	// Parse prefer_modules: {"<unit>": "<module>"}. Unit names listed here
+	// register only from the named module; same-named units defined in
+	// other modules are dropped. Useful when the source-built version of a
+	// package in module-core is broken or under-configured (e.g. missing
+	// shared libs) and the Alpine prebuilt is the right answer.
+	for _, kv := range kwargs {
+		if string(kv[0].(starlark.String)) != "prefer_modules" {
+			continue
+		}
+		d, ok := kv[1].(*starlark.Dict)
+		if !ok {
+			return nil, fmt.Errorf("project: prefer_modules must be a dict")
+		}
+		p.PreferModules = make(map[string]string, d.Len())
+		for _, pair := range d.Items() {
+			k, kok := pair.Index(0).(starlark.String)
+			v, vok := pair.Index(1).(starlark.String)
+			if !kok || !vok {
+				return nil, fmt.Errorf("project: prefer_modules keys and values must be strings")
+			}
+			p.PreferModules[string(k)] = string(v)
+		}
+	}
+
 	e.project = p
 	return starlark.None, nil
 }
@@ -674,8 +698,64 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 		r.DefinedIn = filepath.Dir(e.currentFile)
 	}
 
+	// PROJECT.star's prefer_modules pins a unit to a specific module,
+	// overriding default shadow resolution. If the project has pinned
+	// this name and r is from a different module, drop r outright; the
+	// pinned module's unit (when it registers, or already has) wins.
+	preferred := ""
+	if e.project != nil {
+		preferred = e.project.PreferModules[name]
+	}
+
 	e.mu.Lock()
+	if preferred != "" && r.Module != preferred {
+		// r is from the wrong module for this name. Record it as
+		// shadowed for the diagnostics tab and return whatever (if
+		// anything) is currently registered.
+		existing := e.units[name]
+		winnerModule, winnerDir := preferred, ""
+		if existing != nil {
+			winnerModule, winnerDir = existing.Module, existing.DefinedIn
+		}
+		e.shadows = append(e.shadows, ShadowEvent{
+			Unit:         name,
+			WinnerModule: winnerModule,
+			WinnerDir:    winnerDir,
+			LoserModule:  r.Module,
+			LoserDir:     r.DefinedIn,
+		})
+		e.mu.Unlock()
+		if e.showShadows {
+			fmt.Fprintf(os.Stderr,
+				"notice: unit %q from %s dropped (prefer_modules pins it to %s)\n",
+				name, moduleSource(r.Module), preferred)
+		}
+		if existing != nil {
+			return existing, nil
+		}
+		return r, nil // not registered; caller's r is returned for ergonomics but won't be referenced
+	}
 	if existing, ok := e.units[name]; ok {
+		// If prefer_modules pinned this name and existing is from the
+		// wrong module, replace it with r (which is, by the check above,
+		// from the preferred module).
+		if preferred != "" && existing.Module != preferred {
+			e.shadows = append(e.shadows, ShadowEvent{
+				Unit:         name,
+				WinnerModule: r.Module,
+				WinnerDir:    r.DefinedIn,
+				LoserModule:  existing.Module,
+				LoserDir:     existing.DefinedIn,
+			})
+			if e.showShadows {
+				fmt.Fprintf(os.Stderr,
+					"notice: unit %q from %s shadows %s (prefer_modules pin)\n",
+					name, moduleSource(r.Module), moduleSource(existing.Module))
+			}
+			e.units[name] = r
+			e.mu.Unlock()
+			return r, nil
+		}
 		// Same priority (same module, or both project root) → hard error.
 		// Cross-priority collisions are shadows: highest priority wins, with
 		// a stderr notice. Project priority is set strictly above any module

@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`prefer_modules` on `project()` pins a unit to a specific module.** Set
+  `prefer_modules = {"xz": "alpine"}` in `PROJECT.star` and the `xz` unit
+  registers only from `module-alpine`, regardless of which module wins the
+  default last-module shadowing. Use it when `module-core`'s source-built
+  version of a package is broken or under-configured and the Alpine prebuilt is
+  the right answer; the shadow appears on the Diagnostics tab the same way an
+  ordinary cross-module shadow does.
 - **`modprobe` works on the booted system.** Image assembly now runs `depmod`
   inside the rootfs after `apk add`, so `/lib/modules/<ver>/` carries a real
   `modules.dep` index instead of just bare `.ko` files. The kernel build still
