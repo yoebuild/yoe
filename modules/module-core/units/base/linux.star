@@ -1,7 +1,7 @@
 unit(
     name = "linux",
     version = "6.6.87",
-    release = 1,
+    release = 2,
     source = "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git",
     tag = "v6.6.87",
     license = "GPL-2.0",
