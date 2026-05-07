@@ -878,6 +878,18 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.flashUnit = name
 			m.flashCandidates = cands
 			m.flashCursor = 0
+			// Pre-position the cursor on the device the user picked last
+			// time (saved as `flash_device` in local.star), so reflashing
+			// the same SD card / USB stick is one keypress (`f`, `Enter`)
+			// instead of a fresh hunt through the candidate list.
+			if ov, err := yoestar.LoadLocalOverrides(m.projectDir); err == nil && ov.FlashDevice != "" {
+				for i, c := range cands {
+					if c.Path == ov.FlashDevice {
+						m.flashCursor = i
+						break
+					}
+				}
+			}
 			m.flashStage = flashSelect
 			m.flashErr = nil
 			m.flashWritten = 0
@@ -3944,6 +3956,12 @@ func (m model) updateFlash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.flashStage = flashError
 				m.flashErr = err
 				return m, nil
+			}
+			// Remember this device for next time. Best-effort: a write
+			// failure doesn't block the flash (the user is mid-action).
+			if ov, lerr := yoestar.LoadLocalOverrides(m.projectDir); lerr == nil {
+				ov.FlashDevice = cand.Path
+				_ = yoestar.WriteLocalOverrides(m.projectDir, ov)
 			}
 			m.flashImagePath = imgPath
 			m.flashImageSize = imgSize

@@ -8,7 +8,6 @@
 
 ## Next
 
-- Image version, put this in the image unit?
 - On unit detail page, provide a way to switch the Git URL to the upstream
   source and record this in the unit build state file. Display this state on
   main unit and unit detail page. Thinking several states: nothing, up,
@@ -25,7 +24,6 @@
   - machine package feed?
   - this needs to be solve before start building multiple machines in one tree.
 - e2e testing
-- Save flash device preference in local.star for TUI
 - Data partition for rPI targets
   - Fill/format data partition
 - rPI updater
@@ -33,7 +31,6 @@
   found
 - Progress bar for build and build status
 - Parallel build
-- Save flash drive in local.star
 - Flash progress bar rewinds before display if there has been a previous flash
 - Multiple projects
   - add example to e2e

@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **TUI flash remembers the last device.** Picking and confirming a flash target
+  writes `flash_device = "/dev/sdX"` to `local.star`, and re-entering the flash
+  view positions the cursor on that device when it shows up in the candidate
+  list. Reflashing the same SD card or USB stick is now `f` → Enter → `y`.
 - **`/etc/os-release` now reports the project version.** `VERSION`,
   `VERSION_ID`, and `PRETTY_NAME` come from `version = "..."` in `PROJECT.star`,
   so tools that read `/etc/os-release` (and humans on the device) can tell which
