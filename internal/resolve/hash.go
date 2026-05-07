@@ -56,6 +56,7 @@ func UnitHash(unit *yoestar.Unit, arch string, depHashes map[string]string) stri
 	fmt.Fprintf(h, "source:%s\n", unit.Source)
 	fmt.Fprintf(h, "sha256:%s\n", unit.SHA256)
 	fmt.Fprintf(h, "apk_checksum:%s\n", unit.APKChecksum)
+	fmt.Fprintf(h, "passthrough_apk:%s\n", unit.PassthroughAPK)
 	fmt.Fprintf(h, "tag:%s\n", unit.Tag)
 	fmt.Fprintf(h, "branch:%s\n", unit.Branch)
 	fmt.Fprintf(h, "patches:%s\n", strings.Join(unit.Patches, "|"))

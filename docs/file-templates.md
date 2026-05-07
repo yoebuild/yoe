@@ -12,8 +12,8 @@ highlighters, linters) from understanding the embedded content.
 
 Examples of inline content today:
 
-- `base-files.star` — inittab, rcS, os-release, extlinux.conf
-- `network-config.star` — udhcpc default.script, S10network init script
+- `base-files.star` — inittab, os-release, extlinux.conf
+- `network-config.star` — udhcpc default.script, OpenRC `network` init script
 - `image.star` — sfdisk partition tables, extlinux install scripts
 
 ## Design
@@ -29,14 +29,13 @@ modules/module-core/
       base-files.star
       base-files/                # same name as the unit
         inittab.tmpl
-        rcS
         os-release.tmpl
         extlinux.conf.tmpl
     net/
       network-config.star
       network-config/
         udhcpc-default.script
-        S10network
+        network                  # OpenRC service script
       simpleiot.star
       simpleiot/
         simpleiot.init
@@ -101,13 +100,12 @@ Go `text/template` with the unit context map:
 
 ```
 # inittab.tmpl
-::sysinit:/bin/mount -t proc proc /proc
-::sysinit:/bin/mount -t sysfs sys /sys
-::sysinit:/bin/hostname -F /etc/hostname
-::sysinit:/etc/init.d/rcS
+::sysinit:/sbin/openrc sysinit
+::sysinit:/sbin/openrc boot
+::wait:/sbin/openrc default
 {{.console}}::respawn:/sbin/getty -L {{.console}} 115200 vt100
 ::ctrlaltdel:/sbin/reboot
-::shutdown:/bin/umount -a -r
+::shutdown:/sbin/openrc shutdown
 ```
 
 ```
@@ -146,9 +144,8 @@ required:
 
 ```python
 task("build", steps = [
-    "mkdir -p $DESTDIR/etc $DESTDIR/etc/init.d $DESTDIR/boot/extlinux",
+    "mkdir -p $DESTDIR/etc $DESTDIR/boot/extlinux",
     install_template("inittab.tmpl", "$DESTDIR/etc/inittab"),
-    install_file("rcS", "$DESTDIR/etc/init.d/rcS", mode = 0o755),
     install_template("os-release.tmpl", "$DESTDIR/etc/os-release"),
 ])
 ```
@@ -203,13 +200,12 @@ OSRELEASE""",
 `base-files/inittab.tmpl`:
 
 ```
-::sysinit:/bin/mount -t proc proc /proc
-::sysinit:/bin/mount -t sysfs sys /sys
-::sysinit:/bin/hostname -F /etc/hostname
-::sysinit:/etc/init.d/rcS
+::sysinit:/sbin/openrc sysinit
+::sysinit:/sbin/openrc boot
+::wait:/sbin/openrc default
 {{.console}}::respawn:/sbin/getty -L {{.console}} 115200 vt100
 ::ctrlaltdel:/sbin/reboot
-::shutdown:/bin/umount -a -r
+::shutdown:/sbin/openrc shutdown
 ```
 
 `base-files/os-release.tmpl`:
@@ -221,15 +217,6 @@ PRETTY_NAME="Yoe Linux ({{.machine}})"
 HOME_URL=https://github.com/yoebuild/yoe
 ```
 
-`base-files/rcS`:
-
-```sh
-#!/bin/sh
-for s in /etc/init.d/S*; do
-    [ -x "$s" ] && "$s" start
-done
-```
-
 ```python
 unit(
     name = "base-files",
@@ -238,9 +225,8 @@ unit(
         task("build", steps = [
             "mkdir -p $DESTDIR/etc $DESTDIR/root $DESTDIR/proc $DESTDIR/sys"
                 + " $DESTDIR/dev $DESTDIR/tmp $DESTDIR/run"
-                + " $DESTDIR/etc/init.d $DESTDIR/boot/extlinux",
+                + " $DESTDIR/boot/extlinux",
             install_template("inittab.tmpl", "$DESTDIR/etc/inittab"),
-            install_file("rcS", "$DESTDIR/etc/init.d/rcS", mode = 0o755),
             install_template("os-release.tmpl", "$DESTDIR/etc/os-release"),
             install_template("extlinux.conf.tmpl",
                              "$DESTDIR/boot/extlinux/extlinux.conf"),
@@ -254,11 +240,14 @@ unit(
 `simpleiot/simpleiot.init`:
 
 ```sh
-#!/bin/sh
-case "$1" in
-    start) /usr/bin/siot &;;
-    stop) killall siot;;
-esac
+#!/sbin/openrc-run
+command="/usr/bin/siot"
+command_background="yes"
+pidfile="/run/simpleiot.pid"
+
+depend() {
+    need net
+}
 ```
 
 ```python
@@ -419,9 +408,9 @@ directory, then the container mounts them.
    `SetTemplateContext`) now that it is dead.
 5. **Hashing** — include context map JSON (sorted keys) and files-directory
    contents in the unit hash.
-6. **Migrate base-files** — inittab, rcS, os-release, extlinux.conf as install
-   steps.
-7. **Migrate network-config** — udhcpc script and `S10network` as install steps.
+6. **Migrate base-files** — inittab, os-release, extlinux.conf as install steps.
+7. **Migrate network-config** — udhcpc script and `network` init script as
+   install steps.
 8. **Migrate simpleiot** — init-script task becomes a one-line install step.
 
 ## Non-Goals

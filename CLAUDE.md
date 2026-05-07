@@ -199,3 +199,19 @@ The GitHub Actions workflow (`doc-check.yaml`) runs `prettier --check` on all
   Past entries are immutable history; never edit them during refactors. Do not
   put blank lines between bullet entries — entries sit directly under each
   other, and the blank line separates one version section from the next.
+- **Update `docs/` whenever you add a CHANGELOG entry.** A changelog bullet is a
+  promise that user-facing behavior changed; the matching reference doc under
+  `docs/` (and any key-binding/option table) must reflect that change in the
+  same commit. New flag → document the flag; new TUI tab or keybinding →
+  document it next to the existing ones; new subcommand → describe it where the
+  others live. If a feature is intentionally undocumented (internal,
+  experimental), say so in the changelog entry rather than skipping the doc pass
+  silently.
+- **External-module fixes go in the cached copy.** When the right place to
+  change something is an external module (e.g. `module-alpine`,
+  `module-jetson`), edit the file in place under
+  `testdata/<project>/cache/modules/<module>/...` rather than creating a local
+  override in `module-core`. After making the edit, tell the user which file
+  changed and remind them to commit it back to the upstream module repo (and
+  push when ready). Never do the upstream commit/push yourself — the user
+  manages those repos.

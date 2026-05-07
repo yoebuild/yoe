@@ -16,7 +16,7 @@ func TestInstallFile_ReturnsValue(t *testing.T) {
 		"install_template": starlark.NewBuiltin("install_template", fnInstallTemplate),
 	}
 	globals, err := starlark.ExecFileOptions(&syntax.FileOptions{}, thread, "t.star", `
-f = install_file("rcS", "$DESTDIR/etc/init.d/rcS", mode = 0o755)
+f = install_file("sshd", "$DESTDIR/etc/init.d/sshd", mode = 0o755)
 t = install_template("inittab.tmpl", "$DESTDIR/etc/inittab")
 `, predeclared)
 	if err != nil {
@@ -26,7 +26,7 @@ t = install_template("inittab.tmpl", "$DESTDIR/etc/inittab")
 	if !ok {
 		t.Fatalf("f = %T, want *InstallStepValue", globals["f"])
 	}
-	if f.Kind != "file" || f.Src != "rcS" || f.Dest != "$DESTDIR/etc/init.d/rcS" || f.Mode != 0o755 {
+	if f.Kind != "file" || f.Src != "sshd" || f.Dest != "$DESTDIR/etc/init.d/sshd" || f.Mode != 0o755 {
 		t.Errorf("f = %+v, unexpected fields", f)
 	}
 	tt, ok := globals["t"].(*InstallStepValue)

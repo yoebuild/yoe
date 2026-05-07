@@ -198,6 +198,13 @@ type Unit struct {
 	Branch  string
 	Patches []string // patch files applied after source fetch, before build
 
+	// PassthroughAPK names a .apk file fetched as the unit's source whose
+	// contents should be republished verbatim instead of repackaged from
+	// $DESTDIR. Used by alpine_pkg to ship upstream Alpine .apks (with
+	// their PKGINFO and install scripts intact) under yoe's signing key.
+	// The path is relative to the unit's srcDir.
+	PassthroughAPK string
+
 	// Dependencies
 	Deps        []string
 	RuntimeDeps []string

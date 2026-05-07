@@ -102,6 +102,16 @@ const (
 	viewDeploy
 )
 
+// fileEntry is one row in the Files tab of the detail view: a path
+// (relative to the unit's destdir, with leading slash so it reads as
+// the on-target path) and the size of the underlying inode. Symlinks
+// report the size of the link, not its target.
+type fileEntry struct {
+	Path string
+	Size int64
+	Link bool
+}
+
 // Tabs that share the home screen. Tab key cycles forward.
 type homeTab int
 
@@ -111,6 +121,35 @@ const (
 	tabDiagnostics
 	numHomeTabs
 )
+
+// Tabs inside the unit-detail view. Tab key cycles forward, mirroring
+// the home tab behavior.
+type detailTab int
+
+const (
+	detailTabInfo detailTab = iota
+	detailTabFiles
+	numDetailTabs
+)
+
+// Sort columns for the Files tab inside the detail view. Order matches
+// the on-screen column order; the cycle order driven by `o` follows
+// this sequence.
+const (
+	filesSortByName = iota
+	filesSortBySize
+	numFilesSortColumns
+)
+
+func (t detailTab) String() string {
+	switch t {
+	case detailTabInfo:
+		return "Info"
+	case detailTabFiles:
+		return "Files"
+	}
+	return ""
+}
 
 func (t homeTab) String() string {
 	switch t {
@@ -260,6 +299,14 @@ type model struct {
 	detailSearchText string // current detail search query
 	detailMatches    []int  // line indices in allLines that match
 	detailMatchIdx   int    // current match cursor (-1 = none)
+
+	// Detail-view tabs (Info/Files). Files tab lists everything the
+	// unit installed (its destdir contents) sortable by name/size.
+	detailTab           detailTab
+	detailFiles         []fileEntry
+	detailFilesScroll   int
+	detailFilesSortCol  int
+	detailFilesSortDesc bool
 
 	// Setup view
 	machines    []string // sorted machine names
@@ -694,6 +741,9 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor < len(m.units) {
 			m.detailUnit = m.units[m.cursor]
 			m.view = viewDetail
+			m.detailTab = detailTabInfo
+			m.detailFiles = nil
+			m.detailFilesScroll = 0
 			m.autoFollow = true
 			m.detailScroll = 0
 			m.refreshDetail()
@@ -1533,6 +1583,30 @@ func (m model) updateSetupMachine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Tab cycles between detail tabs (Info / Files), mirroring the home
+	// screen. Handled before the per-tab dispatch so it works regardless
+	// of which tab is active.
+	switch msg.String() {
+	case "tab":
+		m.detailTab = (m.detailTab + 1) % numDetailTabs
+		if m.detailTab == detailTabFiles {
+			m.refreshDetailFiles()
+		}
+		m.message = ""
+		return m, nil
+	case "shift+tab":
+		m.detailTab = (m.detailTab + numDetailTabs - 1) % numDetailTabs
+		if m.detailTab == detailTabFiles {
+			m.refreshDetailFiles()
+		}
+		m.message = ""
+		return m, nil
+	}
+
+	if m.detailTab == detailTabFiles {
+		return m.updateDetailFiles(msg)
+	}
+
 	switch msg.String() {
 	case "esc":
 		// First esc clears search, second esc goes back to list
@@ -1547,6 +1621,8 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.outputLines = nil
 		m.logLines = nil
 		m.detailScroll = 0
+		m.detailFiles = nil
+		m.detailFilesScroll = 0
 		return m, nil
 
 	case "q", "ctrl+c":
@@ -2054,6 +2130,10 @@ var (
 		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
 		{"/", "search"}, {"b", "build"}, {"r", "run"}, {"$", "shell"},
 		{"d", "diagnose"}, {"l", "log"},
+	}
+	detailFilesHelpItems = []helpItem{
+		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
+		{"o", "sort"}, {"O", "reverse"},
 	}
 )
 
@@ -2738,6 +2818,27 @@ func (m model) viewDetail() string {
 	}
 	b.WriteString("\n")
 
+	// Tab bar (Info / Files), styled like the home tab bar so the two
+	// strips read as the same UI element.
+	var tabs []string
+	for t := detailTab(0); t < numDetailTabs; t++ {
+		label := t.String()
+		if t == m.detailTab {
+			tabs = append(tabs, tabActiveStyle.Render("[ "+label+" ]"))
+		} else {
+			tabs = append(tabs, tabInactiveStyle.Render("  "+label+"  "))
+		}
+	}
+	b.WriteString(fmt.Sprintf("  %s    %s%s\n",
+		strings.Join(tabs, " "),
+		helpKeyStyle.Render("tab"),
+		helpStyle.Render(": switch")))
+
+	if m.detailTab == detailTabFiles {
+		b.WriteString(m.viewDetailFilesBody())
+		return b.String()
+	}
+
 	allLines := m.detailAllLines()
 
 	// Build set of matching line indices for highlight
@@ -2830,6 +2931,102 @@ func (m model) viewDetail() string {
 			items = detailImageHelpItems
 		}
 		b.WriteString(renderHelp(items))
+	}
+
+	return b.String()
+}
+
+// viewDetailFilesBody renders everything below the tab bar for the Files
+// tab: column header (sortable), file rows, scroll indicators, and the
+// bottom help row. Mirrors the units-tab table layout — same arrow on
+// the active sort column, same `↑ N more` / `↓ N more` cues.
+func (m model) viewDetailFilesBody() string {
+	var b strings.Builder
+
+	const sizeW = 10
+	pathW := m.width - 2 - sizeW - 2 // leading "  " + gap before SIZE
+	if pathW < 20 {
+		pathW = 20
+	}
+
+	headerLabel := func(col int, label string, w int, rightAlign bool) string {
+		arrow := ""
+		if m.detailFilesSortCol == col {
+			if m.detailFilesSortDesc {
+				arrow = "↓"
+			} else {
+				arrow = "↑"
+			}
+		}
+		displayW := len(label)
+		if arrow != "" {
+			displayW++
+		}
+		if displayW >= w {
+			return label + arrow
+		}
+		pad := strings.Repeat(" ", w-displayW)
+		if rightAlign {
+			return pad + label + arrow
+		}
+		return label + arrow + pad
+	}
+	b.WriteString(fmt.Sprintf("  %s  %s\n",
+		headerStyle.Render(headerLabel(filesSortByName, "PATH", pathW, false)),
+		headerStyle.Render(headerLabel(filesSortBySize, "SIZE", sizeW, true))))
+
+	viewH := m.detailFilesViewportHeight()
+	start := m.detailFilesScroll
+	if start > len(m.detailFiles)-viewH {
+		start = len(m.detailFiles) - viewH
+	}
+	if start < 0 {
+		start = 0
+	}
+	end := start + viewH
+	if end > len(m.detailFiles) {
+		end = len(m.detailFiles)
+	}
+
+	// Always emit the ↑ row — blank when not scrolled — so the row
+	// directly under the column header doesn't shift up by one when
+	// the user scrolls down to a multi-page state.
+	if start > 0 {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  ↑ %d more", start)))
+	}
+	b.WriteString("\n")
+
+	if len(m.detailFiles) == 0 {
+		b.WriteString(dimStyle.Render("  (no files installed — build the unit first)"))
+		b.WriteString("\n")
+		for i := 1; i < viewH; i++ {
+			b.WriteString("\n")
+		}
+	} else {
+		for _, f := range m.detailFiles[start:end] {
+			pathStyle := lipgloss.NewStyle()
+			if f.Link {
+				pathStyle = dimStyle
+			}
+			b.WriteString(fmt.Sprintf("  %s  %s\n",
+				pathStyle.Render(clipFixed(f.Path, pathW)),
+				dimStyle.Render(fmt.Sprintf("%*s", sizeW, formatSize(f.Size)))))
+		}
+		rendered := end - start
+		for i := rendered; i < viewH; i++ {
+			b.WriteString("\n")
+		}
+	}
+
+	if end < len(m.detailFiles) {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  ↓ %d more", len(m.detailFiles)-end)))
+	}
+	b.WriteString("\n")
+
+	if m.message != "" {
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
+	} else {
+		b.WriteString(renderHelp(detailFilesHelpItems))
 	}
 
 	return b.String()
@@ -3009,12 +3206,160 @@ func (m *model) refreshDetail() {
 	}
 }
 
+// refreshDetailFiles populates m.detailFiles by walking the unit's
+// destdir — what `apk` would later pack into the .apk. Directories
+// are skipped (only files and symlinks are listed) since the user is
+// looking at "what got installed". Walked once on tab activation; no
+// background polling, since destdir contents only change on a rebuild
+// and that already drives a `refreshDetail` for the log panes.
+func (m *model) refreshDetailFiles() {
+	m.detailFiles = nil
+	m.detailFilesScroll = 0
+	destDir := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit), "destdir")
+	filepath.Walk(destDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || path == destDir {
+			return nil
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(destDir, path)
+		if relErr != nil {
+			return nil
+		}
+		m.detailFiles = append(m.detailFiles, fileEntry{
+			Path: "/" + filepath.ToSlash(rel),
+			Size: info.Size(),
+			Link: info.Mode()&os.ModeSymlink != 0,
+		})
+		return nil
+	})
+	m.sortDetailFiles()
+}
+
+func (m *model) sortDetailFiles() {
+	desc := m.detailFilesSortDesc
+	col := m.detailFilesSortCol
+	sort.SliceStable(m.detailFiles, func(p, q int) bool {
+		a, b := m.detailFiles[p], m.detailFiles[q]
+		var c int
+		switch col {
+		case filesSortBySize:
+			switch {
+			case a.Size < b.Size:
+				c = -1
+			case a.Size > b.Size:
+				c = 1
+			}
+		default: // filesSortByName
+			switch {
+			case a.Path < b.Path:
+				c = -1
+			case a.Path > b.Path:
+				c = 1
+			}
+		}
+		if c == 0 {
+			switch {
+			case a.Path < b.Path:
+				c = -1
+			case a.Path > b.Path:
+				c = 1
+			}
+		}
+		if desc {
+			return c > 0
+		}
+		return c < 0
+	})
+}
+
+// updateDetailFiles handles keys when the Files tab is active inside
+// the detail view. Navigation only — actions like build/run/log live
+// on the Info tab so the Files tab stays a pure viewer.
+func (m model) updateDetailFiles(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	maxScroll := m.detailFilesMaxScroll()
+	switch msg.String() {
+	case "esc":
+		m.view = viewUnits
+		m.detailUnit = ""
+		m.outputLines = nil
+		m.logLines = nil
+		m.detailScroll = 0
+		m.detailFiles = nil
+		m.detailFilesScroll = 0
+		return m, nil
+
+	case "q", "ctrl+c":
+		if len(m.cancels) > 0 {
+			m.confirm = "quit"
+			m.message = "Builds are running. Quit and cancel them? (y/n)"
+			return m, nil
+		}
+		return m, tea.Quit
+
+	case "up", "k":
+		if m.detailFilesScroll > 0 {
+			m.detailFilesScroll--
+		}
+		return m, nil
+
+	case "down", "j":
+		if m.detailFilesScroll < maxScroll {
+			m.detailFilesScroll++
+		}
+		return m, nil
+
+	case "pgup", "ctrl+b":
+		page := m.detailFilesViewportHeight()
+		m.detailFilesScroll -= page
+		if m.detailFilesScroll < 0 {
+			m.detailFilesScroll = 0
+		}
+		return m, nil
+
+	case "pgdown", "ctrl+f":
+		page := m.detailFilesViewportHeight()
+		m.detailFilesScroll += page
+		if m.detailFilesScroll > maxScroll {
+			m.detailFilesScroll = maxScroll
+		}
+		return m, nil
+
+	case "g":
+		m.detailFilesScroll = 0
+		return m, nil
+
+	case "G":
+		m.detailFilesScroll = maxScroll
+		return m, nil
+
+	case "o":
+		next := (m.detailFilesSortCol + 1) % numFilesSortColumns
+		m.detailFilesSortCol = next
+		// SIZE defaults to descending — biggest files first is what
+		// the user almost always wants when they switch to that sort.
+		m.detailFilesSortDesc = next == filesSortBySize
+		m.sortDetailFiles()
+		m.detailFilesScroll = 0
+		return m, nil
+
+	case "O":
+		m.detailFilesSortDesc = !m.detailFilesSortDesc
+		m.sortDetailFiles()
+		m.detailFilesScroll = 0
+		return m, nil
+	}
+	return m, nil
+}
+
 // detailViewportHeight returns the number of content lines visible in
 // detail view. Chrome is counted exactly so the page doesn't trail
-// extra blank lines below the help bar: title + metadata + scroll
-// indicator + (search bar) + bottom row (help OR status message).
+// extra blank lines below the help bar: title + metadata + tab bar +
+// scroll indicator + (search bar) + bottom row (help OR status message).
 func (m model) detailViewportHeight() int {
 	chrome := 2 // title + metadata/blank
+	chrome++    // tab bar (Info / Files)
 	chrome++    // scroll indicator (always one line, blank when not scrolled)
 	if m.detailSearching || (m.detailSearchText != "" && len(m.detailMatches) > 0) {
 		chrome++ // search bar
@@ -3025,6 +3370,33 @@ func (m model) detailViewportHeight() int {
 		h = 5
 	}
 	return h
+}
+
+// detailFilesViewportHeight returns the number of file rows visible in
+// the Files tab. Chrome: title + metadata + tab bar + column header +
+// ↑/↓ indicators + bottom help row.
+func (m model) detailFilesViewportHeight() int {
+	chrome := 2 // title + metadata/blank
+	chrome++    // tab bar
+	chrome++    // column header
+	chrome++    // ↑ more (always reserved)
+	chrome++    // ↓ more (always reserved)
+	chrome++    // bottom row
+	h := m.height - chrome
+	if h < 3 {
+		h = 3
+	}
+	return h
+}
+
+// detailFilesMaxScroll returns the maximum scroll offset for the Files
+// tab so the cursor can't run past the last row.
+func (m model) detailFilesMaxScroll() int {
+	max := len(m.detailFiles) - m.detailFilesViewportHeight()
+	if max < 0 {
+		return 0
+	}
+	return max
 }
 
 // detailTotalLines returns the total number of display lines in the combined
@@ -3229,7 +3601,7 @@ func (m *model) recomputeMetrics() {
 		}
 		sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
 		buildDir := build.UnitBuildDir(m.projectDir, sd, name)
-		size[name] = installedSize(u, buildDir)
+		size[name] = installedSize(buildDir)
 
 		// Runtime closure of what the unit pulls in. For image units the
 		// package list lives in Artifacts (image.RuntimeDeps is empty
@@ -3267,19 +3639,15 @@ func (m *model) refreshUnitSize(name string) {
 	if m.unitSize == nil {
 		m.unitSize = make(map[string]int64)
 	}
-	m.unitSize[name] = installedSize(u, buildDir)
+	m.unitSize[name] = installedSize(buildDir)
 }
 
 // installedSize returns the on-disk size for a built unit. For image
-// units we report the .img file directly; everything else uses
-// BuildMeta.InstalledBytes (the destdir size that goes into the .apk).
+// units this is the rootfs content (what was actually installed); for
+// other units it is the destdir size (what goes into the .apk). The
+// executor records this in BuildMeta.InstalledBytes — see executor.go.
 // Returns 0 when the unit has not been built yet.
-func installedSize(u *yoestar.Unit, buildDir string) int64 {
-	if u.Class == "image" {
-		if info, err := os.Stat(filepath.Join(buildDir, "destdir", u.Name+".img")); err == nil {
-			return info.Size()
-		}
-	}
+func installedSize(buildDir string) int64 {
 	if meta := build.ReadMeta(buildDir); meta != nil {
 		return meta.InstalledBytes
 	}

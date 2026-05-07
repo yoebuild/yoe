@@ -8,6 +8,54 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **OpenRC replaces the old rcS startup script.** Services now boot under
+  Alpine's OpenRC service manager, so they get dependency ordering, supervised
+  start/stop, and proper status/restart commands (`rc-service sshd restart`,
+  `rc-status`) instead of the silent run-everything-in-`/etc/init.d/S*` pattern.
+  Units declare `services = ["sshd"]` (plain names, no `S40` prefix) and the
+  resulting apk drops the script in `/etc/init.d/` plus a runlevel symlink in
+  `/etc/runlevels/default/`.
+- **Source-built libraries auto-declare what they ship.** Each `.apk` yoe builds
+  from a destdir now lists `provides = so:<soname>=<ver>-r<rel>` for every
+  shared library in the package, matching Alpine's convention. Alpine prebuilt
+  packages whose upstream PKGINFO declares `depend = so:libcrypto.so.3` or
+  similar now resolve cleanly against yoe-source-built `openssl`, `zlib`, etc. —
+  no manual SONAME bookkeeping in the `.star` file.
+- **`module-alpine` packages now ship with their upstream metadata intact.**
+  Prebuilt Alpine apks pass through yoe's pipeline verbatim — only the signature
+  is swapped for the project's key — so `replaces`, `provides`, `triggers`, and
+  post-install hooks (busybox applet symlink creation, sshd privsep user adds,
+  …) reach the on-target system the way Alpine intended. Image assembly drops
+  `--no-scripts` so those hooks actually run; this fixes the no-`/sbin/init`
+  kernel panic that hit when relying on Alpine's busybox.
+- **Alpine packages no longer end up with doubled-`-r` filenames.** `alpine_pkg`
+  splits upstream pkgver like `1.2.5-r11` into yoe's separate version + release
+  fields, so the published apk is `musl-1.2.5-r11.apk` instead of
+  `musl-1.2.5-r11-r0.apk`. Apk's solver finds the file at the URL it constructs
+  from the index, fixing "package mentioned in index not found" on every
+  module-alpine package.
+- **noarch packages publish into `<repo>/noarch/`.** The passthrough path now
+  reads upstream PKGINFO's `arch =` field and routes the published apk to the
+  correct repo subdirectory, so noarch packages (`busybox-binsh`,
+  `busybox-ifupdown`, `ca-certificates-bundle`) land where apk expects to find
+  them.
+- **base-files ships an Alpine-style runlevel baseline.** OpenRC services
+  `devfs`, `dmesg` (sysinit), `bootmisc`, `hostname`, `modules`, `sysctl`
+  (boot), and `mount-ro`, `killprocs` (shutdown) are now wired into the rootfs
+  via `/etc/runlevels/<level>/<svc>` symlinks, so a fresh image boots with the
+  hostname set, kernel modules loaded, and shutdown that unmounts cleanly.
+- **TUI SIZE column for images shows installed content, not partition size.** An
+  image whose machine reserves a 600 MB rootfs partition now reports the ~50 MB
+  actually populated by `apk add`, so you can see what your image _contains_
+  rather than how big the partition was sized.
+- **New `docker-image`.** Builds a dev-image-style rootfs that also ships Docker
+  (engine, CLI, buildx, containerd, runc) so you can poke at the docker
+  userspace on a yoe-built system. Kernel and init still need the container
+  pieces before `dockerd` can actually launch a container — that's the next
+  step.
+- **Files tab on the unit detail page.** Tab into a sortable list of every file
+  the unit installs and its on-disk size — easy to spot the biggest payloads or
+  confirm a binary actually landed where you expected without leaving the TUI.
 - **Drop into a shell on the source.** Press `$` in the units tab or detail page
   to open a shell in the unit's checked-out source directory, or in the Modules
   tab to open a shell in a module's clone — handy for `git status`, spot-edits,

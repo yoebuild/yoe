@@ -1,0 +1,46 @@
+#!/sbin/openrc-run
+
+description="Bring up loopback + eth0 and start a DHCP client"
+
+depend() {
+    need sysfs
+    provide net
+}
+
+start() {
+    ebegin "Bringing up network interfaces"
+    ip link set lo up
+    ip link set eth0 up
+
+    # Wait briefly for carrier so the DHCP client doesn't immediately hit
+    # "Network is down" on virtio-net and similar drivers where IFF_LOWER_UP
+    # lags IFF_UP.
+    i=0
+    while [ "$i" -lt 50 ]; do
+        [ "$(cat /sys/class/net/eth0/carrier 2>/dev/null)" = "1" ] && break
+        i=$((i + 1))
+        sleep 0.1
+    done
+
+    # Prefer dhcpcd when present (IPv6 SLAAC, DHCPv6, IPv4LL fallback);
+    # otherwise fall back to busybox udhcpc. Both run in the background so
+    # boot proceeds even when no DHCP server is reachable.
+    if command -v dhcpcd >/dev/null 2>&1; then
+        dhcpcd -b eth0
+    else
+        udhcpc -i eth0 -s /usr/share/udhcpc/default.script -b -t 5 -T 1 -A 3
+    fi
+    eend $?
+}
+
+stop() {
+    ebegin "Stopping DHCP client"
+    if command -v dhcpcd >/dev/null 2>&1; then
+        dhcpcd -k eth0 2>/dev/null
+    else
+        killall udhcpc 2>/dev/null
+    fi
+    ip link set eth0 down 2>/dev/null
+    ip link set lo down 2>/dev/null
+    eend 0
+}

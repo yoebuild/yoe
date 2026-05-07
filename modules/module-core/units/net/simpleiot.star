@@ -10,6 +10,7 @@ go_binary(
     license = "Apache-2.0",
     description = "IoT application for sensor data, telemetry, configuration, and device management",
     services = ["simpleiot"],
+    runtime_deps = ["openrc"],
     tasks = [
         task("init-script", steps = [
             "mkdir -p $DESTDIR/etc/init.d",

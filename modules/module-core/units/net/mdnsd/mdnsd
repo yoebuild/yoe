@@ -1,0 +1,23 @@
+#!/sbin/openrc-run
+
+description="mdnsd — answer <hostname>.local on the LAN"
+
+# Reads service records from /etc/mdns.d/. Requires multicast on the
+# network interface, which is the kernel default.
+
+depend() {
+    need net
+}
+
+start() {
+    ebegin "Starting mdnsd"
+    # mdnsd backgrounds itself by default; let it.
+    /usr/sbin/mdnsd
+    eend $?
+}
+
+stop() {
+    ebegin "Stopping mdnsd"
+    killall mdnsd 2>/dev/null
+    eend 0
+}

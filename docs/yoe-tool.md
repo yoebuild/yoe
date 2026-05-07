@@ -706,24 +706,38 @@ re-arms the follow so the build cascade is visible.
 
 #### Detail view
 
-Pressing Enter on a unit shows a split-pane detail view:
+Pressing Enter on a unit opens a detail view with two tabs (`tab` / `shift+tab`
+to cycle): **Info** and **Files**.
 
-- **BUILD OUTPUT** (top) — executor progress: dependency resolution, cache hits,
-  build status for each dep
-- **BUILD LOG** (bottom) — tail of the unit's `build.log`, updated in real time
-  during a build
+The **Info** tab shows the unit's place in the project plus its build streams:
 
-| Key         | Action                                         |
-| ----------- | ---------------------------------------------- |
-| `Esc`       | Return to unit list                            |
-| `b`         | Build this unit in background                  |
-| `r`         | Run (image units) — boot in QEMU               |
-| `$`         | Open `$SHELL` in the unit's checked-out source |
-| `d`         | Launch `claude diagnose`                       |
-| `l`         | Open build log in `$EDITOR`                    |
-| `/`         | Search the build log                           |
-| `j/k` `↑/↓` | Scroll the log                                 |
-| `g/G`       | Jump to top / bottom of the log                |
+- **USED BY (upstream)** — which explicit picks in the default image pull this
+  unit in, and the runtime-dep chain that bridges them
+- **PULLS IN (downstream)** — what this unit pulls in transitively
+- **BUILD OUTPUT** — executor progress: dependency resolution, cache hits, build
+  status for each dep
+- **BUILD LOG** — tail of the unit's `build.log`, updated in real time during a
+  build
+
+The **Files** tab lists every file the unit installed into its `destdir` (what
+`apk` packages into the unit's `.apk`) with its on-disk size. Sortable by path
+or size — handy for spotting the biggest payloads or confirming a binary
+actually landed where you expected. Symlinks are dimmed; directories are
+omitted. Empty until the unit has been built at least once.
+
+| Key         | Action                                             |
+| ----------- | -------------------------------------------------- |
+| `tab`       | Switch between Info and Files tabs                 |
+| `Esc`       | Return to unit list                                |
+| `b`         | Build this unit in background _(Info tab)_         |
+| `r`         | Run (image units) — boot in QEMU _(Info tab)_      |
+| `$`         | Open `$SHELL` in the unit's checked-out source     |
+| `d`         | Launch `claude diagnose` _(Info tab)_              |
+| `l`         | Open build log in `$EDITOR` _(Info tab)_           |
+| `/`         | Search the build log _(Info tab)_                  |
+| `o` / `O`   | Cycle sort column / toggle direction _(Files tab)_ |
+| `j/k` `↑/↓` | Scroll the log / file list                         |
+| `g/G`       | Jump to top / bottom                               |
 
 #### Search
 

@@ -27,41 +27,19 @@ func writeMeta(t *testing.T, buildDir string, installedBytes int64) {
 	}
 }
 
-func TestInstalledSize_NonImage_ReadsMeta(t *testing.T) {
+func TestInstalledSize_ReadsMeta(t *testing.T) {
 	dir := t.TempDir()
 	writeMeta(t, dir, 12345)
 
-	u := &yoestar.Unit{Name: "foo", Class: "unit"}
-	got := installedSize(u, dir)
+	got := installedSize(dir)
 	if got != 12345 {
 		t.Fatalf("installedSize = %d, want 12345", got)
 	}
 }
 
-func TestInstalledSize_Image_PrefersImgFile(t *testing.T) {
-	dir := t.TempDir()
-	destDir := filepath.Join(dir, "destdir")
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
-		t.Fatalf("mkdir destdir: %v", err)
-	}
-	imgPath := filepath.Join(destDir, "myimage.img")
-	if err := os.WriteFile(imgPath, make([]byte, 1024), 0o644); err != nil {
-		t.Fatalf("write img: %v", err)
-	}
-	// Meta with a different value to prove the .img stat wins.
-	writeMeta(t, dir, 999)
-
-	u := &yoestar.Unit{Name: "myimage", Class: "image"}
-	got := installedSize(u, dir)
-	if got != 1024 {
-		t.Fatalf("installedSize = %d, want 1024 (.img size)", got)
-	}
-}
-
 func TestInstalledSize_Unbuilt_ReturnsZero(t *testing.T) {
 	dir := t.TempDir()
-	u := &yoestar.Unit{Name: "foo", Class: "unit"}
-	if got := installedSize(u, dir); got != 0 {
+	if got := installedSize(dir); got != 0 {
 		t.Fatalf("installedSize = %d, want 0", got)
 	}
 }
@@ -105,5 +83,74 @@ func TestRefreshUnitSize_UnknownUnit_NoOp(t *testing.T) {
 	m.refreshUnitSize("does-not-exist")
 	if _, ok := m.unitSize["does-not-exist"]; ok {
 		t.Fatalf("refreshUnitSize created entry for unknown unit")
+	}
+}
+
+// TestRefreshDetailFiles_WalksDestdir verifies the Files tab walker:
+// directories are skipped, regular files are listed with their byte
+// size, and symlinks are flagged so the renderer can dim them.
+func TestRefreshDetailFiles_WalksDestdir(t *testing.T) {
+	projDir := t.TempDir()
+	// build/foo.x86_64/destdir/...
+	destDir := filepath.Join(projDir, "build", "foo.x86_64", "destdir")
+	if err := os.MkdirAll(filepath.Join(destDir, "usr", "bin"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(destDir, "usr", "lib"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(destDir, "usr", "bin", "foo"), make([]byte, 200), 0o755); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(destDir, "usr", "lib", "libfoo.so.1"), make([]byte, 5000), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.Symlink("libfoo.so.1", filepath.Join(destDir, "usr", "lib", "libfoo.so")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	m := &model{
+		projectDir: projDir,
+		arch:       "x86_64",
+		detailUnit: "foo",
+		proj: &yoestar.Project{
+			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
+			Units: map[string]*yoestar.Unit{
+				"foo": {Name: "foo", Class: "unit"},
+			},
+		},
+	}
+	m.refreshDetailFiles()
+
+	if len(m.detailFiles) != 3 {
+		t.Fatalf("got %d files, want 3: %+v", len(m.detailFiles), m.detailFiles)
+	}
+	// Default sort is by name ascending.
+	want := []string{"/usr/bin/foo", "/usr/lib/libfoo.so", "/usr/lib/libfoo.so.1"}
+	for i, w := range want {
+		if m.detailFiles[i].Path != w {
+			t.Fatalf("files[%d] = %q, want %q", i, m.detailFiles[i].Path, w)
+		}
+	}
+	// Symlink flagged.
+	if !m.detailFiles[1].Link {
+		t.Fatalf("expected /usr/lib/libfoo.so to be flagged Link")
+	}
+	if m.detailFiles[0].Link || m.detailFiles[2].Link {
+		t.Fatalf("regular files should not be flagged Link")
+	}
+	if m.detailFiles[0].Size != 200 || m.detailFiles[2].Size != 5000 {
+		t.Fatalf("unexpected sizes: %d, %d", m.detailFiles[0].Size, m.detailFiles[2].Size)
+	}
+
+	// Sort by size descending — biggest first, ties broken by name.
+	m.detailFilesSortCol = filesSortBySize
+	m.detailFilesSortDesc = true
+	m.sortDetailFiles()
+	if m.detailFiles[0].Path != "/usr/lib/libfoo.so.1" {
+		t.Fatalf("size-desc top = %q, want /usr/lib/libfoo.so.1", m.detailFiles[0].Path)
+	}
+	if m.detailFiles[len(m.detailFiles)-1].Path == "/usr/lib/libfoo.so.1" {
+		t.Fatalf("size-desc should not put libfoo.so.1 last")
 	}
 }

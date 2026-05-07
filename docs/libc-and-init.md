@@ -17,9 +17,12 @@ The default and currently only fully-supported configuration is:
 - **busybox + a curated GNU userland on top.** The `replaces` mechanism manages
   file conflicts where util-linux, coreutils, etc. shadow busybox applets that
   ship a real implementation.
-- **OpenRC-style init scripts.** `network-config` and similar yoe-specific units
-  ship `/etc/init.d/Sxxx` scripts. There is no systemd integration and no plan
-  to add one inside `module-core`.
+- **OpenRC service supervision.** Yoe-specific units ship native OpenRC scripts
+  (`#!/sbin/openrc-run`) under `/etc/init.d/<name>`, and the `services = [...]`
+  declaration in a unit becomes a runlevel symlink at
+  `/etc/runlevels/default/<name>`. busybox init remains PID 1; `/etc/inittab`
+  triggers OpenRC's `sysinit`, `boot`, and `default` runlevels in order. There
+  is no systemd integration and no plan to add one inside `module-core`.
 - **apk packaging.** All yoe units produce signed `.apk` artifacts. Packages are
   installed with apk-tools at image-assembly time.
 
@@ -415,8 +418,9 @@ its own libc, and the install loop is just "extract files, update DB."
 
 ## What changes for yoe-defining units
 
-Today, `network-config`, `base-files`, and similar units assume OpenRC-style
-`/etc/init.d/Sxx` scripts. In a base-agnostic future, those units gain a
+Today, `network-config`, `base-files`, and similar units assume OpenRC service
+scripts under `/etc/init.d/` with runlevel symlinks in
+`/etc/runlevels/default/`. In a base-agnostic future, those units gain a
 base-aware code path or get split into init-system-specific variants. The
 override model already in yoe (name shadowing, `provides` for alternative
 selection) handles this cleanly: either the init-system-specific `units-systemd`
