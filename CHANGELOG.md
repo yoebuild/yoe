@@ -52,10 +52,12 @@ and this project adheres to
   `busybox-ifupdown`, `ca-certificates-bundle`) land where apk expects to find
   them.
 - **base-files ships an Alpine-style runlevel baseline.** OpenRC services
-  `devfs`, `dmesg` (sysinit), `bootmisc`, `hostname`, `modules`, `sysctl`
-  (boot), and `mount-ro`, `killprocs` (shutdown) are now wired into the rootfs
-  via `/etc/runlevels/<level>/<svc>` symlinks, so a fresh image boots with the
-  hostname set, kernel modules loaded, and shutdown that unmounts cleanly.
+  `cgroups`, `devfs`, `dmesg` (sysinit), `bootmisc`, `hostname`, `modules`,
+  `sysctl` (boot), and `mount-ro`, `killprocs` (shutdown) are now wired into the
+  rootfs via `/etc/runlevels/<level>/<svc>` symlinks, so a fresh image boots
+  with the hostname set, kernel modules loaded, the cgroup hierarchy mounted (so
+  container runtimes don't trip on "Devices cgroup isn't mounted"), and shutdown
+  that unmounts cleanly.
 - **TUI SIZE column for images shows installed content, not partition size.** An
   image whose machine reserves a 600 MB rootfs partition now reports the ~50 MB
   actually populated by `apk add`, so you can see what your image _contains_
