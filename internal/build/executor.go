@@ -559,19 +559,19 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 			// Re-sign the upstream apk verbatim — keeps Alpine's PKGINFO
 			// and install scripts intact. The tasks above still run so
 			// destdir is populated for downstream units' sysroots.
-			//
-			// Publish under the build arch's directory regardless of
-			// whether the upstream PKGINFO declares `arch = noarch`. apk's
-			// solver reads `<repo>/<arch>/APKINDEX.tar.gz` and constructs
-			// fetch URLs relative to that index — putting a noarch package
-			// only in `<repo>/noarch/` leaves it invisible from the
-			// per-arch index. Alpine's own mirrors duplicate noarch apks
-			// into each arch directory for the same reason; the `A:noarch`
-			// line in PKGINFO still tells apk the package is portable.
 			srcAPK := filepath.Join(srcDir, unit.PassthroughAPK)
 			apkPath, err = artifact.RepackAPK(unit, srcAPK, filepath.Join(buildDir, "pkg"), opts.Signer)
 			if err != nil {
 				return fmt.Errorf("repacking upstream apk: %w", err)
+			}
+			// Honor upstream PKGINFO's arch when publishing. apk-tools
+			// constructs fetch URLs as `<repo>/<pkg.arch>/<file>.apk`
+			// using the package's own arch — so a noarch apk physically
+			// has to live in `<repo>/noarch/` regardless of which arch's
+			// build invoked us. Each per-arch APKINDEX picks up noarch
+			// entries via GenerateIndex's sibling-dir scan.
+			if a, aerr := artifact.ReadAPKArch(srcAPK); aerr == nil && a != "" {
+				archDir = a
 			}
 		} else {
 			apkPath, err = artifact.CreateAPK(unit, destDir, filepath.Join(buildDir, "pkg"), archDir, opts.ProjectCommit, opts.Signer)
@@ -768,8 +768,20 @@ func cacheValid(proj *yoestar.Project, projectDir string, unit *yoestar.Unit, sc
 	}
 	archDir := RepoArchDir(unit, arch)
 	apkName := fmt.Sprintf("%s-%s-r%d.apk", unit.Name, unit.Version, unit.Release)
-	_, err := os.Stat(filepath.Join(repo.RepoDir(proj, projectDir), archDir, apkName))
-	return err == nil
+	repoBase := repo.RepoDir(proj, projectDir)
+	if _, err := os.Stat(filepath.Join(repoBase, archDir, apkName)); err == nil {
+		return true
+	}
+	// Passthrough alpine_pkg units with `arch = noarch` in upstream
+	// PKGINFO publish to <repo>/noarch/ regardless of the build arch
+	// (apk's solver constructs fetch URLs from PKGINFO arch). The unit's
+	// Scope on the Starlark side stays empty/arch, so RepoArchDir
+	// returns the build arch — fall back to noarch/ before declaring
+	// the cache stale.
+	if _, err := os.Stat(filepath.Join(repoBase, "noarch", apkName)); err == nil {
+		return true
+	}
+	return false
 }
 
 func HasBuildLog(projectDir, arch, name string) bool {

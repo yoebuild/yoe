@@ -65,7 +65,27 @@ func Publish(apkPath, repoDir, archDir string, signer *artifact.Signer) error {
 		}
 	}
 
-	return GenerateIndex(archPath, signer)
+	if err := GenerateIndex(archPath, signer); err != nil {
+		return err
+	}
+	// A noarch publish has to refresh every per-arch APKINDEX too —
+	// each one includes noarch entries via GenerateIndex's sibling
+	// scan, so adding a noarch apk silently invalidates them all.
+	if archDir == "noarch" {
+		archDirs, err := ArchDirs(repoDir)
+		if err != nil {
+			return err
+		}
+		for _, ad := range archDirs {
+			if ad == "noarch" {
+				continue
+			}
+			if err := GenerateIndex(filepath.Join(repoDir, ad), signer); err != nil {
+				return fmt.Errorf("regenerating %s APKINDEX after noarch publish: %w", ad, err)
+			}
+		}
+	}
+	return nil
 }
 
 // WritePublicKey drops the project's public key into <repoDir>/keys/ so

@@ -22,18 +22,45 @@ import (
 // signer is non-nil the index is signed (a signature stream is prepended)
 // so apk update accepts it without --allow-untrusted.
 func GenerateIndex(repoDir string, signer *artifact.Signer) error {
-	entries, err := os.ReadDir(repoDir)
-	if err != nil {
+	// apks is a list of (apkDir, filename) so a per-arch APKINDEX can
+	// include both arch-specific packages and the shared noarch tree.
+	// Apk constructs fetch URLs as `<repo-base>/<pkg.arch>/<filename>`
+	// (using the package's PKGINFO arch, NOT the index's arch), so a
+	// noarch apk only physically lives in `<repo>/noarch/` — but every
+	// per-arch index must reference it or the solver can't see it.
+	type apkEntry struct {
+		dir  string
+		name string
+	}
+	var apks []apkEntry
+	collect := func(dir string) error {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".apk") {
+				apks = append(apks, apkEntry{dir: dir, name: e.Name()})
+			}
+		}
+		return nil
+	}
+	if err := collect(repoDir); err != nil {
 		return fmt.Errorf("reading repo dir: %w", err)
 	}
-
-	var apks []string
-	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".apk") {
-			apks = append(apks, e.Name())
+	// Pull in the sibling noarch/ tree when indexing a per-arch dir.
+	// `filepath.Base(repoDir)` is the arch token ("x86_64", "noarch", …);
+	// when it's already noarch we don't double-include.
+	if filepath.Base(repoDir) != "noarch" {
+		noarchDir := filepath.Join(filepath.Dir(repoDir), "noarch")
+		if err := collect(noarchDir); err != nil {
+			return fmt.Errorf("reading noarch dir: %w", err)
 		}
 	}
-	sort.Strings(apks)
+	sort.Slice(apks, func(i, j int) bool { return apks[i].name < apks[j].name })
 
 	if len(apks) == 0 {
 		return nil // nothing to index
@@ -41,8 +68,9 @@ func GenerateIndex(repoDir string, signer *artifact.Signer) error {
 
 	// Build APKINDEX content
 	var buf strings.Builder
-	for i, name := range apks {
-		apkPath := filepath.Join(repoDir, name)
+	for i, e := range apks {
+		name := e.name
+		apkPath := filepath.Join(e.dir, name)
 
 		info, err := os.Stat(apkPath)
 		if err != nil {

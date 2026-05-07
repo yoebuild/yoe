@@ -26,7 +26,7 @@ image(
         "curl", "simpleiot", "bash", "less", "file", "procps-ng",
         "htop", "strace", "apk-tools",
         "yazi", "zellij", "helix",
-        "docker", "docker-openrc",
+        "docker", "docker-init",
     ],
     hostname = "yoe-docker",
 )
