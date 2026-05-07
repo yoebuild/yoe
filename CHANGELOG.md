@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`modprobe` works on the booted system.** Image assembly now runs `depmod`
+  inside the rootfs after `apk add`, so `/lib/modules/<ver>/` carries a real
+  `modules.dep` index instead of just bare `.ko` files. The kernel build still
+  skips depmod (the toolchain container has no copy of it); the rootfs's own
+  `kmod` supplies it via chroot.
 - **Kernel ships container-runtime CONFIG by default.** A `container.cfg`
   fragment (overlayfs, bridge/veth, the full netfilter chain, namespaces,
   seccomp, cgroup BPF, eBPF) is merged into the kernel's defconfig during the

@@ -108,6 +108,17 @@ def _assemble_rootfs(packages, hostname, timezone, locale):
         pkg_args,
         privileged = True)
 
+    # The kernel's `make modules_install DEPMOD=true` skipped depmod (the
+    # toolchain container has no depmod), so the rootfs ships .ko files
+    # without a `modules.dep` index for modprobe to read. kmod inside the
+    # rootfs supplies depmod; chroot in to generate the index for every
+    # installed kernel version.
+    run("for kvdir in $DESTDIR/rootfs/lib/modules/*/; do "
+        "  [ -d \"$kvdir\" ] || continue; "
+        "  chroot $DESTDIR/rootfs depmod -a $(basename $kvdir); "
+        "done",
+        privileged = True)
+
     # apk ran as root and left root-owned files (e.g. /root with mode 700)
     # throughout the rootfs. Subsequent host-side steps (`dir_size_mb`
     # below, the destdir walks in the build executor) run as the host
