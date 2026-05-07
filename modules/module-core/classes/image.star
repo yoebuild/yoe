@@ -1,7 +1,15 @@
 def image(name, artifacts=[], hostname="", timezone="", locale="",
           partitions=[], scope="machine",
-          container="toolchain-musl", container_arch="target", deps=[], **kwargs):
-    """Create a bootable disk image from packages."""
+          container="toolchain-musl", container_arch="target", deps=[],
+          version=None, **kwargs):
+    """Create a bootable disk image from packages.
+
+    `version` defaults to PROJECT_VERSION (from PROJECT.star) so the TUI's
+    VERSION column shows what build the image represents and `/etc/os-release`
+    on the device matches.
+    """
+    if version == None:
+        version = PROJECT_VERSION
     # Merge machine packages
     all_artifacts = list(artifacts) + list(MACHINE_CONFIG.packages)
 
@@ -27,6 +35,7 @@ def image(name, artifacts=[], hostname="", timezone="", locale="",
 
     unit(
         name = name,
+        version = version,
         scope = scope,
         unit_class = "image",
         artifacts = resolved,

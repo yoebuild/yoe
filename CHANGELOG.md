@@ -12,6 +12,10 @@ and this project adheres to
   `VERSION_ID`, and `PRETTY_NAME` come from `version = "..."` in `PROJECT.star`,
   so tools that read `/etc/os-release` (and humans on the device) can tell which
   build is running. Templates can reach the value as `{{.project_version}}`.
+- **Image rows in the TUI show the project version.** The `image()` class
+  defaults each image unit's `version` to `PROJECT_VERSION` (from
+  `PROJECT.star`), so the VERSION column in the units table — which used to be
+  blank for image rows — now shows the version the resulting `.img` represents.
 - **OpenRC replaces the old rcS startup script.** Services now boot under
   Alpine's OpenRC service manager, so they get dependency ordering, supervised
   start/stop, and proper status/restart commands (`rc-service sshd restart`,
