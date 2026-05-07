@@ -70,11 +70,12 @@ and this project adheres to
   `musl-1.2.5-r11-r0.apk`. Apk's solver finds the file at the URL it constructs
   from the index, fixing "package mentioned in index not found" on every
   module-alpine package.
-- **noarch packages publish into `<repo>/noarch/`.** The passthrough path now
-  reads upstream PKGINFO's `arch =` field and routes the published apk to the
-  correct repo subdirectory, so noarch packages (`busybox-binsh`,
-  `busybox-ifupdown`, `ca-certificates-bundle`) land where apk expects to find
-  them.
+- **noarch packages publish under the build arch dir (Alpine convention).**
+  apk's solver reads `<repo>/<arch>/APKINDEX.tar.gz` and constructs fetch URLs
+  relative to the index it found the entry in — so a noarch apk only in
+  `<repo>/noarch/` is invisible to the per-arch index. Match Alpine's mirror
+  layout: every published apk lands in the build arch dir; the upstream
+  `A:noarch` line in PKGINFO still tells apk the package is portable.
 - **base-files ships an Alpine-style runlevel baseline.** OpenRC services
   `cgroups`, `devfs`, `dmesg` (sysinit), `bootmisc`, `hostname`, `modules`,
   `sysctl` (boot), and `mount-ro`, `killprocs` (shutdown) are now wired into the

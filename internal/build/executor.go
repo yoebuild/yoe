@@ -559,16 +559,19 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 			// Re-sign the upstream apk verbatim — keeps Alpine's PKGINFO
 			// and install scripts intact. The tasks above still run so
 			// destdir is populated for downstream units' sysroots.
+			//
+			// Publish under the build arch's directory regardless of
+			// whether the upstream PKGINFO declares `arch = noarch`. apk's
+			// solver reads `<repo>/<arch>/APKINDEX.tar.gz` and constructs
+			// fetch URLs relative to that index — putting a noarch package
+			// only in `<repo>/noarch/` leaves it invisible from the
+			// per-arch index. Alpine's own mirrors duplicate noarch apks
+			// into each arch directory for the same reason; the `A:noarch`
+			// line in PKGINFO still tells apk the package is portable.
 			srcAPK := filepath.Join(srcDir, unit.PassthroughAPK)
 			apkPath, err = artifact.RepackAPK(unit, srcAPK, filepath.Join(buildDir, "pkg"), opts.Signer)
 			if err != nil {
 				return fmt.Errorf("repacking upstream apk: %w", err)
-			}
-			// Honor upstream PKGINFO's arch when publishing — noarch
-			// packages must land in <repo>/noarch/ regardless of the
-			// build arch, otherwise apk's solver can't find them.
-			if a, aerr := artifact.ReadAPKArch(srcAPK); aerr == nil && a != "" {
-				archDir = a
 			}
 		} else {
 			apkPath, err = artifact.CreateAPK(unit, destDir, filepath.Join(buildDir, "pkg"), archDir, opts.ProjectCommit, opts.Signer)
