@@ -21,11 +21,12 @@ and this project adheres to
   skips depmod (the toolchain container has no copy of it); the rootfs's own
   `kmod` supplies it via chroot.
 - **Kernel ships container-runtime CONFIG by default.** A `container.cfg`
-  fragment (overlayfs, bridge/veth, the full netfilter chain, namespaces,
-  seccomp, cgroup BPF, eBPF) is merged into the kernel's defconfig during the
-  linux unit's build, so `dockerd` and `containerd` start cleanly without
-  per-image kernel customisation. The cost on non-container images is a few
-  hundred KB of kernel modules that nothing references.
+  fragment (overlayfs, bridge/veth, the full netfilter chain including
+  `NFT_COMPAT` so iptables-nft works, IPv4 + IPv6 NAT, namespaces, seccomp,
+  cgroup BPF, eBPF) is merged into the kernel's defconfig during the linux
+  unit's build, so `dockerd` and `containerd` start cleanly without per-image
+  kernel customisation. The cost on non-container images is a few hundred KB of
+  kernel modules that nothing references.
 - **TUI flash remembers the last device.** Picking and confirming a flash target
   writes `flash_device = "/dev/sdX"` to `local.star`, and re-entering the flash
   view positions the cursor on that device when it shows up in the candidate
