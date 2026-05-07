@@ -448,11 +448,12 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	// Build the template context data map for install_file / install_template.
 	// Unit identity fields + auto-populated machine/arch/console/project,
 	// with unit.Extra kwargs overriding on collision.
-	projectName := ""
+	projectName, projectVersion := "", ""
 	if proj != nil {
 		projectName = proj.Name
+		projectVersion = proj.Version
 	}
-	tctxData := BuildTemplateContext(unit, opts.Arch, opts.Machine, console, projectName)
+	tctxData := BuildTemplateContext(unit, opts.Arch, opts.Machine, console, projectName, projectVersion)
 
 	// Execute tasks
 	for ti, t := range unit.Tasks {

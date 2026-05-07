@@ -8,7 +8,8 @@
 
 ## Next
 
-- on unit detail page, provide a way to switch the Git URL to the upstream
+- Image version, put this in the image unit?
+- On unit detail page, provide a way to switch the Git URL to the upstream
   source and record this in the unit build state file. Display this state on
   main unit and unit detail page. Thinking several states: nothing, up,
   modified, etc.

@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`/etc/os-release` now reports the project version.** `VERSION`,
+  `VERSION_ID`, and `PRETTY_NAME` come from `version = "..."` in `PROJECT.star`,
+  so tools that read `/etc/os-release` (and humans on the device) can tell which
+  build is running. Templates can reach the value as `{{.project_version}}`.
 - **OpenRC replaces the old rcS startup script.** Services now boot under
   Alpine's OpenRC service manager, so they get dependency ordering, supervised
   start/stop, and proper status/restart commands (`rc-service sshd restart`,
