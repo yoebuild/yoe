@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/sha1"
 	"crypto/sha256"
+	"debug/elf"
 	"fmt"
 	"io"
 	"io/fs"
@@ -116,6 +117,228 @@ func CreateAPK(unit *yoestar.Unit, destDir, outputDir, arch, commit string, sign
 	}
 
 	return apkPath, nil
+}
+
+// RepackAPK takes an upstream-built .apk (typically from Alpine), strips its
+// existing signature, re-signs the control stream with the project's key, and
+// writes the result to outputDir under yoe's `<name>-<ver>-r<N>.apk` naming.
+//
+// PKGINFO and install scripts (.pre-install, .post-install, .trigger, ...)
+// inside the control segment are passed through verbatim — that's the whole
+// point: we let upstream's coordinated metadata (`replaces`, `provides`,
+// `triggers`) and post-install hooks (busybox applet symlink creation,
+// privsep user adds) flow into the on-target apk without yoe rewriting them.
+//
+// Layout assumption: an apk is concatenated gzip streams in order
+// [signature?, control, data]. We detect whether the first stream is a
+// signature by peeking at the tar inside it — signature tars contain a single
+// `.SIGN.RSA.*` entry. If present we drop it; otherwise the first stream is
+// already the control segment.
+func RepackAPK(unit *yoestar.Unit, srcAPK, outputDir string, signer *Signer) (string, error) {
+	if signer == nil {
+		return "", fmt.Errorf("RepackAPK requires a signer")
+	}
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return "", fmt.Errorf("creating output dir: %w", err)
+	}
+	apkName := fmt.Sprintf("%s-%s-r%d.apk", unit.Name, unit.Version, unit.Release)
+	apkPath := filepath.Join(outputDir, apkName)
+
+	raw, err := os.ReadFile(srcAPK)
+	if err != nil {
+		return "", fmt.Errorf("reading %s: %w", srcAPK, err)
+	}
+
+	streams, err := splitGzipStreams(raw)
+	if err != nil {
+		return "", fmt.Errorf("splitting %s into gzip streams: %w", srcAPK, err)
+	}
+	if len(streams) < 2 {
+		return "", fmt.Errorf("%s: expected at least 2 gzip streams (control+data), got %d", srcAPK, len(streams))
+	}
+
+	// Drop a leading signature stream if present.
+	idx := 0
+	if isSignatureStream(streams[0]) {
+		idx = 1
+	}
+	if len(streams)-idx < 2 {
+		return "", fmt.Errorf("%s: missing control or data stream after signature strip", srcAPK)
+	}
+	control := streams[idx]
+	data := bytes.Join(streams[idx+1:], nil)
+
+	sigGz, err := signer.SignStream(control)
+	if err != nil {
+		return "", fmt.Errorf("signing control stream: %w", err)
+	}
+
+	f, err := os.Create(apkPath)
+	if err != nil {
+		return "", fmt.Errorf("creating %s: %w", apkPath, err)
+	}
+	defer f.Close()
+	if _, err := f.Write(sigGz); err != nil {
+		return "", fmt.Errorf("writing signature stream: %w", err)
+	}
+	if _, err := f.Write(control); err != nil {
+		return "", fmt.Errorf("writing control stream: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		return "", fmt.Errorf("writing data stream: %w", err)
+	}
+	return apkPath, nil
+}
+
+// splitGzipStreams walks the byte slice, decoding one gzip stream at a time
+// (Multistream(false) so we stop at each member boundary), and returns the
+// raw compressed bytes of each stream in order. The Go gzip reader exposes
+// the underlying bytes.Reader's position via its remaining length, which
+// gives us a clean stream-end offset without needing to parse gzip headers
+// by hand.
+func splitGzipStreams(raw []byte) ([][]byte, error) {
+	var out [][]byte
+	r := bytes.NewReader(raw)
+	for r.Len() > 0 {
+		start := int64(len(raw)) - int64(r.Len())
+		gr, err := gzip.NewReader(r)
+		if err != nil {
+			return nil, fmt.Errorf("gzip stream at offset %d: %w", start, err)
+		}
+		gr.Multistream(false)
+		if _, err := io.Copy(io.Discard, gr); err != nil {
+			gr.Close()
+			return nil, fmt.Errorf("reading gzip stream at offset %d: %w", start, err)
+		}
+		if err := gr.Close(); err != nil {
+			return nil, fmt.Errorf("closing gzip stream at offset %d: %w", start, err)
+		}
+		end := int64(len(raw)) - int64(r.Len())
+		out = append(out, raw[start:end])
+	}
+	return out, nil
+}
+
+// ReadAPKArch returns the value of the `arch =` field in the apk's PKGINFO.
+// Used by the passthrough path to redirect noarch packages to the `noarch/`
+// repo directory: apk-tools constructs fetch URLs from the APKINDEX as
+// `<repo>/<A:>/<P>-<V>.apk`, where `A:` mirrors PKGINFO's `arch =`. If yoe
+// publishes a noarch package under `<repo>/x86_64/`, apk's solver looks for
+// it in `<repo>/noarch/` and 404s.
+func ReadAPKArch(srcAPK string) (string, error) {
+	raw, err := os.ReadFile(srcAPK)
+	if err != nil {
+		return "", err
+	}
+	streams, err := splitGzipStreams(raw)
+	if err != nil {
+		return "", err
+	}
+	idx := 0
+	if len(streams) > 0 && isSignatureStream(streams[0]) {
+		idx = 1
+	}
+	if idx >= len(streams) {
+		return "", fmt.Errorf("%s: no control stream", srcAPK)
+	}
+	gr, err := gzip.NewReader(bytes.NewReader(streams[idx]))
+	if err != nil {
+		return "", err
+	}
+	defer gr.Close()
+	tr := tar.NewReader(gr)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		if hdr.Name != ".PKGINFO" {
+			continue
+		}
+		data, err := io.ReadAll(tr)
+		if err != nil {
+			return "", err
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(line, "arch = ") {
+				return strings.TrimSpace(strings.TrimPrefix(line, "arch = ")), nil
+			}
+		}
+		break
+	}
+	return "", fmt.Errorf("%s: arch not found in PKGINFO", srcAPK)
+}
+
+// scanSONAMEs walks destDir, opens every regular file as an ELF, and
+// returns the deduped list of DT_SONAME values found. Used to auto-emit
+// `provides = so:<soname>=…` lines in PKGINFO so that Alpine prebuilt
+// packages depending on `so:libfoo.so.N` can resolve against
+// yoe-source-built libraries without the unit author maintaining SONAME
+// lists by hand.
+//
+// We open files unconditionally and let `elf.NewFile` reject non-ELF
+// content via its magic-byte check — cheaper and more correct than
+// pattern-matching filenames. Symlinks are skipped: the symlink resolves
+// to its target which carries the SONAME directly, so following them
+// would just emit duplicates the dedupe map would discard anyway.
+func scanSONAMEs(destDir string) ([]string, error) {
+	seen := map[string]bool{}
+	var out []string
+	err := filepath.WalkDir(destDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return nil
+		}
+		defer f.Close()
+		ef, err := elf.NewFile(f)
+		if err != nil {
+			return nil
+		}
+		defer ef.Close()
+		sonames, err := ef.DynString(elf.DT_SONAME)
+		if err != nil {
+			return nil
+		}
+		for _, s := range sonames {
+			if s == "" || seen[s] {
+				continue
+			}
+			seen[s] = true
+			out = append(out, s)
+		}
+		return nil
+	})
+	sort.Strings(out)
+	return out, err
+}
+
+// isSignatureStream returns true if the gzipped tar contains a `.SIGN.RSA.*`
+// entry as its first member. Apk signatures live in single-entry tars with
+// that name; control streams start with `.PKGINFO` instead.
+func isSignatureStream(streamGz []byte) bool {
+	gr, err := gzip.NewReader(bytes.NewReader(streamGz))
+	if err != nil {
+		return false
+	}
+	defer gr.Close()
+	tr := tar.NewReader(gr)
+	hdr, err := tr.Next()
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(hdr.Name, ".SIGN.RSA.")
 }
 
 // normalizeOwnership resets a tar header to root:root. Package artifacts are
@@ -336,6 +559,19 @@ func generatePKGINFO(unit *yoestar.Unit, destDir, dataHashHex, arch, commit stri
 		fmt.Fprintf(&b, "provides = %s\n", p)
 	}
 
+	// Auto-emit `provides = so:<soname>=<ver>-r<rel>` for every shared
+	// library this unit ships, matching Alpine's abuild convention. Lets
+	// Alpine prebuilt apks (e.g. apk-tools, openrc) whose upstream PKGINFO
+	// declares `depend = so:libcrypto.so.3` resolve cleanly against
+	// yoe-source-built openssl/zlib/etc. without the unit author having
+	// to maintain SONAME tables by hand.
+	soVersion := fmt.Sprintf("%s-r%d", unit.Version, unit.Release)
+	if sonames, err := scanSONAMEs(destDir); err == nil {
+		for _, s := range sonames {
+			fmt.Fprintf(&b, "provides = so:%s=%s\n", s, soVersion)
+		}
+	}
+
 	// Packages whose files this one is allowed to overwrite at install time.
 	// apk reads this to scope file-conflict overrides — without it, a
 	// shadowing package (e.g. util-linux over busybox's /bin/dmesg) fails
@@ -344,81 +580,57 @@ func generatePKGINFO(unit *yoestar.Unit, destDir, dataHashHex, arch, commit stri
 		fmt.Fprintf(&b, "replaces = %s\n", r)
 	}
 
-	// Note: yoe's `services = [...]` declaration becomes actual init.d
-	// symlinks in the data tar (see materializeServiceSymlinks). We don't
-	// emit a custom `service =` PKGINFO field because apk-tools 2.x
-	// silently discards unknown fields when populating
-	// `/lib/apk/db/installed`, so it would never round-trip to the target.
+	// Note: yoe's `services = [...]` declaration becomes actual OpenRC
+	// runlevel symlinks (/etc/runlevels/default/<svc>) in the data tar
+	// (see materializeServiceSymlinks). We don't emit a custom `service =`
+	// PKGINFO field because apk-tools 2.x silently discards unknown fields
+	// when populating `/lib/apk/db/installed`, so it would never round-trip
+	// to the target.
 
 	return b.String()
 }
 
 // materializeServiceSymlinks turns the unit's `services = [...]` declaration
-// into init.d symlinks inside destDir, so the apk's data tar carries them as
-// regular files. This lets `apk add` (image-time or on-target) produce a
-// rootfs with `/etc/init.d/SXX<svc>` already in place — yoe never has to
-// patch the rootfs after the install.
+// into OpenRC runlevel symlinks inside destDir, so the apk's data tar carries
+// them as regular files. This lets `apk add` (image-time or on-target) produce
+// a rootfs with `/etc/runlevels/default/<svc>` already in place — yoe never
+// has to patch the rootfs after the install.
 //
-// Naming convention follows yoe's existing _enable_services logic:
+// OpenRC walks /etc/runlevels/<runlevel>/ to discover which services to start,
+// resolving each entry as a symlink to the script in /etc/init.d/. For each
+// `svc` in the list we create:
 //
-//   - if the service name already starts with `S<digit>` (e.g., `S20ntp`,
-//     `S30mdnsd`), it's used directly — the unit author has chosen the
-//     boot-order prefix.
-//   - otherwise, an `S50<svc>` symlink pointing to `../init.d/<svc>` is
-//     created (default boot priority 50).
+//	/etc/runlevels/default/<svc> -> /etc/init.d/<svc>
 //
-// The target script (`<destDir>/etc/init.d/<svc>`) must already exist; if
-// it doesn't, that's the unit's bug — we don't silently swallow it.
+// The target script (`<destDir>/etc/init.d/<svc>`) must already exist; if it
+// doesn't, that's the unit's bug — we fail loudly rather than ship a dangling
+// symlink.
 func materializeServiceSymlinks(unit *yoestar.Unit, destDir string) error {
 	if len(unit.Services) == 0 {
 		return nil
 	}
 	initd := filepath.Join(destDir, "etc", "init.d")
+	runlevel := filepath.Join(destDir, "etc", "runlevels", "default")
 	for _, svc := range unit.Services {
-		linkName := svc
-		if !startsWithSPriority(svc) {
-			linkName = "S50" + svc
+		targetPath := filepath.Join(initd, svc)
+		if _, err := os.Stat(targetPath); err != nil {
+			return fmt.Errorf("service %q declared but %s missing in destdir", svc, filepath.Join("/etc/init.d", svc))
 		}
-		// If the unit already shipped its own SXX symlink (e.g., units
-		// that bake their own init.d/SXX file), don't overwrite it.
-		linkPath := filepath.Join(initd, linkName)
+		linkPath := filepath.Join(runlevel, svc)
 		if _, err := os.Lstat(linkPath); err == nil {
 			continue
 		}
-		// Verify the target script exists so a typo in `services` fails
-		// loudly instead of producing a dangling symlink.
-		target := svc
-		if startsWithSPriority(svc) {
-			// SXX<name> → target is <name> (drop the SXX prefix).
-			// We don't have a generic way to derive <name> here without
-			// knowing the prefix length, so trust that the unit ships
-			// the script under exactly the name the symlink points at.
-			// For SXX-prefixed entries the unit usually ships the
-			// symlink itself, hit the early-continue above.
-			target = strings.TrimLeft(svc, "S0123456789")
-		}
-		targetPath := filepath.Join(initd, target)
-		if _, err := os.Stat(targetPath); err != nil {
-			return fmt.Errorf("service %q declared but %s missing in destdir", svc, filepath.Join("/etc/init.d", target))
-		}
-		if err := os.MkdirAll(initd, 0755); err != nil {
+		if err := os.MkdirAll(runlevel, 0755); err != nil {
 			return err
 		}
-		relTarget := filepath.Join("..", "init.d", target)
-		if err := os.Symlink(relTarget, linkPath); err != nil {
+		// Absolute symlink target — OpenRC's own rc-update writes absolute
+		// targets here, and an absolute path resolves correctly regardless
+		// of where the rootfs is mounted at boot.
+		if err := os.Symlink("/etc/init.d/"+svc, linkPath); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// startsWithSPriority reports whether name looks like an init.d priority
-// prefix — `S` followed by at least one digit (e.g., `S20`, `S99foo`).
-func startsWithSPriority(name string) bool {
-	if len(name) < 2 || name[0] != 'S' {
-		return false
-	}
-	return name[1] >= '0' && name[1] <= '9'
 }
 
 // APKHash computes the SHA256 hash of an .apk file.

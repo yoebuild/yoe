@@ -8,6 +8,112 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`docker-image` starts dockerd at boot.** Pulls in Alpine's `docker-openrc`
+  package (which ships `/etc/init.d/docker` and the `/etc/conf.d/docker` config
+  template upstream maintains) and adds the default-runlevel symlink at
+  packaging time, so `dockerd` is supervised on a fresh boot without manual
+  `rc-update add`.
+- **`prefer_modules` on `project()` pins a unit to a specific module.** Set
+  `prefer_modules = {"xz": "alpine"}` in `PROJECT.star` and the `xz` unit
+  registers only from `module-alpine`, regardless of which module wins the
+  default last-module shadowing. Use it when `module-core`'s source-built
+  version of a package is broken or under-configured and the Alpine prebuilt is
+  the right answer; the shadow appears on the Diagnostics tab the same way an
+  ordinary cross-module shadow does.
+- **`modprobe` works on the booted system.** Image assembly now runs `depmod`
+  inside the rootfs after `apk add`, so `/lib/modules/<ver>/` carries a real
+  `modules.dep` index instead of just bare `.ko` files. The kernel build still
+  skips depmod (the toolchain container has no copy of it); the rootfs's own
+  `kmod` supplies it via chroot.
+- **Kernel ships container-runtime CONFIG by default.** A `container.cfg`
+  fragment (overlayfs, bridge/veth, the full netfilter chain including
+  `NFT_COMPAT` so iptables-nft works, IPv4 + IPv6 NAT, namespaces, seccomp,
+  cgroup BPF, eBPF) is merged into the kernel's defconfig during the linux
+  unit's build, so `dockerd` and `containerd` start cleanly without per-image
+  kernel customisation. The cost on non-container images is a few hundred KB of
+  kernel modules that nothing references.
+- **TUI flash remembers the last device.** Picking and confirming a flash target
+  writes `flash_device = "/dev/sdX"` to `local.star`, and re-entering the flash
+  view positions the cursor on that device when it shows up in the candidate
+  list. Reflashing the same SD card or USB stick is now `f` → Enter → `y`.
+- **`/etc/os-release` now reports the project version.** `VERSION`,
+  `VERSION_ID`, and `PRETTY_NAME` come from `version = "..."` in `PROJECT.star`,
+  so tools that read `/etc/os-release` (and humans on the device) can tell which
+  build is running. Templates can reach the value as `{{.project_version}}`.
+- **Image rows in the TUI show the project version.** The `image()` class
+  defaults each image unit's `version` to `PROJECT_VERSION` (from
+  `PROJECT.star`), so the VERSION column in the units table — which used to be
+  blank for image rows — now shows the version the resulting `.img` represents.
+- **OpenRC replaces the old rcS startup script.** Services now boot under
+  Alpine's OpenRC service manager, so they get dependency ordering, supervised
+  start/stop, and proper status/restart commands (`rc-service sshd restart`,
+  `rc-status`) instead of the silent run-everything-in-`/etc/init.d/S*` pattern.
+  Units declare `services = ["sshd"]` (plain names, no `S40` prefix) and the
+  resulting apk drops the script in `/etc/init.d/` plus a runlevel symlink in
+  `/etc/runlevels/default/`.
+- **Source-built libraries auto-declare what they ship.** Each `.apk` yoe builds
+  from a destdir now lists `provides = so:<soname>=<ver>-r<rel>` for every
+  shared library in the package, matching Alpine's convention. Alpine prebuilt
+  packages whose upstream PKGINFO declares `depend = so:libcrypto.so.3` or
+  similar now resolve cleanly against yoe-source-built `openssl`, `zlib`, etc. —
+  no manual SONAME bookkeeping in the `.star` file.
+- **`module-alpine` packages now ship with their upstream metadata intact.**
+  Prebuilt Alpine apks pass through yoe's pipeline verbatim — only the signature
+  is swapped for the project's key — so `replaces`, `provides`, `triggers`, and
+  post-install hooks (busybox applet symlink creation, sshd privsep user adds,
+  …) reach the on-target system the way Alpine intended. Image assembly drops
+  `--no-scripts` so those hooks actually run; this fixes the no-`/sbin/init`
+  kernel panic that hit when relying on Alpine's busybox.
+- **Alpine packages no longer end up with doubled-`-r` filenames.** `alpine_pkg`
+  splits upstream pkgver like `1.2.5-r11` into yoe's separate version + release
+  fields, so the published apk is `musl-1.2.5-r11.apk` instead of
+  `musl-1.2.5-r11-r0.apk`. Apk's solver finds the file at the URL it constructs
+  from the index, fixing "package mentioned in index not found" on every
+  module-alpine package.
+- **noarch passthrough packages route correctly across the repo.** apk-tools
+  constructs fetch URLs from PKGINFO's `arch =` field (always
+  `<base>/noarch/<file>` for noarch packages), but its solver only reads one
+  arch's APKINDEX per repo. Three coordinated fixes:
+  - Passthrough alpine_pkg units with `arch = noarch` publish under
+    `<repo>/noarch/` (where apk fetches them from).
+  - Each per-arch `APKINDEX` now scans the sibling `noarch/` tree at generation
+    time, so the solver sees noarch packages from any arch's perspective.
+  - A noarch publish refreshes every per-arch `APKINDEX` (since each one
+    references those noarch entries).
+  - Cache validation also looks under `noarch/` for the published apk, so noarch
+    units don't rebuild on every invocation.
+- **base-files ships an Alpine-style runlevel baseline.** OpenRC services
+  `cgroups`, `devfs`, `dmesg` (sysinit), `bootmisc`, `hostname`, `modules`,
+  `sysctl` (boot), and `mount-ro`, `killprocs` (shutdown) are now wired into the
+  rootfs via `/etc/runlevels/<level>/<svc>` symlinks, so a fresh image boots
+  with the hostname set, kernel modules loaded, the cgroup hierarchy mounted (so
+  container runtimes don't trip on "Devices cgroup isn't mounted"), and shutdown
+  that unmounts cleanly.
+- **TUI SIZE column for images shows installed content, not partition size.** An
+  image whose machine reserves a 600 MB rootfs partition now reports the ~50 MB
+  actually populated by `apk add`, so you can see what your image _contains_
+  rather than how big the partition was sized.
+- **New `docker-image`.** Builds a dev-image-style rootfs that also ships Docker
+  (engine, CLI, buildx, containerd, runc) so you can poke at the docker
+  userspace on a yoe-built system. Kernel and init still need the container
+  pieces before `dockerd` can actually launch a container — that's the next
+  step.
+- **Files tab on the unit detail page.** Tab into a sortable list of every file
+  the unit installs and its on-disk size — easy to spot the biggest payloads or
+  confirm a binary actually landed where you expected without leaving the TUI.
+- **Drop into a shell on the source.** Press `$` in the units tab or detail page
+  to open a shell in the unit's checked-out source directory, or in the Modules
+  tab to open a shell in a module's clone — handy for `git status`, spot-edits,
+  or running an out-of-tree command without leaving the TUI.
+- **`VERSION` column in the unit table.** Each row now shows the unit's declared
+  version next to its module, sortable from the `o` cycle, and the same version
+  appears next to the unit name on the detail page — so spotting a stale pin or
+  confirming what's about to build is a glance, not a file open.
+- **TUI auto-follow no longer yanks the cursor mid-navigation.** The units list
+  scrolls to whatever is actively building only when you're idle — pressing j/k
+  or typing a query keeps the cursor where you put it, while `b` still hands
+  control back to the build so you can watch what's compiling.
+
 ## [0.10.2] - 2026-05-05
 
 - **`yoe init` lists module-core last so it wins shadowing.** New projects now

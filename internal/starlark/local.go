@@ -14,10 +14,11 @@ const localStarFile = "local.star"
 // LocalOverrides holds values loaded from <project-dir>/local.star.
 // Empty fields mean the file did not specify that value (or did not exist).
 type LocalOverrides struct {
-	Machine    string
-	Image      string // overrides PROJECT.star defaults.image (e.g. for `yoe run` and TUI bootstrap)
-	DeployHost string // last-used target for `yoe deploy` from the TUI
-	Query      string // last-saved TUI search query (in:base-image, etc.)
+	Machine     string
+	Image       string // overrides PROJECT.star defaults.image (e.g. for `yoe run` and TUI bootstrap)
+	DeployHost  string // last-used target for `yoe deploy` from the TUI
+	FlashDevice string // last-used flash target (e.g. /dev/sdb) for the TUI flash view
+	Query       string // last-saved TUI search query (in:base-image, etc.)
 }
 
 // LoadLocalOverrides reads <projectDir>/local.star if it exists and
@@ -49,6 +50,8 @@ func LoadLocalOverrides(projectDir string) (LocalOverrides, error) {
 				captured.Image = string(v)
 			case "deploy_host":
 				captured.DeployHost = string(v)
+			case "flash_device":
+				captured.FlashDevice = string(v)
 			case "query":
 				captured.Query = string(v)
 			default:
@@ -83,6 +86,9 @@ func WriteLocalOverrides(projectDir string, ov LocalOverrides) error {
 	}
 	if ov.DeployHost != "" {
 		fmt.Fprintf(&b, "    deploy_host = %q,\n", ov.DeployHost)
+	}
+	if ov.FlashDevice != "" {
+		fmt.Fprintf(&b, "    flash_device = %q,\n", ov.FlashDevice)
 	}
 	if ov.Query != "" {
 		fmt.Fprintf(&b, "    query = %q,\n", ov.Query)

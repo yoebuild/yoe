@@ -1,5 +1,11 @@
-#!/bin/sh
-case "$1" in
-    start) /usr/bin/siot &;;
-    stop) killall siot;;
-esac
+#!/sbin/openrc-run
+
+description="Simple IoT — sensor data, telemetry, configuration, device management"
+
+command="/usr/bin/siot"
+command_background="yes"
+pidfile="/run/simpleiot.pid"
+
+depend() {
+    need net
+}

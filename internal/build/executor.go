@@ -277,7 +277,17 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		meta.Finished = &now
 		meta.Duration = now.Sub(buildStart).Seconds()
 		meta.DiskBytes = DirSize(buildDir)
-		meta.InstalledBytes = DirSize(filepath.Join(buildDir, "destdir"))
+		// For non-image units this is the destdir (what goes into the .apk).
+		// For image units the destdir contains both `rootfs/` (actual file
+		// content) and `<name>.img` (the assembled disk image, sized by the
+		// machine's partition spec); we report just the rootfs walk so the
+		// TUI's SIZE column reflects "what's installed" rather than the
+		// partition's reserved free space.
+		installedRoot := filepath.Join(buildDir, "destdir")
+		if unit.Class == "image" {
+			installedRoot = filepath.Join(installedRoot, "rootfs")
+		}
+		meta.InstalledBytes = DirSize(installedRoot)
 		if ctx.Err() != nil {
 			meta.Status = "cancelled"
 		} else if buildErr != nil {
@@ -438,11 +448,12 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	// Build the template context data map for install_file / install_template.
 	// Unit identity fields + auto-populated machine/arch/console/project,
 	// with unit.Extra kwargs overriding on collision.
-	projectName := ""
+	projectName, projectVersion := "", ""
 	if proj != nil {
 		projectName = proj.Name
+		projectVersion = proj.Version
 	}
-	tctxData := BuildTemplateContext(unit, opts.Arch, opts.Machine, console, projectName)
+	tctxData := BuildTemplateContext(unit, opts.Arch, opts.Machine, console, projectName, projectVersion)
 
 	// Execute tasks
 	for ti, t := range unit.Tasks {
@@ -540,9 +551,33 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	// Then stage destdir for downstream units' per-unit sysroots.
 	if unit.Class != "image" && unit.Class != "container" {
 		archDir := RepoArchDir(unit, opts.Arch)
-		apkPath, err := artifact.CreateAPK(unit, destDir, filepath.Join(buildDir, "pkg"), archDir, opts.ProjectCommit, opts.Signer)
-		if err != nil {
-			return fmt.Errorf("creating apk: %w", err)
+		var (
+			apkPath string
+			err     error
+		)
+		if unit.PassthroughAPK != "" {
+			// Re-sign the upstream apk verbatim — keeps Alpine's PKGINFO
+			// and install scripts intact. The tasks above still run so
+			// destdir is populated for downstream units' sysroots.
+			srcAPK := filepath.Join(srcDir, unit.PassthroughAPK)
+			apkPath, err = artifact.RepackAPK(unit, srcAPK, filepath.Join(buildDir, "pkg"), opts.Signer)
+			if err != nil {
+				return fmt.Errorf("repacking upstream apk: %w", err)
+			}
+			// Honor upstream PKGINFO's arch when publishing. apk-tools
+			// constructs fetch URLs as `<repo>/<pkg.arch>/<file>.apk`
+			// using the package's own arch — so a noarch apk physically
+			// has to live in `<repo>/noarch/` regardless of which arch's
+			// build invoked us. Each per-arch APKINDEX picks up noarch
+			// entries via GenerateIndex's sibling-dir scan.
+			if a, aerr := artifact.ReadAPKArch(srcAPK); aerr == nil && a != "" {
+				archDir = a
+			}
+		} else {
+			apkPath, err = artifact.CreateAPK(unit, destDir, filepath.Join(buildDir, "pkg"), archDir, opts.ProjectCommit, opts.Signer)
+			if err != nil {
+				return fmt.Errorf("creating apk: %w", err)
+			}
 		}
 		fmt.Fprintf(w, "  → %s\n", filepath.Base(apkPath))
 
@@ -733,8 +768,20 @@ func cacheValid(proj *yoestar.Project, projectDir string, unit *yoestar.Unit, sc
 	}
 	archDir := RepoArchDir(unit, arch)
 	apkName := fmt.Sprintf("%s-%s-r%d.apk", unit.Name, unit.Version, unit.Release)
-	_, err := os.Stat(filepath.Join(repo.RepoDir(proj, projectDir), archDir, apkName))
-	return err == nil
+	repoBase := repo.RepoDir(proj, projectDir)
+	if _, err := os.Stat(filepath.Join(repoBase, archDir, apkName)); err == nil {
+		return true
+	}
+	// Passthrough alpine_pkg units with `arch = noarch` in upstream
+	// PKGINFO publish to <repo>/noarch/ regardless of the build arch
+	// (apk's solver constructs fetch URLs from PKGINFO arch). The unit's
+	// Scope on the Starlark side stays empty/arch, so RepoArchDir
+	// returns the build arch — fall back to noarch/ before declaring
+	// the cache stale.
+	if _, err := os.Stat(filepath.Join(repoBase, "noarch", apkName)); err == nil {
+		return true
+	}
+	return false
 }
 
 func HasBuildLog(projectDir, arch, name string) bool {

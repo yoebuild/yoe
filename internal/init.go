@@ -28,7 +28,6 @@ func RunInit(projectDir string, machine string) error {
     name = %q,
     version = "0.1.0",
     defaults = defaults(machine = %q, image = "base-image"),
-    cache = cache(path = "build/cache"),
     sources = sources(go_proxy = "https://proxy.golang.org"),
     # modules listed in priority order: later entries shadow earlier ones,
     # so module-core wins over module-rpi and the Alpine/Jetson prebuilts.

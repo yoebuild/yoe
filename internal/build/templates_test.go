@@ -18,18 +18,19 @@ func TestBuildTemplateContext_MergesFields(t *testing.T) {
 			"log_level": "info",
 		},
 	}
-	ctx := BuildTemplateContext(u, "x86_64", "qemu-x86_64", "ttyS0", "e2e-project")
+	ctx := BuildTemplateContext(u, "x86_64", "qemu-x86_64", "ttyS0", "e2e-project", "0.1.0")
 
 	want := map[string]any{
-		"name":      "base-files",
-		"version":   "1.0.0",
-		"release":   int64(2),
-		"arch":      "x86_64",
-		"machine":   "qemu-x86_64",
-		"console":   "ttyS0",
-		"project":   "e2e-project",
-		"port":      int64(8080),
-		"log_level": "info",
+		"name":            "base-files",
+		"version":         "1.0.0",
+		"release":         int64(2),
+		"arch":            "x86_64",
+		"machine":         "qemu-x86_64",
+		"console":         "ttyS0",
+		"project":         "e2e-project",
+		"project_version": "0.1.0",
+		"port":            int64(8080),
+		"log_level":       "info",
 	}
 	if len(ctx) != len(want) {
 		t.Errorf("len(ctx) = %d, want %d; ctx = %v", len(ctx), len(want), ctx)
@@ -49,7 +50,7 @@ func TestBuildTemplateContext_ExtraOverridesAuto(t *testing.T) {
 			"machine": "override", // should win over auto-populated "qemu-x86_64"
 		},
 	}
-	ctx := BuildTemplateContext(u, "x86_64", "qemu-x86_64", "ttyS0", "e2e-project")
+	ctx := BuildTemplateContext(u, "x86_64", "qemu-x86_64", "ttyS0", "e2e-project", "0.1.0")
 	if ctx["machine"] != "override" {
 		t.Errorf("ctx[machine] = %v, want \"override\" (Extra should override auto)", ctx["machine"])
 	}

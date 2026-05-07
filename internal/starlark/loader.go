@@ -214,6 +214,16 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	}
 	eng.SetVar("MACHINE", starlark.String(machine))
 
+	// Set PROJECT_VERSION — the version string declared in PROJECT.star —
+	// so the image() class can default each image unit's `version` to it.
+	// That value flows into PKGINFO, the TUI's VERSION column, and (via
+	// the project_version template key) /etc/os-release on the device.
+	projectVersion := ""
+	if proj := eng.Project(); proj != nil {
+		projectVersion = proj.Version
+	}
+	eng.SetVar("PROJECT_VERSION", starlark.String(projectVersion))
+
 	// Set MACHINE_CONFIG — a Starlark struct exposing the active machine's
 	// configuration to unit and image definitions.
 	if proj := eng.Project(); proj != nil {

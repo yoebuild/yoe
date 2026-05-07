@@ -1,7 +1,15 @@
 def image(name, artifacts=[], hostname="", timezone="", locale="",
           partitions=[], scope="machine",
-          container="toolchain-musl", container_arch="target", deps=[], **kwargs):
-    """Create a bootable disk image from packages."""
+          container="toolchain-musl", container_arch="target", deps=[],
+          version=None, **kwargs):
+    """Create a bootable disk image from packages.
+
+    `version` defaults to PROJECT_VERSION (from PROJECT.star) so the TUI's
+    VERSION column shows what build the image represents and `/etc/os-release`
+    on the device matches.
+    """
+    if version == None:
+        version = PROJECT_VERSION
     # Merge machine packages
     all_artifacts = list(artifacts) + list(MACHINE_CONFIG.packages)
 
@@ -27,6 +35,7 @@ def image(name, artifacts=[], hostname="", timezone="", locale="",
 
     unit(
         name = name,
+        version = version,
         scope = scope,
         unit_class = "image",
         artifacts = resolved,
@@ -58,10 +67,16 @@ def _assemble_rootfs(packages, hostname, timezone, locale):
       --initdb          — create /lib/apk/db on a fresh rootfs
       --no-network      — never reach the public Alpine mirrors
       --no-cache        — keep /etc/apk/cache out of the rootfs
-      --no-scripts      — don't try to run pre/post-install scripts during
-                          assembly; the rootfs has no /bin/sh yet, and
-                          yoe-built apks don't ship scripts today anyway
       -X $REPO          — yoe's local Alpine-layout repo
+
+    Install scripts run at assembly time. apk's chroot-then-exec model
+    needs /bin/sh to exist inside the rootfs by the time a script wants
+    it; busybox's .post-install (`#!/bin/busybox sh`) creates the applet
+    symlinks (/bin/sh, /sbin/init, …) before any later package's
+    `#!/bin/sh` script runs, so dependency ordering bootstraps the
+    chicken-and-egg the same way `apk add --initdb` does on a fresh
+    Alpine install. Image assembly already runs in a `--platform linux/<arch>`
+    container matching the target, so chrooted execs are native.
 
     The project's signing public key is pre-staged into the rootfs at
     /etc/apk/keys/<keyname>.rsa.pub before `apk add` runs — apk reads
@@ -79,15 +94,40 @@ def _assemble_rootfs(packages, hostname, timezone, locale):
     run("mkdir -p $DESTDIR/rootfs/etc/apk/keys")
     run("cp $YOE_KEYS_DIR/$YOE_KEY_NAME $DESTDIR/rootfs/etc/apk/keys/")
 
+    # privileged = True runs directly in the container (no bwrap) as root,
+    # so apk can `chroot $DESTDIR/rootfs` to execute install scripts.
+    # Under bwrap, chroot fails with "Operation not permitted" because the
+    # default bwrap profile drops CAP_SYS_CHROOT.
     pkg_args = " ".join(packages)
     run("apk add " +
         "--root $DESTDIR/rootfs " +
         "--initdb " +
         "--no-network " +
         "--no-cache " +
-        "--no-scripts " +
         "-X $REPO " +
-        pkg_args)
+        pkg_args,
+        privileged = True)
+
+    # The kernel's `make modules_install DEPMOD=true` skipped depmod (the
+    # toolchain container has no depmod), so the rootfs ships .ko files
+    # without a `modules.dep` index for modprobe to read. kmod inside the
+    # rootfs supplies depmod; chroot in to generate the index for every
+    # installed kernel version.
+    run("""
+for kvdir in $DESTDIR/rootfs/lib/modules/*/; do
+    [ -d "$kvdir" ] || continue
+    chroot $DESTDIR/rootfs depmod -a $(basename $kvdir)
+done
+""", privileged = True)
+
+    # apk ran as root and left root-owned files (e.g. /root with mode 700)
+    # throughout the rootfs. Subsequent host-side steps (`dir_size_mb`
+    # below, the destdir walks in the build executor) run as the host
+    # build user and can't enter those dirs. Hand ownership back to the
+    # build user; _create_disk_image will chown to root again right
+    # before mkfs.ext4 -d so the on-target rootfs is owned by root.
+    run("chown -R $(stat -c %u:%g /project) $DESTDIR/rootfs",
+        privileged = True)
 
     if hostname:
         run("mkdir -p $DESTDIR/rootfs/etc")

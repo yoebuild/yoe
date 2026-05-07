@@ -1,4 +1,0 @@
-#!/bin/sh
-for s in /etc/init.d/S*; do
-    [ -x "$s" ] && "$s" start
-done

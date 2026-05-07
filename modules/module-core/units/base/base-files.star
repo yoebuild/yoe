@@ -1,5 +1,34 @@
 load("//classes/users.star", "user", "users_commands")
 
+# Alpine-style OpenRC runlevel membership. OpenRC's apk ships the
+# /etc/init.d/<svc> scripts but not the runlevel symlinks — distros wire
+# those up. base-files owns this configuration because it's the boot-time
+# baseline every yoe image inherits. Per-unit `services = [...]` adds
+# additional default-runlevel entries on top of these.
+_RUNLEVELS = {
+    # `sysfs` mounts /sys (and must run before `cgroups`, which mounts
+    # /sys/fs/cgroup but only if /sys/fs/cgroup already exists as a
+    # directory — created by the kernel when /sys is mounted). cgroups'
+    # depend() uses `after sysfs`, which only orders execution when both
+    # are in the same runlevel, so sysfs has to live here too.
+    #
+    # `cgroups` is required for container runtimes (dockerd, containerd)
+    # which refuse to start with "Devices cgroup isn't mounted"
+    # otherwise. Harmless on non-container images.
+    "sysinit": ["sysfs", "cgroups", "devfs", "dmesg"],
+    "boot":    ["bootmisc", "hostname", "modules", "sysctl"],
+    "shutdown": ["mount-ro", "killprocs"],
+}
+
+def _runlevel_commands():
+    cmds = []
+    for runlevel, services in _RUNLEVELS.items():
+        cmds.append("mkdir -p $DESTDIR/etc/runlevels/" + runlevel)
+        for svc in services:
+            cmds.append("ln -sf /etc/init.d/%s $DESTDIR/etc/runlevels/%s/%s"
+                        % (svc, runlevel, svc))
+    return cmds
+
 def base_files(name = "base-files", users = None):
     """Creates a base filesystem skeleton unit with the given users.
 
@@ -26,11 +55,12 @@ def base_files(name = "base-files", users = None):
     unit(
         name = name,
         version = "1.0.0",
-        release = 5,
+        release = 10,
         scope = "machine",
         license = "MIT",
         description = "Base filesystem skeleton: users, groups, dirs, inittab, boot config",
         deps = deps,
+        runtime_deps = ["openrc"],
         container = "toolchain-musl",
         container_arch = "target",
         tasks = [
@@ -38,13 +68,13 @@ def base_files(name = "base-files", users = None):
                 [
                     "mkdir -p $DESTDIR/etc $DESTDIR/root $DESTDIR/proc $DESTDIR/sys"
                     + " $DESTDIR/dev $DESTDIR/tmp $DESTDIR/run $DESTDIR/var/run"
-                    + " $DESTDIR/etc/init.d $DESTDIR/boot/extlinux"
+                    + " $DESTDIR/boot/extlinux"
                     + " $DESTDIR/etc/apk/keys",
                 ]
+                + _runlevel_commands()
                 + users_commands(users)
                 + [
                     install_template("inittab.tmpl", "$DESTDIR/etc/inittab"),
-                    install_file("rcS", "$DESTDIR/etc/init.d/rcS", mode = 0o755),
                     install_template("os-release.tmpl", "$DESTDIR/etc/os-release"),
                     install_file("extlinux.conf",
                                  "$DESTDIR/boot/extlinux/extlinux.conf"),

@@ -8,16 +8,16 @@ autotools(
     license = "BSD-2-Clause",
     description = "OpenSSH secure shell client and server",
     deps = ["openssl", "zlib"],
-    runtime_deps = ["openssl", "zlib"],
+    runtime_deps = ["openssl", "zlib", "openrc"],
     configure_args = [
         "--sysconfdir=/etc/ssh",
         "--without-openssl-header-check",
     ],
-    services = ["S40sshd"],
+    services = ["sshd"],
     tasks = [
         task("install-init", steps = [
             "mkdir -p $DESTDIR/etc/init.d",
-            install_file("S40sshd", "$DESTDIR/etc/init.d/S40sshd", mode = 0o755),
+            install_file("sshd", "$DESTDIR/etc/init.d/sshd", mode = 0o755),
         ]),
     ],
 )

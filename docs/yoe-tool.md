@@ -640,23 +640,23 @@ yoe graph --stale
 ### `yoe` (no args)
 
 Running `yoe` with no arguments launches an interactive terminal UI showing all
-units with their build status.
+units with their build status. The home screen has three tabs (`tab` /
+`shift+tab` to cycle): **Units**, **Modules**, and **Diagnostics**.
 
 ```
   `[yoe]`  Machine: qemu-x86_64  Image: base-image
 
-  NAME                         CLASS        STATUS
-→ base-files                   unit         ● cached
-  busybox                      unit         ● cached
-  linux                        unit         ▌building...
-  musl                         unit         ● waiting
-  ncurses                      autotools    ● cached
-  openssh                      unit         ● failed
-  openssl                      autotools    ● cached
-  util-linux                   autotools
-  zlib                         autotools    ● cached
+  Query: in:base-image                            Units: 9/142
 
-  b build  e edit  d diagnose  l log  c clean  / search  q quit
+  NAME           CLASS      MODULE     VERSION     SIZE  DEPS  STATUS
+→ base-files     unit       core       1.0.0      12 KiB    0  ● cached
+  busybox        unit       core       1.37.0    1.2 MiB    2  ● cached
+  linux          unit       core       6.6.87   42.1 MiB    1  ▌building...
+  musl           unit       core       1.2.5     650 KiB    0  ● waiting
+  openssl        autotools  core       3.4.1     5.4 MiB    2  ● cached
+  zlib           autotools  core       1.3.1     120 KiB    0  ● cached
+
+  b build  $ shell  e edit  l log  s setup  / search  \ home  S save  q quit
 ```
 
 #### Status indicators
@@ -675,41 +675,79 @@ deps can flash green simultaneously.
 
 #### Key bindings (unit list)
 
-| Key     | Action                                               |
-| ------- | ---------------------------------------------------- |
-| `b`     | Build selected unit in background                    |
-| `e`     | Open unit's `.star` file in `$EDITOR`                |
-| `d`     | Launch `claude diagnose` for the unit                |
-| `l`     | Open unit's build log in `$EDITOR`                   |
-| `a`     | Launch `claude /new-unit`                            |
-| `c`     | Clean selected unit's build artifacts (with confirm) |
-| `/`     | Search/filter units by name                          |
-| `Enter` | Show detail view (build output + log tail)           |
-| `B`     | Build all units in background                        |
-| `C`     | Clean all build artifacts (with confirm)             |
-| `j/k`   | Navigate up/down                                     |
-| `q`     | Quit                                                 |
+| Key         | Action                                                      |
+| ----------- | ----------------------------------------------------------- |
+| `b`         | Build selected unit in background                           |
+| `B`         | Build all visible units in background                       |
+| `x`         | Cancel an in-progress build for the selected unit           |
+| `r`         | Run an image unit (boot in QEMU)                            |
+| `f`         | Flash a built image to a removable device                   |
+| `D`         | Deploy a non-image unit to a host over SSH                  |
+| `e`         | Open unit's `.star` file in `$EDITOR`                       |
+| `$`         | Open `$SHELL` in the unit's checked-out source dir          |
+| `l`         | Open unit's build log in `$EDITOR`                          |
+| `d`         | Launch `claude diagnose` for the unit                       |
+| `a`         | Launch `claude /new-unit`                                   |
+| `s`         | Open Setup (machine / default image picker)                 |
+| `/`         | Edit the active query (substring + `type:` `module:` `in:`) |
+| `\`         | Snap query back to the saved default in `local.star`        |
+| `S`         | Save the current query as the new default                   |
+| `o` / `O`   | Cycle sort column / toggle direction                        |
+| `tab`       | Switch to the next home-screen tab (Units → Modules → …)    |
+| `Enter`     | Open detail view for the selected unit                      |
+| `j/k` `↑/↓` | Navigate up/down                                            |
+| `g/G`       | Jump to top / bottom                                        |
+| `q`         | Quit                                                        |
+
+The cursor auto-follows whatever unit is actively building, but only when you've
+been idle for a couple of seconds — pressing `j/k` or typing into the query bar
+suppresses the follow so the cursor stays where you put it. Pressing `b` or `B`
+re-arms the follow so the build cascade is visible.
 
 #### Detail view
 
-Pressing Enter on a unit shows a split-pane detail view:
+Pressing Enter on a unit opens a detail view with two tabs (`tab` / `shift+tab`
+to cycle): **Info** and **Files**.
 
-- **BUILD OUTPUT** (top) — executor progress: dependency resolution, cache hits,
-  build status for each dep
-- **BUILD LOG** (bottom) — tail of the unit's `build.log`, updated in real time
-  during a build
+The **Info** tab shows the unit's place in the project plus its build streams:
 
-| Key   | Action                        |
-| ----- | ----------------------------- |
-| `Esc` | Return to unit list           |
-| `b`   | Build this unit in background |
-| `d`   | Launch `claude diagnose`      |
-| `l`   | Open build log in `$EDITOR`   |
+- **USED BY (upstream)** — which explicit picks in the default image pull this
+  unit in, and the runtime-dep chain that bridges them
+- **PULLS IN (downstream)** — what this unit pulls in transitively
+- **BUILD OUTPUT** — executor progress: dependency resolution, cache hits, build
+  status for each dep
+- **BUILD LOG** — tail of the unit's `build.log`, updated in real time during a
+  build
+
+The **Files** tab lists every file the unit installed into its `destdir` (what
+`apk` packages into the unit's `.apk`) with its on-disk size. Sortable by path
+or size — handy for spotting the biggest payloads or confirming a binary
+actually landed where you expected. Symlinks are dimmed; directories are
+omitted. Empty until the unit has been built at least once.
+
+| Key         | Action                                             |
+| ----------- | -------------------------------------------------- |
+| `tab`       | Switch between Info and Files tabs                 |
+| `Esc`       | Return to unit list                                |
+| `b`         | Build this unit in background _(Info tab)_         |
+| `r`         | Run (image units) — boot in QEMU _(Info tab)_      |
+| `$`         | Open `$SHELL` in the unit's checked-out source     |
+| `d`         | Launch `claude diagnose` _(Info tab)_              |
+| `l`         | Open build log in `$EDITOR` _(Info tab)_           |
+| `/`         | Search the build log _(Info tab)_                  |
+| `o` / `O`   | Cycle sort column / toggle direction _(Files tab)_ |
+| `j/k` `↑/↓` | Scroll the log / file list                         |
+| `g/G`       | Jump to top / bottom                               |
 
 #### Search
 
-Press `/` to enter search mode. Type to filter — only matching units are shown.
-Press Enter to accept the filter, Esc to cancel and show all units.
+Press `/` to edit the active query. The query bar accepts plain substrings plus
+field filters: `type:image`, `module:rpi`, `status:failed`, and `in:<unit>` —
+the last expands to the runtime closure of that unit, so `in:dev-image` shows
+only what your image needs. `Tab` completes field names and values. Press Enter
+to accept, Esc to revert. The TUI starts filtered to your default image's
+closure; press `\` to snap back to the saved default and `S` to save the current
+query as the new default.
 
 Builds call `build.BuildUnits()` directly (in-process, no subprocess). The
 executor sends events to the TUI as each unit starts and finishes building.

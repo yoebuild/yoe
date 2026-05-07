@@ -13,8 +13,9 @@ base_files(
 image(
     name = "dev-image",
     artifacts = [
-        "base-files-dev", "busybox", "musl", "kmod", "util-linux",
-        "e2fsprogs", "eudev", "linux", "network-config", "iproute2",
+        "base-files-dev", "busybox", "busybox-binsh", "musl", "kmod",
+        "util-linux", "e2fsprogs", "eudev", "linux", "openrc",
+        "network-config", "iproute2",
         "dhcpcd", "ntp-client", "mdnsd", "openssh", "ca-certificates",
         "curl", "simpleiot", "bash", "less", "file", "procps-ng",
         "htop", "strace", "apk-tools",

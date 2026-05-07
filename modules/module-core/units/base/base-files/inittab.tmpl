@@ -1,9 +1,14 @@
-::sysinit:/bin/mount -t proc proc /proc
-::sysinit:/bin/mount -t sysfs sys /sys
-::sysinit:/bin/mkdir -p /dev/pts
-::sysinit:/bin/mount -t devpts devpts /dev/pts
-::sysinit:/bin/hostname -F /etc/hostname
-::sysinit:/etc/init.d/rcS
+# /etc/inittab — read by busybox init.
+#
+# Service supervision is delegated to OpenRC. busybox init handles PID 1
+# duties (reaping, signals, getty respawn) and triggers the OpenRC
+# runlevels in order: sysinit → boot → default.
+
+::sysinit:/sbin/openrc sysinit
+::sysinit:/sbin/openrc boot
+::wait:/sbin/openrc default
+
 {{.console}}::respawn:/sbin/getty -L {{.console}} 115200 vt100
+
 ::ctrlaltdel:/sbin/reboot
-::shutdown:/bin/umount -a -r
+::shutdown:/sbin/openrc shutdown

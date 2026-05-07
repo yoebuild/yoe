@@ -347,9 +347,9 @@ to vary."
 Concretely, when you reach for a per-project or per-machine variant of a generic
 unit, prefer instead:
 
-- **Init scripts that detect what's installed.** `S10network` checks
-  `command -v dhcpcd` and falls back to busybox `udhcpc` when it's missing — one
-  network-config unit, two viable runtimes, no DHCP-client fork.
+- **Init scripts that detect what's installed.** The `network` OpenRC service
+  checks `command -v dhcpcd` and falls back to busybox `udhcpc` when it's
+  missing — one network-config unit, two viable runtimes, no DHCP-client fork.
 - **Conditional config files** in a project- or machine-scoped config unit
   (e.g., `base-files-<project>`, `network-config`). Those units are already
   flavored, so they're the right place for choices that have to vary.

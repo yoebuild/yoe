@@ -8,38 +8,39 @@
 
 ## Next
 
-- Display version on units tab
-- Open to unit source on web.
-- Shell into module source, drop into directory
-- Shell into unit source, drop into directory
-- Tab in unit to display files installed and sizes.
-- Side issue worth flagging (not fixing now): the doubled -r0-r0 in
-  ca-certificates-bundle-20260413-r0-r0 is a real bug in units-alpine. Alpine's
-  upstream version 20260413-r0 already contains the release suffix, but
-  units-alpine declares it as version = "20260413-r0" and yoe's apk packaging
-  then appends another -r<release> (default 0). The clean fix lives upstream in
-  units-alpine: split version = "20260413" and release = 0. Affects every
-  alpine_pkg unit. Not blocking the install (apk accepts the goofy name), so it
-  can wait — but worth a separate issue.
+- docker running
+- Use alpine docker-init. Had some problems with consuming packages with
+  multiple outputs.
+- Is there any advantage in sources to storing filename as a hash? What is this
+  a hash of?
+- On unit detail page, provide a way to switch the Git URL to the upstream
+  source and record this in the unit build state file. Display this state on
+  main unit and unit detail page. Thinking several states: nothing, up,
+  modified, etc.
+- Can we watch the unit state files and automatically update the TUI if
+  something changes? The idea is you could be building in two different TUIs and
+  both TUIs would show current status of the other.
 - alpine should have unit deps, not just runtime deps
 - alpine packages like gvim provides vim. This could be a source of pain.
 - document BSP and package moat
 - Better hostnames for targets.
-- units-xxx -> module-xxx in git
-- unit details, show dependency graph up to image (upstream), and then
-  (downstream) a tree of stuff it pulls in
-- long z
 - mDNS on target (we have a mdns component, why is it not working?)
 - base-files is modified by machine
   - machine package feed?
   - this needs to be solve before start building multiple machines in one tree.
 - e2e testing
-- Save flash device preference in local.star for TUI
 - Data partition for rPI targets
   - Fill/format data partition
 - rPI updater
 - Error reading OS version: searching /etc/os-release, got: field VERSION not
   found
+- Progress bar for build and build status
+- Parallel build
+- Flash progress bar rewinds before display if there has been a previous flash
+- Multiple projects
+  - add example to e2e
+  - Support selecting and saving to local.star
+- Open to unit source on web.
 
 ## Bugs / Improvements
 
@@ -55,6 +56,17 @@
 
 The biggest leverage area: making yoe pleasant for the developer writing apps
 that run on yoe-built devices, not just for the author of a distro.
+
+- Plugins to create custom commands and TUI features
+  - Need to make it easy to extend the automation for custom needs.
+
+### Source can directly embed units
+
+- star file directly in source code
+- declares dependencies (modules, containers)
+- can be directly included in a PROJECT.star
+
+This allows yoe to be an application build tool as well as a system build tool.
 
 ### Build & Deploy Loop
 
@@ -72,6 +84,7 @@ for the design.
   a standalone project with `PROJECT.star`, a unit pinning the language, and a
   happy path.
 - Software update — Yoe updater or SWUpdate. Rewrite in Zig?
+- Anything we can learn from https://docs.ruuda.nl/deptool/?
 
 ### On-Device App UX
 
@@ -141,18 +154,54 @@ Ship a `container-host-image` that runs containerd (later Podman, then Docker
 CE) on yoe-built devices. Design and reference architecture in
 [containers.md](containers.md).
 
-## Init System
-
-Replace busybox init with something supporting dependency ordering and
-supervision (OpenRC most likely). See
-[containers.md](containers.md#libc-and-init-system) for the discussion of
-options.
+`docker-image` already ships the Docker userspace (engine, CLI, buildx,
+containerd, runc) alongside dev-image content. The remaining gating work is the
+`kernel-container-host.cfg` fragment (overlayfs, bridge/veth, netfilter, cgroup
+v2, seccomp, namespaces) and an init system that supervises `dockerd`.
 
 ## Image Assembly on Host
 
 Move image assembly (`mkfs.ext4`, bootloader install) from the build container
 to the host via `bwrap` user namespaces. Design in
 [build-environment.md](build-environment.md#reducing-dependence-on-dockers-dev-planned).
+
+## Auto-depend from ELF DT_NEEDED
+
+Counterpart to the auto-`provides` SONAME scan that already runs in
+`internal/artifact/apk.go`. Walk every executable and shared library in the
+unit's destdir, read each binary's `DT_NEEDED` entries, and emit
+`depend = so:<soname>` lines in PKGINFO — same convention Alpine's abuild uses.
+Skip sonames the unit provides itself, plus a small platform-baseline allowlist
+(`libc.musl-*.so.1` from `musl`, `ld-musl-*.so.1`, etc.) that's guaranteed
+present in any yoe rootfs.
+
+Catches the class of bug where a `.star` declares a `runtime_deps` list that
+silently misses a transitive shared-lib dependency: today the unit installs fine
+but fails at runtime; with auto-depend, apk refuses the install with a clear
+`so:libfoo.so.N (no such package)` message.
+
+## `module-alpine` units as deltas over upstream PKGINFO
+
+Today every cached `alpine_pkg` unit duplicates upstream metadata
+(`runtime_deps`, `provides`, `replaces`, …) inline in the `.star`, and yoe's apk
+pipeline regenerates PKGINFO from those declarations — silently dropping fields
+the generator missed (e.g. `replaces = busybox` on openrc). Now that
+`alpine_pkg` re-signs upstream apks instead of rebuilding them, the on-target
+PKGINFO comes from upstream verbatim. Next step: turn the `.star` fields into
+explicit deltas over that upstream metadata so cached units stay tiny and only
+record yoe-specific changes. Proposed shape:
+
+```
+provides_extra      / provides_drop      / provides_override
+replaces_extra      / replaces_drop      / replaces_override
+runtime_deps_extra  / runtime_deps_drop  / runtime_deps_override
+triggers_extra      / triggers_drop      / triggers_override
+```
+
+`_extra` adds, `_drop` removes, `_override` replaces wholesale. 90% of edits
+will be `_extra` / `_drop`; `_override` is the escape hatch. Plain
+`runtime_deps` / `provides` / `replaces` (no suffix) stay reserved for
+source-built `module-core` units where there's no upstream to merge with.
 
 ## Testing
 
