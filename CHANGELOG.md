@@ -8,10 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
-- **`docker-image` starts dockerd at boot.** A new `docker-init` unit ships
-  `/etc/init.d/docker` and registers it in the default runlevel, so the dockerd
-  daemon comes up automatically — `docker run hello-world` works on a fresh boot
-  without manual intervention.
+- **`docker-image` starts dockerd at boot.** Pulls in Alpine's `docker-openrc`
+  package (which ships `/etc/init.d/docker` and the `/etc/conf.d/docker` config
+  template upstream maintains) and adds the default-runlevel symlink at
+  packaging time, so `dockerd` is supervised on a fresh boot without manual
+  `rc-update add`.
 - **`prefer_modules` on `project()` pins a unit to a specific module.** Set
   `prefer_modules = {"xz": "alpine"}` in `PROJECT.star` and the `xz` unit
   registers only from `module-alpine`, regardless of which module wins the
