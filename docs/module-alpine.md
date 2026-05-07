@@ -6,6 +6,10 @@ this module fetch a binary apk from a pinned Alpine release, verify its sha256,
 and repack it as a yoe artifact. The unit's "build" is just extracting the apk
 into `$DESTDIR`.
 
+The module lives at <https://github.com/yoebuild/module-alpine>. Open it to
+browse the cached `.star` files, the `gen-unit.py` generator, or to send a PR
+adding a new package wrapper.
+
 > **Implementation details:** how Alpine apks pass through yoe's pipeline
 > (signature swap, noarch routing, `gen-unit.py`, the docker-openrc punt) live
 > in [apk-passthrough.md](apk-passthrough.md). This doc is the "when to reach
