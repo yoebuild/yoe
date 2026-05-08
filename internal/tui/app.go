@@ -4242,11 +4242,30 @@ func (m model) listViewportHeight() int {
 	chrome++ // ↓ more (always reserved)
 	chrome++ // blank line before bottom row
 	chrome++ // bottom row: help / search / message — always one line
+	chrome += m.queryCompletionsLines()
 	h := m.height - chrome
 	if h < 3 {
 		h = 3
 	}
 	return h
+}
+
+// queryCompletionsLines returns how many lines the tab-completion
+// candidate list adds under the query bar. Zero when the list is
+// empty. Capped at the same maxRows the renderer uses, plus one for
+// the "(N more)" hint when truncated. listViewportHeight subtracts
+// this so a long candidate list doesn't push the home header off
+// the top of the screen.
+func (m model) queryCompletionsLines() int {
+	const maxRows = 8
+	n := len(m.queryCompletions)
+	if n == 0 {
+		return 0
+	}
+	if n > maxRows {
+		return maxRows + 1 // truncation hint
+	}
+	return n
 }
 
 // homeHeaderLines returns the number of lines renderHomeHeader outputs.
