@@ -11,7 +11,15 @@ unit(
     container_arch = "target",
     tasks = [
         task("build", steps=[
-            "make ARCH=arm64 bcm2711_defconfig",
+            install_file("container.cfg", "$SRCDIR/.yoe-container.cfg"),
+            # Generate defconfig, merge container-runtime CONFIG fragment
+            # (overlayfs, netfilter, namespaces, eBPF cgroup support) so
+            # dockerd/podman/runc work out of the box, then resolve deps.
+            """
+make ARCH=arm64 bcm2711_defconfig
+scripts/kconfig/merge_config.sh -m -O . .config .yoe-container.cfg
+make ARCH=arm64 olddefconfig
+""",
             "make ARCH=arm64 -j$NPROC Image modules dtbs",
             # Install kernel as kernel8.img (RPi4 64-bit naming convention)
             "install -D arch/arm64/boot/Image $DESTDIR/boot/kernel8.img",

@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **TUI help bar reflects the active mode.** While typing in the search bar, the
+  bottom help row swaps to the keys that actually work there (`type filter`,
+  `tab complete`, `⌫ delete`, `enter apply`, `esc cancel`) instead of pretending
+  `b build`, `q quit`, etc. still fire. Out of search-edit it shows the
+  navigation shortcuts as before.
+
 ## [0.10.3] - 2026-05-07
 
 - **`docker-image` starts dockerd at boot.** Pulls in Alpine's `docker-openrc`
@@ -30,10 +36,11 @@ and this project adheres to
 - **Kernel ships container-runtime CONFIG by default.** A `container.cfg`
   fragment (overlayfs, bridge/veth, the full netfilter chain including
   `NFT_COMPAT` so iptables-nft works, IPv4 + IPv6 NAT, namespaces, seccomp,
-  cgroup BPF, eBPF) is merged into the kernel's defconfig during the linux
-  unit's build, so `dockerd` and `containerd` start cleanly without per-image
-  kernel customisation. The cost on non-container images is a few hundred KB of
-  kernel modules that nothing references.
+  cgroup BPF, eBPF) is merged into the kernel's defconfig during the build of
+  the upstream `linux` unit and the Raspberry Pi `linux-rpi4` / `linux-rpi5`
+  units, so `dockerd` and `containerd` start cleanly on every supported board
+  without per-image kernel customisation. The cost on non-container images is a
+  few hundred KB of kernel modules that nothing references.
 - **TUI flash remembers the last device.** Picking and confirming a flash target
   writes `flash_device = "/dev/sdX"` to `local.star`, and re-entering the flash
   view positions the cursor on that device when it shows up in the candidate

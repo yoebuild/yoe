@@ -2093,14 +2093,25 @@ func (m model) viewUnitsTab() string {
 	if m.message != "" {
 		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
 	} else {
-		items := defaultHelpItems
-		if m.cursor < len(m.units) {
-			name := m.units[m.cursor]
-			if u, ok := m.proj.Units[name]; ok && u.Class == "image" {
-				if m.statuses[name] == statusCached {
-					items = imageCachedHelpItems
-				} else {
-					items = imageHelpItems
+		// While the query input is focused, only the keys updateSearch
+		// actually handles are reachable — printable chars, tab to
+		// complete, backspace, enter to commit, esc to revert. Showing
+		// the navigation help bar there is a lie, so swap in a help
+		// row that matches the active mode.
+		var items []helpItem
+		switch {
+		case m.queryEditing:
+			items = searchEditHelpItems
+		default:
+			items = defaultHelpItems
+			if m.cursor < len(m.units) {
+				name := m.units[m.cursor]
+				if u, ok := m.proj.Units[name]; ok && u.Class == "image" {
+					if m.statuses[name] == statusCached {
+						items = imageCachedHelpItems
+					} else {
+						items = imageHelpItems
+					}
 				}
 			}
 		}
@@ -2132,6 +2143,13 @@ var (
 		{"b", "build"}, {"x", "cancel"}, {"r", "run"}, {"f", "flash"},
 		{"e", "edit"}, {"$", "shell"}, {"l", "log"}, {"s", "setup"},
 		{"/", "search"}, {`\`, "home"}, {"S", "save"}, {"q", "quit"},
+	}
+	// Shown while the query input is focused — these are the only keys
+	// updateSearch actually handles; navigation/build shortcuts are
+	// inert until the user commits or escapes the search bar.
+	searchEditHelpItems = []helpItem{
+		{"type", "filter"}, {"tab", "complete"}, {"⌫", "delete"},
+		{"enter", "apply"}, {"esc", "cancel"},
 	}
 	detailHelpItems = []helpItem{
 		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
