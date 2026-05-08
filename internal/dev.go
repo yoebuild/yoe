@@ -176,9 +176,8 @@ func devSrcDir(projectDir, scopeDir, unitName string) string {
 }
 
 // DevUpstreamOpts configures the upstream-fetch performed when a unit
-// (or module) is toggled into dev mode. Zero values keep the legacy
-// "rewrite remote, unshallow, fetch everything" behavior, so callers
-// that don't care about depth keep working without changes.
+// (or module) is toggled into dev mode. Zero values keep the
+// "rewrite remote, unshallow, fetch everything" behavior.
 type DevUpstreamOpts struct {
 	// SSH rewrites a github/gitlab-style HTTPS URL to git@host:path
 	// before setting origin. Hosts that don't match a known SSH
@@ -189,12 +188,6 @@ type DevUpstreamOpts struct {
 	// chromium) where a full unshallow pulls gigabytes of objects
 	// the developer doesn't need.
 	FetchDepth int
-	// FetchSince, when non-empty, replaces `--unshallow` with
-	// `--shallow-since=<spec>` (e.g. "1.year.ago", "2024-01-01").
-	// Mutually exclusive with FetchDepth — FetchDepth wins if both
-	// are set, on the assumption an explicit commit count is more
-	// predictable than a date heuristic.
-	FetchSince string
 }
 
 // DevToUpstream switches a unit's src checkout from pin mode (yoe-managed
@@ -247,36 +240,21 @@ func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, opts DevUpst
 
 // devFetchOrigin runs the upstream fetch with the depth strategy
 // chosen in opts. Picks one of:
-//   - --depth=N        when FetchDepth > 0
-//   - --shallow-since  when FetchSince is set
-//   - --unshallow      when the clone is currently shallow (default)
-//   - plain fetch      when the clone is already full history
+//   - --depth=N    when FetchDepth > 0
+//   - --unshallow  when the clone is currently shallow (default)
+//   - plain fetch  when the clone is already full history
 //
-// The fetch refspec depends on the strategy:
-//
-//   - Depth: use the unit's pinned ref so we get N commits leading up
-//     to the pin. Passing the broad refspec would fan out to every
-//     tracked branch (Linux: 100 commits × dozens of branches).
-//
-//   - Since: use HEAD instead of the pinned ref. The since window is
-//     forward-looking from the upstream's current tip, so an old
-//     pin (v6.6.87 cut years ago) produces an empty pack and the
-//     fetch errors with "shallow info: 4". HEAD picks the remote's
-//     default branch, which always has recent activity.
-//
-//   - Unshallow / full: use the configured refspec (broad), since
-//     the user explicitly asked for everything.
-//
-// Depth- and since-bounded fetches also pass `--filter=blob:none` so
-// the transfer is commits + trees only — file content is fetched on
-// demand when something actually reads it. The full-unshallow path
-// deliberately skips the filter: the user explicitly asked for
-// everything.
+// Depth fetches narrow the refspec to the unit's pinned ref so we
+// get N commits leading up to the pin (passing the broad refspec
+// would fan out to every tracked branch — Linux: 100 commits × N
+// branches). They also pass `--filter=blob:none` so the transfer
+// is commits + trees only; file content is fetched on demand when
+// something actually reads it. The full-unshallow path skips both
+// — the user explicitly asked for everything.
 //
 // The `--unshallow` branch errors on a non-shallow repo, so we probe
 // is-shallow-repository first instead of paying the round-trip on the
-// failing path. The depth and since branches are safe on either
-// shape — git just deepens to the requested boundary.
+// failing path.
 func devFetchOrigin(srcDir string, opts DevUpstreamOpts, pinnedRef string) error {
 	shallow, _ := gitCmd(srcDir, "rev-parse", "--is-shallow-repository")
 	isShallow := strings.TrimSpace(shallow) == "true"
@@ -288,12 +266,6 @@ func devFetchOrigin(srcDir string, opts DevUpstreamOpts, pinnedRef string) error
 	case opts.FetchDepth > 0:
 		args = []string{"fetch", fmt.Sprintf("--depth=%d", opts.FetchDepth)}
 		refspec = pinnedRef
-		useFilter = true
-	case opts.FetchSince != "":
-		args = []string{"fetch", "--shallow-since=" + opts.FetchSince}
-		// The pinned ref is fixed in time; a since window may exclude
-		// it. HEAD reaches whatever the remote's default branch is now.
-		refspec = "HEAD"
 		useFilter = true
 	case isShallow:
 		args = []string{"fetch", "--unshallow"}

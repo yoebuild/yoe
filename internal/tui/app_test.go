@@ -537,7 +537,6 @@ func TestDepthOptionToFetch(t *testing.T) {
 		{"all", depthFetchSpec{}},
 		{"depth=1000", depthFetchSpec{FetchDepth: 1000}},
 		{"depth=100", depthFetchSpec{FetchDepth: 100}},
-		{"since=1.year.ago", depthFetchSpec{FetchSince: "1.year.ago"}},
 		{"unknown", depthFetchSpec{}},
 	}
 	for _, c := range cases {
@@ -554,9 +553,6 @@ func TestDepthLabel_HumanForms(t *testing.T) {
 	}
 	if got := depthLabel(depthFetchSpec{FetchDepth: 100}); !strings.Contains(got, "100") {
 		t.Errorf("depth label should include the count, got %q", got)
-	}
-	if got := depthLabel(depthFetchSpec{FetchSince: "1.year.ago"}); !strings.Contains(got, "1.year.ago") {
-		t.Errorf("since label should include the spec, got %q", got)
 	}
 }
 

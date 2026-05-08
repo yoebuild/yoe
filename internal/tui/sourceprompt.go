@@ -350,11 +350,10 @@ func liveRemoteURL(dir string) string {
 }
 
 // depthFetchSpec is the depth strategy a prompt option resolves to.
-// FetchDepth (>0) and FetchSince (non-empty) are passed straight to
-// internal/dev.go's DevUpstreamOpts; both zero means "all history".
+// FetchDepth (>0) is passed straight to internal/dev.go's
+// DevUpstreamOpts; zero means "all history".
 type depthFetchSpec struct {
 	FetchDepth int
-	FetchSince string
 }
 
 // depthPromptOptions returns the standard fetch-depth menu.
@@ -365,8 +364,6 @@ func depthPromptOptions() []sourcePromptOption {
 		{label: "all", desc: "full history (slowest, but `git log` shows everything)", value: "all"},
 		{label: "1000", desc: "last 1000 commits — much faster, plenty for most work", value: "depth=1000"},
 		{label: "100", desc: "last 100 commits — quickest", value: "depth=100"},
-		{label: "1y", desc: "commits since one year ago", value: "since=1.year.ago"},
-		{label: "1m", desc: "commits since one month ago", value: "since=1.month.ago"},
 		{label: "cancel", desc: "stay pinned", value: "cancel"},
 	}
 }
@@ -374,16 +371,12 @@ func depthPromptOptions() []sourcePromptOption {
 // depthOptionToFetch parses a value emitted by depthPromptOptions
 // back into the structured fetch spec. Unknown / "all" → zero spec.
 func depthOptionToFetch(value string) depthFetchSpec {
-	switch {
-	case strings.HasPrefix(value, "depth="):
-		var n int
-		fmt.Sscanf(strings.TrimPrefix(value, "depth="), "%d", &n)
-		return depthFetchSpec{FetchDepth: n}
-	case strings.HasPrefix(value, "since="):
-		return depthFetchSpec{FetchSince: strings.TrimPrefix(value, "since=")}
-	default:
-		return depthFetchSpec{}
+	if n, ok := strings.CutPrefix(value, "depth="); ok {
+		var v int
+		fmt.Sscanf(n, "%d", &v)
+		return depthFetchSpec{FetchDepth: v}
 	}
+	return depthFetchSpec{}
 }
 
 // runDevToUpstream backgrounds DevToUpstream in a goroutine and parks
@@ -402,7 +395,7 @@ func (m model) runDevToUpstream(unitName string, ssh bool, depth depthFetchSpec)
 	m.sourceOp = newSourceOp(targetUnit, unitName,
 		fmt.Sprintf("Fetching %s for %s", depthLabel(depth), unitName),
 		prevView)
-	opts := yoe.DevUpstreamOpts{SSH: ssh, FetchDepth: depth.FetchDepth, FetchSince: depth.FetchSince}
+	opts := yoe.DevUpstreamOpts{SSH: ssh, FetchDepth: depth.FetchDepth}
 	cmd := func() tea.Msg {
 		err := yoe.DevToUpstream(m.projectDir, scope, u, opts)
 		return sourceOpDoneMsg{
@@ -416,18 +409,13 @@ func (m model) runDevToUpstream(unitName string, ssh bool, depth depthFetchSpec)
 }
 
 // depthLabel renders a fetch spec as a short user-facing phrase for
-// the spinner label ("full history", "last 1000 commits", "commits
-// since 1.year.ago"). Keeps the spinner explanatory without
-// duplicating the option list verbiage.
+// the spinner label ("full history", "last 1000 commits"). Keeps the
+// spinner explanatory without duplicating the option list verbiage.
 func depthLabel(d depthFetchSpec) string {
-	switch {
-	case d.FetchDepth > 0:
+	if d.FetchDepth > 0 {
 		return fmt.Sprintf("last %d commits", d.FetchDepth)
-	case d.FetchSince != "":
-		return fmt.Sprintf("commits since %s", d.FetchSince)
-	default:
-		return "full upstream history (this may take a while)"
 	}
+	return "full upstream history (this may take a while)"
 }
 
 // runDevToPin runs DevToPin in the background. Pin transitions are
@@ -510,7 +498,7 @@ func (m model) runModuleToUpstream(rmName string, ssh bool, depth depthFetchSpec
 	m.sourceOp = newSourceOp(targetModule, rmName,
 		fmt.Sprintf("Fetching %s for module %s", depthLabel(depth), rmName),
 		prevView)
-	opts := module.ModuleUpstreamOpts{SSH: ssh, FetchDepth: depth.FetchDepth, FetchSince: depth.FetchSince}
+	opts := module.ModuleUpstreamOpts{SSH: ssh, FetchDepth: depth.FetchDepth}
 	cmd := func() tea.Msg {
 		err := module.ModuleToUpstream(rm, opts)
 		return sourceOpDoneMsg{

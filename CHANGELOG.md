@@ -24,11 +24,11 @@ and this project adheres to
   yoe-managed (`pin`), tracking upstream (`dev`), has commits beyond upstream
   (`dev-mod`), or has uncommitted edits (`dev-dirty`). Press `u` on a unit's
   detail page (or a module row) to switch between pin and dev — yoe asks whether
-  to rewrite origin to SSH, then how much history to fetch (full / last 1000 /
-  last 100 / last year / last month) so the Linux kernel's full history doesn't
-  have to come down every time. A spinner runs while the fetch is in flight so
-  you can see something is happening. Once you're happy with a `dev-mod` HEAD,
-  `P` captures it back into the `.star` pin so other people building the project
+  to rewrite origin to SSH, then how much history to fetch (full / last 1000
+  commits / last 100 commits) so the Linux kernel's full history doesn't have to
+  come down every time. A spinner runs while the fetch is in flight so you can
+  see something is happening. Once you're happy with a `dev-mod` HEAD, `P`
+  captures it back into the `.star` pin so other people building the project
   pick it up. A `dev*` unit is left untouched at build time, so `yoe build`
   won't overwrite your working tree or undo in-flight changes.
 - **TUI size column no longer overflows on big artifacts.** Sizes like a 1003
