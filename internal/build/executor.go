@@ -384,7 +384,15 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	// Prepare source (fetch + extract + patch, or reuse dev source).
 	// Units without a source field (e.g., musl) skip this step.
 	if unit.Source != "" {
-		if _, err := source.Prepare(opts.ProjectDir, sd, unit, w); err != nil {
+		// Look up the unit's previous BuildMeta so Prepare can honor
+		// dev-mode state without re-running source.DetectState
+		// itself — the cache is the trusted signal here, set by the
+		// internal/dev.go toggle.
+		var cachedSourceState string
+		if meta := ReadMeta(buildDir); meta != nil {
+			cachedSourceState = meta.SourceState
+		}
+		if _, err := source.Prepare(opts.ProjectDir, sd, unit, cachedSourceState, w); err != nil {
 			return fmt.Errorf("preparing source: %w", err)
 		}
 	} else {
