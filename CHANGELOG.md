@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Search bar clears with `Ctrl+U`.** Readline's kill-line shortcut wipes the
+  query input back to a blank bar in one keystroke — faster than holding
+  Backspace or pressing `\` to snap to the saved default. Live-applied like a
+  backspace, so the unit list updates to "showing all" immediately.
 - **Tab completions show up under the query bar.** When the search input can't
   be advanced further (multiple equally-good matches), the candidate list now
   renders as a vertical column directly under the query bar — closer to the

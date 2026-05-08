@@ -54,6 +54,29 @@ func TestInstalledSize_Unbuilt_ReturnsZero(t *testing.T) {
 // renders as a vertical column under the query bar (one candidate
 // per line) rather than the previous horizontal "tab: a  b  c"
 // blob at the bottom of the screen.
+// TestUpdateSearch_CtrlU_ClearsInput verifies the readline-style
+// kill-line shortcut wipes the query input back to empty in one
+// keystroke.
+func TestUpdateSearch_CtrlU_ClearsInput(t *testing.T) {
+	m := model{
+		queryEditing:     true,
+		queryInput:       "in:base-image type:image status:failed",
+		queryCompletions: []string{"in:", "module:"},
+		proj: &yoestar.Project{
+			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
+			Units:    map[string]*yoestar.Unit{},
+		},
+	}
+	updated, _ := m.updateSearch(tea.KeyMsg{Type: tea.KeyCtrlU})
+	got := updated.(model)
+	if got.queryInput != "" {
+		t.Errorf("queryInput = %q, want empty after Ctrl+U", got.queryInput)
+	}
+	if got.queryCompletions != nil {
+		t.Errorf("queryCompletions should be cleared, got %v", got.queryCompletions)
+	}
+}
+
 func TestRenderQueryCompletions_Vertical(t *testing.T) {
 	m := model{
 		queryCompletions: []string{"openssh", "openssl"},

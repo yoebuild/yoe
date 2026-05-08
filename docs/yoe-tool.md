@@ -773,7 +773,10 @@ field filters: `type:image`, `module:rpi`, `status:failed`, and `in:<unit>` —
 the last expands to the runtime closure of that unit, so `in:dev-image` shows
 only what your image needs. When the active query is non-empty, `/` opens the
 bar with a trailing space so you can immediately type an additional term. `Tab`
-completes field names and values. Press Enter to accept, Esc to revert. The TUI
+completes field names and values; when there are multiple equally-good matches
+the candidate list renders as a vertical column directly under the query bar so
+you can see the next character to type. Press `Ctrl+U` to clear the input back
+to a blank bar in one keystroke. Press Enter to accept, Esc to revert. The TUI
 starts filtered to your default image's closure; press `\` to snap back to the
 saved default and `S` to save the current query as the new default.
 

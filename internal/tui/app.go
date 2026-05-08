@@ -1407,6 +1407,15 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case "ctrl+u":
+		// Readline-style kill-line: clear the entire input back to a
+		// blank bar in one keystroke. Live-applied like a backspace —
+		// the unit list updates immediately to "showing all".
+		m.queryInput = ""
+		m.queryCompletions = nil
+		m.reparse()
+		return m, nil
+
 	case "tab":
 		ctx := query.Context{
 			Modules: m.moduleNames(),
@@ -2400,7 +2409,7 @@ var (
 	// inert until the user commits or escapes the search bar.
 	searchEditHelpItems = []helpItem{
 		{"type", "filter"}, {"tab", "complete"}, {"⌫", "delete"},
-		{"enter", "apply"}, {"esc", "cancel"},
+		{"^U", "clear"}, {"enter", "apply"}, {"esc", "cancel"},
 	}
 	detailHelpItems = []helpItem{
 		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
