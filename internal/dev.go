@@ -252,11 +252,20 @@ func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, opts DevUpst
 //   - --unshallow      when the clone is currently shallow (default)
 //   - plain fetch      when the clone is already full history
 //
-// `pinnedRef` (when non-empty) is appended as the fetch refspec so we
-// only pull history for the branch / tag the unit is pinned to, not
-// every branch the broad `+refs/heads/*:…` refspec would otherwise
-// fan out to. For a repo like the Linux kernel that's the
-// difference between "100 commits" and "100 commits × N branches".
+// The fetch refspec depends on the strategy:
+//
+//   - Depth: use the unit's pinned ref so we get N commits leading up
+//     to the pin. Passing the broad refspec would fan out to every
+//     tracked branch (Linux: 100 commits × dozens of branches).
+//
+//   - Since: use HEAD instead of the pinned ref. The since window is
+//     forward-looking from the upstream's current tip, so an old
+//     pin (v6.6.87 cut years ago) produces an empty pack and the
+//     fetch errors with "shallow info: 4". HEAD picks the remote's
+//     default branch, which always has recent activity.
+//
+//   - Unshallow / full: use the configured refspec (broad), since
+//     the user explicitly asked for everything.
 //
 // Depth- and since-bounded fetches also pass `--filter=blob:none` so
 // the transfer is commits + trees only — file content is fetched on
@@ -273,13 +282,18 @@ func devFetchOrigin(srcDir string, opts DevUpstreamOpts, pinnedRef string) error
 	isShallow := strings.TrimSpace(shallow) == "true"
 
 	var args []string
+	var refspec string
 	useFilter := false
 	switch {
 	case opts.FetchDepth > 0:
 		args = []string{"fetch", fmt.Sprintf("--depth=%d", opts.FetchDepth)}
+		refspec = pinnedRef
 		useFilter = true
 	case opts.FetchSince != "":
 		args = []string{"fetch", "--shallow-since=" + opts.FetchSince}
+		// The pinned ref is fixed in time; a since window may exclude
+		// it. HEAD reaches whatever the remote's default branch is now.
+		refspec = "HEAD"
 		useFilter = true
 	case isShallow:
 		args = []string{"fetch", "--unshallow"}
@@ -290,8 +304,8 @@ func devFetchOrigin(srcDir string, opts DevUpstreamOpts, pinnedRef string) error
 		args = append(args, "--filter=blob:none")
 	}
 	args = append(args, "origin")
-	if pinnedRef != "" {
-		args = append(args, pinnedRef)
+	if refspec != "" {
+		args = append(args, refspec)
 	}
 	if _, err := gitCmd(srcDir, args...); err != nil {
 		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)

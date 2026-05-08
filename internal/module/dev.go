@@ -148,22 +148,27 @@ func httpsToSSH(httpsURL string) (string, bool) {
 // dependency tree (yoestar.Unit, source state writers) into the
 // module package, which is meant to stay narrow.
 //
-// Depth- and since-bounded fetches narrow the refspec to the module's
-// pinned ref (when present) and pass `--filter=blob:none` so the
-// transfer is commits + trees only. Full-unshallow paths skip the
-// filter — the user explicitly asked for everything.
+// Depth-bounded fetches narrow the refspec to the module's pinned
+// ref. Since-bounded fetches use HEAD instead — a since window is
+// forward-looking and may exclude an older pinned ref entirely.
+// Both pass `--filter=blob:none` so the transfer is commits + trees
+// only. Full-unshallow paths skip the filter — the user explicitly
+// asked for everything.
 func moduleFetchOrigin(dir string, opts ModuleUpstreamOpts, pinnedRef string) error {
 	shallow, _ := gitOut(dir, "rev-parse", "--is-shallow-repository")
 	isShallow := strings.TrimSpace(shallow) == "true"
 
 	var args []string
+	var refspec string
 	useFilter := false
 	switch {
 	case opts.FetchDepth > 0:
 		args = []string{"fetch", fmt.Sprintf("--depth=%d", opts.FetchDepth)}
+		refspec = pinnedRef
 		useFilter = true
 	case opts.FetchSince != "":
 		args = []string{"fetch", "--shallow-since=" + opts.FetchSince}
+		refspec = "HEAD"
 		useFilter = true
 	case isShallow:
 		args = []string{"fetch", "--unshallow"}
@@ -176,8 +181,8 @@ func moduleFetchOrigin(dir string, opts ModuleUpstreamOpts, pinnedRef string) er
 		args = append(args, "--filter=blob:none")
 	}
 	args = append(args, "origin")
-	if pinnedRef != "" {
-		args = append(args, pinnedRef)
+	if refspec != "" {
+		args = append(args, refspec)
 	}
 	if _, err := gitOut(dir, args...); err != nil {
 		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
