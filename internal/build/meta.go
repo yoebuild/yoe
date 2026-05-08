@@ -10,14 +10,19 @@ import (
 // BuildMeta records metadata about a unit's build.
 // Stored as build.json in the unit's build directory.
 type BuildMeta struct {
-	Status   string     `json:"status"`            // "building", "complete", "failed", "cancelled"
-	Started  *time.Time `json:"started,omitempty"`  // when the build started
-	Finished *time.Time `json:"finished,omitempty"` // when the build finished
-	Duration float64    `json:"duration_seconds"`   // wall-clock seconds
-	DiskBytes      int64 `json:"disk_bytes"`      // total size of build directory
-	InstalledBytes int64 `json:"installed_bytes"` // size of destdir (what goes into the apk)
-	Hash     string     `json:"hash"`               // input hash
-	Error    string     `json:"error,omitempty"`     // error message if failed
+	Status         string     `json:"status"`               // "building", "complete", "failed", "cancelled"
+	Started        *time.Time `json:"started,omitempty"`    // when the build started
+	Finished       *time.Time `json:"finished,omitempty"`   // when the build finished
+	Duration       float64    `json:"duration_seconds"`     // wall-clock seconds
+	DiskBytes      int64      `json:"disk_bytes"`           // total size of build directory
+	InstalledBytes int64      `json:"installed_bytes"`      // size of destdir (what goes into the apk)
+	Hash           string     `json:"hash"`                 // input hash
+	Error          string     `json:"error,omitempty"`      // error message if failed
+	// SourceState is the cached source state token for the unit's
+	// build/<name>/src/ checkout — pin / dev / dev-mod / dev-dirty.
+	// Advisory: callers fall through to source.DetectState on miss.
+	// Empty for units not yet seen by the dev-mode machinery.
+	SourceState string `json:"source_state,omitempty"`
 }
 
 const metaFile = "build.json"
