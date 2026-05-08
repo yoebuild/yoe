@@ -362,6 +362,29 @@ func (m model) runModuleToPin(rmName string, force bool) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// armWatcherFromInitialStates seeds the source watcher with every
+// unit/module that's already in dev* state on startup. The cache
+// helpers populate the underlying maps as a side effect, which is
+// what we want — the watcher and the SRC column should agree on
+// initial membership.
+func (m *model) armWatcherFromInitialStates() {
+	if m.srcWatcher == nil {
+		return
+	}
+	for name := range m.proj.Units {
+		state := m.unitSourceState(name)
+		if source.IsDev(state) {
+			m.srcWatcher.Arm(targetUnit, name, m.unitSrcDir(name), state)
+		}
+	}
+	for _, rm := range m.proj.ResolvedModules {
+		state := m.moduleSourceState(rm)
+		if source.IsDev(state) {
+			m.srcWatcher.Arm(targetModule, rm.Name, rm.Dir, state)
+		}
+	}
+}
+
 // findModule returns the resolved module by name and a found-bool.
 func (m model) findModule(name string) (yoestar.ResolvedModule, bool) {
 	for _, r := range m.proj.ResolvedModules {
@@ -373,17 +396,41 @@ func (m model) findModule(name string) (yoestar.ResolvedModule, bool) {
 }
 
 // invalidateUnitState drops the cached source state for a unit so the
-// next render re-reads BuildMeta.SourceState.
+// next render re-reads BuildMeta.SourceState. Also reconciles the
+// background watcher: if the new state is dev*, arm; otherwise disarm.
 func (m model) invalidateUnitState(name string) {
 	if m.unitSrcStates != nil {
 		delete(m.unitSrcStates, name)
 	}
+	if m.srcWatcher == nil {
+		return
+	}
+	state := m.unitSourceState(name)
+	if source.IsDev(state) {
+		m.srcWatcher.Arm(targetUnit, name, m.unitSrcDir(name), state)
+	} else {
+		m.srcWatcher.Disarm(targetUnit, name)
+	}
 }
 
-// invalidateModuleState drops the cached source state for a module.
+// invalidateModuleState drops the cached source state for a module
+// and reconciles the watcher membership.
 func (m model) invalidateModuleState(name string) {
 	if m.moduleSrcStates != nil {
 		delete(m.moduleSrcStates, name)
+	}
+	if m.srcWatcher == nil {
+		return
+	}
+	rm, ok := m.findModule(name)
+	if !ok {
+		return
+	}
+	state := m.moduleSourceState(rm)
+	if source.IsDev(state) {
+		m.srcWatcher.Arm(targetModule, name, rm.Dir, state)
+	} else {
+		m.srcWatcher.Disarm(targetModule, name)
 	}
 }
 

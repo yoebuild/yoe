@@ -402,6 +402,13 @@ type model struct {
 	// discard-confirm). Nil when no prompt is showing.
 	sourcePrompt *sourcePrompt
 
+	// Background watcher that polls the on-disk state of every dev*
+	// unit/module and pushes a sourceStateChangedMsg when DetectState
+	// returns something new. Invariant: watcher membership matches
+	// the set of unitSrcStates / moduleSrcStates whose value is in
+	// the dev* family. Nil in tests that build a model directly.
+	srcWatcher *sourceWatcher
+
 	// Column sort state. sortColumn picks the comparator (sortByName etc.).
 	// sortDesc inverts it. Click a header to switch column or toggle direction.
 	sortColumn int
@@ -484,6 +491,7 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 		cancels:         make(map[string]context.CancelFunc),
 		unitSrcStates:   make(map[string]source.State),
 		moduleSrcStates: make(map[string]source.State),
+		srcWatcher:      newSourceWatcher(),
 		machines:       machines,
 		flashProgress:  progress.New(progress.WithDefaultGradient()),
 		deployHost:     ov.DeployHost,
@@ -518,6 +526,17 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	tuiProgram = p
+
+	// Arm the source watcher for any unit/module that's already in
+	// dev* state at startup (e.g. user toggled it via the CLI before
+	// launching the TUI). Polling fires immediately afterwards.
+	m.armWatcherFromInitialStates()
+	m.srcWatcher.Start(func(msg tea.Msg) {
+		if tuiProgram != nil {
+			tuiProgram.Send(msg)
+		}
+	})
+	defer m.srcWatcher.Stop()
 
 	yoe.OnNotify = func(msg string) {
 		if tuiProgram != nil {
@@ -555,6 +574,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshDetail()
 		}
 		return m, doTick()
+
+	case sourceStateChangedMsg:
+		// Watcher saw a state transition (e.g. user committed in a
+		// dev clone outside the TUI). Update the cache directly so
+		// the next render shows the new token without forcing a full
+		// project reload.
+		switch msg.target {
+		case targetUnit:
+			if m.unitSrcStates != nil {
+				m.unitSrcStates[msg.name] = msg.state
+			}
+		case targetModule:
+			if m.moduleSrcStates != nil {
+				m.moduleSrcStates[msg.name] = msg.state
+			}
+		}
+		return m, nil
 
 	case buildEventMsg:
 		switch msg.status {
