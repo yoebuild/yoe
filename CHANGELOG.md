@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-05-08
+
 - **Search bar clears with `Ctrl+U`.** Readline's kill-line shortcut wipes the
   query input back to a blank bar in one keystroke — faster than holding
   Backspace or pressing `\` to snap to the saved default. Live-applied like a
