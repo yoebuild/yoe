@@ -125,9 +125,10 @@ const (
 type sourcePromptKind int
 
 const (
-	promptSSHHTTPS    sourcePromptKind = iota // pin → dev: pick remote scheme
-	promptPinKind                             // dev-mod → dev: pick tag / hash / branch to write into .star
-	promptDiscardDev                          // dev-mod / dev-dirty → pin: confirm discard
+	promptSSHHTTPS     sourcePromptKind = iota // pin → dev, stage 1: pick remote scheme
+	promptHistoryDepth                         // pin → dev, stage 2: pick fetch depth
+	promptPinKind                              // dev-mod → dev: pick tag / hash / branch to write into .star
+	promptDiscardDev                           // dev-mod / dev-dirty → pin: confirm discard
 )
 
 // sourcePromptOption is one row in the dev-mode modal. `value` is the
@@ -151,6 +152,11 @@ type sourcePrompt struct {
 	options    []sourcePromptOption
 	cursor     int
 	prevView   viewKind
+
+	// Carried across multi-stage prompts. The pin → dev flow asks for
+	// the remote scheme first, then for the fetch depth — chosenSSH
+	// remembers stage-1's pick so stage-2's apply has both choices.
+	chosenSSH bool
 }
 
 // sourceOp tracks an in-flight dev-mode action so the UI can render
@@ -1102,6 +1108,9 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.queryEditing = true
 		m.queryRevertTo = m.query
 		m.queryInput = m.query.String() // start the bar prefilled with the active query
+		if m.queryInput != "" {
+			m.queryInput += " " // ready for the user to append a new term
+		}
 		return m, nil
 
 	case "s":

@@ -240,7 +240,7 @@ func TestDevToUpstream_PinToDev(t *testing.T) {
 	srcDir, upstreamURL := setupPinnedSrc(t, dir, "openssh")
 
 	unit := &yoestar.Unit{Name: "openssh", Source: upstreamURL}
-	if err := DevToUpstream(dir, "x86_64", unit, false); err != nil {
+	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
 	// Origin set?
@@ -262,7 +262,7 @@ func TestDevToUpstream_NonGitSource(t *testing.T) {
 	setupPinnedSrc(t, dir, "openssh")
 
 	unit := &yoestar.Unit{Name: "openssh", Source: "https://example.com/openssh.tar.gz"}
-	err := DevToUpstream(dir, "x86_64", unit, false)
+	err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{})
 	if err == nil {
 		t.Fatal("expected DevToUpstream to refuse a non-git source")
 	}
@@ -278,7 +278,7 @@ func TestDevToUpstream_Idempotent(t *testing.T) {
 	run(t, srcDir, "git", "remote", "add", "origin", "https://stale.example.com/x.git")
 
 	unit := &yoestar.Unit{Name: "openssh", Source: upstreamURL}
-	if err := DevToUpstream(dir, "x86_64", unit, false); err != nil {
+	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
 	out, _ := gitCmd(srcDir, "remote", "get-url", "origin")
@@ -291,7 +291,7 @@ func TestDevToPin_CleanDev(t *testing.T) {
 	dir := t.TempDir()
 	srcDir, upstreamURL := setupPinnedSrc(t, dir, "openssh")
 	unit := &yoestar.Unit{Name: "openssh", Source: upstreamURL}
-	if err := DevToUpstream(dir, "x86_64", unit, false); err != nil {
+	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
 	if err := DevToPin(dir, "x86_64", unit, false); err != nil {
@@ -309,7 +309,7 @@ func TestDevToPin_RefusesDevModWithoutForce(t *testing.T) {
 	dir := t.TempDir()
 	srcDir, upstreamURL := setupPinnedSrc(t, dir, "openssh")
 	unit := &yoestar.Unit{Name: "openssh", Source: upstreamURL}
-	if err := DevToUpstream(dir, "x86_64", unit, false); err != nil {
+	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
 	// Add a local commit beyond upstream.
@@ -332,7 +332,7 @@ func TestDevToPin_ForceDiscardsDevMod(t *testing.T) {
 	dir := t.TempDir()
 	srcDir, upstreamURL := setupPinnedSrc(t, dir, "openssh")
 	unit := &yoestar.Unit{Name: "openssh", Source: upstreamURL}
-	if err := DevToUpstream(dir, "x86_64", unit, false); err != nil {
+	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(srcDir, "extra.c"), []byte("// extra\n"), 0o644); err != nil {
@@ -391,7 +391,7 @@ func setupDevModUnit(t *testing.T, dir, unitName, starBody string) (srcDir, star
 	}
 
 	unit = &yoestar.Unit{Name: unitName, Source: upstreamURL, DefinedIn: defDir}
-	if err := DevToUpstream(dir, "x86_64", unit, false); err != nil {
+	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
 	// Add a local commit beyond upstream → state is dev-mod.
@@ -510,7 +510,7 @@ func TestDevPromoteToPin_RefusesNonDevMod(t *testing.T) {
 		t.Errorf("error should mention dev-mod requirement: %v", err)
 	}
 	// Also test from dev-dirty (uncommitted edits).
-	if err := DevToUpstream(dir, "x86_64", unit, false); err != nil {
+	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(srcDir, "dirty.c"), []byte("// dirty\n"), 0o644); err != nil {

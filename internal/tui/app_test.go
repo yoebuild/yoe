@@ -444,9 +444,75 @@ func TestUpdateSourcePrompt_Esc_RestoresPrevView(t *testing.T) {
 	}
 }
 
+// TestApplySourcePromptChoice_SSHOpensDepthStage verifies the
+// two-stage flow: picking https/ssh in stage 1 doesn't fire the
+// toggle, it opens the fetch-depth picker as stage 2.
+func TestApplySourcePromptChoice_SSHOpensDepthStage(t *testing.T) {
+	m := model{
+		view: viewSourcePrompt,
+		sourcePrompt: &sourcePrompt{
+			kind:       promptSSHHTTPS,
+			target:     "unit",
+			targetName: "foo",
+			prevView:   viewDetail,
+			options:    []sourcePromptOption{{label: "ssh", value: "ssh"}},
+		},
+	}
+	updated, _ := m.applySourcePromptChoice("ssh")
+	got := updated.(model)
+	if got.sourcePrompt == nil {
+		t.Fatal("expected stage-2 prompt to be open")
+	}
+	if got.sourcePrompt.kind != promptHistoryDepth {
+		t.Errorf("kind = %v, want promptHistoryDepth", got.sourcePrompt.kind)
+	}
+	if !got.sourcePrompt.chosenSSH {
+		t.Errorf("chosenSSH = false, want true (carried from stage 1)")
+	}
+	// Stage 2's options should include all/depth=N/since/cancel.
+	labels := make([]string, 0, len(got.sourcePrompt.options))
+	for _, o := range got.sourcePrompt.options {
+		labels = append(labels, o.label)
+	}
+	if !strings.Contains(strings.Join(labels, " "), "all") {
+		t.Errorf("expected an 'all' option, got %v", labels)
+	}
+}
+
+func TestDepthOptionToFetch(t *testing.T) {
+	cases := []struct {
+		in   string
+		want depthFetchSpec
+	}{
+		{"all", depthFetchSpec{}},
+		{"depth=1000", depthFetchSpec{FetchDepth: 1000}},
+		{"depth=100", depthFetchSpec{FetchDepth: 100}},
+		{"since=1.year.ago", depthFetchSpec{FetchSince: "1.year.ago"}},
+		{"unknown", depthFetchSpec{}},
+	}
+	for _, c := range cases {
+		got := depthOptionToFetch(c.in)
+		if got != c.want {
+			t.Errorf("depthOptionToFetch(%q) = %+v, want %+v", c.in, got, c.want)
+		}
+	}
+}
+
+func TestDepthLabel_HumanForms(t *testing.T) {
+	if got := depthLabel(depthFetchSpec{}); !strings.Contains(got, "full") {
+		t.Errorf("zero spec should mention full history, got %q", got)
+	}
+	if got := depthLabel(depthFetchSpec{FetchDepth: 100}); !strings.Contains(got, "100") {
+		t.Errorf("depth label should include the count, got %q", got)
+	}
+	if got := depthLabel(depthFetchSpec{FetchSince: "1.year.ago"}); !strings.Contains(got, "1.year.ago") {
+		t.Errorf("since label should include the spec, got %q", got)
+	}
+}
+
 func TestRunDevToUpstream_ParksInProgressView(t *testing.T) {
 	m := newModelWithUnit(t, t.TempDir(), "foo", source.StatePin)
-	updated, cmd := m.runDevToUpstream("foo", false)
+	updated, cmd := m.runDevToUpstream("foo", false, depthFetchSpec{})
 	got := updated.(model)
 	if got.view != viewSourceProgress {
 		t.Errorf("view = %v, want viewSourceProgress", got.view)
@@ -458,8 +524,8 @@ func TestRunDevToUpstream_ParksInProgressView(t *testing.T) {
 		t.Errorf("op target/name = (%v, %s), want (unit, foo)",
 			got.sourceOp.target, got.sourceOp.name)
 	}
-	if !strings.Contains(got.sourceOp.label, "Fetching upstream history") {
-		t.Errorf("label should mention fetching upstream, got %q", got.sourceOp.label)
+	if !strings.Contains(got.sourceOp.label, "Fetching") {
+		t.Errorf("label should mention fetching, got %q", got.sourceOp.label)
 	}
 	if cmd == nil {
 		t.Fatal("expected a tea.Cmd to dispatch the goroutine work")

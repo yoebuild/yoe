@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **TUI `/` makes refining an existing query faster.** When you press `/` and
+  the active query is non-empty, the bar opens with a trailing space so you can
+  immediately type the next term — no need to press End or space first. A blank
+  query still opens empty.
 - **Builds no longer wipe a unit in dev-dirty state.** The executor was
   rewriting each unit's build metadata on every build start, which dropped the
   dev-mode marker the source step uses to skip its own fetch and extract. With
@@ -19,11 +23,13 @@ and this project adheres to
   yoe-managed (`pin`), tracking upstream (`dev`), has commits beyond upstream
   (`dev-mod`), or has uncommitted edits (`dev-dirty`). Press `u` on a unit's
   detail page (or a module row) to switch between pin and dev — yoe asks whether
-  to rewrite origin to SSH, and warns before discarding local work. Once you're
-  happy with a `dev-mod` HEAD, `P` captures it back into the `.star` pin so
-  other people building the project pick it up. A `dev*` unit is left untouched
-  at build time, so `yoe build` won't overwrite your working tree or undo
-  in-flight changes.
+  to rewrite origin to SSH, then how much history to fetch (full / last 1000 /
+  last 100 / last year / last month) so the Linux kernel's full history doesn't
+  have to come down every time. A spinner runs while the fetch is in flight so
+  you can see something is happening. Once you're happy with a `dev-mod` HEAD,
+  `P` captures it back into the `.star` pin so other people building the project
+  pick it up. A `dev*` unit is left untouched at build time, so `yoe build`
+  won't overwrite your working tree or undo in-flight changes.
 - **TUI size column no longer overflows on big artifacts.** Sizes like a 1003
   KiB kernel image render as `1003K` instead of `1003.4K`, keeping the column
   aligned. The decimal still shows for small values (e.g. `9.9K`, `1.2M`) where

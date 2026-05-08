@@ -59,7 +59,7 @@ func TestModuleToUpstream_UnshallowsShallow(t *testing.T) {
 	moduleDir, _ := setupModuleClone(t, dir, "foo", true)
 	m := yoestar.ResolvedModule{Name: "foo", Dir: moduleDir, Ref: "main"}
 
-	if err := ModuleToUpstream(m, false); err != nil {
+	if err := ModuleToUpstream(m, ModuleUpstreamOpts{}); err != nil {
 		t.Fatalf("ModuleToUpstream: %v", err)
 	}
 	got, err := gitOut(moduleDir, "rev-parse", "--is-shallow-repository")
@@ -80,7 +80,7 @@ func TestModuleToUpstream_AlreadyFullHistory(t *testing.T) {
 	m := yoestar.ResolvedModule{Name: "foo", Dir: moduleDir, Ref: "main"}
 
 	// Should be a no-op for the unshallow step.
-	if err := ModuleToUpstream(m, false); err != nil {
+	if err := ModuleToUpstream(m, ModuleUpstreamOpts{}); err != nil {
 		t.Fatalf("ModuleToUpstream: %v", err)
 	}
 	if state := ReadState(moduleDir); state != source.StateDev {
@@ -90,7 +90,7 @@ func TestModuleToUpstream_AlreadyFullHistory(t *testing.T) {
 
 func TestModuleToUpstream_LocalRefuses(t *testing.T) {
 	m := yoestar.ResolvedModule{Name: "foo", Local: "../path", Dir: ""}
-	err := ModuleToUpstream(m, false)
+	err := ModuleToUpstream(m, ModuleUpstreamOpts{})
 	if err == nil {
 		t.Fatal("expected error for local module")
 	}
@@ -101,7 +101,7 @@ func TestModuleToUpstream_LocalRefuses(t *testing.T) {
 
 func TestModuleToUpstream_NotSyncedRefuses(t *testing.T) {
 	m := yoestar.ResolvedModule{Name: "foo", Dir: ""}
-	err := ModuleToUpstream(m, false)
+	err := ModuleToUpstream(m, ModuleUpstreamOpts{})
 	if err == nil {
 		t.Fatal("expected error for unsynced module")
 	}
@@ -113,7 +113,7 @@ func TestModuleToPin_ResetsToRef(t *testing.T) {
 	m := yoestar.ResolvedModule{Name: "foo", Dir: moduleDir, Ref: "main"}
 
 	// Toggle to dev so we have something to reset.
-	if err := ModuleToUpstream(m, false); err != nil {
+	if err := ModuleToUpstream(m, ModuleUpstreamOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	// State should now be dev.
@@ -135,7 +135,7 @@ func TestModuleToPin_RefusesDevModWithoutForce(t *testing.T) {
 	moduleDir, _ := setupModuleClone(t, dir, "foo", false)
 	m := yoestar.ResolvedModule{Name: "foo", Dir: moduleDir, Ref: "main"}
 
-	if err := ModuleToUpstream(m, false); err != nil {
+	if err := ModuleToUpstream(m, ModuleUpstreamOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	// Add a local commit beyond declared ref.

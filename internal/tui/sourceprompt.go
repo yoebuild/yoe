@@ -228,9 +228,10 @@ func (m *model) moveSourcePromptCursor(delta int) {
 }
 
 // applySourcePromptChoice runs the action keyed off the prompt kind
-// and selected value. On success, refreshes the source-state cache
-// for the target so the SRC column repaints to the new state on the
-// next render.
+// and selected value. The pin → dev flow goes through two prompts
+// (scheme then depth); other flows complete in one step. On success,
+// refreshes the source-state cache for the target so the SRC column
+// repaints to the new state on the next render.
 func (m model) applySourcePromptChoice(value string) (tea.Model, tea.Cmd) {
 	if m.sourcePrompt == nil {
 		return m, nil
@@ -244,34 +245,93 @@ func (m model) applySourcePromptChoice(value string) (tea.Model, tea.Cmd) {
 	target := m.sourcePrompt.target
 	name := m.sourcePrompt.targetName
 	kind := m.sourcePrompt.kind
-	prevView := m.sourcePrompt.prevView
-	m.sourcePrompt = nil
-	m.view = prevView
 
 	switch kind {
 	case promptSSHHTTPS:
+		// Stage 1 of pin → dev. Carry the SSH choice forward and
+		// open the depth picker — don't fire the toggle yet.
 		ssh := value == "ssh"
+		m.sourcePrompt.kind = promptHistoryDepth
+		m.sourcePrompt.chosenSSH = ssh
+		m.sourcePrompt.header = fmt.Sprintf(
+			"How much history should we fetch for %s?", name)
+		m.sourcePrompt.options = depthPromptOptions()
+		m.sourcePrompt.cursor = 0 // default to "all history"
+		return m, nil
+
+	case promptHistoryDepth:
+		// Stage 2 of pin → dev. We have both choices; fire the toggle.
+		ssh := m.sourcePrompt.chosenSSH
+		opts := depthOptionToFetch(value)
+		prevView := m.sourcePrompt.prevView
+		m.sourcePrompt = nil
+		m.view = prevView
 		if target == "unit" {
-			return m.runDevToUpstream(name, ssh)
+			return m.runDevToUpstream(name, ssh, opts)
 		}
-		return m.runModuleToUpstream(name, ssh)
+		return m.runModuleToUpstream(name, ssh, opts)
+
 	case promptDiscardDev:
+		prevView := m.sourcePrompt.prevView
+		m.sourcePrompt = nil
+		m.view = prevView
 		// Only "discard" lands here (cancel returned above).
 		if target == "unit" {
 			return m.runDevToPin(name, true)
 		}
 		return m.runModuleToPin(name, true)
+
 	case promptPinKind:
+		prevView := m.sourcePrompt.prevView
+		m.sourcePrompt = nil
+		m.view = prevView
 		return m.runDevPromote(name, value)
 	}
 	return m, nil
+}
+
+// depthFetchSpec is the depth strategy a prompt option resolves to.
+// FetchDepth (>0) and FetchSince (non-empty) are passed straight to
+// internal/dev.go's DevUpstreamOpts; both zero means "all history".
+type depthFetchSpec struct {
+	FetchDepth int
+	FetchSince string
+}
+
+// depthPromptOptions returns the standard fetch-depth menu.
+// Cursor 0 ("all history") preserves the legacy behavior — pressing
+// Enter through both prompts is identical to the pre-depth flow.
+func depthPromptOptions() []sourcePromptOption {
+	return []sourcePromptOption{
+		{label: "all", desc: "full history (slowest, but `git log` shows everything)", value: "all"},
+		{label: "1000", desc: "last 1000 commits — much faster, plenty for most work", value: "depth=1000"},
+		{label: "100", desc: "last 100 commits — quickest", value: "depth=100"},
+		{label: "1y", desc: "commits since one year ago", value: "since=1.year.ago"},
+		{label: "1m", desc: "commits since one month ago", value: "since=1.month.ago"},
+		{label: "cancel", desc: "stay pinned", value: "cancel"},
+	}
+}
+
+// depthOptionToFetch parses a value emitted by depthPromptOptions
+// back into the structured fetch spec. Unknown / "all" → zero spec.
+func depthOptionToFetch(value string) depthFetchSpec {
+	switch {
+	case strings.HasPrefix(value, "depth="):
+		var n int
+		fmt.Sscanf(strings.TrimPrefix(value, "depth="), "%d", &n)
+		return depthFetchSpec{FetchDepth: n}
+	case strings.HasPrefix(value, "since="):
+		return depthFetchSpec{FetchSince: strings.TrimPrefix(value, "since=")}
+	default:
+		return depthFetchSpec{}
+	}
 }
 
 // runDevToUpstream backgrounds DevToUpstream in a goroutine and parks
 // the TUI in viewSourceProgress with a spinner. The op is potentially
 // slow — `git fetch --unshallow` against a multi-GB repo can run for
 // tens of seconds — so blocking the Update loop would freeze the UI.
-func (m model) runDevToUpstream(unitName string, ssh bool) (tea.Model, tea.Cmd) {
+func (m model) runDevToUpstream(unitName string, ssh bool, depth depthFetchSpec) (tea.Model, tea.Cmd) {
 	u, ok := m.proj.Units[unitName]
 	if !ok {
 		m.message = fmt.Sprintf("unit %s not found", unitName)
@@ -281,10 +341,11 @@ func (m model) runDevToUpstream(unitName string, ssh bool) (tea.Model, tea.Cmd) 
 	prevView := m.view
 	m.view = viewSourceProgress
 	m.sourceOp = newSourceOp(targetUnit, unitName,
-		fmt.Sprintf("Fetching upstream history for %s (this may take a while)", unitName),
+		fmt.Sprintf("Fetching %s for %s", depthLabel(depth), unitName),
 		prevView)
+	opts := yoe.DevUpstreamOpts{SSH: ssh, FetchDepth: depth.FetchDepth, FetchSince: depth.FetchSince}
 	cmd := func() tea.Msg {
-		err := yoe.DevToUpstream(m.projectDir, scope, u, ssh)
+		err := yoe.DevToUpstream(m.projectDir, scope, u, opts)
 		return sourceOpDoneMsg{
 			target:     targetUnit,
 			name:       unitName,
@@ -293,6 +354,21 @@ func (m model) runDevToUpstream(unitName string, ssh bool) (tea.Model, tea.Cmd) 
 		}
 	}
 	return m, tea.Batch(m.sourceOp.spinner.Tick, cmd)
+}
+
+// depthLabel renders a fetch spec as a short user-facing phrase for
+// the spinner label ("full history", "last 1000 commits", "commits
+// since 1.year.ago"). Keeps the spinner explanatory without
+// duplicating the option list verbiage.
+func depthLabel(d depthFetchSpec) string {
+	switch {
+	case d.FetchDepth > 0:
+		return fmt.Sprintf("last %d commits", d.FetchDepth)
+	case d.FetchSince != "":
+		return fmt.Sprintf("commits since %s", d.FetchSince)
+	default:
+		return "full upstream history (this may take a while)"
+	}
 }
 
 // runDevToPin runs DevToPin in the background. Pin transitions are
@@ -364,7 +440,7 @@ func (m model) runDevPromote(unitName, kindValue string) (tea.Model, tea.Cmd) {
 // dispatch. ModuleToUpstream's `git fetch --unshallow` is the most
 // common reason the TUI ever feels slow, so the spinner is most
 // valuable here.
-func (m model) runModuleToUpstream(rmName string, ssh bool) (tea.Model, tea.Cmd) {
+func (m model) runModuleToUpstream(rmName string, ssh bool, depth depthFetchSpec) (tea.Model, tea.Cmd) {
 	rm, ok := m.findModule(rmName)
 	if !ok {
 		m.message = fmt.Sprintf("module %s not found", rmName)
@@ -373,10 +449,11 @@ func (m model) runModuleToUpstream(rmName string, ssh bool) (tea.Model, tea.Cmd)
 	prevView := m.view
 	m.view = viewSourceProgress
 	m.sourceOp = newSourceOp(targetModule, rmName,
-		fmt.Sprintf("Fetching upstream history for module %s (this may take a while)", rmName),
+		fmt.Sprintf("Fetching %s for module %s", depthLabel(depth), rmName),
 		prevView)
+	opts := module.ModuleUpstreamOpts{SSH: ssh, FetchDepth: depth.FetchDepth, FetchSince: depth.FetchSince}
 	cmd := func() tea.Msg {
-		err := module.ModuleToUpstream(rm, ssh)
+		err := module.ModuleToUpstream(rm, opts)
 		return sourceOpDoneMsg{
 			target:     targetModule,
 			name:       rmName,

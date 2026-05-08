@@ -175,21 +175,43 @@ func devSrcDir(projectDir, scopeDir, unitName string) string {
 	return filepath.Join(projectDir, "build", unitName+"."+scopeDir, "src")
 }
 
+// DevUpstreamOpts configures the upstream-fetch performed when a unit
+// (or module) is toggled into dev mode. Zero values keep the legacy
+// "rewrite remote, unshallow, fetch everything" behavior, so callers
+// that don't care about depth keep working without changes.
+type DevUpstreamOpts struct {
+	// SSH rewrites a github/gitlab-style HTTPS URL to git@host:path
+	// before setting origin. Hosts that don't match a known SSH
+	// mapping fall back to HTTPS regardless of this flag.
+	SSH bool
+	// FetchDepth, when > 0, replaces `--unshallow` with
+	// `--depth=<N>`. Useful for repos with deep history (linux,
+	// chromium) where a full unshallow pulls gigabytes of objects
+	// the developer doesn't need.
+	FetchDepth int
+	// FetchSince, when non-empty, replaces `--unshallow` with
+	// `--shallow-since=<spec>` (e.g. "1.year.ago", "2024-01-01").
+	// Mutually exclusive with FetchDepth — FetchDepth wins if both
+	// are set, on the assumption an explicit commit count is more
+	// predictable than a date heuristic.
+	FetchSince string
+}
+
 // DevToUpstream switches a unit's src checkout from pin mode (yoe-managed
 // shallow clone, no remote) into dev mode: rewrites `origin` to the
-// upstream URL the user picks (HTTPS or SSH), unshallows the clone so
-// `git log`, `git blame`, etc. work against full history, and persists
+// upstream URL the user picks (HTTPS or SSH), fetches enough history
+// for `git log` / `git blame` / branch ops to work, and persists
 // `dev` state in BuildMeta.
 //
-// `unit.Source` provides the canonical HTTPS URL; ssh=true rewrites it
+// `unit.Source` provides the canonical HTTPS URL; opts.SSH rewrites it
 // to git@host:path form for hosts where that mapping is well-defined
 // (github.com, gitlab.com, generic SSH-on-:22 servers). Hosts that don't
-// fit that pattern fall through to HTTPS regardless of the ssh argument.
+// fit that pattern fall through to HTTPS regardless of the SSH flag.
 //
 // The unit's working tree is not moved — pin and dev mode for the same
 // commit produce bit-identical builds. The transition adds connectivity
 // and history; it doesn't change source content.
-func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, ssh bool) error {
+func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, opts DevUpstreamOpts) error {
 	srcDir := devSrcDir(projectDir, scopeDir, unit.Name)
 	if _, err := os.Stat(filepath.Join(srcDir, ".git")); err != nil {
 		return fmt.Errorf("DevToUpstream: %s is not a git repo — build the unit first", srcDir)
@@ -199,7 +221,7 @@ func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, ssh bool) er
 	}
 
 	target := unit.Source
-	if ssh {
+	if opts.SSH {
 		if rewrote, ok := httpsToSSH(unit.Source); ok {
 			target = rewrote
 		}
@@ -213,23 +235,44 @@ func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, ssh bool) er
 		return fmt.Errorf("DevToUpstream: setting origin: %w", err)
 	}
 
-	// Unshallow if the clone is shallow. `git fetch --unshallow` errors
-	// on a non-shallow repo; check first to avoid the noise.
-	shallow, _ := gitCmd(srcDir, "rev-parse", "--is-shallow-repository")
-	if strings.TrimSpace(shallow) == "true" {
-		if _, err := gitCmd(srcDir, "fetch", "--unshallow", "origin"); err != nil {
-			return fmt.Errorf("DevToUpstream: fetch --unshallow: %w", err)
-		}
-	} else {
-		// Already full-history (or treated as such). Still fetch so
-		// origin/<branch> refs are populated for `git log origin/...`.
-		if _, err := gitCmd(srcDir, "fetch", "origin"); err != nil {
-			return fmt.Errorf("DevToUpstream: fetch: %w", err)
-		}
+	if err := devFetchOrigin(srcDir, opts); err != nil {
+		return fmt.Errorf("DevToUpstream: %w", err)
 	}
 
 	if err := writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StateDev); err != nil {
 		return fmt.Errorf("DevToUpstream: persisting state: %w", err)
+	}
+	return nil
+}
+
+// devFetchOrigin runs the upstream fetch with the depth strategy
+// chosen in opts. Picks one of:
+//   - --depth=N        when FetchDepth > 0
+//   - --shallow-since  when FetchSince is set
+//   - --unshallow      when the clone is currently shallow (default)
+//   - plain fetch      when the clone is already full history
+//
+// The `--unshallow` branch errors on a non-shallow repo, so we probe
+// is-shallow-repository first instead of paying the round-trip on the
+// failing path. The depth and since branches are safe on either
+// shape — git just deepens to the requested boundary.
+func devFetchOrigin(srcDir string, opts DevUpstreamOpts) error {
+	shallow, _ := gitCmd(srcDir, "rev-parse", "--is-shallow-repository")
+	isShallow := strings.TrimSpace(shallow) == "true"
+
+	var args []string
+	switch {
+	case opts.FetchDepth > 0:
+		args = []string{"fetch", fmt.Sprintf("--depth=%d", opts.FetchDepth), "origin"}
+	case opts.FetchSince != "":
+		args = []string{"fetch", "--shallow-since=" + opts.FetchSince, "origin"}
+	case isShallow:
+		args = []string{"fetch", "--unshallow", "origin"}
+	default:
+		args = []string{"fetch", "origin"}
+	}
+	if _, err := gitCmd(srcDir, args...); err != nil {
+		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
 	return nil
 }

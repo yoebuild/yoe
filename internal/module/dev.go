@@ -12,18 +12,28 @@ import (
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
+// ModuleUpstreamOpts mirrors the unit-side DevUpstreamOpts so callers
+// can request a depth-limited fetch instead of a full unshallow. See
+// internal/dev.go for field semantics.
+type ModuleUpstreamOpts struct {
+	SSH        bool
+	FetchDepth int
+	FetchSince string
+}
+
 // ModuleToUpstream switches a module's clone into dev mode: rewrites
-// origin to SSH if the user prefers, unshallows the clone if it was
-// shallow, and persists `dev` state in the module's sibling state file.
+// origin to SSH if the user prefers, fetches enough history for `git
+// log` / `git blame` to work, and persists `dev` state in the
+// module's sibling state file.
 //
 // Modules differ from units in that they already have a real remote
 // (a git clone done at sync time), so the transition is lighter than
 // the unit-side DevToUpstream — no remote-add, no fetch needed beyond
-// unshallow.
+// the depth strategy chosen in opts.
 //
 // Locally-overridden modules (`module(local = "...")`) error out: the
 // user's checkout is theirs to manage; yoe doesn't touch its remote.
-func ModuleToUpstream(m yoestar.ResolvedModule, ssh bool) error {
+func ModuleToUpstream(m yoestar.ResolvedModule, opts ModuleUpstreamOpts) error {
 	if m.Local != "" {
 		return fmt.Errorf("ModuleToUpstream: module %q is locally overridden (local = %q); yoe doesn't manage its remote", m.Name, m.Local)
 	}
@@ -34,7 +44,7 @@ func ModuleToUpstream(m yoestar.ResolvedModule, ssh bool) error {
 		return fmt.Errorf("ModuleToUpstream: %s is not a git repo", m.Dir)
 	}
 
-	if ssh {
+	if opts.SSH {
 		current, err := gitOut(m.Dir, "remote", "get-url", "origin")
 		if err == nil {
 			if rewrote, ok := httpsToSSH(strings.TrimSpace(current)); ok {
@@ -45,11 +55,8 @@ func ModuleToUpstream(m yoestar.ResolvedModule, ssh bool) error {
 		}
 	}
 
-	shallow, _ := gitOut(m.Dir, "rev-parse", "--is-shallow-repository")
-	if strings.TrimSpace(shallow) == "true" {
-		if _, err := gitOut(m.Dir, "fetch", "--unshallow", "origin"); err != nil {
-			return fmt.Errorf("ModuleToUpstream: fetch --unshallow: %w", err)
-		}
+	if err := moduleFetchOrigin(m.Dir, opts); err != nil {
+		return fmt.Errorf("ModuleToUpstream: %w", err)
 	}
 
 	// Tag the current HEAD as `upstream` so source.DetectState's
@@ -133,6 +140,34 @@ func httpsToSSH(httpsURL string) (string, bool) {
 		return httpsURL, false
 	}
 	return "git@" + u.Host + ":" + path, true
+}
+
+// moduleFetchOrigin runs the upstream fetch with the depth strategy
+// chosen in opts — mirrors devFetchOrigin in internal/dev.go but
+// keeps a thin private copy here to avoid pulling internal/dev's
+// dependency tree (yoestar.Unit, source state writers) into the
+// module package, which is meant to stay narrow.
+func moduleFetchOrigin(dir string, opts ModuleUpstreamOpts) error {
+	shallow, _ := gitOut(dir, "rev-parse", "--is-shallow-repository")
+	isShallow := strings.TrimSpace(shallow) == "true"
+
+	var args []string
+	switch {
+	case opts.FetchDepth > 0:
+		args = []string{"fetch", fmt.Sprintf("--depth=%d", opts.FetchDepth), "origin"}
+	case opts.FetchSince != "":
+		args = []string{"fetch", "--shallow-since=" + opts.FetchSince, "origin"}
+	case isShallow:
+		args = []string{"fetch", "--unshallow", "origin"}
+	default:
+		// Already full-history clones don't need a re-fetch on toggle —
+		// the user already has everything. Skip silently.
+		return nil
+	}
+	if _, err := gitOut(dir, args...); err != nil {
+		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return nil
 }
 
 // excludeFromGit appends entry to <gitDir>/.git/info/exclude so the

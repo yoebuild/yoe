@@ -771,10 +771,11 @@ omitted. Empty until the unit has been built at least once.
 Press `/` to edit the active query. The query bar accepts plain substrings plus
 field filters: `type:image`, `module:rpi`, `status:failed`, and `in:<unit>` —
 the last expands to the runtime closure of that unit, so `in:dev-image` shows
-only what your image needs. `Tab` completes field names and values. Press Enter
-to accept, Esc to revert. The TUI starts filtered to your default image's
-closure; press `\` to snap back to the saved default and `S` to save the current
-query as the new default.
+only what your image needs. When the active query is non-empty, `/` opens the
+bar with a trailing space so you can immediately type an additional term. `Tab`
+completes field names and values. Press Enter to accept, Esc to revert. The TUI
+starts filtered to your default image's closure; press `\` to snap back to the
+saved default and `S` to save the current query as the new default.
 
 Builds call `build.BuildUnits()` directly (in-process, no subprocess). The
 executor sends events to the TUI as each unit starts and finishes building.
