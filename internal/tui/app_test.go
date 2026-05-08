@@ -50,6 +50,43 @@ func TestInstalledSize_Unbuilt_ReturnsZero(t *testing.T) {
 	}
 }
 
+// TestRenderQueryCompletions_Vertical confirms the completion list
+// renders as a vertical column under the query bar (one candidate
+// per line) rather than the previous horizontal "tab: a  b  c"
+// blob at the bottom of the screen.
+func TestRenderQueryCompletions_Vertical(t *testing.T) {
+	m := model{
+		queryCompletions: []string{"openssh", "openssl"},
+	}
+	got := m.renderQueryCompletions()
+	if !strings.Contains(got, "openssh") || !strings.Contains(got, "openssl") {
+		t.Errorf("expected both candidates: %q", got)
+	}
+	// Each candidate should land on its own line.
+	if strings.Count(got, "\n") < 2 {
+		t.Errorf("expected one newline per candidate, got %q", got)
+	}
+}
+
+func TestRenderQueryCompletions_TruncatesLongList(t *testing.T) {
+	cands := make([]string, 20)
+	for i := range cands {
+		cands[i] = fmt.Sprintf("cand%02d", i)
+	}
+	m := model{queryCompletions: cands}
+	got := m.renderQueryCompletions()
+	if !strings.Contains(got, "more") {
+		t.Errorf("expected '(N more)' truncation hint, got %q", got)
+	}
+}
+
+func TestRenderQueryCompletions_EmptyReturnsNothing(t *testing.T) {
+	m := model{}
+	if got := m.renderQueryCompletions(); got != "" {
+		t.Errorf("expected empty render for nil completions, got %q", got)
+	}
+}
+
 func TestRefreshUnitSize_PicksUpFreshlyWrittenMeta(t *testing.T) {
 	projDir := t.TempDir()
 	// build/foo.x86_64/build.json

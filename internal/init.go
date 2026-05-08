@@ -43,6 +43,14 @@ func RunInit(projectDir string, machine string) error {
                ref = "main",
                path = "modules/module-core"),
     ],
+    # Per-unit pins that override the default last-module-wins shadowing.
+    # Use these when module-core's source-built version of a package is
+    # broken or under-configured and Alpine's prebuilt is the right
+    # answer (e.g. xz is built static-only in module-core, but kmod's
+    # depmod needs the shared liblzma.so.5).
+    prefer_modules = {
+        "xz": "alpine",
+    },
 )
 `, name, defaultMachine)
 

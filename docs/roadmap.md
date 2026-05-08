@@ -8,6 +8,7 @@
 
 ## Next
 
+- Search completion can we display a list vertical under search bar?
 - Warn if units specify Git branches. These are not deterministic.
 - Use alpine docker-init. Had some problems with consuming packages with
   multiple outputs.

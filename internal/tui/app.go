@@ -365,9 +365,10 @@ type model struct {
 	building   map[string]bool
 	cancels    map[string]context.CancelFunc // cancel funcs for active builds
 	confirm      string // non-empty = waiting for y/n confirmation
-	queryEditing  bool            // true while the user is typing in the query bar
-	queryInput    string          // text in the query bar; live-parsed every keystroke
-	queryError    string          // last parse error; rendered next to the query bar
+	queryEditing     bool     // true while the user is typing in the query bar
+	queryInput       string   // text in the query bar; live-parsed every keystroke
+	queryError       string   // last parse error; rendered next to the query bar
+	queryCompletions []string // tab-completion candidates, rendered under the bar
 	inSet         map[string]bool // pre-computed in:X closure for the active query, nil if no in: filter
 	visible       []int           // indexes into m.units after applying m.query
 	query         query.Query     // active query, applied to m.units to produce visible
@@ -1377,10 +1378,10 @@ func (m *model) applySortReset() {
 
 func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Any keystroke other than Tab clears a leftover tab-completion
-	// message (the inline candidate list). Tab manages its own message
-	// state below.
+	// list. Tab manages its own state below.
 	if msg.String() != "tab" {
 		m.message = ""
+		m.queryCompletions = nil
 	}
 	switch msg.String() {
 	case "esc":
@@ -1415,11 +1416,13 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch len(cands) {
 		case 0:
 			m.message = "no completions"
+			m.queryCompletions = nil
 		case 1:
 			// splice in the single candidate, preserving field: prefix when present
 			m.queryInput = spliceCompletion(m.queryInput, start, end, cands[0])
 			m.reparse()
 			m.message = ""
+			m.queryCompletions = nil
 		default:
 			// longest common prefix
 			lcp := longestCommonPrefix(cands)
@@ -1432,13 +1435,16 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.queryInput = spliceCompletion(m.queryInput, start, end, lcp)
 				m.reparse()
 				m.message = ""
+				m.queryCompletions = nil
 			} else {
-				// Can't advance the input — show the options inline so the
-				// user can pick the next character to type. Without this
-				// branch tab looks like a no-op when the user just opened
-				// the bar (cands = all top-level keywords) or typed an
-				// ambiguous single letter.
-				m.message = "tab: " + strings.Join(cands, "  ")
+				// Can't advance the input — surface the options as a
+				// vertical list under the search bar so the user can
+				// pick the next character to type. Without this branch
+				// tab looks like a no-op when the user just opened the
+				// bar (cands = all top-level keywords) or typed an
+				// ambiguous single letter. Cleared on the next keystroke.
+				m.queryCompletions = cands
+				m.message = ""
 			}
 		}
 		return m, nil
@@ -2119,6 +2125,33 @@ func (m model) renderHomeHeader() string {
 	return b.String()
 }
 
+// renderQueryCompletions formats the tab-completion candidate list as
+// a vertical column under the query bar. Truncates with a "(N more)"
+// hint past a threshold so a one-letter ambiguous prefix can't push
+// the unit list off the bottom of the screen.
+func (m model) renderQueryCompletions() string {
+	const maxRows = 8
+	cands := m.queryCompletions
+	if len(cands) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	shown := cands
+	if len(shown) > maxRows {
+		shown = shown[:maxRows]
+	}
+	for _, c := range shown {
+		b.WriteString("    ")
+		b.WriteString(queryActiveStyle.Render(c))
+		b.WriteString("\n")
+	}
+	if len(cands) > len(shown) {
+		fmt.Fprintf(&b, "    %s\n",
+			queryDimStyle.Render(fmt.Sprintf("(%d more — type a letter to narrow)", len(cands)-len(shown))))
+	}
+	return b.String()
+}
+
 func (m model) viewUnits() string {
 	switch m.activeTab {
 	case tabModules:
@@ -2150,6 +2183,12 @@ func (m model) viewUnitsTab() string {
 			queryDimStyle.Render("Query: "),
 			body,
 			queryDimStyle.Render(counter)))
+		// Tab-completion candidates: when the input can't be advanced
+		// further (multiple equally-good matches), drop the list right
+		// under the bar — closer to the eye than the bottom help row.
+		if len(m.queryCompletions) > 0 {
+			b.WriteString(m.renderQueryCompletions())
+		}
 	} else {
 		qStr := m.query.String()
 		qBody := qStr

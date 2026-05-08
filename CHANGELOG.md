@@ -8,15 +8,16 @@ and this project adheres to
 
 ## [Unreleased]
 
-- **Module dev mode now works for sub-path modules.** Switching a module like
-  `module-rpi` (declared with `path = "modules/module-rpi"` inside a multi-
-  module repo) into dev mode previously failed with `is not a git repo` because
-  yoe was running git in the MODULE.star subdirectory instead of the clone root.
-  Git operations and the dev/pin state file now target the clone root, so `u`
-  works on every kind of module.
-- **Modules tab drops the URL column.** Long git URLs were eating most of the
-  row width and pushing the path and status columns off-screen. The URL still
-  appears in the detail strip below the table when a module is selected.
+- **Tab completions show up under the query bar.** When the search input can't
+  be advanced further (multiple equally-good matches), the candidate list now
+  renders as a vertical column directly under the query bar — closer to the
+  cursor than the previous horizontal blob at the bottom of the screen, and
+  easier to scan for the next character to type. Long lists truncate with a "(N
+  more — type a letter to narrow)" hint.
+- **Fresh projects from `yoe init` build out of the box.** The generated
+  PROJECT.star now pins `xz` to the Alpine module, matching the canonical
+  e2e-project template. Without this, kmod's depmod failed at image-assembly
+  time because module-core's xz is static-only and doesn't ship liblzma.so.5.
 - **Switching a unit/module to dev mode transfers far less data.** The
   depth-limited fetch (`last 100 / 1000 commits`, `last year`, `last month`) now
   narrows to the unit's pinned ref instead of fanning out across every branch
