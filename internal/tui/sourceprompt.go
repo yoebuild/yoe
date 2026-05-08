@@ -30,17 +30,16 @@ func (m model) openSourcePromptForUnit(unitName string) (tea.Model, tea.Cmd) {
 	switch state {
 	case source.StatePin, source.StateEmpty:
 		// Pin → dev: ask user whether to use SSH or HTTPS for origin.
+		// Show the upstream URL each option resolves to so the user can
+		// see what the resulting `origin` will point at.
 		m.sourcePrompt = &sourcePrompt{
 			kind:       promptSSHHTTPS,
 			target:     "unit",
 			targetName: unitName,
-			header:     fmt.Sprintf("Switch %s to dev mode (track upstream)?", unitName),
-			options: []sourcePromptOption{
-				{label: "HTTPS", desc: "use the original https:// URL", value: "https"},
-				{label: "SSH", desc: "rewrite https:// → git@host:… (push access)", value: "ssh"},
-				{label: "cancel", desc: "stay pinned", value: "cancel"},
-			},
-			prevView: m.view,
+			header:     fmt.Sprintf("Switch %s to dev mode", unitName),
+			subheader:  "upstream: " + u.Source,
+			options:    schemePromptOptions(u.Source),
+			prevView:   m.view,
 		}
 		m.view = viewSourcePrompt
 		return m, nil
@@ -89,17 +88,21 @@ func (m model) openSourcePromptForModule(rmName string) (tea.Model, tea.Cmd) {
 	state := m.moduleSourceState(rm)
 	switch state {
 	case source.StateEmpty, source.StatePin:
+		// Prefer the live origin URL — the user may have edited it in
+		// the clone — falling back to the declared rm.URL if the live
+		// probe fails (clone missing, no .git, etc.).
+		upstream := liveRemoteURL(rm.Dir)
+		if upstream == "" {
+			upstream = rm.URL
+		}
 		m.sourcePrompt = &sourcePrompt{
 			kind:       promptSSHHTTPS,
 			target:     "module",
 			targetName: rmName,
-			header:     fmt.Sprintf("Switch module %s to dev mode?", rmName),
-			options: []sourcePromptOption{
-				{label: "HTTPS", desc: "keep current https:// origin", value: "https"},
-				{label: "SSH", desc: "rewrite to git@host:… (push access)", value: "ssh"},
-				{label: "cancel", desc: "stay pinned", value: "cancel"},
-			},
-			prevView: m.view,
+			header:     fmt.Sprintf("Switch module %s to dev mode", rmName),
+			subheader:  "upstream: " + upstream,
+			options:    schemePromptOptions(upstream),
+			prevView:   m.view,
 		}
 		m.view = viewSourcePrompt
 		return m, nil
@@ -288,6 +291,62 @@ func (m model) applySourcePromptChoice(value string) (tea.Model, tea.Cmd) {
 		return m.runDevPromote(name, value)
 	}
 	return m, nil
+}
+
+// schemePromptOptions builds the HTTPS / SSH / cancel option list,
+// embedding the URL each choice would set as `origin` so the user
+// can verify the destination before committing.
+//
+// SSH is greyed out when the upstream URL doesn't admit a sensible
+// rewrite (non-https scheme, empty path) — picking it would still
+// "work" by leaving the URL as-is, but the choice is misleading.
+func schemePromptOptions(upstreamURL string) []sourcePromptOption {
+	httpsURL := upstreamURL
+	sshURL, sshOK := previewHTTPSToSSH(upstreamURL)
+	sshOpt := sourcePromptOption{label: "SSH", value: "ssh"}
+	if sshOK {
+		sshOpt.desc = "use " + sshURL
+	} else {
+		sshOpt.desc = "(no SSH mapping for this URL — pick HTTPS)"
+		sshOpt.disabled = true
+	}
+	return []sourcePromptOption{
+		{label: "HTTPS", desc: "use " + httpsURL, value: "https"},
+		sshOpt,
+		{label: "cancel", desc: "stay pinned", value: "cancel"},
+	}
+}
+
+// previewHTTPSToSSH mirrors the rewrite in internal/dev.go's
+// httpsToSSH so the prompt can show what origin will be set to
+// without going through the actual toggle. Kept here (rather than
+// exported from internal/dev.go) so the TUI doesn't need write
+// access for read-only previews.
+func previewHTTPSToSSH(httpsURL string) (string, bool) {
+	if !strings.HasPrefix(httpsURL, "https://") {
+		return httpsURL, false
+	}
+	rest := strings.TrimPrefix(httpsURL, "https://")
+	slash := strings.IndexByte(rest, '/')
+	if slash < 0 || slash == len(rest)-1 {
+		return httpsURL, false
+	}
+	host := rest[:slash]
+	path := rest[slash+1:]
+	return "git@" + host + ":" + path, true
+}
+
+// liveRemoteURL returns `git remote get-url origin` for a module dir.
+// Empty when the dir isn't a git repo or origin isn't configured.
+func liveRemoteURL(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	out, err := runGit(dir, "remote", "get-url", "origin")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }
 
 // depthFetchSpec is the depth strategy a prompt option resolves to.
@@ -682,7 +741,13 @@ func (m model) viewSourcePrompt() string {
 	var b strings.Builder
 	b.WriteString("\n  ")
 	b.WriteString(titleStyle.Render(m.sourcePrompt.header))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+	if m.sourcePrompt.subheader != "" {
+		b.WriteString("  ")
+		b.WriteString(dimStyle.Render(m.sourcePrompt.subheader))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
 	for i, opt := range m.sourcePrompt.options {
 		marker := "  "
 		labelStyle := dimStyle

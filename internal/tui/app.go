@@ -149,6 +149,7 @@ type sourcePrompt struct {
 	target     string // "unit" | "module"
 	targetName string
 	header     string
+	subheader  string // optional dim line under the title (e.g. "upstream: …")
 	options    []sourcePromptOption
 	cursor     int
 	prevView   viewKind
