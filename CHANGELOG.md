@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-05-07
+
 - **`docker-image` starts dockerd at boot.** Pulls in Alpine's `docker-openrc`
   package (which ships `/etc/init.d/docker` and the `/etc/conf.d/docker` config
   template upstream maintains) and adds the default-runlevel symlink at
