@@ -3873,12 +3873,16 @@ func (m *model) recomputeMetrics() {
 	}
 	m.unitSize = size
 	m.unitDeps = deps
-	// Source-state cache lives in lockstep with metrics — a project
-	// reload may have invalidated existing entries (re-resolved DAG,
-	// switched arch, etc.). Drop them so the next render re-reads
-	// BuildMeta.SourceState from disk.
-	m.unitSrcStates = make(map[string]source.State)
-	m.moduleSrcStates = make(map[string]source.State)
+	// Note: the source-state cache deliberately survives this call.
+	// recomputeMetrics is invoked after every build completion, but
+	// BuildMeta.SourceState only records the persistent toggle state
+	// ("dev"); the live dev-mod / dev-dirty refinement comes from the
+	// watcher's polling and lives only in unitSrcStates. Wiping it
+	// here would briefly flip a dev-dirty unit back to "dev" until
+	// the next 2-second poll picked the dirt up again — exactly the
+	// glitch users hit after `yoe build` on a unit with uncommitted
+	// edits. Project reloads (recomputeStatuses) wipe the cache
+	// explicitly because the DAG and arch may have changed.
 }
 
 // refreshUnitSize re-reads a single unit's installed size from disk.
@@ -4170,6 +4174,11 @@ func (m *model) recomputeStatuses() {
 		}
 	}
 	m.recomputeMetrics()
+	// Project actually reloaded — DAG, arch, machine may all be
+	// different — so the runtime source-state cache is genuinely
+	// stale and should be re-derived from scratch on the next render.
+	m.unitSrcStates = make(map[string]source.State)
+	m.moduleSrcStates = make(map[string]source.State)
 }
 
 // checkBinfmtWarning sets or clears the warning banner based on whether
