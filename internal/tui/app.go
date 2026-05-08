@@ -22,7 +22,9 @@ import (
 	yoe "github.com/yoebuild/yoe/internal"
 	"github.com/yoebuild/yoe/internal/build"
 	"github.com/yoebuild/yoe/internal/device"
+	"github.com/yoebuild/yoe/internal/module"
 	"github.com/yoebuild/yoe/internal/resolve"
+	"github.com/yoebuild/yoe/internal/source"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 	"github.com/yoebuild/yoe/internal/tui/query"
 )
@@ -60,6 +62,18 @@ var (
 	// matchHighlightStyle draws the matched substring on top of whatever
 	// the row's existing color is.
 	matchHighlightStyle = lipgloss.NewStyle().Underline(true).Bold(true)
+
+	// SRC column state styles. Each token is short (≤ 9 cells) and
+	// colored so the eye can scan a long unit list and spot dev units
+	// instantly. Pin == "match the .star" (cyan, like cached). Dev ==
+	// "user-controlled but clean" (green). Dev-mod == "user has
+	// committed local changes" (yellow). Dev-dirty == "uncommitted
+	// edits" (red). Local == "module(local=...)" override (faded).
+	srcPinStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("12")) // blue/cyan
+	srcDevStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("10")) // green
+	srcDevModStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // yellow
+	srcDevDirtyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))  // red
+	srcLocalStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Faint(true)
 
 	// Tab bar styling: active tab in amber-bold to match the [yoe] logo,
 	// inactive tabs faded so the eye is drawn to the current selection.
@@ -342,6 +356,13 @@ type model struct {
 	unitSize map[string]int64 // installed bytes (image units: .img file size)
 	unitDeps map[string]int   // runtime closure size, excluding the unit itself
 
+	// Source-state cache for the SRC column. Populated lazily from
+	// BuildMeta.SourceState (units) or module.ReadState (modules) on
+	// first render, then refreshed by U9's fsnotify watcher. Cleared
+	// on project reload so stale entries don't survive a restart.
+	unitSrcStates   map[string]source.State
+	moduleSrcStates map[string]source.State
+
 	// Column sort state. sortColumn picks the comparator (sortByName etc.).
 	// sortDesc inverts it. Click a header to switch column or toggle direction.
 	sortColumn int
@@ -420,8 +441,10 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 		units:          units,
 		hashes:         hashes,
 		statuses:       statuses,
-		building:       make(map[string]bool),
-		cancels:        make(map[string]context.CancelFunc),
+		building:        make(map[string]bool),
+		cancels:         make(map[string]context.CancelFunc),
+		unitSrcStates:   make(map[string]source.State),
+		moduleSrcStates: make(map[string]source.State),
 		machines:       machines,
 		flashProgress:  progress.New(progress.WithDefaultGradient()),
 		deployHost:     ov.DeployHost,
@@ -1995,11 +2018,12 @@ func (m model) viewUnitsTab() string {
 		}
 		return label + arrow + pad
 	}
-	b.WriteString(fmt.Sprintf("  %s %s %s %s %s %s %s\n",
+	b.WriteString(fmt.Sprintf("  %s %s %s %s %s %s %s %s\n",
 		headerStyle.Render(headerLabel(sortByName, "NAME", 28, false)),
 		headerStyle.Render(headerLabel(sortByClass, "CLASS", 9, false)),
 		headerStyle.Render(headerLabel(sortByModule, "MODULE", 14, false)),
 		headerStyle.Render(headerLabel(sortByVersion, "VERSION", 11, false)),
+		headerStyle.Render(fmt.Sprintf("%-9s", "SRC")),
 		headerStyle.Render(headerLabel(sortBySize, "SIZE", 6, true)),
 		headerStyle.Render(headerLabel(sortByDeps, "DEPS", 5, true)),
 		headerStyle.Render(headerLabel(sortByStatus, "STATUS", 10, false))))
@@ -2071,12 +2095,14 @@ func (m model) viewUnitsTab() string {
 		paddedVersion := clipFixed(version, 11)
 		paddedSize := fmt.Sprintf("%6s", size)
 		paddedDeps := fmt.Sprintf("%5s", depsStr)
-		b.WriteString(fmt.Sprintf("%s%s %s %s %s %s %s %s\n",
+		srcCell := m.renderSrcCell(name)
+		b.WriteString(fmt.Sprintf("%s%s %s %s %s %s %s %s %s\n",
 			cursor,
 			m.renderName(paddedName, nameStyle),
 			classStyle.Render(paddedClass),
 			classStyle.Render(paddedModule),
 			classStyle.Render(paddedVersion),
+			srcCell,
 			classStyle.Render(paddedSize),
 			classStyle.Render(paddedDeps),
 			status))
@@ -2202,8 +2228,8 @@ func (m model) viewModulesTab() string {
 	fmt.Fprintf(&b, "  %s%s\n",
 		queryDimStyle.Render("Modules: "),
 		queryDimStyle.Render(fmt.Sprintf("%d declared", len(mods))))
-	fmt.Fprintf(&b, "  %s\n", headerStyle.Render(fmt.Sprintf("%-22s %-10s %-32s %-32s %s",
-		"NAME", "REF", "URL", "PATH", "STATUS")))
+	fmt.Fprintf(&b, "  %s\n", headerStyle.Render(fmt.Sprintf("%-22s %-10s %-9s %-32s %-32s %s",
+		"NAME", "REF", "SRC", "URL", "PATH", "STATUS")))
 
 	viewH := m.modulesViewportHeight()
 
@@ -2252,10 +2278,13 @@ func (m model) viewModulesTab() string {
 				statusStyle = waitingStyle
 			}
 		}
-		rendered = append(rendered, fmt.Sprintf("%s%s %s %s %s %s",
+		modState := m.moduleSourceState(rm)
+		srcCell := srcStateStyle(modState).Render(clipFixed(srcStateToken(modState), 9))
+		rendered = append(rendered, fmt.Sprintf("%s%s %s %s %s %s %s",
 			cursorMark,
 			nameStyle.Render(clipFixed(rm.Name, 22)),
 			classUnitStyle.Render(clipFixed(ref, 10)),
+			srcCell,
 			dimStyle.Render(clipFixed(url, 32)),
 			dimStyle.Render(clipFixed(path, 32)),
 			statusStyle.Render(status)))
@@ -2859,6 +2888,13 @@ func (m model) viewDetail() string {
 		}
 	}
 	b.WriteString("\n")
+
+	// SOURCE line — colored state token + remote URL + git describe.
+	// Skip for image/container units (no source dir to track).
+	if line := m.detailSourceLine(); line != "" {
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
 
 	// Tab bar (Info / Files), styled like the home tab bar so the two
 	// strips read as the same UI element.
@@ -3664,6 +3700,12 @@ func (m *model) recomputeMetrics() {
 	}
 	m.unitSize = size
 	m.unitDeps = deps
+	// Source-state cache lives in lockstep with metrics — a project
+	// reload may have invalidated existing entries (re-resolved DAG,
+	// switched arch, etc.). Drop them so the next render re-reads
+	// BuildMeta.SourceState from disk.
+	m.unitSrcStates = make(map[string]source.State)
+	m.moduleSrcStates = make(map[string]source.State)
 }
 
 // refreshUnitSize re-reads a single unit's installed size from disk.
@@ -3706,6 +3748,164 @@ func clipFixed(s string, w int) string {
 		return s[:w-1] + "…"
 	}
 	return fmt.Sprintf("%-*s", w, s)
+}
+
+// detailSourceLine renders the SOURCE strip on the unit detail page:
+// colored state token + remote URL + git describe (e.g.
+// "v3.4.1-3-gabc1234-dirty"). Returns "" when the unit has no source
+// dir (image/container) so the caller can skip the line entirely.
+func (m model) detailSourceLine() string {
+	u, ok := m.proj.Units[m.detailUnit]
+	if !ok || u.Class == "image" || u.Class == "container" {
+		return ""
+	}
+	state := m.unitSourceState(m.detailUnit)
+	tok := srcStateToken(state)
+	if tok == "" {
+		tok = "(unbuilt)"
+	}
+	parts := []string{
+		dimStyle.Render("  SOURCE"),
+		srcStateStyle(state).Render(tok),
+	}
+	// Remote URL: prefer the .star-declared source string so the row is
+	// meaningful even before a build has run; if a dev clone has
+	// rewritten origin (HTTPS↔SSH), surface the live remote instead.
+	url := u.Source
+	sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
+	buildDir := build.UnitBuildDir(m.projectDir, sd, m.detailUnit)
+	srcDir := filepath.Join(buildDir, "src")
+	if source.IsDev(state) {
+		if live := remoteOriginURL(srcDir); live != "" {
+			url = live
+		}
+	}
+	if url != "" {
+		parts = append(parts, dimStyle.Render(url))
+	}
+	if meta := build.ReadMeta(buildDir); meta != nil && meta.SourceDescribe != "" {
+		parts = append(parts, dimStyle.Render(meta.SourceDescribe))
+	}
+	return strings.Join(parts, "  ")
+}
+
+// remoteOriginURL returns `git remote get-url origin` for srcDir, or
+// "" when not a git repo. Used by detailSourceLine to show the live
+// remote of a dev clone (which may differ from the .star-declared
+// source if the user rewrote it to SSH).
+func remoteOriginURL(srcDir string) string {
+	cmd := exec.Command("git", "remote", "get-url", "origin")
+	cmd.Dir = srcDir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// srcStateToken is the short label rendered in the SRC column for a
+// given source state. Returned width is 9 cells max (matches the
+// column width in renderUnitsBody / viewModulesTab); blank for an
+// unbuilt or non-source unit so the column reads as cleanly empty.
+func srcStateToken(s source.State) string {
+	switch s {
+	case source.StatePin:
+		return "pin"
+	case source.StateDev:
+		return "dev"
+	case source.StateDevMod:
+		return "dev-mod"
+	case source.StateDevDirty:
+		return "dev-dirty"
+	case source.StateLocal:
+		return "local"
+	default:
+		return ""
+	}
+}
+
+// srcStateStyle picks the lipgloss style for a source-state token.
+// Pin: blue/cyan (matches cachedStyle's "stable, matches the
+// declared ref" semantic). Dev: green. Dev-mod: yellow. Dev-dirty:
+// red. Local: faded. Empty/unknown: dim.
+func srcStateStyle(s source.State) lipgloss.Style {
+	switch s {
+	case source.StatePin:
+		return srcPinStyle
+	case source.StateDev:
+		return srcDevStyle
+	case source.StateDevMod:
+		return srcDevModStyle
+	case source.StateDevDirty:
+		return srcDevDirtyStyle
+	case source.StateLocal:
+		return srcLocalStyle
+	default:
+		return dimStyle
+	}
+}
+
+// renderSrcCell returns the styled SRC column cell for a unit, padded
+// to width 9. Image and container units return blank (no source dir
+// to track). The state value is taken from m.unitSrcStates if cached,
+// otherwise from BuildMeta.SourceState; if neither is set, the unit
+// is assumed pin (it has never been toggled to dev).
+func (m model) renderSrcCell(name string) string {
+	const w = 9
+	u, ok := m.proj.Units[name]
+	if !ok || u.Class == "image" || u.Class == "container" {
+		return clipFixed("", w)
+	}
+	state := m.unitSourceState(name)
+	tok := srcStateToken(state)
+	return srcStateStyle(state).Render(clipFixed(tok, w))
+}
+
+// unitSourceState returns the cached source state for a unit, falling
+// back to BuildMeta.SourceState on the disk and finally to "empty"
+// (which the renderer displays as blank). Caches the answer so a
+// long unit list doesn't trigger N disk reads per render.
+func (m model) unitSourceState(name string) source.State {
+	if m.unitSrcStates == nil {
+		// In production newModel always initialises this, but tests
+		// build models directly via &model{} — bail rather than panic.
+		return source.StateEmpty
+	}
+	if s, ok := m.unitSrcStates[name]; ok {
+		return s
+	}
+	state := source.StateEmpty
+	if u, ok := m.proj.Units[name]; ok {
+		sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
+		buildDir := build.UnitBuildDir(m.projectDir, sd, name)
+		if meta := build.ReadMeta(buildDir); meta != nil {
+			state = source.State(meta.SourceState)
+		}
+	}
+	m.unitSrcStates[name] = state
+	return state
+}
+
+// moduleSourceState returns the cached source state for a module.
+// Modules carry their state in a sibling .yoe-state.json (see
+// internal/module/state.go); module(local=…) overrides always
+// report "local" without touching disk.
+func (m model) moduleSourceState(rm yoestar.ResolvedModule) source.State {
+	if rm.Local != "" {
+		return source.StateLocal
+	}
+	if m.moduleSrcStates == nil {
+		return source.StateEmpty
+	}
+	if s, ok := m.moduleSrcStates[rm.Name]; ok {
+		return s
+	}
+	state := source.StateEmpty
+	if rm.Dir != "" {
+		state = module.ReadState(rm.Dir)
+	}
+	m.moduleSrcStates[rm.Name] = state
+	return state
 }
 
 // formatSize renders a byte count in a fixed-width, human-readable form
