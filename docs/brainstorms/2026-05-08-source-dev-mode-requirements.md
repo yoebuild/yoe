@@ -193,17 +193,18 @@ work is more common than for unit checkouts.
 ### Promote current dev state to the .star pin
 
 A second keybinding on the detail page (suggested: `P` for "pin to current"),
-available when the unit is in `dev` or `dev-mod` state. It captures the
-checkout's current git state back into the unit's `.star` definition, so the
-next pinned-mode build picks up whatever the user has settled on (typically:
-bumped to a newer upstream tag, or stabilised on a specific commit they
-cherry-picked from upstream).
+available **only when the unit is in `dev-mod` state**. The other three states
+don't need it: `pin` and `dev` already match the unit's declared ref, so
+"promote to current" is a no-op; `dev-dirty` has uncommitted work that should be
+committed or stashed before pinning so the captured state is reproducible. The
+action captures the checkout's current HEAD back into the unit's `.star`
+definition, so the next pinned-mode build picks up whatever the user has settled
+on (typically: bumped to a newer upstream tag, or stabilised on a specific
+commit they cherry-picked from upstream).
 
-**Disabled when the src tree is dirty.** A `dev-dirty` unit must commit or stash
-first; pinning a tree with uncommitted edits would either lose those edits on
-the next pin-mode rebuild or freeze a non-canonical state into the project. The
-detail page surfaces a hint instead of the action:
-`P pin: commit or stash first`.
+The detail page surfaces a hint when the action isn't available:
+`P pin: commit or stash first` in `dev-dirty`, or simply omits the help row
+entry in `pin`/`dev` (nothing to promote).
 
 When invoked, yoe inspects the current HEAD and offers a popup asking which form
 of pin to write:
@@ -251,22 +252,29 @@ behave as before: source is freely re-fetched/re-cloned each rebuild.
 ## State machine
 
 ```
-                 [pin: shallow clone, no remote]
-                          │
-                          │  press `u` → SSH/HTTPS prompt
-                          │  → fetch --unshallow, set origin
-                          ▼
-              ┌──────── [dev] ────────┐
-              │            │           │
-   git commit │   edit     │  git      │
-              │   files    │  reset    │
-              ▼            ▼           │
-         [dev-mod]    [dev-dirty]      │
-              │            │           │
-              │  press `u` → confirm   │
-              │  → re-clone shallow    │
-              ▼            ▼           ▼
-                 [pin: shallow clone, no remote]
+                       ┌──────────────────┐
+                       │       pin        │
+                       │ shallow, no rmt  │
+                       └────────┬─▲───────┘
+                                │ │
+   press `u` → SSH/HTTPS prompt │ │ press `u` → confirm if dev-mod
+   → fetch --unshallow          │ │ or dev-dirty (loses work)
+                                ▼ │ → re-clone shallow
+                       ┌──────────────────┐
+                  ┌───►│       dev        │◄────────────────┐
+                  │    └──┬───────────┬───┘                 │
+                  │       │           │                     │
+        git stash │       │ edit      │ git commit          │ press `P`
+        / reset   │       │ files     │                     │ → tag/hash/branch
+                  │       ▼           ▼                     │   prompt
+                  │  ┌──────────┐ ┌──────────┐              │ → rewrite .star
+                  └──┤dev-dirty │ │ dev-mod  ├──────────────┘ → move upstream
+                     │uncommit'd│ │ N commits│                  tag to HEAD
+                     │  edits   │ │  ahead   │
+                     └────┬─────┘ └─────┬────┘
+                          │ git commit  │
+                          └─────────────┘
+                          (auto-detected)
 ```
 
 Transitions:
