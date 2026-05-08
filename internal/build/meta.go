@@ -61,6 +61,25 @@ func ReadMeta(buildDir string) *BuildMeta {
 	return &meta
 }
 
+// initBuildMeta returns a fresh "building" meta for buildDir, but
+// preserves SourceState and SourceDescribe from any prior meta. The
+// dev-mode toggle (internal/dev.go) writes those fields out-of-band;
+// dropping them on every build start would erase the marker
+// source.Prepare uses to skip its fetch/extract step — re-fetching
+// over a dev-dirty src tree and destroying the user's work.
+func initBuildMeta(buildDir, hash string, started time.Time) *BuildMeta {
+	meta := &BuildMeta{
+		Status:  "building",
+		Started: &started,
+		Hash:    hash,
+	}
+	if prev := ReadMeta(buildDir); prev != nil {
+		meta.SourceState = prev.SourceState
+		meta.SourceDescribe = prev.SourceDescribe
+	}
+	return meta
+}
+
 // DirSize returns the total size of all files in a directory tree.
 func DirSize(path string) int64 {
 	var size int64

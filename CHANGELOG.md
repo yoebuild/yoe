@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Builds no longer wipe a unit in dev-dirty state.** The executor was
+  rewriting each unit's build metadata on every build start, which dropped the
+  dev-mode marker the source step uses to skip its own fetch and extract. With
+  the marker gone the build re-cloned over the user's working tree. Dev state
+  now survives across builds, so an in-progress edit isn't destroyed by a
+  rebuild of the unit (or anything that depends on it).
 - **Toggle any unit or module between pinned and dev mode from the TUI.** A new
   SRC column on the units and modules tabs surfaces whether each source dir is
   yoe-managed (`pin`), tracking upstream (`dev`), has commits beyond upstream

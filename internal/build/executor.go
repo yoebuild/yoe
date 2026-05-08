@@ -282,11 +282,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 
 	// Write initial build metadata; update on completion.
 	buildStart := time.Now()
-	meta := &BuildMeta{
-		Status:  "building",
-		Started: &buildStart,
-		Hash:    hash,
-	}
+	meta := initBuildMeta(buildDir, hash, buildStart)
 	WriteMeta(buildDir, meta)
 	defer func() {
 		now := time.Now()
