@@ -190,6 +190,49 @@ Same `u` binding from the module's expanded view. Same prompts. The "discard
 local commits" warning matters more for modules since losing pushed-elsewhere
 work is more common than for unit checkouts.
 
+### Promote current dev state to the .star pin
+
+A second keybinding on the detail page (suggested: `P` for "pin to current"),
+available when the unit is in `dev` or `dev-mod` state. It captures the
+checkout's current git state back into the unit's `.star` definition, so the
+next pinned-mode build picks up whatever the user has settled on (typically:
+bumped to a newer upstream tag, or stabilised on a specific commit they
+cherry-picked from upstream).
+
+**Disabled when the src tree is dirty.** A `dev-dirty` unit must commit or stash
+first; pinning a tree with uncommitted edits would either lose those edits on
+the next pin-mode rebuild or freeze a non-canonical state into the project. The
+detail page surfaces a hint instead of the action:
+`P pin: commit or stash first`.
+
+When invoked, yoe inspects the current HEAD and offers a popup asking which form
+of pin to write:
+
+- **Tag** — only offered if HEAD has an annotated or lightweight tag pointing at
+  it. Writes `tag = "<tagname>"` in the unit's .star. Most common for "I bumped
+  busybox to v1.38.0".
+- **Hash** — always offered. Writes `tag = "<full-40-char-sha>"` (yoe's source
+  layer accepts a sha in the `tag` field). Most reproducible; best when HEAD is
+  on a commit with no tag.
+- **Branch** — offered with a warning that branches are mutable and break build
+  reproducibility. Writes `branch = "<branchname>"` and removes any existing
+  `tag` field. Use sparingly.
+
+Whichever form the user picks, the .star edit is a single-field rewrite
+(regex-based to preserve comments and surrounding whitespace). The existing
+`tag` / `branch` fields are updated in place; if the unit had a `branch` and the
+user picks tag/hash, the `branch` line is removed.
+
+After the pin lands, yoe also re-points the local `upstream` tag at the current
+HEAD (`git tag -f upstream HEAD`). With the tag moved,
+`git rev-list upstream..HEAD` returns zero commits and the unit transitions from
+`dev-mod` back to plain `dev` — the visible acknowledgement that "what I'm
+building is now what's pinned."
+
+The underlying checkout doesn't move: the user's branch and working tree stay
+where they were, just the upstream marker catches up. A later toggle back to pin
+re-clones shallow at the new ref; the work tree stays consistent.
+
 ### Build-time warning, not overwrite
 
 When `yoe build` is invoked on a unit/module in any `dev*` state, **the source
@@ -234,6 +277,9 @@ Transitions:
 - **dev → pin** (`u`): if `dev-mod` or `dev-dirty`, prompt with warning about
   losing local work. On confirm: re-clone via the existing `source.Prepare`
   path.
+- **dev-mod → dev** (`P`): promote current HEAD to the unit's pinned ref —
+  rewrite the .star's `tag`/`branch` field and move the local `upstream` tag to
+  HEAD. Disabled when state is `dev-dirty` (commit or stash first).
 - **dev ↔ dev-mod ↔ dev-dirty**: auto-detected from `git status` +
   `git rev-list upstream..HEAD`. No user action required.
 
@@ -255,7 +301,11 @@ These are pointers, not the design — planning doc owns specifics.
 
 - `internal/dev.go` already has `DevDiff` / `DevExtract` / `DevStatus` — extend
   with `DevToPin(unit)` / `DevToUpstream(unit, ssh bool)` /
-  `DevDetectState(unit)` and reuse the same git-cmd scaffolding.
+  `DevDetectState(unit)` / `DevPromoteToPin(unit, kind)` (where `kind` is one of
+  `tag`/`hash`/`branch`) and reuse the same git-cmd scaffolding.
+- The .star rewriter for the promote action is regex-based — find the unit's
+  `tag = "..."` / `branch = "..."` / `sha256 = "..."` line and splice.
+  Round-tripping through a Starlark printer would lose comments.
 - `BuildMeta.SourceState` string field; ReadMeta/WriteMeta unchanged.
 - `internal/source/Prepare` already short-circuits when the src dir has local
   commits — extend the gate to "any unit in dev state" once the state file is
@@ -296,5 +346,9 @@ These are pointers, not the design — planning doc owns specifics.
   work tree.
 - A `dev-mod` unit being switched back to pin shows the user the commit list and
   asks for confirmation before discarding.
+- A `dev-mod` unit can be promoted to pin (`P`) by picking tag/hash/branch in a
+  popup; the .star rewrites in place, the local `upstream` tag advances to HEAD,
+  and the unit transitions to plain `dev`. The action is disabled (with a hint)
+  for `dev-dirty`.
 - The displayed state updates within seconds of an external edit (shell via `$`,
   an editor in another window) — no TUI restart required.
