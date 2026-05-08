@@ -8,12 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
-- **`yoe build` now picks up uncommitted edits in a dev-dirty unit.** The cache
-  hash for a dev unit folded in the HEAD sha but skipped the dirty-diff sha, so
-  an edit didn't change the hash and the build was served from cache — silently
-  dropping the work. Hashing now runs against the live source state, not the
-  persisted toggle marker, so any edit invalidates the cache and rebuilds
-  against the dirty tree.
+- **Switching a unit/module to dev mode transfers far less data.** The
+  depth-limited fetch (`last 100 / 1000 commits`, `last year`, `last month`) now
+  narrows to the unit's pinned ref instead of fanning out across every branch
+  the upstream tracks, and adds `--filter=blob:none` so file content comes down
+  on demand instead of all at once. For a Linux-kernel-sized repo that's the
+  difference between a multi-gigabyte fetch and tens of megabytes; `git log` and
+  `git blame` still work, and missing blobs are fetched lazily when needed.
 - **TUI `/` makes refining an existing query faster.** When you press `/` and
   the active query is non-empty, the bar opens with a trailing space so you can
   immediately type the next term — no need to press End or space first. A blank

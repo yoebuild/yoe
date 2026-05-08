@@ -55,7 +55,7 @@ func ModuleToUpstream(m yoestar.ResolvedModule, opts ModuleUpstreamOpts) error {
 		}
 	}
 
-	if err := moduleFetchOrigin(m.Dir, opts); err != nil {
+	if err := moduleFetchOrigin(m.Dir, opts, m.Ref); err != nil {
 		return fmt.Errorf("ModuleToUpstream: %w", err)
 	}
 
@@ -147,22 +147,37 @@ func httpsToSSH(httpsURL string) (string, bool) {
 // keeps a thin private copy here to avoid pulling internal/dev's
 // dependency tree (yoestar.Unit, source state writers) into the
 // module package, which is meant to stay narrow.
-func moduleFetchOrigin(dir string, opts ModuleUpstreamOpts) error {
+//
+// Depth- and since-bounded fetches narrow the refspec to the module's
+// pinned ref (when present) and pass `--filter=blob:none` so the
+// transfer is commits + trees only. Full-unshallow paths skip the
+// filter — the user explicitly asked for everything.
+func moduleFetchOrigin(dir string, opts ModuleUpstreamOpts, pinnedRef string) error {
 	shallow, _ := gitOut(dir, "rev-parse", "--is-shallow-repository")
 	isShallow := strings.TrimSpace(shallow) == "true"
 
 	var args []string
+	useFilter := false
 	switch {
 	case opts.FetchDepth > 0:
-		args = []string{"fetch", fmt.Sprintf("--depth=%d", opts.FetchDepth), "origin"}
+		args = []string{"fetch", fmt.Sprintf("--depth=%d", opts.FetchDepth)}
+		useFilter = true
 	case opts.FetchSince != "":
-		args = []string{"fetch", "--shallow-since=" + opts.FetchSince, "origin"}
+		args = []string{"fetch", "--shallow-since=" + opts.FetchSince}
+		useFilter = true
 	case isShallow:
-		args = []string{"fetch", "--unshallow", "origin"}
+		args = []string{"fetch", "--unshallow"}
 	default:
 		// Already full-history clones don't need a re-fetch on toggle —
 		// the user already has everything. Skip silently.
 		return nil
+	}
+	if useFilter {
+		args = append(args, "--filter=blob:none")
+	}
+	args = append(args, "origin")
+	if pinnedRef != "" {
+		args = append(args, pinnedRef)
 	}
 	if _, err := gitOut(dir, args...); err != nil {
 		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)

@@ -235,7 +235,7 @@ func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, opts DevUpst
 		return fmt.Errorf("DevToUpstream: setting origin: %w", err)
 	}
 
-	if err := devFetchOrigin(srcDir, opts); err != nil {
+	if err := devFetchOrigin(srcDir, opts, devPinnedRef(unit)); err != nil {
 		return fmt.Errorf("DevToUpstream: %w", err)
 	}
 
@@ -252,29 +252,64 @@ func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, opts DevUpst
 //   - --unshallow      when the clone is currently shallow (default)
 //   - plain fetch      when the clone is already full history
 //
+// `pinnedRef` (when non-empty) is appended as the fetch refspec so we
+// only pull history for the branch / tag the unit is pinned to, not
+// every branch the broad `+refs/heads/*:…` refspec would otherwise
+// fan out to. For a repo like the Linux kernel that's the
+// difference between "100 commits" and "100 commits × N branches".
+//
+// Depth- and since-bounded fetches also pass `--filter=blob:none` so
+// the transfer is commits + trees only — file content is fetched on
+// demand when something actually reads it. The full-unshallow path
+// deliberately skips the filter: the user explicitly asked for
+// everything.
+//
 // The `--unshallow` branch errors on a non-shallow repo, so we probe
 // is-shallow-repository first instead of paying the round-trip on the
 // failing path. The depth and since branches are safe on either
 // shape — git just deepens to the requested boundary.
-func devFetchOrigin(srcDir string, opts DevUpstreamOpts) error {
+func devFetchOrigin(srcDir string, opts DevUpstreamOpts, pinnedRef string) error {
 	shallow, _ := gitCmd(srcDir, "rev-parse", "--is-shallow-repository")
 	isShallow := strings.TrimSpace(shallow) == "true"
 
 	var args []string
+	useFilter := false
 	switch {
 	case opts.FetchDepth > 0:
-		args = []string{"fetch", fmt.Sprintf("--depth=%d", opts.FetchDepth), "origin"}
+		args = []string{"fetch", fmt.Sprintf("--depth=%d", opts.FetchDepth)}
+		useFilter = true
 	case opts.FetchSince != "":
-		args = []string{"fetch", "--shallow-since=" + opts.FetchSince, "origin"}
+		args = []string{"fetch", "--shallow-since=" + opts.FetchSince}
+		useFilter = true
 	case isShallow:
-		args = []string{"fetch", "--unshallow", "origin"}
+		args = []string{"fetch", "--unshallow"}
 	default:
-		args = []string{"fetch", "origin"}
+		args = []string{"fetch"}
+	}
+	if useFilter {
+		args = append(args, "--filter=blob:none")
+	}
+	args = append(args, "origin")
+	if pinnedRef != "" {
+		args = append(args, pinnedRef)
 	}
 	if _, err := gitCmd(srcDir, args...); err != nil {
 		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
 	return nil
+}
+
+// devPinnedRef returns the ref the unit is pinned to (tag, then
+// branch). Empty string means the unit didn't pin anything explicit
+// — caller falls through to a broad fetch.
+func devPinnedRef(unit *yoestar.Unit) string {
+	if unit.Tag != "" {
+		return unit.Tag
+	}
+	if unit.Branch != "" {
+		return unit.Branch
+	}
+	return ""
 }
 
 // DevToPin throws away the dev-mode checkout and re-runs source.Prepare
