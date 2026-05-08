@@ -1,4 +1,4 @@
-def image(name, artifacts=[], hostname="", timezone="", locale="",
+def image(name, artifacts=[], hostname=None, timezone="", locale="",
           partitions=[], scope="machine",
           container="toolchain-musl", container_arch="target", deps=[],
           version=None, **kwargs):
@@ -7,9 +7,16 @@ def image(name, artifacts=[], hostname="", timezone="", locale="",
     `version` defaults to PROJECT_VERSION (from PROJECT.star) so the TUI's
     VERSION column shows what build the image represents and `/etc/os-release`
     on the device matches.
+
+    `hostname` defaults to MACHINE so a fleet of identically-imaged devices is
+    distinguishable on the LAN by board (raspberrypi4.local, qemu-x86_64.local,
+    etc.). Pass an explicit string to override (e.g. a kiosk image that wants
+    its own brand).
     """
     if version == None:
         version = PROJECT_VERSION
+    if hostname == None:
+        hostname = MACHINE
     # Merge machine packages
     all_artifacts = list(artifacts) + list(MACHINE_CONFIG.packages)
 

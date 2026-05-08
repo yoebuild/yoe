@@ -261,7 +261,7 @@ image(
         "myapp",
         "monitoring-agent",
     ],
-    hostname = "yoe",
+    # hostname defaults to MACHINE (e.g. "raspberrypi4"); set to override.
     timezone = "UTC",
     locale = "en_US.UTF-8",
     services = ["sshd", "NetworkManager", "myapp"],
@@ -302,7 +302,7 @@ image(
     packages = BASE_PACKAGES,
     services = BASE_SERVICES,
     partitions = BBB_PARTITIONS,
-    hostname = "yoe",
+    # hostname defaults to MACHINE; pass an explicit string to override.
 )
 
 image(
@@ -313,7 +313,6 @@ image(
     exclude = ["monitoring-agent"],
     services = BASE_SERVICES,
     partitions = BBB_PARTITIONS,
-    hostname = "yoe-dev",
 )
 ```
 

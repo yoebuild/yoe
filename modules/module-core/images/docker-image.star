@@ -28,5 +28,4 @@ image(
         "yazi", "zellij", "helix",
         "docker", "docker-init",
     ],
-    hostname = "yoe-docker",
 )

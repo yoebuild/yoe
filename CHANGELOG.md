@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Device hostname now matches the machine, not the image.** A fleet of
+  raspberrypi4s flashed with `dev-image` no longer all answer to
+  `yoe-dev.local`; each board comes up as `<machine>.local` (e.g.
+  `raspberrypi4.local`, `qemu-x86_64.local`) so they're distinguishable on the
+  LAN out of the box. Set `hostname = "..."` on an image to override (e.g. a
+  branded kiosk image).
 - **TUI help bar reflects the active mode.** While typing in the search bar, the
   bottom help row swaps to the keys that actually work there (`type filter`,
   `tab complete`, `⌫ delete`, `enter apply`, `esc cancel`) instead of pretending
