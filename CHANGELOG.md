@@ -8,16 +8,16 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`yoe build` now picks up uncommitted edits in a dev-dirty unit.** The cache
+  hash for a dev unit folded in the HEAD sha but skipped the dirty-diff sha, so
+  an edit didn't change the hash and the build was served from cache — silently
+  dropping the work. Hashing now runs against the live source state, not the
+  persisted toggle marker, so any edit invalidates the cache and rebuilds
+  against the dirty tree.
 - **TUI `/` makes refining an existing query faster.** When you press `/` and
   the active query is non-empty, the bar opens with a trailing space so you can
   immediately type the next term — no need to press End or space first. A blank
   query still opens empty.
-- **Builds no longer wipe a unit in dev-dirty state.** The executor was
-  rewriting each unit's build metadata on every build start, which dropped the
-  dev-mode marker the source step uses to skip its own fetch and extract. With
-  the marker gone the build re-cloned over the user's working tree. Dev state
-  now survives across builds, so an in-progress edit isn't destroyed by a
-  rebuild of the unit (or anything that depends on it).
 - **Toggle any unit or module between pinned and dev mode from the TUI.** A new
   SRC column on the units and modules tabs surfaces whether each source dir is
   yoe-managed (`pin`), tracking upstream (`dev`), has commits beyond upstream

@@ -132,22 +132,37 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		return err
 	}
 
-	// Compute hashes for cache. Source-state inputs come from each
-	// unit's cached BuildMeta (via the build dir) — pin units pass
-	// empty, dev units fold in HEAD sha + dirty diff sha so an
-	// in-place edit invalidates the cache.
+	// Compute hashes for cache. Pin units pass empty (cache-neutral);
+	// dev units fold in HEAD sha and, when the work tree is dirty,
+	// the dirty diff sha so an in-place edit invalidates the cache.
+	//
+	// The persisted BuildMeta.SourceState only ever records the
+	// toggle decision ("dev"); the dev-mod / dev-dirty refinement is
+	// a live observation. We therefore read the persisted state to
+	// decide *whether* the unit is under user control, and then run
+	// source.DetectState on the actual src dir to discover the live
+	// state — without that step, an uncommitted edit didn't change
+	// the hash and the build was served from cache, silently
+	// dropping the user's edits.
 	srcInputs := func(u *yoestar.Unit) string {
 		sd := ScopeDir(u, opts.Arch, opts.Machine)
 		buildDir := UnitBuildDir(opts.ProjectDir, sd, u.Name)
-		state := source.StateEmpty
+		persisted := source.StateEmpty
 		if meta := ReadMeta(buildDir); meta != nil {
-			state = source.State(meta.SourceState)
+			persisted = source.State(meta.SourceState)
 		}
-		if !source.IsDev(state) {
+		if !source.IsDev(persisted) {
 			return ""
 		}
 		srcDir := filepath.Join(buildDir, "src")
-		return source.SrcHashInputs(srcDir, state)
+		liveState, _ := source.DetectState(srcDir)
+		if !source.IsDev(liveState) {
+			// Persisted says dev but the live dir disagrees (user
+			// wiped it, no .git, etc.). Fall back to the persisted
+			// state so we still produce a stable hash component.
+			liveState = persisted
+		}
+		return source.SrcHashInputs(srcDir, liveState)
 	}
 	hashes, err := resolve.ComputeAllHashes(dag, opts.Arch, opts.Machine, srcInputs)
 	if err != nil {

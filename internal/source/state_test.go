@@ -169,6 +169,68 @@ func TestIsDev(t *testing.T) {
 	}
 }
 
+// TestSrcHashInputs_DirtyEditChangesHash is a regression test for a
+// bug where `yoe build` short-circuited a unit with uncommitted
+// edits because the hash didn't change between successive edits.
+// The hash function only included the dirty diff sha when called
+// with state==StateDevDirty, but callers were passing the
+// persisted "dev" state from BuildMeta. SrcHashInputs is correct;
+// the test pins down the contract callers must honor.
+func TestSrcHashInputs_DirtyEditChangesHash(t *testing.T) {
+	dir := initRepo(t)
+	addOriginRemote(t, dir)
+	markUpstream(t, dir)
+
+	// Clean dev state — hash is just the HEAD sha.
+	clean := SrcHashInputs(dir, StateDev)
+	if clean == "" {
+		t.Fatal("SrcHashInputs returned empty for clean dev state")
+	}
+
+	// Dirty up the work tree.
+	if err := os.WriteFile(filepath.Join(dir, "main.c"), []byte("int main(){return 1;}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Caller passes the live (dirty) state — this is what the
+	// executor's srcInputs closure must do.
+	dirty := SrcHashInputs(dir, StateDevDirty)
+	if dirty == "" {
+		t.Fatal("SrcHashInputs returned empty for dirty dev state")
+	}
+	if dirty == clean {
+		t.Errorf("dirty hash equals clean hash — edits would be cached:\n  clean: %s\n  dirty: %s", clean, dirty)
+	}
+
+	// A second different edit should produce a third distinct hash.
+	if err := os.WriteFile(filepath.Join(dir, "main.c"), []byte("int main(){return 2;}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dirty2 := SrcHashInputs(dir, StateDevDirty)
+	if dirty2 == dirty {
+		t.Errorf("two distinct edits produced the same hash:\n  edit1: %s\n  edit2: %s", dirty, dirty2)
+	}
+}
+
+// TestSrcHashInputs_StateDevSkipsDirtyDiff documents the surprising
+// caller contract: passing StateDev when the work tree is actually
+// dirty produces a clean-only hash. The fix for the regression
+// lives in the caller (executor.go), which now runs DetectState
+// before calling SrcHashInputs.
+func TestSrcHashInputs_StateDevSkipsDirtyDiff(t *testing.T) {
+	dir := initRepo(t)
+	addOriginRemote(t, dir)
+	markUpstream(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "main.c"), []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	asDev := SrcHashInputs(dir, StateDev)
+	asDirty := SrcHashInputs(dir, StateDevDirty)
+	if asDev == asDirty {
+		t.Errorf("state argument must affect output:\n  StateDev:      %s\n  StateDevDirty: %s", asDev, asDirty)
+	}
+}
+
 // --- Helpers ------------------------------------------------------------
 
 // initRepo creates a fresh git repo under t.TempDir() with a single
