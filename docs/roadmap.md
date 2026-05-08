@@ -8,6 +8,7 @@
 
 ## Next
 
+- Warn if units specify Git branches. These are not deterministic.
 - Use alpine docker-init. Had some problems with consuming packages with
   multiple outputs.
 - Is there any advantage in sources to storing filename as a hash? What is this

@@ -147,6 +147,13 @@ origin: `docs/brainstorms/2026-05-08-source-dev-mode-requirements.md`.
   (often just SSH rewrite + unshallow), but the state vocabulary is identical.
 - **`local =` modules show `local` token, no toggle.** A user-overridden module
   is whatever the user has; yoe can't reason about its pin.
+- **Unit hash inputs vary by source state.** Pin units hash from the .star
+  fields exactly as today (URL, tag, branch, patches). Dev units fold in the
+  actual src tree state — `git rev-parse HEAD` plus a content hash of any dirty
+  diff — so an in-place edit invalidates the cache. Without this, a `yoe build`
+  against a freshly-edited dev unit would hit the cache and silently skip the
+  rebuild. The cost is one rebuild per pin → dev toggle (the hash inputs
+  change), which is acceptable.
 
 ---
 
@@ -315,6 +322,84 @@ so the TUI can render without re-running git on every paint.
 
 - Existing `BuildMeta` JSON files still parse cleanly.
 - The module state file is a peer of the module clone, not inside `.git/`.
+
+---
+
+- [ ] U12. **Fold dev-state src tree into the unit hash**
+
+**Goal:** When a unit is in any `dev*` state, the unit hash captures the actual
+git state of `build/<unit>/src/` — HEAD sha plus a content hash of any dirty
+diff — so cache validity matches what the user will actually build. For `pin`
+units the hash is unchanged.
+
+**Requirements:** R3, R4, R6.
+
+**Dependencies:** U1 (state detection), U2 (cached state lookup so the hash
+function knows whether to fold tree state in without a git call on every
+render).
+
+**Files:**
+
+- Modify: `internal/resolve/hash.go`
+- Modify: `internal/build/meta.go` (capture `git describe --dirty --always`
+  alongside `SourceState`)
+- Modify: `internal/build/executor.go` (write the describe string when
+  populating `BuildMeta`)
+- Test: `internal/resolve/hash_test.go`
+
+**Approach:**
+
+- In `UnitHash`, after the existing pin-mode inputs, check the unit's cached
+  `SourceState`:
+  - `pin` (or empty): no additional input. Existing behavior preserved so
+    already-cached pin builds stay valid.
+  - `dev` / `dev-mod`: append `git rev-parse HEAD` of the unit's src dir.
+  - `dev-dirty`: append the HEAD sha **and** a sha256 of `git diff HEAD` output
+    (so two different dirty states produce distinct hashes).
+- Use `git stash create` as an alternative content sha when `git diff HEAD` is
+  too noisy (binary files, mode changes); evaluate at impl time which is more
+  robust.
+- Add
+  `SourceDescribe string \`json:"source_describe,omitempty"\``to`BuildMeta`. Populate it in the executor's `defer`-set finalize block with `git
+  describe --dirty
+  --always`against the src dir for dev units. Empty for pin units (no useful describe —`upstream`
+  tag is the only ref).
+- Document in the existing `Hash` field comment that the input set varies by
+  source state.
+
+**Patterns to follow:**
+
+- Existing `fmt.Fprintf(h, "%s:%s\n", key, value)` accumulator pattern in
+  `hash.go`.
+- The "advisory cache, fall through to git on miss" pattern from `cacheValid`.
+
+**Test scenarios:**
+
+- Happy path: a pin unit's hash is identical before and after the change (no
+  behavior change for non-dev workflows).
+- Happy path: same dev unit hashed twice with no edits in between → same hash.
+- Happy path: dev unit + edit a tracked file + rehash → different hash.
+- Happy path: dev-dirty unit, edit one file then a different file (each followed
+  by `git diff HEAD`) → two different hashes.
+- Happy path: dev unit, commit the dirty change → state moves to `dev-mod`, hash
+  reflects the new HEAD sha (different from when the edit was uncommitted).
+- Edge case: dev unit with broken `.git` → falls back to "unknown" hash
+  component (constant), unit still builds but always cache-misses until git
+  state is reachable.
+- Edge case: pin → dev transition on the same commit → hash changes (because dev
+  now includes HEAD sha as input). One rebuild per toggle. Acceptable cost.
+- Integration: `BuildMeta.SourceDescribe` round-trips through
+  `WriteMeta`/`ReadMeta`.
+
+**Verification:**
+
+- `yoe build` against a dev unit, edit a file, rebuild → executor logs show
+  `[building]` not `[cached]`.
+- Pin units behave exactly as today: no extra git invocations during hashing,
+  identical hashes vs. pre-change.
+- The TUI detail page can read `BuildMeta.SourceDescribe` to render the unit's
+  git description (e.g. `v3.4.1-3-gabc1234-dirty`) — that rendering belongs to
+  U7's SOURCE line addition.
 
 ---
 
@@ -548,7 +633,8 @@ both list views, plus a SOURCE line near the top of the unit detail page.
 
 **Requirements:** R2.
 
-**Dependencies:** U1 (state detection), U2 (state cache lookup).
+**Dependencies:** U1 (state detection), U2 (state cache lookup), U12
+(`BuildMeta.SourceDescribe` for the detail-page git description).
 
 **Files:**
 
@@ -563,7 +649,8 @@ both list views, plus a SOURCE line near the top of the unit detail page.
   Skip image/container units (display blank).
 - Same column on the modules-tab list.
 - On the detail page, add a SOURCE line below the existing metadata block: state
-  token + remote URL + (when `dev-mod`) commits-ahead count.
+  token + remote URL + the `git describe --dirty --always` string cached in
+  `BuildMeta.SourceDescribe` (e.g. `v3.4.1-3-gabc1234-dirty`).
 - State source-of-truth at render time: the cached `BuildMeta.SourceState`, with
   `DetectState` as the cold-start fallback the first time a unit is rendered
   after restart.
@@ -725,7 +812,8 @@ logged so the user knows the .star changes (changed `source` URL, `tag`,
 
 **Requirements:** R4.
 
-**Dependencies:** U1, U2.
+**Dependencies:** U1, U2, U12 (so cache validity tracks dev edits — without U12,
+this guard would still let a stale apk be reused after a dev edit).
 
 **Files:**
 
