@@ -23,6 +23,12 @@ type BuildMeta struct {
 	// Advisory: callers fall through to source.DetectState on miss.
 	// Empty for units not yet seen by the dev-mode machinery.
 	SourceState string `json:"source_state,omitempty"`
+
+	// SourceDescribe is `git describe --dirty --always` against the
+	// unit's src dir at build time. Useful for the TUI's SOURCE line
+	// and for the build log ("building openssl @ v3.4.1-3-g abcdef-dirty").
+	// Empty for units never built in dev mode.
+	SourceDescribe string `json:"source_describe,omitempty"`
 }
 
 const metaFile = "build.json"

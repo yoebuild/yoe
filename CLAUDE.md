@@ -132,7 +132,12 @@ The GitHub Actions workflow (`doc-check.yaml`) runs `prettier --check` on all
   `load("@module-core//classes/autotools.star", "autotools")`, `//` relative to
   module root when inside a module
 - **Two-phase build** — resolve DAG then execute (inspired by GN)
-- **Content-addressed caching** — input hash determines output
+- **Content-addressed caching** — input hash determines output. When adding a
+  new unit field that participates in the hash (`internal/resolve/hash.go`),
+  gate the `fmt.Fprintf` on a non-empty/non-zero check so units that don't set
+  the field stay cache-neutral. An unconditional write invalidates every
+  unit's hash the moment the line lands, forcing a full rebuild. Follow the
+  pattern used for `Extra` and the image-only block.
 - **Hardware-bootable images** — images must boot on real hardware, not just
   QEMU. Never suggest QEMU-only shortcuts like `-kernel` direct boot that bypass
   the bootloader. QEMU is a development convenience; the real target is always

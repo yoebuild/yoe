@@ -385,7 +385,7 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	if m, ok := proj.Machines[proj.Defaults.Machine]; ok {
 		arch = m.Arch
 	}
-	hashes, err := resolve.ComputeAllHashes(dag, arch, proj.Defaults.Machine)
+	hashes, err := resolve.ComputeAllHashes(dag, arch, proj.Defaults.Machine, nil)
 	if err != nil {
 		return fmt.Errorf("computing hashes: %w", err)
 	}
@@ -3772,7 +3772,7 @@ func (m *model) recomputeStatuses() {
 	// m.visible would carry stale indices into the old slice.
 	m.applyQuery()
 
-	hashes, err := resolve.ComputeAllHashes(m.dag, m.arch, m.proj.Defaults.Machine)
+	hashes, err := resolve.ComputeAllHashes(m.dag, m.arch, m.proj.Defaults.Machine, nil)
 	if err != nil {
 		return
 	}

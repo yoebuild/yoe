@@ -132,8 +132,24 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		return err
 	}
 
-	// Compute hashes for cache
-	hashes, err := resolve.ComputeAllHashes(dag, opts.Arch, opts.Machine)
+	// Compute hashes for cache. Source-state inputs come from each
+	// unit's cached BuildMeta (via the build dir) — pin units pass
+	// empty, dev units fold in HEAD sha + dirty diff sha so an
+	// in-place edit invalidates the cache.
+	srcInputs := func(u *yoestar.Unit) string {
+		sd := ScopeDir(u, opts.Arch, opts.Machine)
+		buildDir := UnitBuildDir(opts.ProjectDir, sd, u.Name)
+		state := source.StateEmpty
+		if meta := ReadMeta(buildDir); meta != nil {
+			state = source.State(meta.SourceState)
+		}
+		if !source.IsDev(state) {
+			return ""
+		}
+		srcDir := filepath.Join(buildDir, "src")
+		return source.SrcHashInputs(srcDir, state)
+	}
+	hashes, err := resolve.ComputeAllHashes(dag, opts.Arch, opts.Machine, srcInputs)
 	if err != nil {
 		return err
 	}
@@ -288,6 +304,13 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 			installedRoot = filepath.Join(installedRoot, "rootfs")
 		}
 		meta.InstalledBytes = DirSize(installedRoot)
+		// For dev units, capture `git describe --dirty --always` so the
+		// TUI's SOURCE line and the build log can show a meaningful
+		// reference (e.g. v3.4.1-3-gabc1234-dirty). Empty for pin units
+		// — there's nothing useful to describe against the upstream tag.
+		if source.IsDev(source.State(meta.SourceState)) {
+			meta.SourceDescribe = source.SrcDescribe(filepath.Join(buildDir, "src"))
+		}
 		if ctx.Err() != nil {
 			meta.Status = "cancelled"
 		} else if buildErr != nil {
