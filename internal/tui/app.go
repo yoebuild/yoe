@@ -3710,7 +3710,9 @@ func clipFixed(s string, w int) string {
 
 // formatSize renders a byte count in a fixed-width, human-readable form
 // using KiB/MiB/GiB. Empty string for unbuilt units (size == 0) so the
-// column reads as cleanly absent rather than misleading "0 B".
+// column reads as cleanly absent rather than misleading "0 B". Uses one
+// decimal below 10 of each unit ("9.9K") and drops the decimal at 10 and
+// above ("1003K") so the rendered width stays bounded — max 5 chars.
 func formatSize(b int64) string {
 	if b <= 0 {
 		return ""
@@ -3720,13 +3722,19 @@ func formatSize(b int64) string {
 		mib = 1024 * kib
 		gib = 1024 * mib
 	)
+	format := func(v float64, unit string) string {
+		if v < 10 {
+			return fmt.Sprintf("%.1f%s", v, unit)
+		}
+		return fmt.Sprintf("%d%s", int64(v), unit)
+	}
 	switch {
 	case b >= gib:
-		return fmt.Sprintf("%.1fG", float64(b)/float64(gib))
+		return format(float64(b)/float64(gib), "G")
 	case b >= mib:
-		return fmt.Sprintf("%.1fM", float64(b)/float64(mib))
+		return format(float64(b)/float64(mib), "M")
 	case b >= kib:
-		return fmt.Sprintf("%.1fK", float64(b)/float64(kib))
+		return format(float64(b)/float64(kib), "K")
 	default:
 		return fmt.Sprintf("%dB", b)
 	}

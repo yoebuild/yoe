@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **TUI size column no longer overflows on big artifacts.** Sizes like a
+  1003 KiB kernel image render as `1003K` instead of `1003.4K`, keeping the
+  column aligned. The decimal still shows for small values (e.g. `9.9K`,
+  `1.2M`) where it carries useful precision.
 - **Device hostname now matches the machine, not the image.** A fleet of
   raspberrypi4s flashed with `dev-image` no longer all answer to
   `yoe-dev.local`; each board comes up as `<machine>.local` (e.g.
