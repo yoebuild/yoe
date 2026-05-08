@@ -1,13 +1,16 @@
 package internal
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/yoebuild/yoe/internal/source"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -162,4 +165,167 @@ func gitCmd(dir string, args ...string) (string, error) {
 		return "", fmt.Errorf("%s: %s", err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
+}
+
+// devSrcDir returns the src/ path for a unit's build dir. Mirrors
+// build.UnitBuildDir without importing the build package (which
+// imports this package).
+func devSrcDir(projectDir, scopeDir, unitName string) string {
+	return filepath.Join(projectDir, "build", unitName+"."+scopeDir, "src")
+}
+
+// DevToUpstream switches a unit's src checkout from pin mode (yoe-managed
+// shallow clone, no remote) into dev mode: rewrites `origin` to the
+// upstream URL the user picks (HTTPS or SSH), unshallows the clone so
+// `git log`, `git blame`, etc. work against full history, and persists
+// `dev` state in BuildMeta.
+//
+// `unit.Source` provides the canonical HTTPS URL; ssh=true rewrites it
+// to git@host:path form for hosts where that mapping is well-defined
+// (github.com, gitlab.com, generic SSH-on-:22 servers). Hosts that don't
+// fit that pattern fall through to HTTPS regardless of the ssh argument.
+//
+// The unit's working tree is not moved — pin and dev mode for the same
+// commit produce bit-identical builds. The transition adds connectivity
+// and history; it doesn't change source content.
+func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, ssh bool) error {
+	srcDir := devSrcDir(projectDir, scopeDir, unit.Name)
+	if _, err := os.Stat(filepath.Join(srcDir, ".git")); err != nil {
+		return fmt.Errorf("DevToUpstream: %s is not a git repo — build the unit first", srcDir)
+	}
+	if !devIsGitURL(unit.Source) {
+		return fmt.Errorf("DevToUpstream: %s has a non-git source (%s); only git-based units support dev mode", unit.Name, unit.Source)
+	}
+
+	target := unit.Source
+	if ssh {
+		if rewrote, ok := httpsToSSH(unit.Source); ok {
+			target = rewrote
+		}
+	}
+
+	// `git remote remove origin` exits non-zero if origin doesn't
+	// exist; treat that as success since the next `add` will install
+	// the right one.
+	_, _ = gitCmd(srcDir, "remote", "remove", "origin")
+	if _, err := gitCmd(srcDir, "remote", "add", "origin", target); err != nil {
+		return fmt.Errorf("DevToUpstream: setting origin: %w", err)
+	}
+
+	// Unshallow if the clone is shallow. `git fetch --unshallow` errors
+	// on a non-shallow repo; check first to avoid the noise.
+	shallow, _ := gitCmd(srcDir, "rev-parse", "--is-shallow-repository")
+	if strings.TrimSpace(shallow) == "true" {
+		if _, err := gitCmd(srcDir, "fetch", "--unshallow", "origin"); err != nil {
+			return fmt.Errorf("DevToUpstream: fetch --unshallow: %w", err)
+		}
+	} else {
+		// Already full-history (or treated as such). Still fetch so
+		// origin/<branch> refs are populated for `git log origin/...`.
+		if _, err := gitCmd(srcDir, "fetch", "origin"); err != nil {
+			return fmt.Errorf("DevToUpstream: fetch: %w", err)
+		}
+	}
+
+	if err := writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StateDev); err != nil {
+		return fmt.Errorf("DevToUpstream: persisting state: %w", err)
+	}
+	return nil
+}
+
+// DevToPin throws away the dev-mode checkout and re-runs source.Prepare
+// on the next build. Without `force=true`, refuses to proceed when there
+// are commits beyond `upstream` or uncommitted edits in the work tree —
+// the caller (TUI or CLI) is responsible for surfacing a confirmation
+// to the user when local work is at stake.
+//
+// Implementation is dead simple: remove the src dir and clear the
+// cached state. The next build's source.Prepare re-clones at the
+// pinned ref.
+func DevToPin(projectDir, scopeDir string, unit *yoestar.Unit, force bool) error {
+	srcDir := devSrcDir(projectDir, scopeDir, unit.Name)
+	state, _ := source.DetectState(srcDir)
+	if !force {
+		switch state {
+		case source.StateDevDirty:
+			return fmt.Errorf("DevToPin: %s has uncommitted edits; commit/stash or pass force=true to discard", unit.Name)
+		case source.StateDevMod:
+			return fmt.Errorf("DevToPin: %s has commits beyond upstream; switch back will discard them — pass force=true to confirm", unit.Name)
+		}
+	}
+	if err := os.RemoveAll(srcDir); err != nil {
+		return fmt.Errorf("DevToPin: removing %s: %w", srcDir, err)
+	}
+	if err := writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StateEmpty); err != nil {
+		return fmt.Errorf("DevToPin: clearing state: %w", err)
+	}
+	return nil
+}
+
+// httpsToSSH rewrites a github/gitlab-style HTTPS git URL into the
+// equivalent SSH form. Returns (rewritten, true) on a recognized
+// host; (original, false) otherwise so the caller can fall through
+// to HTTPS without a separate error path.
+//
+//	https://github.com/foo/bar.git → git@github.com:foo/bar.git
+//	https://gitlab.com/foo/bar.git → git@gitlab.com:foo/bar.git
+func httpsToSSH(httpsURL string) (string, bool) {
+	u, err := url.Parse(httpsURL)
+	if err != nil || u.Scheme != "https" {
+		return httpsURL, false
+	}
+	// Path always starts with /; strip it.
+	path := strings.TrimPrefix(u.Path, "/")
+	if path == "" {
+		return httpsURL, false
+	}
+	return "git@" + u.Host + ":" + path, true
+}
+
+// writeUnitSourceState updates BuildMeta.SourceState in the unit's
+// build dir, leaving every other meta field intact. Used by DevTo*
+// to mark a unit as dev or clear it back to pin without re-running
+// the executor's full meta finalize.
+func writeUnitSourceState(projectDir, scopeDir, unitName string, state source.State) error {
+	buildDir := filepath.Join(projectDir, "build", unitName+"."+scopeDir)
+	if err := os.MkdirAll(buildDir, 0o755); err != nil {
+		return err
+	}
+	metaPath := filepath.Join(buildDir, "build.json")
+	// Read whatever's there (or start with an empty struct).
+	type metaShape struct {
+		Status         string  `json:"status,omitempty"`
+		Started        any     `json:"started,omitempty"`
+		Finished       any     `json:"finished,omitempty"`
+		Duration       float64 `json:"duration_seconds,omitempty"`
+		DiskBytes      int64   `json:"disk_bytes,omitempty"`
+		InstalledBytes int64   `json:"installed_bytes,omitempty"`
+		Hash           string  `json:"hash,omitempty"`
+		Error          string  `json:"error,omitempty"`
+		SourceState    string  `json:"source_state,omitempty"`
+		SourceDescribe string  `json:"source_describe,omitempty"`
+	}
+	var meta metaShape
+	if data, err := os.ReadFile(metaPath); err == nil {
+		_ = json.Unmarshal(data, &meta)
+	}
+	meta.SourceState = string(state)
+	if state == source.StateEmpty {
+		meta.SourceDescribe = ""
+	}
+	out, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(metaPath, out, 0o644)
+}
+
+// devIsGitURL is a small mirror of source.isGitURL (which is unexported).
+// Inlined here to avoid widening the source package's API just for this
+// caller — the check is two lines and the failure mode is informational.
+func devIsGitURL(u string) bool {
+	if strings.HasSuffix(u, ".git") {
+		return true
+	}
+	return strings.HasPrefix(u, "git@") || strings.HasPrefix(u, "git://") || strings.HasPrefix(u, "ssh://")
 }
