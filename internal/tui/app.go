@@ -114,7 +114,42 @@ const (
 	viewSetup
 	viewFlash
 	viewDeploy
+	viewSourcePrompt
 )
+
+// sourcePromptKind names which dev-mode modal is showing. Each kind has
+// its own option set and post-selection action; updateSourcePrompt
+// dispatches on this enum to call the right internal/dev.go helper.
+type sourcePromptKind int
+
+const (
+	promptSSHHTTPS    sourcePromptKind = iota // pin → dev: pick remote scheme
+	promptPinKind                             // dev-mod → dev: pick tag / hash / branch to write into .star
+	promptDiscardDev                          // dev-mod / dev-dirty → pin: confirm discard
+)
+
+// sourcePromptOption is one row in the dev-mode modal. `value` is the
+// back-channel string passed to the action (e.g. "ssh", "tag"); `label`
+// is what the user reads.
+type sourcePromptOption struct {
+	label    string
+	desc     string // secondary line under the label, optional
+	value    string
+	disabled bool // greyed-out, non-selectable (e.g. "tag" when HEAD has no tag)
+}
+
+// sourcePrompt is the in-flight modal state. The TUI parks the previous
+// view in `prevView` so cancelling the prompt restores it; the action
+// fires on Enter and clears the state.
+type sourcePrompt struct {
+	kind       sourcePromptKind
+	target     string // "unit" | "module"
+	targetName string
+	header     string
+	options    []sourcePromptOption
+	cursor     int
+	prevView   viewKind
+}
 
 // fileEntry is one row in the Files tab of the detail view: a path
 // (relative to the unit's destdir, with leading slash so it reads as
@@ -362,6 +397,10 @@ type model struct {
 	// on project reload so stale entries don't survive a restart.
 	unitSrcStates   map[string]source.State
 	moduleSrcStates map[string]source.State
+
+	// Active dev-mode modal (SSH/HTTPS picker, promote-kind picker,
+	// discard-confirm). Nil when no prompt is showing.
+	sourcePrompt *sourcePrompt
 
 	// Column sort state. sortColumn picks the comparator (sortByName etc.).
 	// sortDesc inverts it. Click a header to switch column or toggle direction.
@@ -669,6 +708,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateFlash(msg)
 		case viewDeploy:
 			return m.updateDeploy(msg)
+		case viewSourcePrompt:
+			return m.updateSourcePrompt(msg)
 		}
 	}
 	return m, nil
@@ -1073,6 +1114,12 @@ func (m model) updateModulesTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.execShell(rm.Dir)
+	case "u":
+		mods := m.proj.ResolvedModules
+		if m.modulesCursor < 0 || m.modulesCursor >= len(mods) {
+			return m, nil
+		}
+		return m.openSourcePromptForModule(mods[m.modulesCursor].Name)
 	}
 	return m, nil
 }
@@ -1789,6 +1836,12 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.detailMatchIdx = -1
 		return m, nil
 
+	case "u":
+		return m.openSourcePromptForUnit(m.detailUnit)
+
+	case "P":
+		return m.openPromotePrompt(m.detailUnit)
+
 	case "n":
 		if len(m.detailMatches) > 0 {
 			m.detailMatchIdx = (m.detailMatchIdx + 1) % len(m.detailMatches)
@@ -1889,6 +1942,8 @@ func (m model) View() string {
 		return m.viewFlash()
 	case viewDeploy:
 		return m.viewDeploy()
+	case viewSourcePrompt:
+		return m.viewSourcePrompt()
 	default:
 		return m.viewUnits()
 	}
@@ -2191,8 +2246,8 @@ var (
 	}
 	detailHelpItems = []helpItem{
 		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
-		{"/", "search"}, {"b", "build"}, {"$", "shell"}, {"d", "diagnose"},
-		{"l", "log"},
+		{"/", "search"}, {"b", "build"}, {"$", "shell"}, {"u", "src"},
+		{"P", "promote"}, {"d", "diagnose"}, {"l", "log"},
 	}
 	detailImageHelpItems = []helpItem{
 		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
@@ -2346,7 +2401,7 @@ func (m model) viewModulesTab() string {
 	} else {
 		b.WriteString(renderHelp([]helpItem{
 			{"tab", "next tab"}, {"j/k", "move"}, {"g/G", "top/bottom"},
-			{"$", "shell"}, {"r", "refresh"}, {"q", "quit"},
+			{"$", "shell"}, {"u", "src"}, {"r", "refresh"}, {"q", "quit"},
 		}))
 	}
 	return b.String()

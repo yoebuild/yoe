@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/yoebuild/yoe/internal/source"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
@@ -286,6 +288,183 @@ func TestDetailSourceLine_DevModSurfacesDescribe(t *testing.T) {
 	}
 	if !strings.Contains(got, "v3.4.1-3-gabc1234") {
 		t.Errorf("missing source_describe: %q", got)
+	}
+}
+
+// helper: build a model with one pinned unit and the source-state cache wired up.
+func newModelWithUnit(t *testing.T, projDir, unitName string, state source.State) model {
+	t.Helper()
+	m := model{
+		projectDir: projDir,
+		arch:       "x86_64",
+		proj: &yoestar.Project{
+			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
+			Units: map[string]*yoestar.Unit{
+				unitName: {Name: unitName, Class: "unit", Source: "https://example.com/" + unitName + ".git"},
+			},
+		},
+		unitSrcStates:   map[string]source.State{unitName: state},
+		moduleSrcStates: map[string]source.State{},
+		view:            viewDetail,
+	}
+	return m
+}
+
+func TestOpenSourcePromptForUnit_Pin_OpensSSHHTTPSPicker(t *testing.T) {
+	m := newModelWithUnit(t, t.TempDir(), "foo", source.StatePin)
+	updated, _ := m.openSourcePromptForUnit("foo")
+	got, ok := updated.(model)
+	if !ok {
+		t.Fatalf("expected model, got %T", updated)
+	}
+	if got.view != viewSourcePrompt {
+		t.Errorf("view = %v, want viewSourcePrompt", got.view)
+	}
+	if got.sourcePrompt == nil {
+		t.Fatal("expected sourcePrompt to be set")
+	}
+	if got.sourcePrompt.kind != promptSSHHTTPS {
+		t.Errorf("kind = %v, want promptSSHHTTPS", got.sourcePrompt.kind)
+	}
+	// Three options: HTTPS, SSH, cancel.
+	if len(got.sourcePrompt.options) != 3 {
+		t.Errorf("options = %d, want 3", len(got.sourcePrompt.options))
+	}
+}
+
+func TestOpenSourcePromptForUnit_DevDirty_OpensDiscardConfirm(t *testing.T) {
+	m := newModelWithUnit(t, t.TempDir(), "foo", source.StateDevDirty)
+	updated, _ := m.openSourcePromptForUnit("foo")
+	got := updated.(model)
+	if got.sourcePrompt == nil || got.sourcePrompt.kind != promptDiscardDev {
+		t.Fatalf("expected discard-confirm prompt, got %+v", got.sourcePrompt)
+	}
+}
+
+func TestOpenSourcePromptForUnit_Image_NoOpsWithMessage(t *testing.T) {
+	m := model{
+		projectDir: t.TempDir(),
+		arch:       "x86_64",
+		proj: &yoestar.Project{
+			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
+			Units: map[string]*yoestar.Unit{
+				"my-img": {Name: "my-img", Class: "image"},
+			},
+		},
+		unitSrcStates:   map[string]source.State{},
+		moduleSrcStates: map[string]source.State{},
+	}
+	updated, _ := m.openSourcePromptForUnit("my-img")
+	got := updated.(model)
+	if got.sourcePrompt != nil {
+		t.Errorf("image unit should not open a prompt")
+	}
+	if got.message == "" {
+		t.Errorf("expected an explanatory message")
+	}
+}
+
+func TestOpenPromotePrompt_PinHasHint(t *testing.T) {
+	m := newModelWithUnit(t, t.TempDir(), "foo", source.StatePin)
+	updated, _ := m.openPromotePrompt("foo")
+	got := updated.(model)
+	if got.sourcePrompt != nil {
+		t.Errorf("promote should be a no-op outside dev-mod, got prompt")
+	}
+	if got.message == "" {
+		t.Errorf("expected a hint message about state")
+	}
+}
+
+func TestSourcePromptCursor_SkipsDisabled(t *testing.T) {
+	m := model{
+		sourcePrompt: &sourcePrompt{
+			options: []sourcePromptOption{
+				{label: "tag", value: "tag", disabled: true},
+				{label: "hash", value: "hash"},
+				{label: "branch", value: "branch", disabled: true},
+				{label: "cancel", value: "cancel"},
+			},
+			cursor: 1, // start on hash
+		},
+	}
+	m.moveSourcePromptCursor(1)
+	// Should skip "branch" (disabled) and land on "cancel".
+	if m.sourcePrompt.cursor != 3 {
+		t.Errorf("cursor = %d, want 3", m.sourcePrompt.cursor)
+	}
+	m.moveSourcePromptCursor(1)
+	// Wraps past the end, skips disabled "tag", lands on "hash" again.
+	if m.sourcePrompt.cursor != 1 {
+		t.Errorf("cursor wrap = %d, want 1", m.sourcePrompt.cursor)
+	}
+}
+
+func TestApplySourcePromptChoice_Cancel_RestoresPrevView(t *testing.T) {
+	m := model{
+		view: viewSourcePrompt,
+		sourcePrompt: &sourcePrompt{
+			kind:     promptSSHHTTPS,
+			prevView: viewDetail,
+			options: []sourcePromptOption{
+				{label: "cancel", value: "cancel"},
+			},
+		},
+	}
+	updated, _ := m.applySourcePromptChoice("cancel")
+	got := updated.(model)
+	if got.sourcePrompt != nil {
+		t.Errorf("prompt should be cleared")
+	}
+	if got.view != viewDetail {
+		t.Errorf("view should restore to viewDetail, got %v", got.view)
+	}
+}
+
+func TestUpdateSourcePrompt_Esc_RestoresPrevView(t *testing.T) {
+	m := model{
+		view: viewSourcePrompt,
+		sourcePrompt: &sourcePrompt{
+			prevView: viewUnits,
+			options: []sourcePromptOption{
+				{label: "https", value: "https"},
+				{label: "ssh", value: "ssh"},
+			},
+		},
+	}
+	updated, _ := m.updateSourcePrompt(tea.KeyMsg{Type: tea.KeyEsc})
+	got := updated.(model)
+	if got.view != viewUnits {
+		t.Errorf("esc should restore viewUnits, got %v", got.view)
+	}
+	if got.sourcePrompt != nil {
+		t.Errorf("prompt should be cleared after esc")
+	}
+}
+
+func TestViewSourcePrompt_RendersHeaderAndOptions(t *testing.T) {
+	m := model{
+		view: viewSourcePrompt,
+		sourcePrompt: &sourcePrompt{
+			kind:   promptSSHHTTPS,
+			header: "Switch foo to dev mode?",
+			options: []sourcePromptOption{
+				{label: "HTTPS", desc: "use https://", value: "https"},
+				{label: "SSH", desc: "use git@", value: "ssh"},
+				{label: "cancel", value: "cancel"},
+			},
+			cursor: 0,
+		},
+	}
+	got := m.viewSourcePrompt()
+	if !strings.Contains(got, "Switch foo to dev mode?") {
+		t.Errorf("header missing: %q", got)
+	}
+	if !strings.Contains(got, "HTTPS") || !strings.Contains(got, "SSH") {
+		t.Errorf("options missing: %q", got)
+	}
+	if !strings.Contains(got, "cancel") {
+		t.Errorf("cancel option missing: %q", got)
 	}
 }
 
