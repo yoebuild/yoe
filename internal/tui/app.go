@@ -1189,6 +1189,12 @@ func (m *model) applySortReset() {
 }
 
 func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Any keystroke other than Tab clears a leftover tab-completion
+	// message (the inline candidate list). Tab manages its own message
+	// state below.
+	if msg.String() != "tab" {
+		m.message = ""
+	}
 	switch msg.String() {
 	case "esc":
 		// Revert to whatever query was active when the bar opened.
@@ -1221,11 +1227,12 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		start, end, cands := query.Complete(m.queryInput, len(m.queryInput), ctx)
 		switch len(cands) {
 		case 0:
-			// nothing to do
+			m.message = "no completions"
 		case 1:
 			// splice in the single candidate, preserving field: prefix when present
 			m.queryInput = spliceCompletion(m.queryInput, start, end, cands[0])
 			m.reparse()
+			m.message = ""
 		default:
 			// longest common prefix
 			lcp := longestCommonPrefix(cands)
@@ -1237,10 +1244,15 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if lcp != "" && lcp != cur {
 				m.queryInput = spliceCompletion(m.queryInput, start, end, lcp)
 				m.reparse()
+				m.message = ""
+			} else {
+				// Can't advance the input — show the options inline so the
+				// user can pick the next character to type. Without this
+				// branch tab looks like a no-op when the user just opened
+				// the bar (cands = all top-level keywords) or typed an
+				// ambiguous single letter.
+				m.message = "tab: " + strings.Join(cands, "  ")
 			}
-			// else: leave as-is. The "second tab shows ghost line" is
-			// deferred to a follow-up; v1 ships a single-tab completion,
-			// which already does the heavy lifting.
 		}
 		return m, nil
 

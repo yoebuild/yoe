@@ -8,7 +8,8 @@
 
 ## Next
 
-- docker running
+- Better hostnames for targets. Lets use machine name, not image name for
+  hostname.
 - Use alpine docker-init. Had some problems with consuming packages with
   multiple outputs.
 - Is there any advantage in sources to storing filename as a hash? What is this
@@ -23,7 +24,6 @@
 - alpine should have unit deps, not just runtime deps
 - alpine packages like gvim provides vim. This could be a source of pain.
 - document BSP and package moat
-- Better hostnames for targets.
 - mDNS on target (we have a mdns component, why is it not working?)
 - base-files is modified by machine
   - machine package feed?

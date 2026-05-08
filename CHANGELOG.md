@@ -13,6 +13,12 @@ and this project adheres to
   `tab complete`, `⌫ delete`, `enter apply`, `esc cancel`) instead of pretending
   `b build`, `q quit`, etc. still fire. Out of search-edit it shows the
   navigation shortcuts as before.
+- **Tab in the search bar always shows progress.** When Tab can't advance the
+  input (multiple candidates with no common prefix to extend — most visibly when
+  you've just opened the bar, or typed a single ambiguous letter), the candidate
+  list now flashes in place of the help bar instead of silently doing nothing.
+  Single-candidate completions still splice in. Empty pool flashes "no
+  completions".
 
 ## [0.10.3] - 2026-05-07
 
