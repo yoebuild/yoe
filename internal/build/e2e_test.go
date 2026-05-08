@@ -17,7 +17,11 @@ func TestE2E_DryRun(t *testing.T) {
 	}
 
 	abs, _ := filepath.Abs(projectDir)
-	t.Setenv("YOE_CACHE", filepath.Join(abs, "build", "cache"))
+	// Point at the checked-in cache snapshot under testdata/e2e-project/cache/
+	// so the test loads the full module-alpine tree (units/main + units/community).
+	// build/cache/ is a build-output subset and may drift; the source-of-truth
+	// fixture lives at cache/.
+	t.Setenv("YOE_CACHE", filepath.Join(abs, "cache"))
 
 	proj, err := yoestar.LoadProject(projectDir,
 		yoestar.WithModuleSync(module.SyncIfNeeded),

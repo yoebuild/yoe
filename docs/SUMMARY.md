@@ -20,6 +20,7 @@
 - [Build Dependencies and Caching](build-dependencies-and-caching.md)
 - [Build Environment](build-environment.md)
 - [Development Environments](dev-env.md)
+- [Go Workflows](go.md)
 - [Testing](testing.md)
 
 # Packages and Devices

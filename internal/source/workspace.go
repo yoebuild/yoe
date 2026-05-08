@@ -20,12 +20,31 @@ import (
 // 2. Extracts into build/<unit>/src/ as a git repo with "upstream" tag
 // 3. Applies patches from the unit as git commits
 //
-// If the source directory already exists with local commits beyond upstream,
-// it is left untouched (yoe dev workflow).
-func Prepare(projectDir, scopeDir string, unit *yoestar.Unit, w io.Writer) (string, error) {
+// cachedSourceState is the unit's BuildMeta.SourceState from the previous
+// build (empty for first-time builds). When it's in the dev* family, the
+// existing src dir is the user's working tree — Prepare returns it
+// untouched and logs a warning so .star edits surface explicitly. The
+// "commits beyond upstream" fallback covers manually-committed src dirs
+// from before the dev-mode toggle existed.
+func Prepare(projectDir, scopeDir string, unit *yoestar.Unit, cachedSourceState string, w io.Writer) (string, error) {
 	srcDir := filepath.Join(projectDir, "build", unit.Name+"."+scopeDir, "src")
 
-	// If source dir exists and has local commits, don't touch it (dev mode)
+	// If the cached state says dev* and the src dir still exists, the
+	// user is actively editing it — never overwrite.
+	if IsDev(State(cachedSourceState)) {
+		if _, err := os.Stat(filepath.Join(srcDir, ".git")); err == nil {
+			fmt.Fprintf(w, "Using local source for %s (state %s) — "+
+				".star source/tag/patches changes won't apply until you switch back to pin\n",
+				unit.Name, cachedSourceState)
+			return srcDir, nil
+		}
+		// Cache is stale (user wiped the src dir). Fall through to a
+		// fresh prep so the build can proceed instead of erroring.
+	}
+
+	// Legacy fallback: a src dir with commits beyond upstream pre-dates
+	// the BuildMeta.SourceState mechanism. Treat it the same as a
+	// dev-mod state so existing yoe-dev workflows keep working.
 	if hasLocalCommits(srcDir) {
 		fmt.Fprintf(w, "Using local source for %s (has commits beyond upstream)\n", unit.Name)
 		return srcDir, nil

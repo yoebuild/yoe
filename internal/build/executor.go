@@ -132,8 +132,39 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		return err
 	}
 
-	// Compute hashes for cache
-	hashes, err := resolve.ComputeAllHashes(dag, opts.Arch, opts.Machine)
+	// Compute hashes for cache. Pin units pass empty (cache-neutral);
+	// dev units fold in HEAD sha and, when the work tree is dirty,
+	// the dirty diff sha so an in-place edit invalidates the cache.
+	//
+	// The persisted BuildMeta.SourceState only ever records the
+	// toggle decision ("dev"); the dev-mod / dev-dirty refinement is
+	// a live observation. We therefore read the persisted state to
+	// decide *whether* the unit is under user control, and then run
+	// source.DetectState on the actual src dir to discover the live
+	// state — without that step, an uncommitted edit didn't change
+	// the hash and the build was served from cache, silently
+	// dropping the user's edits.
+	srcInputs := func(u *yoestar.Unit) string {
+		sd := ScopeDir(u, opts.Arch, opts.Machine)
+		buildDir := UnitBuildDir(opts.ProjectDir, sd, u.Name)
+		persisted := source.StateEmpty
+		if meta := ReadMeta(buildDir); meta != nil {
+			persisted = source.State(meta.SourceState)
+		}
+		if !source.IsDev(persisted) {
+			return ""
+		}
+		srcDir := filepath.Join(buildDir, "src")
+		liveState, _ := source.DetectState(srcDir)
+		if !source.IsDev(liveState) {
+			// Persisted says dev but the live dir disagrees (user
+			// wiped it, no .git, etc.). Fall back to the persisted
+			// state so we still produce a stable hash component.
+			liveState = persisted
+		}
+		return source.SrcHashInputs(srcDir, liveState)
+	}
+	hashes, err := resolve.ComputeAllHashes(dag, opts.Arch, opts.Machine, srcInputs)
 	if err != nil {
 		return err
 	}
@@ -266,11 +297,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 
 	// Write initial build metadata; update on completion.
 	buildStart := time.Now()
-	meta := &BuildMeta{
-		Status:  "building",
-		Started: &buildStart,
-		Hash:    hash,
-	}
+	meta := initBuildMeta(buildDir, hash, buildStart)
 	WriteMeta(buildDir, meta)
 	defer func() {
 		now := time.Now()
@@ -288,6 +315,13 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 			installedRoot = filepath.Join(installedRoot, "rootfs")
 		}
 		meta.InstalledBytes = DirSize(installedRoot)
+		// For dev units, capture `git describe --dirty --always` so the
+		// TUI's SOURCE line and the build log can show a meaningful
+		// reference (e.g. v3.4.1-3-gabc1234-dirty). Empty for pin units
+		// — there's nothing useful to describe against the upstream tag.
+		if source.IsDev(source.State(meta.SourceState)) {
+			meta.SourceDescribe = source.SrcDescribe(filepath.Join(buildDir, "src"))
+		}
 		if ctx.Err() != nil {
 			meta.Status = "cancelled"
 		} else if buildErr != nil {
@@ -361,7 +395,15 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	// Prepare source (fetch + extract + patch, or reuse dev source).
 	// Units without a source field (e.g., musl) skip this step.
 	if unit.Source != "" {
-		if _, err := source.Prepare(opts.ProjectDir, sd, unit, w); err != nil {
+		// Look up the unit's previous BuildMeta so Prepare can honor
+		// dev-mode state without re-running source.DetectState
+		// itself — the cache is the trusted signal here, set by the
+		// internal/dev.go toggle.
+		var cachedSourceState string
+		if meta := ReadMeta(buildDir); meta != nil {
+			cachedSourceState = meta.SourceState
+		}
+		if _, err := source.Prepare(opts.ProjectDir, sd, unit, cachedSourceState, w); err != nil {
 			return fmt.Errorf("preparing source: %w", err)
 		}
 	} else {

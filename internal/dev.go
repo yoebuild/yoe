@@ -1,13 +1,17 @@
 package internal
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
+	"github.com/yoebuild/yoe/internal/source"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -162,4 +166,372 @@ func gitCmd(dir string, args ...string) (string, error) {
 		return "", fmt.Errorf("%s: %s", err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
+}
+
+// devSrcDir returns the src/ path for a unit's build dir. Mirrors
+// build.UnitBuildDir without importing the build package (which
+// imports this package).
+func devSrcDir(projectDir, scopeDir, unitName string) string {
+	return filepath.Join(projectDir, "build", unitName+"."+scopeDir, "src")
+}
+
+// DevUpstreamOpts configures the upstream-fetch performed when a unit
+// (or module) is toggled into dev mode. Zero values keep the
+// "rewrite remote, unshallow, fetch everything" behavior.
+type DevUpstreamOpts struct {
+	// SSH rewrites a github/gitlab-style HTTPS URL to git@host:path
+	// before setting origin. Hosts that don't match a known SSH
+	// mapping fall back to HTTPS regardless of this flag.
+	SSH bool
+	// FetchDepth, when > 0, replaces `--unshallow` with
+	// `--depth=<N>`. Useful for repos with deep history (linux,
+	// chromium) where a full unshallow pulls gigabytes of objects
+	// the developer doesn't need.
+	FetchDepth int
+}
+
+// DevToUpstream switches a unit's src checkout from pin mode (yoe-managed
+// shallow clone, no remote) into dev mode: rewrites `origin` to the
+// upstream URL the user picks (HTTPS or SSH), fetches enough history
+// for `git log` / `git blame` / branch ops to work, and persists
+// `dev` state in BuildMeta.
+//
+// `unit.Source` provides the canonical HTTPS URL; opts.SSH rewrites it
+// to git@host:path form for hosts where that mapping is well-defined
+// (github.com, gitlab.com, generic SSH-on-:22 servers). Hosts that don't
+// fit that pattern fall through to HTTPS regardless of the SSH flag.
+//
+// The unit's working tree is not moved — pin and dev mode for the same
+// commit produce bit-identical builds. The transition adds connectivity
+// and history; it doesn't change source content.
+func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, opts DevUpstreamOpts) error {
+	srcDir := devSrcDir(projectDir, scopeDir, unit.Name)
+	if _, err := os.Stat(filepath.Join(srcDir, ".git")); err != nil {
+		return fmt.Errorf("DevToUpstream: %s is not a git repo — build the unit first", srcDir)
+	}
+	if !devIsGitURL(unit.Source) {
+		return fmt.Errorf("DevToUpstream: %s has a non-git source (%s); only git-based units support dev mode", unit.Name, unit.Source)
+	}
+
+	target := unit.Source
+	if opts.SSH {
+		if rewrote, ok := httpsToSSH(unit.Source); ok {
+			target = rewrote
+		}
+	}
+
+	// `git remote remove origin` exits non-zero if origin doesn't
+	// exist; treat that as success since the next `add` will install
+	// the right one.
+	_, _ = gitCmd(srcDir, "remote", "remove", "origin")
+	if _, err := gitCmd(srcDir, "remote", "add", "origin", target); err != nil {
+		return fmt.Errorf("DevToUpstream: setting origin: %w", err)
+	}
+
+	if err := devFetchOrigin(srcDir, opts, devPinnedRef(unit)); err != nil {
+		return fmt.Errorf("DevToUpstream: %w", err)
+	}
+
+	if err := writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StateDev); err != nil {
+		return fmt.Errorf("DevToUpstream: persisting state: %w", err)
+	}
+	return nil
+}
+
+// devFetchOrigin runs the upstream fetch with the depth strategy
+// chosen in opts. Picks one of:
+//   - --depth=N    when FetchDepth > 0
+//   - --unshallow  when the clone is currently shallow (default)
+//   - plain fetch  when the clone is already full history
+//
+// Depth fetches narrow the refspec to the unit's pinned ref so we
+// get N commits leading up to the pin (passing the broad refspec
+// would fan out to every tracked branch — Linux: 100 commits × N
+// branches). They also pass `--filter=blob:none` so the transfer
+// is commits + trees only; file content is fetched on demand when
+// something actually reads it. The full-unshallow path skips both
+// — the user explicitly asked for everything.
+//
+// The `--unshallow` branch errors on a non-shallow repo, so we probe
+// is-shallow-repository first instead of paying the round-trip on the
+// failing path.
+func devFetchOrigin(srcDir string, opts DevUpstreamOpts, pinnedRef string) error {
+	shallow, _ := gitCmd(srcDir, "rev-parse", "--is-shallow-repository")
+	isShallow := strings.TrimSpace(shallow) == "true"
+
+	var args []string
+	var refspec string
+	useFilter := false
+	switch {
+	case opts.FetchDepth > 0:
+		args = []string{"fetch", fmt.Sprintf("--depth=%d", opts.FetchDepth)}
+		refspec = pinnedRef
+		useFilter = true
+	case isShallow:
+		args = []string{"fetch", "--unshallow"}
+	default:
+		args = []string{"fetch"}
+	}
+	if useFilter {
+		args = append(args, "--filter=blob:none")
+	}
+	args = append(args, "origin")
+	if refspec != "" {
+		args = append(args, refspec)
+	}
+	if _, err := gitCmd(srcDir, args...); err != nil {
+		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return nil
+}
+
+// devPinnedRef returns the ref the unit is pinned to (tag, then
+// branch). Empty string means the unit didn't pin anything explicit
+// — caller falls through to a broad fetch.
+func devPinnedRef(unit *yoestar.Unit) string {
+	if unit.Tag != "" {
+		return unit.Tag
+	}
+	if unit.Branch != "" {
+		return unit.Branch
+	}
+	return ""
+}
+
+// DevToPin throws away the dev-mode checkout and re-runs source.Prepare
+// on the next build. Without `force=true`, refuses to proceed when there
+// are commits beyond `upstream` or uncommitted edits in the work tree —
+// the caller (TUI or CLI) is responsible for surfacing a confirmation
+// to the user when local work is at stake.
+//
+// Implementation is dead simple: remove the src dir and clear the
+// cached state. The next build's source.Prepare re-clones at the
+// pinned ref.
+func DevToPin(projectDir, scopeDir string, unit *yoestar.Unit, force bool) error {
+	srcDir := devSrcDir(projectDir, scopeDir, unit.Name)
+	state, _ := source.DetectState(srcDir)
+	if !force {
+		switch state {
+		case source.StateDevDirty:
+			return fmt.Errorf("DevToPin: %s has uncommitted edits; commit/stash or pass force=true to discard", unit.Name)
+		case source.StateDevMod:
+			return fmt.Errorf("DevToPin: %s has commits beyond upstream; switch back will discard them — pass force=true to confirm", unit.Name)
+		}
+	}
+	if err := os.RemoveAll(srcDir); err != nil {
+		return fmt.Errorf("DevToPin: removing %s: %w", srcDir, err)
+	}
+	if err := writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StateEmpty); err != nil {
+		return fmt.Errorf("DevToPin: clearing state: %w", err)
+	}
+	return nil
+}
+
+// httpsToSSH rewrites a github/gitlab-style HTTPS git URL into the
+// equivalent SSH form. Returns (rewritten, true) on a recognized
+// host; (original, false) otherwise so the caller can fall through
+// to HTTPS without a separate error path.
+//
+//	https://github.com/foo/bar.git → git@github.com:foo/bar.git
+//	https://gitlab.com/foo/bar.git → git@gitlab.com:foo/bar.git
+func httpsToSSH(httpsURL string) (string, bool) {
+	u, err := url.Parse(httpsURL)
+	if err != nil || u.Scheme != "https" {
+		return httpsURL, false
+	}
+	// Path always starts with /; strip it.
+	path := strings.TrimPrefix(u.Path, "/")
+	if path == "" {
+		return httpsURL, false
+	}
+	return "git@" + u.Host + ":" + path, true
+}
+
+// writeUnitSourceState updates BuildMeta.SourceState in the unit's
+// build dir, leaving every other meta field intact. Used by DevTo*
+// to mark a unit as dev or clear it back to pin without re-running
+// the executor's full meta finalize.
+func writeUnitSourceState(projectDir, scopeDir, unitName string, state source.State) error {
+	buildDir := filepath.Join(projectDir, "build", unitName+"."+scopeDir)
+	if err := os.MkdirAll(buildDir, 0o755); err != nil {
+		return err
+	}
+	metaPath := filepath.Join(buildDir, "build.json")
+	// Read whatever's there (or start with an empty struct).
+	type metaShape struct {
+		Status         string  `json:"status,omitempty"`
+		Started        any     `json:"started,omitempty"`
+		Finished       any     `json:"finished,omitempty"`
+		Duration       float64 `json:"duration_seconds,omitempty"`
+		DiskBytes      int64   `json:"disk_bytes,omitempty"`
+		InstalledBytes int64   `json:"installed_bytes,omitempty"`
+		Hash           string  `json:"hash,omitempty"`
+		Error          string  `json:"error,omitempty"`
+		SourceState    string  `json:"source_state,omitempty"`
+		SourceDescribe string  `json:"source_describe,omitempty"`
+	}
+	var meta metaShape
+	if data, err := os.ReadFile(metaPath); err == nil {
+		_ = json.Unmarshal(data, &meta)
+	}
+	meta.SourceState = string(state)
+	if state == source.StateEmpty {
+		meta.SourceDescribe = ""
+	}
+	out, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(metaPath, out, 0o644)
+}
+
+// PinKind selects which form of pin to write when promoting a dev-mod
+// unit's HEAD into the .star.
+type PinKind string
+
+const (
+	// PinKindTag pins to the git tag at HEAD. Errors if HEAD has no
+	// tag — the caller should disable this option in the UI prompt.
+	PinKindTag PinKind = "tag"
+	// PinKindHash pins to the 40-char sha at HEAD. Always available;
+	// most reproducible.
+	PinKindHash PinKind = "hash"
+	// PinKindBranch pins to the current branch name. Mutable —
+	// breaks build reproducibility — surface a warning in the UI.
+	PinKindBranch PinKind = "branch"
+)
+
+// DevPromoteToPin captures the dev-mode checkout's current HEAD into
+// the unit's .star definition. State must be StateDevMod (commits
+// beyond upstream, work tree clean); other states return an error so
+// the caller can render an appropriate UI hint instead of silently
+// no-oping.
+//
+// On success: rewrites the unit's `tag` (PinKindTag/Hash) or `branch`
+// (PinKindBranch) field, removes the now-stale alternate field, and
+// advances the local `upstream` git tag to HEAD so
+// `git rev-list upstream..HEAD` returns 0 — the unit transitions from
+// `dev-mod` to plain `dev` as the visible acknowledgement that
+// pinned == checked-out.
+//
+// The unit's working tree commit is unchanged. A subsequent
+// pin-mode rebuild will re-clone shallow at the new ref; the user's
+// branch and any uncommitted state-dirty work would survive in dev
+// mode (uncommitted edits aren't possible in StateDevMod by
+// definition).
+func DevPromoteToPin(projectDir, scopeDir string, unit *yoestar.Unit, kind PinKind) error {
+	srcDir := devSrcDir(projectDir, scopeDir, unit.Name)
+	state, _ := source.DetectState(srcDir)
+	if state != source.StateDevMod {
+		return fmt.Errorf("DevPromoteToPin: unit %q is in state %q; promote requires dev-mod (commit dirty edits or there's nothing to promote)",
+			unit.Name, state)
+	}
+
+	starPath, err := findUnitStarFile(unit.DefinedIn, unit.Name)
+	if err != nil {
+		return fmt.Errorf("DevPromoteToPin: %w", err)
+	}
+
+	var newField, newValue, removeField string
+	switch kind {
+	case PinKindTag:
+		// Pick a git tag pointing at HEAD. If there are several, pick
+		// the first sorted lexicographically — deterministic without
+		// requiring annotated tags.
+		out, err := gitCmd(srcDir, "tag", "--points-at", "HEAD")
+		if err != nil {
+			return fmt.Errorf("DevPromoteToPin: %w", err)
+		}
+		tags := strings.Fields(out)
+		if len(tags) == 0 {
+			return fmt.Errorf("DevPromoteToPin: HEAD has no tag — pick PinKindHash or PinKindBranch instead")
+		}
+		newField, newValue = "tag", tags[0]
+		removeField = "branch"
+	case PinKindHash:
+		out, err := gitCmd(srcDir, "rev-parse", "HEAD")
+		if err != nil {
+			return fmt.Errorf("DevPromoteToPin: %w", err)
+		}
+		newField, newValue = "tag", strings.TrimSpace(out)
+		removeField = "branch"
+	case PinKindBranch:
+		out, err := gitCmd(srcDir, "rev-parse", "--abbrev-ref", "HEAD")
+		if err != nil {
+			return fmt.Errorf("DevPromoteToPin: %w", err)
+		}
+		branch := strings.TrimSpace(out)
+		if branch == "HEAD" {
+			return fmt.Errorf("DevPromoteToPin: detached HEAD has no branch — pick PinKindTag or PinKindHash")
+		}
+		newField, newValue = "branch", branch
+		removeField = "tag"
+	default:
+		return fmt.Errorf("DevPromoteToPin: unknown PinKind %q", kind)
+	}
+
+	if err := yoestar.RewriteUnitField(starPath, unit.Name, newField, newValue); err != nil {
+		return fmt.Errorf("DevPromoteToPin: rewriting %s: %w", newField, err)
+	}
+	if err := yoestar.RemoveUnitField(starPath, unit.Name, removeField); err != nil {
+		return fmt.Errorf("DevPromoteToPin: removing stale %s: %w", removeField, err)
+	}
+
+	// Move upstream tag forward so the state transitions from dev-mod
+	// to dev. -f overwrites the existing upstream tag.
+	if _, err := gitCmd(srcDir, "tag", "-f", "upstream", "HEAD"); err != nil {
+		return fmt.Errorf("DevPromoteToPin: advancing upstream tag: %w", err)
+	}
+
+	return writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StateDev)
+}
+
+// findUnitStarFile locates the .star file that registers a unit with
+// the given name within a directory. Tries the convention
+// (`<dir>/<unitName>.star`) first, falls back to scanning every .star
+// file in the dir for a matching `name = "<unitName>"` declaration.
+//
+// The fallback covers cases where a helper function (e.g.,
+// base_files() in modules/module-core/units/base/base-files.star)
+// registers a unit with a different name than the file that defines
+// the helper.
+func findUnitStarFile(dir, unitName string) (string, error) {
+	if dir == "" {
+		return "", fmt.Errorf("unit %q has no DefinedIn — was it loaded from disk?", unitName)
+	}
+	nameRE := regexp.MustCompile(`(?m)name\s*=\s*"` + regexp.QuoteMeta(unitName) + `"`)
+
+	candidate := filepath.Join(dir, unitName+".star")
+	if data, err := os.ReadFile(candidate); err == nil && nameRE.Match(data) {
+		return candidate, nil
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", fmt.Errorf("scanning %s: %w", dir, err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".star") {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if nameRE.Match(data) {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("could not locate .star file defining unit %q in %s", unitName, dir)
+}
+
+// devIsGitURL is a small mirror of source.isGitURL (which is unexported).
+// Inlined here to avoid widening the source package's API just for this
+// caller — the check is two lines and the failure mode is informational.
+func devIsGitURL(u string) bool {
+	if strings.HasSuffix(u, ".git") {
+		return true
+	}
+	return strings.HasPrefix(u, "git@") || strings.HasPrefix(u, "git://") || strings.HasPrefix(u, "ssh://")
 }

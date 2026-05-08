@@ -648,13 +648,13 @@ units with their build status. The home screen has three tabs (`tab` /
 
   Query: in:base-image                            Units: 9/142
 
-  NAME           CLASS      MODULE     VERSION     SIZE  DEPS  STATUS
-→ base-files     unit       core       1.0.0      12 KiB    0  ● cached
-  busybox        unit       core       1.37.0    1.2 MiB    2  ● cached
-  linux          unit       core       6.6.87   42.1 MiB    1  ▌building...
-  musl           unit       core       1.2.5     650 KiB    0  ● waiting
-  openssl        autotools  core       3.4.1     5.4 MiB    2  ● cached
-  zlib           autotools  core       1.3.1     120 KiB    0  ● cached
+  NAME           CLASS      MODULE     VERSION    SRC         SIZE  DEPS  STATUS
+→ base-files     unit       core       1.0.0                12 KiB    0  ● cached
+  busybox        unit       core       1.37.0    pin        1.2 MiB    2  ● cached
+  linux          unit       core       6.6.87    dev       42.1 MiB    1  ▌building...
+  musl           unit       core       1.2.5     dev-mod    650 KiB    0  ● waiting
+  openssl        autotools  core       3.4.1     dev-dirty  5.4 MiB    2  ● cached
+  zlib           autotools  core       1.3.1                120 KiB    0  ● cached
 
   b build  $ shell  e edit  l log  s setup  / search  \ home  S save  q quit
 ```
@@ -672,6 +672,31 @@ units with their build status. The home screen has three tabs (`tab` /
 When you build a unit, its dependencies appear as "waiting" (yellow), then
 transition to "building" (flashing green) as the executor reaches them. Multiple
 deps can flash green simultaneously.
+
+#### Source state (SRC column)
+
+The SRC column on the units and modules tabs shows whether the on-disk source
+checkout is yoe-managed or under your control. The same vocabulary applies to
+both units (`build/<unit>/src/`) and modules (`<cache>/modules/<name>/`).
+
+| Token       | Color  | Meaning                                                   |
+| ----------- | ------ | --------------------------------------------------------- |
+| (blank)     | —      | Never built / no source dir / image or container unit     |
+| `pin`       | blue   | Yoe-managed clone at the `.star`'s declared ref           |
+| `dev`       | green  | Tracking upstream, work tree clean, at the upstream tag   |
+| `dev-mod`   | yellow | Tracking upstream + commits beyond `upstream` tag (clean) |
+| `dev-dirty` | red    | Tracking upstream + uncommitted edits in the work tree    |
+| `local`     | dim    | Module overridden via `module(local = "...")`             |
+
+Toggle a unit's source between `pin` and `dev` with `u` on its detail page (or
+on the cursor row in the modules tab). When a `dev-mod` unit is ready to ship
+its commits, `P` rewrites the unit's `.star` `tag`/`branch` field to capture the
+current HEAD; the SRC column flips back to `dev` the next time the row renders.
+
+While a unit is in any `dev*` state, `yoe build` reuses your working tree
+without re-fetching, re-extracting, or re-applying patches. A warning is logged
+so you know `.star` source/tag/patches edits won't apply until you toggle the
+unit back to `pin`.
 
 #### Key bindings (unit list)
 
@@ -732,6 +757,8 @@ omitted. Empty until the unit has been built at least once.
 | `b`         | Build this unit in background _(Info tab)_         |
 | `r`         | Run (image units) — boot in QEMU _(Info tab)_      |
 | `$`         | Open `$SHELL` in the unit's checked-out source     |
+| `u`         | Toggle source between pin and dev mode             |
+| `P`         | Promote a `dev-mod` HEAD into the `.star` pin      |
 | `d`         | Launch `claude diagnose` _(Info tab)_              |
 | `l`         | Open build log in `$EDITOR` _(Info tab)_           |
 | `/`         | Search the build log _(Info tab)_                  |
@@ -744,10 +771,14 @@ omitted. Empty until the unit has been built at least once.
 Press `/` to edit the active query. The query bar accepts plain substrings plus
 field filters: `type:image`, `module:rpi`, `status:failed`, and `in:<unit>` —
 the last expands to the runtime closure of that unit, so `in:dev-image` shows
-only what your image needs. `Tab` completes field names and values. Press Enter
-to accept, Esc to revert. The TUI starts filtered to your default image's
-closure; press `\` to snap back to the saved default and `S` to save the current
-query as the new default.
+only what your image needs. When the active query is non-empty, `/` opens the
+bar with a trailing space so you can immediately type an additional term. `Tab`
+completes field names and values; when there are multiple equally-good matches
+the candidate list renders as a vertical column directly under the query bar so
+you can see the next character to type. Press `Ctrl+U` to clear the input back
+to a blank bar in one keystroke. Press Enter to accept, Esc to revert. The TUI
+starts filtered to your default image's closure; press `\` to snap back to the
+saved default and `S` to save the current query as the new default.
 
 Builds call `build.BuildUnits()` directly (in-process, no subprocess). The
 executor sends events to the TUI as each unit starts and finishes building.

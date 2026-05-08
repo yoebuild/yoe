@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -22,7 +23,9 @@ import (
 	yoe "github.com/yoebuild/yoe/internal"
 	"github.com/yoebuild/yoe/internal/build"
 	"github.com/yoebuild/yoe/internal/device"
+	"github.com/yoebuild/yoe/internal/module"
 	"github.com/yoebuild/yoe/internal/resolve"
+	"github.com/yoebuild/yoe/internal/source"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 	"github.com/yoebuild/yoe/internal/tui/query"
 )
@@ -60,6 +63,18 @@ var (
 	// matchHighlightStyle draws the matched substring on top of whatever
 	// the row's existing color is.
 	matchHighlightStyle = lipgloss.NewStyle().Underline(true).Bold(true)
+
+	// SRC column state styles. Each token is short (≤ 9 cells) and
+	// colored so the eye can scan a long unit list and spot dev units
+	// instantly. Pin == "match the .star" (cyan, like cached). Dev ==
+	// "user-controlled but clean" (green). Dev-mod == "user has
+	// committed local changes" (yellow). Dev-dirty == "uncommitted
+	// edits" (red). Local == "module(local=...)" override (faded).
+	srcPinStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("12")) // blue/cyan
+	srcDevStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("10")) // green
+	srcDevModStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // yellow
+	srcDevDirtyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))  // red
+	srcLocalStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Faint(true)
 
 	// Tab bar styling: active tab in amber-bold to match the [yoe] logo,
 	// inactive tabs faded so the eye is drawn to the current selection.
@@ -100,7 +115,72 @@ const (
 	viewSetup
 	viewFlash
 	viewDeploy
+	viewSourcePrompt
+	viewSourceProgress
 )
+
+// sourcePromptKind names which dev-mode modal is showing. Each kind has
+// its own option set and post-selection action; updateSourcePrompt
+// dispatches on this enum to call the right internal/dev.go helper.
+type sourcePromptKind int
+
+const (
+	promptSSHHTTPS     sourcePromptKind = iota // pin → dev, stage 1: pick remote scheme
+	promptHistoryDepth                         // pin → dev, stage 2: pick fetch depth
+	promptPinKind                              // dev-mod → dev: pick tag / hash / branch to write into .star
+	promptDiscardDev                           // dev-mod / dev-dirty → pin: confirm discard
+)
+
+// sourcePromptOption is one row in the dev-mode modal. `value` is the
+// back-channel string passed to the action (e.g. "ssh", "tag"); `label`
+// is what the user reads.
+type sourcePromptOption struct {
+	label    string
+	desc     string // secondary line under the label, optional
+	value    string
+	disabled bool // greyed-out, non-selectable (e.g. "tag" when HEAD has no tag)
+}
+
+// sourcePrompt is the in-flight modal state. The TUI parks the previous
+// view in `prevView` so cancelling the prompt restores it; the action
+// fires on Enter and clears the state.
+type sourcePrompt struct {
+	kind       sourcePromptKind
+	target     string // "unit" | "module"
+	targetName string
+	header     string
+	subheader  string // optional dim line under the title (e.g. "upstream: …")
+	options    []sourcePromptOption
+	cursor     int
+	prevView   viewKind
+
+	// Carried across multi-stage prompts. The pin → dev flow asks for
+	// the remote scheme first, then for the fetch depth — chosenSSH
+	// remembers stage-1's pick so stage-2's apply has both choices.
+	chosenSSH bool
+}
+
+// sourceOp tracks an in-flight dev-mode action so the UI can render
+// a "working…" view while a goroutine does the (potentially slow)
+// git work. The spinner ticks autonomously via spinner.Tick; the
+// completion message arrives as sourceOpDoneMsg.
+type sourceOp struct {
+	target   sourceTarget // unit or module — drives cache invalidation on done
+	name     string
+	label    string // user-facing description ("fetching upstream history for foo")
+	spinner  spinner.Model
+	prevView viewKind
+}
+
+// sourceOpDoneMsg is the completion signal for a dev-mode action. err
+// is nil on success; successMsg is set in that case for the status
+// strip ("foo switched to dev mode").
+type sourceOpDoneMsg struct {
+	target     sourceTarget
+	name       string
+	err        error
+	successMsg string
+}
 
 // fileEntry is one row in the Files tab of the detail view: a path
 // (relative to the unit's destdir, with leading slash so it reads as
@@ -285,9 +365,10 @@ type model struct {
 	building   map[string]bool
 	cancels    map[string]context.CancelFunc // cancel funcs for active builds
 	confirm      string // non-empty = waiting for y/n confirmation
-	queryEditing  bool            // true while the user is typing in the query bar
-	queryInput    string          // text in the query bar; live-parsed every keystroke
-	queryError    string          // last parse error; rendered next to the query bar
+	queryEditing     bool     // true while the user is typing in the query bar
+	queryInput       string   // text in the query bar; live-parsed every keystroke
+	queryError       string   // last parse error; rendered next to the query bar
+	queryCompletions []string // tab-completion candidates, rendered under the bar
 	inSet         map[string]bool // pre-computed in:X closure for the active query, nil if no in: filter
 	visible       []int           // indexes into m.units after applying m.query
 	query         query.Query     // active query, applied to m.units to produce visible
@@ -342,6 +423,30 @@ type model struct {
 	unitSize map[string]int64 // installed bytes (image units: .img file size)
 	unitDeps map[string]int   // runtime closure size, excluding the unit itself
 
+	// Source-state cache for the SRC column. Populated lazily from
+	// BuildMeta.SourceState (units) or module.ReadState (modules) on
+	// first render, then refreshed by U9's fsnotify watcher. Cleared
+	// on project reload so stale entries don't survive a restart.
+	unitSrcStates   map[string]source.State
+	moduleSrcStates map[string]source.State
+
+	// Active dev-mode modal (SSH/HTTPS picker, promote-kind picker,
+	// discard-confirm). Nil when no prompt is showing.
+	sourcePrompt *sourcePrompt
+
+	// In-flight dev-mode operation (e.g. DevToUpstream's
+	// `git fetch --unshallow` against a 100MB repo). The TUI parks
+	// here while the goroutine works so the UI doesn't freeze and the
+	// user has visible feedback. Nil when no operation is active.
+	sourceOp *sourceOp
+
+	// Background watcher that polls the on-disk state of every dev*
+	// unit/module and pushes a sourceStateChangedMsg when DetectState
+	// returns something new. Invariant: watcher membership matches
+	// the set of unitSrcStates / moduleSrcStates whose value is in
+	// the dev* family. Nil in tests that build a model directly.
+	srcWatcher *sourceWatcher
+
 	// Column sort state. sortColumn picks the comparator (sortByName etc.).
 	// sortDesc inverts it. Click a header to switch column or toggle direction.
 	sortColumn int
@@ -385,7 +490,7 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	if m, ok := proj.Machines[proj.Defaults.Machine]; ok {
 		arch = m.Arch
 	}
-	hashes, err := resolve.ComputeAllHashes(dag, arch, proj.Defaults.Machine)
+	hashes, err := resolve.ComputeAllHashes(dag, arch, proj.Defaults.Machine, nil)
 	if err != nil {
 		return fmt.Errorf("computing hashes: %w", err)
 	}
@@ -420,8 +525,11 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 		units:          units,
 		hashes:         hashes,
 		statuses:       statuses,
-		building:       make(map[string]bool),
-		cancels:        make(map[string]context.CancelFunc),
+		building:        make(map[string]bool),
+		cancels:         make(map[string]context.CancelFunc),
+		unitSrcStates:   make(map[string]source.State),
+		moduleSrcStates: make(map[string]source.State),
+		srcWatcher:      newSourceWatcher(),
 		machines:       machines,
 		flashProgress:  progress.New(progress.WithDefaultGradient()),
 		deployHost:     ov.DeployHost,
@@ -456,6 +564,17 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	tuiProgram = p
+
+	// Arm the source watcher for any unit/module that's already in
+	// dev* state at startup (e.g. user toggled it via the CLI before
+	// launching the TUI). Polling fires immediately afterwards.
+	m.armWatcherFromInitialStates()
+	m.srcWatcher.Start(func(msg tea.Msg) {
+		if tuiProgram != nil {
+			tuiProgram.Send(msg)
+		}
+	})
+	defer m.srcWatcher.Stop()
 
 	yoe.OnNotify = func(msg string) {
 		if tuiProgram != nil {
@@ -493,6 +612,58 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshDetail()
 		}
 		return m, doTick()
+
+	case spinner.TickMsg:
+		// Forward to the in-flight op's spinner so its frame advances.
+		// Ignored when no op is pending — a stale tick can arrive after
+		// the op has already completed and shouldn't crash us.
+		if m.sourceOp != nil {
+			var cmd tea.Cmd
+			m.sourceOp.spinner, cmd = m.sourceOp.spinner.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+
+	case sourceOpDoneMsg:
+		// Completion from a backgrounded dev-mode action. Pop the
+		// progress view, surface success/error, and reconcile the
+		// source-state cache so the next render shows the new token.
+		op := m.sourceOp
+		m.sourceOp = nil
+		prev := viewUnits
+		if op != nil {
+			prev = op.prevView
+		}
+		m.view = prev
+		if msg.err != nil {
+			m.message = fmt.Sprintf("%s", msg.err)
+			return m, nil
+		}
+		m.message = msg.successMsg
+		switch msg.target {
+		case targetUnit:
+			m.invalidateUnitState(msg.name)
+		case targetModule:
+			m.invalidateModuleState(msg.name)
+		}
+		return m, nil
+
+	case sourceStateChangedMsg:
+		// Watcher saw a state transition (e.g. user committed in a
+		// dev clone outside the TUI). Update the cache directly so
+		// the next render shows the new token without forcing a full
+		// project reload.
+		switch msg.target {
+		case targetUnit:
+			if m.unitSrcStates != nil {
+				m.unitSrcStates[msg.name] = msg.state
+			}
+		case targetModule:
+			if m.moduleSrcStates != nil {
+				m.moduleSrcStates[msg.name] = msg.state
+			}
+		}
+		return m, nil
 
 	case buildEventMsg:
 		switch msg.status {
@@ -646,6 +817,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateFlash(msg)
 		case viewDeploy:
 			return m.updateDeploy(msg)
+		case viewSourcePrompt:
+			return m.updateSourcePrompt(msg)
+		case viewSourceProgress:
+			// Keys are inert while a dev-mode op is in flight — the
+			// goroutine will finish on its own schedule, and a stray
+			// `q` press shouldn't kill the TUI mid-fetch and leave the
+			// clone half-rewritten.
+			return m, nil
 		}
 	}
 	return m, nil
@@ -931,6 +1110,9 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.queryEditing = true
 		m.queryRevertTo = m.query
 		m.queryInput = m.query.String() // start the bar prefilled with the active query
+		if m.queryInput != "" {
+			m.queryInput += " " // ready for the user to append a new term
+		}
 		return m, nil
 
 	case "s":
@@ -1045,11 +1227,17 @@ func (m model) updateModulesTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		rm := mods[m.modulesCursor]
-		if rm.Dir == "" {
+		if rm.CloneDir == "" {
 			m.message = fmt.Sprintf("Module %s is not synced — run `yoe sync`", rm.Name)
 			return m, nil
 		}
-		return m, m.execShell(rm.Dir)
+		return m, m.execShell(rm.CloneDir)
+	case "u":
+		mods := m.proj.ResolvedModules
+		if m.modulesCursor < 0 || m.modulesCursor >= len(mods) {
+			return m, nil
+		}
+		return m.openSourcePromptForModule(mods[m.modulesCursor].Name)
 	}
 	return m, nil
 }
@@ -1160,7 +1348,7 @@ func (m *model) refreshModuleStatus() {
 			m.moduleStatus[rm.Name] = "missing"
 			continue
 		}
-		out, err := exec.Command("git", "-C", rm.Dir, "status", "--porcelain").Output()
+		out, err := exec.Command("git", "-C", rm.CloneDir, "status", "--porcelain").Output()
 		if err != nil {
 			m.moduleStatus[rm.Name] = "no-git"
 			continue
@@ -1189,6 +1377,12 @@ func (m *model) applySortReset() {
 }
 
 func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Any keystroke other than Tab clears a leftover tab-completion
+	// list. Tab manages its own state below.
+	if msg.String() != "tab" {
+		m.message = ""
+		m.queryCompletions = nil
+	}
 	switch msg.String() {
 	case "esc":
 		// Revert to whatever query was active when the bar opened.
@@ -1213,6 +1407,15 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case "ctrl+u":
+		// Readline-style kill-line: clear the entire input back to a
+		// blank bar in one keystroke. Live-applied like a backspace —
+		// the unit list updates immediately to "showing all".
+		m.queryInput = ""
+		m.queryCompletions = nil
+		m.reparse()
+		return m, nil
+
 	case "tab":
 		ctx := query.Context{
 			Modules: m.moduleNames(),
@@ -1221,11 +1424,14 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		start, end, cands := query.Complete(m.queryInput, len(m.queryInput), ctx)
 		switch len(cands) {
 		case 0:
-			// nothing to do
+			m.message = "no completions"
+			m.queryCompletions = nil
 		case 1:
 			// splice in the single candidate, preserving field: prefix when present
 			m.queryInput = spliceCompletion(m.queryInput, start, end, cands[0])
 			m.reparse()
+			m.message = ""
+			m.queryCompletions = nil
 		default:
 			// longest common prefix
 			lcp := longestCommonPrefix(cands)
@@ -1237,10 +1443,18 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if lcp != "" && lcp != cur {
 				m.queryInput = spliceCompletion(m.queryInput, start, end, lcp)
 				m.reparse()
+				m.message = ""
+				m.queryCompletions = nil
+			} else {
+				// Can't advance the input — surface the options as a
+				// vertical list under the search bar so the user can
+				// pick the next character to type. Without this branch
+				// tab looks like a no-op when the user just opened the
+				// bar (cands = all top-level keywords) or typed an
+				// ambiguous single letter. Cleared on the next keystroke.
+				m.queryCompletions = cands
+				m.message = ""
 			}
-			// else: leave as-is. The "second tab shows ghost line" is
-			// deferred to a follow-up; v1 ships a single-tab completion,
-			// which already does the heavy lifting.
 		}
 		return m, nil
 
@@ -1754,6 +1968,12 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.detailMatchIdx = -1
 		return m, nil
 
+	case "u":
+		return m.openSourcePromptForUnit(m.detailUnit)
+
+	case "P":
+		return m.openPromotePrompt(m.detailUnit)
+
 	case "n":
 		if len(m.detailMatches) > 0 {
 			m.detailMatchIdx = (m.detailMatchIdx + 1) % len(m.detailMatches)
@@ -1854,6 +2074,10 @@ func (m model) View() string {
 		return m.viewFlash()
 	case viewDeploy:
 		return m.viewDeploy()
+	case viewSourcePrompt:
+		return m.viewSourcePrompt()
+	case viewSourceProgress:
+		return m.viewSourceProgress()
 	default:
 		return m.viewUnits()
 	}
@@ -1910,6 +2134,33 @@ func (m model) renderHomeHeader() string {
 	return b.String()
 }
 
+// renderQueryCompletions formats the tab-completion candidate list as
+// a vertical column under the query bar. Truncates with a "(N more)"
+// hint past a threshold so a one-letter ambiguous prefix can't push
+// the unit list off the bottom of the screen.
+func (m model) renderQueryCompletions() string {
+	const maxRows = 8
+	cands := m.queryCompletions
+	if len(cands) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	shown := cands
+	if len(shown) > maxRows {
+		shown = shown[:maxRows]
+	}
+	for _, c := range shown {
+		b.WriteString("    ")
+		b.WriteString(queryActiveStyle.Render(c))
+		b.WriteString("\n")
+	}
+	if len(cands) > len(shown) {
+		fmt.Fprintf(&b, "    %s\n",
+			queryDimStyle.Render(fmt.Sprintf("(%d more — type a letter to narrow)", len(cands)-len(shown))))
+	}
+	return b.String()
+}
+
 func (m model) viewUnits() string {
 	switch m.activeTab {
 	case tabModules:
@@ -1941,6 +2192,12 @@ func (m model) viewUnitsTab() string {
 			queryDimStyle.Render("Query: "),
 			body,
 			queryDimStyle.Render(counter)))
+		// Tab-completion candidates: when the input can't be advanced
+		// further (multiple equally-good matches), drop the list right
+		// under the bar — closer to the eye than the bottom help row.
+		if len(m.queryCompletions) > 0 {
+			b.WriteString(m.renderQueryCompletions())
+		}
 	} else {
 		qStr := m.query.String()
 		qBody := qStr
@@ -1983,11 +2240,12 @@ func (m model) viewUnitsTab() string {
 		}
 		return label + arrow + pad
 	}
-	b.WriteString(fmt.Sprintf("  %s %s %s %s %s %s %s\n",
+	b.WriteString(fmt.Sprintf("  %s %s %s %s %s %s %s %s\n",
 		headerStyle.Render(headerLabel(sortByName, "NAME", 28, false)),
 		headerStyle.Render(headerLabel(sortByClass, "CLASS", 9, false)),
 		headerStyle.Render(headerLabel(sortByModule, "MODULE", 14, false)),
 		headerStyle.Render(headerLabel(sortByVersion, "VERSION", 11, false)),
+		headerStyle.Render(fmt.Sprintf("%-9s", "SRC")),
 		headerStyle.Render(headerLabel(sortBySize, "SIZE", 6, true)),
 		headerStyle.Render(headerLabel(sortByDeps, "DEPS", 5, true)),
 		headerStyle.Render(headerLabel(sortByStatus, "STATUS", 10, false))))
@@ -2059,12 +2317,14 @@ func (m model) viewUnitsTab() string {
 		paddedVersion := clipFixed(version, 11)
 		paddedSize := fmt.Sprintf("%6s", size)
 		paddedDeps := fmt.Sprintf("%5s", depsStr)
-		b.WriteString(fmt.Sprintf("%s%s %s %s %s %s %s %s\n",
+		srcCell := m.renderSrcCell(name)
+		b.WriteString(fmt.Sprintf("%s%s %s %s %s %s %s %s %s\n",
 			cursor,
 			m.renderName(paddedName, nameStyle),
 			classStyle.Render(paddedClass),
 			classStyle.Render(paddedModule),
 			classStyle.Render(paddedVersion),
+			srcCell,
 			classStyle.Render(paddedSize),
 			classStyle.Render(paddedDeps),
 			status))
@@ -2093,14 +2353,25 @@ func (m model) viewUnitsTab() string {
 	if m.message != "" {
 		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
 	} else {
-		items := defaultHelpItems
-		if m.cursor < len(m.units) {
-			name := m.units[m.cursor]
-			if u, ok := m.proj.Units[name]; ok && u.Class == "image" {
-				if m.statuses[name] == statusCached {
-					items = imageCachedHelpItems
-				} else {
-					items = imageHelpItems
+		// While the query input is focused, only the keys updateSearch
+		// actually handles are reachable — printable chars, tab to
+		// complete, backspace, enter to commit, esc to revert. Showing
+		// the navigation help bar there is a lie, so swap in a help
+		// row that matches the active mode.
+		var items []helpItem
+		switch {
+		case m.queryEditing:
+			items = searchEditHelpItems
+		default:
+			items = defaultHelpItems
+			if m.cursor < len(m.units) {
+				name := m.units[m.cursor]
+				if u, ok := m.proj.Units[name]; ok && u.Class == "image" {
+					if m.statuses[name] == statusCached {
+						items = imageCachedHelpItems
+					} else {
+						items = imageHelpItems
+					}
 				}
 			}
 		}
@@ -2133,10 +2404,17 @@ var (
 		{"e", "edit"}, {"$", "shell"}, {"l", "log"}, {"s", "setup"},
 		{"/", "search"}, {`\`, "home"}, {"S", "save"}, {"q", "quit"},
 	}
+	// Shown while the query input is focused — these are the only keys
+	// updateSearch actually handles; navigation/build shortcuts are
+	// inert until the user commits or escapes the search bar.
+	searchEditHelpItems = []helpItem{
+		{"type", "filter"}, {"tab", "complete"}, {"⌫", "delete"},
+		{"^U", "clear"}, {"enter", "apply"}, {"esc", "cancel"},
+	}
 	detailHelpItems = []helpItem{
 		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
-		{"/", "search"}, {"b", "build"}, {"$", "shell"}, {"d", "diagnose"},
-		{"l", "log"},
+		{"/", "search"}, {"b", "build"}, {"$", "shell"}, {"u", "src"},
+		{"P", "promote"}, {"d", "diagnose"}, {"l", "log"},
 	}
 	detailImageHelpItems = []helpItem{
 		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
@@ -2172,8 +2450,8 @@ func (m model) viewModulesTab() string {
 	fmt.Fprintf(&b, "  %s%s\n",
 		queryDimStyle.Render("Modules: "),
 		queryDimStyle.Render(fmt.Sprintf("%d declared", len(mods))))
-	fmt.Fprintf(&b, "  %s\n", headerStyle.Render(fmt.Sprintf("%-22s %-10s %-32s %-32s %s",
-		"NAME", "REF", "URL", "PATH", "STATUS")))
+	fmt.Fprintf(&b, "  %s\n", headerStyle.Render(fmt.Sprintf("%-22s %-10s %-9s %-32s %s",
+		"NAME", "REF", "SRC", "PATH", "STATUS")))
 
 	viewH := m.modulesViewportHeight()
 
@@ -2190,10 +2468,6 @@ func (m model) viewModulesTab() string {
 		ref := rm.Ref
 		if ref == "" {
 			ref = "-"
-		}
-		url := rm.URL
-		if url == "" {
-			url = "(unset)"
 		}
 		path := rm.Path
 		if rm.Local != "" {
@@ -2222,11 +2496,13 @@ func (m model) viewModulesTab() string {
 				statusStyle = waitingStyle
 			}
 		}
+		modState := m.moduleSourceState(rm)
+		srcCell := srcStateStyle(modState).Render(clipFixed(srcStateToken(modState), 9))
 		rendered = append(rendered, fmt.Sprintf("%s%s %s %s %s %s",
 			cursorMark,
 			nameStyle.Render(clipFixed(rm.Name, 22)),
 			classUnitStyle.Render(clipFixed(ref, 10)),
-			dimStyle.Render(clipFixed(url, 32)),
+			srcCell,
 			dimStyle.Render(clipFixed(path, 32)),
 			statusStyle.Render(status)))
 	}
@@ -2287,7 +2563,7 @@ func (m model) viewModulesTab() string {
 	} else {
 		b.WriteString(renderHelp([]helpItem{
 			{"tab", "next tab"}, {"j/k", "move"}, {"g/G", "top/bottom"},
-			{"$", "shell"}, {"r", "refresh"}, {"q", "quit"},
+			{"$", "shell"}, {"u", "src"}, {"r", "refresh"}, {"q", "quit"},
 		}))
 	}
 	return b.String()
@@ -2829,6 +3105,13 @@ func (m model) viewDetail() string {
 		}
 	}
 	b.WriteString("\n")
+
+	// SOURCE line — colored state token + remote URL + git describe.
+	// Skip for image/container units (no source dir to track).
+	if line := m.detailSourceLine(); line != "" {
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
 
 	// Tab bar (Info / Files), styled like the home tab bar so the two
 	// strips read as the same UI element.
@@ -3634,6 +3917,16 @@ func (m *model) recomputeMetrics() {
 	}
 	m.unitSize = size
 	m.unitDeps = deps
+	// Note: the source-state cache deliberately survives this call.
+	// recomputeMetrics is invoked after every build completion, but
+	// BuildMeta.SourceState only records the persistent toggle state
+	// ("dev"); the live dev-mod / dev-dirty refinement comes from the
+	// watcher's polling and lives only in unitSrcStates. Wiping it
+	// here would briefly flip a dev-dirty unit back to "dev" until
+	// the next 2-second poll picked the dirt up again — exactly the
+	// glitch users hit after `yoe build` on a unit with uncommitted
+	// edits. Project reloads (recomputeStatuses) wipe the cache
+	// explicitly because the DAG and arch may have changed.
 }
 
 // refreshUnitSize re-reads a single unit's installed size from disk.
@@ -3678,9 +3971,169 @@ func clipFixed(s string, w int) string {
 	return fmt.Sprintf("%-*s", w, s)
 }
 
+// detailSourceLine renders the SOURCE strip on the unit detail page:
+// colored state token + remote URL + git describe (e.g.
+// "v3.4.1-3-gabc1234-dirty"). Returns "" when the unit has no source
+// dir (image/container) so the caller can skip the line entirely.
+func (m model) detailSourceLine() string {
+	u, ok := m.proj.Units[m.detailUnit]
+	if !ok || u.Class == "image" || u.Class == "container" {
+		return ""
+	}
+	state := m.unitSourceState(m.detailUnit)
+	tok := srcStateToken(state)
+	if tok == "" {
+		tok = "(unbuilt)"
+	}
+	parts := []string{
+		dimStyle.Render("  SOURCE"),
+		srcStateStyle(state).Render(tok),
+	}
+	// Remote URL: prefer the .star-declared source string so the row is
+	// meaningful even before a build has run; if a dev clone has
+	// rewritten origin (HTTPS↔SSH), surface the live remote instead.
+	url := u.Source
+	sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
+	buildDir := build.UnitBuildDir(m.projectDir, sd, m.detailUnit)
+	srcDir := filepath.Join(buildDir, "src")
+	if source.IsDev(state) {
+		if live := remoteOriginURL(srcDir); live != "" {
+			url = live
+		}
+	}
+	if url != "" {
+		parts = append(parts, dimStyle.Render(url))
+	}
+	if meta := build.ReadMeta(buildDir); meta != nil && meta.SourceDescribe != "" {
+		parts = append(parts, dimStyle.Render(meta.SourceDescribe))
+	}
+	return strings.Join(parts, "  ")
+}
+
+// remoteOriginURL returns `git remote get-url origin` for srcDir, or
+// "" when not a git repo. Used by detailSourceLine to show the live
+// remote of a dev clone (which may differ from the .star-declared
+// source if the user rewrote it to SSH).
+func remoteOriginURL(srcDir string) string {
+	cmd := exec.Command("git", "remote", "get-url", "origin")
+	cmd.Dir = srcDir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// srcStateToken is the short label rendered in the SRC column for a
+// given source state. Returned width is 9 cells max (matches the
+// column width in renderUnitsBody / viewModulesTab); blank for an
+// unbuilt or non-source unit so the column reads as cleanly empty.
+func srcStateToken(s source.State) string {
+	switch s {
+	case source.StatePin:
+		return "pin"
+	case source.StateDev:
+		return "dev"
+	case source.StateDevMod:
+		return "dev-mod"
+	case source.StateDevDirty:
+		return "dev-dirty"
+	case source.StateLocal:
+		return "local"
+	default:
+		return ""
+	}
+}
+
+// srcStateStyle picks the lipgloss style for a source-state token.
+// Pin: blue/cyan (matches cachedStyle's "stable, matches the
+// declared ref" semantic). Dev: green. Dev-mod: yellow. Dev-dirty:
+// red. Local: faded. Empty/unknown: dim.
+func srcStateStyle(s source.State) lipgloss.Style {
+	switch s {
+	case source.StatePin:
+		return srcPinStyle
+	case source.StateDev:
+		return srcDevStyle
+	case source.StateDevMod:
+		return srcDevModStyle
+	case source.StateDevDirty:
+		return srcDevDirtyStyle
+	case source.StateLocal:
+		return srcLocalStyle
+	default:
+		return dimStyle
+	}
+}
+
+// renderSrcCell returns the styled SRC column cell for a unit, padded
+// to width 9. Image and container units return blank (no source dir
+// to track). The state value is taken from m.unitSrcStates if cached,
+// otherwise from BuildMeta.SourceState; if neither is set, the unit
+// is assumed pin (it has never been toggled to dev).
+func (m model) renderSrcCell(name string) string {
+	const w = 9
+	u, ok := m.proj.Units[name]
+	if !ok || u.Class == "image" || u.Class == "container" {
+		return clipFixed("", w)
+	}
+	state := m.unitSourceState(name)
+	tok := srcStateToken(state)
+	return srcStateStyle(state).Render(clipFixed(tok, w))
+}
+
+// unitSourceState returns the cached source state for a unit, falling
+// back to BuildMeta.SourceState on the disk and finally to "empty"
+// (which the renderer displays as blank). Caches the answer so a
+// long unit list doesn't trigger N disk reads per render.
+func (m model) unitSourceState(name string) source.State {
+	if m.unitSrcStates == nil {
+		// In production newModel always initialises this, but tests
+		// build models directly via &model{} — bail rather than panic.
+		return source.StateEmpty
+	}
+	if s, ok := m.unitSrcStates[name]; ok {
+		return s
+	}
+	state := source.StateEmpty
+	if u, ok := m.proj.Units[name]; ok {
+		sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
+		buildDir := build.UnitBuildDir(m.projectDir, sd, name)
+		if meta := build.ReadMeta(buildDir); meta != nil {
+			state = source.State(meta.SourceState)
+		}
+	}
+	m.unitSrcStates[name] = state
+	return state
+}
+
+// moduleSourceState returns the cached source state for a module.
+// Modules carry their state in a sibling .yoe-state.json (see
+// internal/module/state.go); module(local=…) overrides always
+// report "local" without touching disk.
+func (m model) moduleSourceState(rm yoestar.ResolvedModule) source.State {
+	if rm.Local != "" {
+		return source.StateLocal
+	}
+	if m.moduleSrcStates == nil {
+		return source.StateEmpty
+	}
+	if s, ok := m.moduleSrcStates[rm.Name]; ok {
+		return s
+	}
+	state := source.StateEmpty
+	if rm.CloneDir != "" {
+		state = module.ReadState(rm.CloneDir)
+	}
+	m.moduleSrcStates[rm.Name] = state
+	return state
+}
+
 // formatSize renders a byte count in a fixed-width, human-readable form
 // using KiB/MiB/GiB. Empty string for unbuilt units (size == 0) so the
-// column reads as cleanly absent rather than misleading "0 B".
+// column reads as cleanly absent rather than misleading "0 B". Uses one
+// decimal below 10 of each unit ("9.9K") and drops the decimal at 10 and
+// above ("1003K") so the rendered width stays bounded — max 5 chars.
 func formatSize(b int64) string {
 	if b <= 0 {
 		return ""
@@ -3690,13 +4143,19 @@ func formatSize(b int64) string {
 		mib = 1024 * kib
 		gib = 1024 * mib
 	)
+	format := func(v float64, unit string) string {
+		if v < 10 {
+			return fmt.Sprintf("%.1f%s", v, unit)
+		}
+		return fmt.Sprintf("%d%s", int64(v), unit)
+	}
 	switch {
 	case b >= gib:
-		return fmt.Sprintf("%.1fG", float64(b)/float64(gib))
+		return format(float64(b)/float64(gib), "G")
 	case b >= mib:
-		return fmt.Sprintf("%.1fM", float64(b)/float64(mib))
+		return format(float64(b)/float64(mib), "M")
 	case b >= kib:
-		return fmt.Sprintf("%.1fK", float64(b)/float64(kib))
+		return format(float64(b)/float64(kib), "K")
 	default:
 		return fmt.Sprintf("%dB", b)
 	}
@@ -3734,7 +4193,7 @@ func (m *model) recomputeStatuses() {
 	// m.visible would carry stale indices into the old slice.
 	m.applyQuery()
 
-	hashes, err := resolve.ComputeAllHashes(m.dag, m.arch, m.proj.Defaults.Machine)
+	hashes, err := resolve.ComputeAllHashes(m.dag, m.arch, m.proj.Defaults.Machine, nil)
 	if err != nil {
 		return
 	}
@@ -3759,6 +4218,11 @@ func (m *model) recomputeStatuses() {
 		}
 	}
 	m.recomputeMetrics()
+	// Project actually reloaded — DAG, arch, machine may all be
+	// different — so the runtime source-state cache is genuinely
+	// stale and should be re-derived from scratch on the next render.
+	m.unitSrcStates = make(map[string]source.State)
+	m.moduleSrcStates = make(map[string]source.State)
 }
 
 // checkBinfmtWarning sets or clears the warning banner based on whether
@@ -3787,11 +4251,30 @@ func (m model) listViewportHeight() int {
 	chrome++ // ↓ more (always reserved)
 	chrome++ // blank line before bottom row
 	chrome++ // bottom row: help / search / message — always one line
+	chrome += m.queryCompletionsLines()
 	h := m.height - chrome
 	if h < 3 {
 		h = 3
 	}
 	return h
+}
+
+// queryCompletionsLines returns how many lines the tab-completion
+// candidate list adds under the query bar. Zero when the list is
+// empty. Capped at the same maxRows the renderer uses, plus one for
+// the "(N more)" hint when truncated. listViewportHeight subtracts
+// this so a long candidate list doesn't push the home header off
+// the top of the screen.
+func (m model) queryCompletionsLines() int {
+	const maxRows = 8
+	n := len(m.queryCompletions)
+	if n == 0 {
+		return 0
+	}
+	if n > maxRows {
+		return maxRows + 1 // truncation hint
+	}
+	return n
 }
 
 // homeHeaderLines returns the number of lines renderHomeHeader outputs.

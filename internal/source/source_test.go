@@ -91,7 +91,7 @@ func TestPrepare(t *testing.T) {
 		Source:  srv.URL + "/test-1.0.tar.gz",
 	}
 
-	srcDir, err := Prepare(projectDir, "x86_64", unit, os.Stdout)
+	srcDir, err := Prepare(projectDir, "x86_64", unit, "", os.Stdout)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestPrepare_WithPatches(t *testing.T) {
 		Patches: []string{"patches/test-pkg/fix.patch"},
 	}
 
-	srcDir, err := Prepare(projectDir, "x86_64", unit, os.Stdout)
+	srcDir, err := Prepare(projectDir, "x86_64", unit, "", os.Stdout)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestPrepare_PatchesRelativeToDefinedIn(t *testing.T) {
 		DefinedIn: unitDir,
 	}
 
-	srcDir, err := Prepare(projectDir, "x86_64", unit, os.Stdout)
+	srcDir, err := Prepare(projectDir, "x86_64", unit, "", os.Stdout)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestPrepare_DevMode(t *testing.T) {
 		Source: "https://example.com/should-not-fetch.tar.gz",
 	}
 
-	result, err := Prepare(projectDir, "x86_64", unit, os.Stdout)
+	result, err := Prepare(projectDir, "x86_64", unit, "", os.Stdout)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -258,6 +258,83 @@ func TestPrepare_DevMode(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(srcDir, "main.c"))
 	if !strings.Contains(string(data), "return 1") {
 		t.Error("local changes were overwritten")
+	}
+}
+
+// TestPrepare_CachedDevSkipsFetch verifies the U10 widening: when
+// BuildMeta.SourceState is in the dev* family, Prepare leaves the
+// existing src dir alone — even if it would otherwise have been
+// classified as plain dev (clean clone with origin + upstream tag,
+// no commits beyond), which the old hasLocalCommits gate would have
+// re-fetched on top of.
+func TestPrepare_CachedDevSkipsFetch(t *testing.T) {
+	projectDir := t.TempDir()
+	srcDir := filepath.Join(projectDir, "build", "test-pkg.x86_64", "src")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set up a clean clone with origin + upstream tag at HEAD —
+	// hasLocalCommits would return false, so the legacy path would
+	// re-fetch. The cached "dev" state must short-circuit anyway.
+	run(t, srcDir, "git", "init")
+	run(t, srcDir, "git", "config", "user.email", "test@test.com")
+	run(t, srcDir, "git", "config", "user.name", "Test")
+	os.WriteFile(filepath.Join(srcDir, "main.c"), []byte("int main() {}\n"), 0o644)
+	run(t, srcDir, "git", "add", "-A")
+	run(t, srcDir, "git", "commit", "-m", "upstream")
+	run(t, srcDir, "git", "tag", "upstream")
+	run(t, srcDir, "git", "remote", "add", "origin", "https://example.com/foo.git")
+
+	unit := &yoestar.Unit{
+		Name:   "test-pkg",
+		Source: "https://example.com/should-not-fetch.tar.gz",
+	}
+
+	var buf bytes.Buffer
+	result, err := Prepare(projectDir, "x86_64", unit, "dev", &buf)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if result != srcDir {
+		t.Errorf("Prepare returned %q, want %q", result, srcDir)
+	}
+	if !strings.Contains(buf.String(), "Using local source") {
+		t.Errorf("expected warning about local source, got %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "switch back to pin") {
+		t.Errorf("warning should hint at pin recovery, got %q", buf.String())
+	}
+}
+
+// TestPrepare_StaleCacheFallsThrough covers the edge case the plan
+// calls out: BuildMeta says "dev" but the user wiped build/<unit>/src.
+// Prepare must not error out — it should fall through to a fresh
+// fetch so the build can proceed.
+func TestPrepare_StaleCacheFallsThrough(t *testing.T) {
+	content := createTestTarball(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(content)
+	}))
+	defer srv.Close()
+
+	projectDir := t.TempDir()
+	t.Setenv("YOE_CACHE", filepath.Join(projectDir, "cache"))
+
+	unit := &yoestar.Unit{
+		Name:    "test-pkg",
+		Version: "1.0",
+		Source:  srv.URL + "/test-1.0.tar.gz",
+	}
+
+	// Cache says "dev" but no src dir exists — Prepare should still
+	// run a fresh prep instead of returning the missing dir.
+	srcDir, err := Prepare(projectDir, "x86_64", unit, "dev", os.Stdout)
+	if err != nil {
+		t.Fatalf("Prepare with stale dev cache: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(srcDir, ".git")); err != nil {
+		t.Errorf("expected fresh clone at %s, got %v", srcDir, err)
 	}
 }
 

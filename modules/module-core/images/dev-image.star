@@ -21,5 +21,4 @@ image(
         "htop", "strace", "apk-tools",
         "yazi", "zellij", "helix"
     ],
-    hostname = "yoe-dev",
 )

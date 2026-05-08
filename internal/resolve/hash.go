@@ -34,10 +34,13 @@ func hashStringMap(h io.Writer, label string, m map[string]string) {
 //   - Unit fields (name, version, class, source, sha256, deps, build steps, etc.)
 //   - Machine architecture and build flags
 //   - Dependency hashes (transitive, via depHashes map)
+//   - Source-state inputs (only for units in dev mode — pin units stay
+//     cache-neutral; the line is gated on non-empty so adding the field
+//     doesn't invalidate every unit's hash).
 //
 // This ensures any change to a unit, its source, or any of its dependencies
 // produces a new hash and triggers a rebuild.
-func UnitHash(unit *yoestar.Unit, arch string, depHashes map[string]string) string {
+func UnitHash(unit *yoestar.Unit, arch string, depHashes map[string]string, srcInputs string) string {
 	h := sha256.New()
 
 	// Unit identity
@@ -60,6 +63,16 @@ func UnitHash(unit *yoestar.Unit, arch string, depHashes map[string]string) stri
 	fmt.Fprintf(h, "tag:%s\n", unit.Tag)
 	fmt.Fprintf(h, "branch:%s\n", unit.Branch)
 	fmt.Fprintf(h, "patches:%s\n", strings.Join(unit.Patches, "|"))
+
+	// Dev-mode source state. Gated on non-empty so pin units stay
+	// cache-neutral — adding this hash input must not invalidate every
+	// unit's cache the moment it lands. The caller (ComputeAllHashes
+	// via the executor) returns a non-empty string only for units in
+	// dev mode; the value captures HEAD sha and any dirty diff sha so
+	// in-place edits invalidate the cache.
+	if srcInputs != "" {
+		fmt.Fprintf(h, "src_state:%s\n", srcInputs)
+	}
 
 	// Tasks — hash command text, callable name, and install-step payload so
 	// any change to a build step invalidates the cache.
@@ -146,7 +159,13 @@ func UnitHash(unit *yoestar.Unit, arch string, depHashes map[string]string) stri
 
 // ComputeAllHashes computes hashes for all units in build order.
 // Returns a map of unit name -> hash.
-func ComputeAllHashes(dag *DAG, arch, machine string) (map[string]string, error) {
+//
+// `srcInputs` returns the source-state hash component for a unit.
+// Pass nil to skip — every unit gets an empty source-state input,
+// preserving pre-dev-mode hashing behaviour. Production callers
+// (the build executor) supply a function that reads BuildMeta and
+// runs source.SrcHashInputs against the unit's src dir.
+func ComputeAllHashes(dag *DAG, arch, machine string, srcInputs func(*yoestar.Unit) string) (map[string]string, error) {
 	order, err := dag.TopologicalSort()
 	if err != nil {
 		return nil, err
@@ -161,7 +180,11 @@ func ComputeAllHashes(dag *DAG, arch, machine string) (map[string]string, error)
 		if node.Unit.Scope == "machine" {
 			unitArch = arch + ":" + machine
 		}
-		hashes[name] = UnitHash(node.Unit, unitArch, hashes)
+		var src string
+		if srcInputs != nil {
+			src = srcInputs(node.Unit)
+		}
+		hashes[name] = UnitHash(node.Unit, unitArch, hashes, src)
 	}
 
 	return hashes, nil

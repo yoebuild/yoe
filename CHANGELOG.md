@@ -8,6 +8,67 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-05-08
+
+- **Search bar clears with `Ctrl+U`.** Readline's kill-line shortcut wipes the
+  query input back to a blank bar in one keystroke — faster than holding
+  Backspace or pressing `\` to snap to the saved default. Live-applied like a
+  backspace, so the unit list updates to "showing all" immediately.
+- **Tab completions show up under the query bar.** When the search input can't
+  be advanced further (multiple equally-good matches), the candidate list now
+  renders as a vertical column directly under the query bar — closer to the
+  cursor than the previous horizontal blob at the bottom of the screen, and
+  easier to scan for the next character to type. Long lists truncate with a "(N
+  more — type a letter to narrow)" hint.
+- **Fresh projects from `yoe init` build out of the box.** The generated
+  PROJECT.star now pins `xz` to the Alpine module, matching the canonical
+  e2e-project template. Without this, kmod's depmod failed at image-assembly
+  time because module-core's xz is static-only and doesn't ship liblzma.so.5.
+- **Switching a unit/module to dev mode transfers far less data.** The
+  depth-limited fetch (`last 100 / 1000 commits`, `last year`, `last month`) now
+  narrows to the unit's pinned ref instead of fanning out across every branch
+  the upstream tracks, and adds `--filter=blob:none` so file content comes down
+  on demand instead of all at once. For a Linux-kernel-sized repo that's the
+  difference between a multi-gigabyte fetch and tens of megabytes; `git log` and
+  `git blame` still work, and missing blobs are fetched lazily when needed.
+- **TUI `/` makes refining an existing query faster.** When you press `/` and
+  the active query is non-empty, the bar opens with a trailing space so you can
+  immediately type the next term — no need to press End or space first. A blank
+  query still opens empty.
+- **Toggle any unit or module between pinned and dev mode from the TUI.** A new
+  SRC column on the units and modules tabs surfaces whether each source dir is
+  yoe-managed (`pin`), tracking upstream (`dev`), has commits beyond upstream
+  (`dev-mod`), or has uncommitted edits (`dev-dirty`). Press `u` on a unit's
+  detail page (or a module row) to switch between pin and dev — yoe asks whether
+  to rewrite origin to SSH, then how much history to fetch (full / last 1000
+  commits / last 100 commits) so the Linux kernel's full history doesn't have to
+  come down every time. A spinner runs while the fetch is in flight so you can
+  see something is happening. Once you're happy with a `dev-mod` HEAD, `P`
+  captures it back into the `.star` pin so other people building the project
+  pick it up. A `dev*` unit is left untouched at build time, so `yoe build`
+  won't overwrite your working tree or undo in-flight changes.
+- **TUI size column no longer overflows on big artifacts.** Sizes like a 1003
+  KiB kernel image render as `1003K` instead of `1003.4K`, keeping the column
+  aligned. The decimal still shows for small values (e.g. `9.9K`, `1.2M`) where
+  it carries useful precision.
+- **Device hostname now matches the machine, not the image.** A fleet of
+  raspberrypi4s flashed with `dev-image` no longer all answer to
+  `yoe-dev.local`; each board comes up as `<machine>.local` (e.g.
+  `raspberrypi4.local`, `qemu-x86_64.local`) so they're distinguishable on the
+  LAN out of the box. Set `hostname = "..."` on an image to override (e.g. a
+  branded kiosk image).
+- **TUI help bar reflects the active mode.** While typing in the search bar, the
+  bottom help row swaps to the keys that actually work there (`type filter`,
+  `tab complete`, `⌫ delete`, `enter apply`, `esc cancel`) instead of pretending
+  `b build`, `q quit`, etc. still fire. Out of search-edit it shows the
+  navigation shortcuts as before.
+- **Tab in the search bar always shows progress.** When Tab can't advance the
+  input (multiple candidates with no common prefix to extend — most visibly when
+  you've just opened the bar, or typed a single ambiguous letter), the candidate
+  list now flashes in place of the help bar instead of silently doing nothing.
+  Single-candidate completions still splice in. Empty pool flashes "no
+  completions".
+
 ## [0.10.3] - 2026-05-07
 
 - **`docker-image` starts dockerd at boot.** Pulls in Alpine's `docker-openrc`
@@ -30,10 +91,11 @@ and this project adheres to
 - **Kernel ships container-runtime CONFIG by default.** A `container.cfg`
   fragment (overlayfs, bridge/veth, the full netfilter chain including
   `NFT_COMPAT` so iptables-nft works, IPv4 + IPv6 NAT, namespaces, seccomp,
-  cgroup BPF, eBPF) is merged into the kernel's defconfig during the linux
-  unit's build, so `dockerd` and `containerd` start cleanly without per-image
-  kernel customisation. The cost on non-container images is a few hundred KB of
-  kernel modules that nothing references.
+  cgroup BPF, eBPF) is merged into the kernel's defconfig during the build of
+  the upstream `linux` unit and the Raspberry Pi `linux-rpi4` / `linux-rpi5`
+  units, so `dockerd` and `containerd` start cleanly on every supported board
+  without per-image kernel customisation. The cost on non-container images is a
+  few hundred KB of kernel modules that nothing references.
 - **TUI flash remembers the last device.** Picking and confirming a flash target
   writes `flash_device = "/dev/sdX"` to `local.star`, and re-entering the flash
   view positions the cursor on that device when it shows up in the candidate
