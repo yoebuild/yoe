@@ -87,6 +87,34 @@ func TestRenderQueryCompletions_EmptyReturnsNothing(t *testing.T) {
 	}
 }
 
+// TestViewUnitsTab_CompletionsRenderUnderQueryLine verifies layout
+// order: the completion candidates land between the Query line and
+// the column header, not above the Query line nor at the bottom of
+// the screen.
+func TestViewUnitsTab_CompletionsRenderUnderQueryLine(t *testing.T) {
+	m := model{
+		proj: &yoestar.Project{
+			Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
+			Units:    map[string]*yoestar.Unit{},
+		},
+		queryEditing:     true,
+		queryInput:       "o",
+		queryCompletions: []string{"openrc", "openssh", "openssl"},
+		width:            120, height: 40,
+	}
+	got := m.viewUnitsTab()
+	queryIdx := strings.Index(got, "Query:")
+	candIdx := strings.Index(got, "openrc")
+	colIdx := strings.Index(got, "NAME")
+	if queryIdx < 0 || candIdx < 0 || colIdx < 0 {
+		t.Fatalf("missing landmark — Query=%d candidate=%d NAME=%d\n%s", queryIdx, candIdx, colIdx, got)
+	}
+	if !(queryIdx < candIdx && candIdx < colIdx) {
+		t.Errorf("expected order Query → candidate → NAME header, got positions %d %d %d:\n%s",
+			queryIdx, candIdx, colIdx, got)
+	}
+}
+
 func TestRefreshUnitSize_PicksUpFreshlyWrittenMeta(t *testing.T) {
 	projDir := t.TempDir()
 	// build/foo.x86_64/build.json
