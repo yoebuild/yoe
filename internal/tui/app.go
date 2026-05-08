@@ -1226,11 +1226,11 @@ func (m model) updateModulesTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		rm := mods[m.modulesCursor]
-		if rm.Dir == "" {
+		if rm.CloneDir == "" {
 			m.message = fmt.Sprintf("Module %s is not synced — run `yoe sync`", rm.Name)
 			return m, nil
 		}
-		return m, m.execShell(rm.Dir)
+		return m, m.execShell(rm.CloneDir)
 	case "u":
 		mods := m.proj.ResolvedModules
 		if m.modulesCursor < 0 || m.modulesCursor >= len(mods) {
@@ -1347,7 +1347,7 @@ func (m *model) refreshModuleStatus() {
 			m.moduleStatus[rm.Name] = "missing"
 			continue
 		}
-		out, err := exec.Command("git", "-C", rm.Dir, "status", "--porcelain").Output()
+		out, err := exec.Command("git", "-C", rm.CloneDir, "status", "--porcelain").Output()
 		if err != nil {
 			m.moduleStatus[rm.Name] = "no-git"
 			continue
@@ -2402,8 +2402,8 @@ func (m model) viewModulesTab() string {
 	fmt.Fprintf(&b, "  %s%s\n",
 		queryDimStyle.Render("Modules: "),
 		queryDimStyle.Render(fmt.Sprintf("%d declared", len(mods))))
-	fmt.Fprintf(&b, "  %s\n", headerStyle.Render(fmt.Sprintf("%-22s %-10s %-9s %-32s %-32s %s",
-		"NAME", "REF", "SRC", "URL", "PATH", "STATUS")))
+	fmt.Fprintf(&b, "  %s\n", headerStyle.Render(fmt.Sprintf("%-22s %-10s %-9s %-32s %s",
+		"NAME", "REF", "SRC", "PATH", "STATUS")))
 
 	viewH := m.modulesViewportHeight()
 
@@ -2420,10 +2420,6 @@ func (m model) viewModulesTab() string {
 		ref := rm.Ref
 		if ref == "" {
 			ref = "-"
-		}
-		url := rm.URL
-		if url == "" {
-			url = "(unset)"
 		}
 		path := rm.Path
 		if rm.Local != "" {
@@ -2454,12 +2450,11 @@ func (m model) viewModulesTab() string {
 		}
 		modState := m.moduleSourceState(rm)
 		srcCell := srcStateStyle(modState).Render(clipFixed(srcStateToken(modState), 9))
-		rendered = append(rendered, fmt.Sprintf("%s%s %s %s %s %s %s",
+		rendered = append(rendered, fmt.Sprintf("%s%s %s %s %s %s",
 			cursorMark,
 			nameStyle.Render(clipFixed(rm.Name, 22)),
 			classUnitStyle.Render(clipFixed(ref, 10)),
 			srcCell,
-			dimStyle.Render(clipFixed(url, 32)),
 			dimStyle.Render(clipFixed(path, 32)),
 			statusStyle.Render(status)))
 	}
@@ -4079,8 +4074,8 @@ func (m model) moduleSourceState(rm yoestar.ResolvedModule) source.State {
 		return s
 	}
 	state := source.StateEmpty
-	if rm.Dir != "" {
-		state = module.ReadState(rm.Dir)
+	if rm.CloneDir != "" {
+		state = module.ReadState(rm.CloneDir)
 	}
 	m.moduleSrcStates[rm.Name] = state
 	return state

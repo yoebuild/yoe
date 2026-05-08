@@ -36,25 +36,32 @@ func ModuleToUpstream(m yoestar.ResolvedModule, opts ModuleUpstreamOpts) error {
 	if m.Local != "" {
 		return fmt.Errorf("ModuleToUpstream: module %q is locally overridden (local = %q); yoe doesn't manage its remote", m.Name, m.Local)
 	}
-	if m.Dir == "" {
+	// Git operations target the clone root (where .git lives), not the
+	// MODULE.star subdir — they differ when the module declares a
+	// `path = "..."` field (e.g. module-rpi inside a multi-module repo).
+	repo := m.CloneDir
+	if repo == "" {
+		repo = m.Dir
+	}
+	if repo == "" {
 		return fmt.Errorf("ModuleToUpstream: module %q has no clone dir — was it synced?", m.Name)
 	}
-	if _, err := os.Stat(filepath.Join(m.Dir, ".git")); err != nil {
-		return fmt.Errorf("ModuleToUpstream: %s is not a git repo", m.Dir)
+	if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
+		return fmt.Errorf("ModuleToUpstream: %s is not a git repo", repo)
 	}
 
 	if opts.SSH {
-		current, err := gitOut(m.Dir, "remote", "get-url", "origin")
+		current, err := gitOut(repo, "remote", "get-url", "origin")
 		if err == nil {
 			if rewrote, ok := httpsToSSH(strings.TrimSpace(current)); ok {
-				if _, err := gitOut(m.Dir, "remote", "set-url", "origin", rewrote); err != nil {
+				if _, err := gitOut(repo, "remote", "set-url", "origin", rewrote); err != nil {
 					return fmt.Errorf("ModuleToUpstream: switching origin to SSH: %w", err)
 				}
 			}
 		}
 	}
 
-	if err := moduleFetchOrigin(m.Dir, opts, m.Ref); err != nil {
+	if err := moduleFetchOrigin(repo, opts, m.Ref); err != nil {
 		return fmt.Errorf("ModuleToUpstream: %w", err)
 	}
 
@@ -63,20 +70,20 @@ func ModuleToUpstream(m yoestar.ResolvedModule, opts ModuleUpstreamOpts) error {
 	// HEAD == upstream, dev-mod after a local commit, dev-dirty when
 	// the work tree is dirty). Modules don't get this tag at sync time
 	// — only when the user opts into dev mode.
-	if _, err := gitOut(m.Dir, "tag", "-f", "upstream", "HEAD"); err != nil {
+	if _, err := gitOut(repo, "tag", "-f", "upstream", "HEAD"); err != nil {
 		return fmt.Errorf("ModuleToUpstream: tagging upstream: %w", err)
 	}
 	// Hide the state file from `git status` so it doesn't taint the
 	// dirty signal. .git/info/exclude is the clone-local gitignore,
 	// won't propagate via git add.
-	if err := excludeFromGit(m.Dir, stateFile); err != nil {
+	if err := excludeFromGit(repo, stateFile); err != nil {
 		// best effort — losing this just makes `git status` slightly
 		// noisier; it doesn't break dev-mode functionality once the
 		// state file exists.
 		_ = err
 	}
 
-	return WriteState(m.Dir, source.StateDev)
+	return WriteState(repo, source.StateDev)
 }
 
 // ModuleToPin resets the module clone to the project-declared ref
@@ -88,12 +95,16 @@ func ModuleToPin(m yoestar.ResolvedModule, force bool) error {
 	if m.Local != "" {
 		return fmt.Errorf("ModuleToPin: module %q is locally overridden; nothing to reset", m.Name)
 	}
-	if m.Dir == "" {
+	repo := m.CloneDir
+	if repo == "" {
+		repo = m.Dir
+	}
+	if repo == "" {
 		return fmt.Errorf("ModuleToPin: module %q has no clone dir", m.Name)
 	}
 
 	if !force {
-		state, _ := source.DetectState(m.Dir)
+		state, _ := source.DetectState(repo)
 		switch state {
 		case source.StateDevDirty:
 			return fmt.Errorf("ModuleToPin: %s has uncommitted edits; commit/stash or pass force=true", m.Name)
@@ -106,22 +117,22 @@ func ModuleToPin(m yoestar.ResolvedModule, force bool) error {
 	if ref == "" {
 		ref = "main"
 	}
-	if _, err := gitOut(m.Dir, "fetch", "origin", ref); err != nil {
+	if _, err := gitOut(repo, "fetch", "origin", ref); err != nil {
 		return fmt.Errorf("ModuleToPin: fetch origin %s: %w", ref, err)
 	}
-	if _, err := gitOut(m.Dir, "reset", "--hard", "FETCH_HEAD"); err != nil {
+	if _, err := gitOut(repo, "reset", "--hard", "FETCH_HEAD"); err != nil {
 		return fmt.Errorf("ModuleToPin: reset --hard: %w", err)
 	}
 	// Advance the upstream tag to the new HEAD so any future
 	// source.DetectState query (during a TUI cold-start before the
 	// user re-toggles to dev) doesn't see the old upstream commit and
 	// misreport dev-mod against a freshly reset clone.
-	if _, err := gitOut(m.Dir, "tag", "-f", "upstream", "HEAD"); err != nil {
+	if _, err := gitOut(repo, "tag", "-f", "upstream", "HEAD"); err != nil {
 		// best effort; the state-file clear below is the authoritative
 		// signal for the TUI.
 		_ = err
 	}
-	return WriteState(m.Dir, source.StateEmpty)
+	return WriteState(repo, source.StateEmpty)
 }
 
 // httpsToSSH rewrites a github/gitlab-style HTTPS URL to SSH.

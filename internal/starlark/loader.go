@@ -140,7 +140,7 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	var resolvedForProject []ResolvedModule
 	if proj := eng.Project(); proj != nil {
 		for _, m := range proj.Modules {
-			modulePath, ok := locateModulePath(m, root)
+			modulePath, cloneDir, ok := locateModulePath(m, root)
 			rm := ResolvedModule{
 				URL:       m.URL,
 				Ref:       m.Ref,
@@ -159,6 +159,7 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 			}
 			rm.Name = name
 			rm.Dir = modulePath
+			rm.CloneDir = cloneDir
 			resolvedForProject = append(resolvedForProject, rm)
 			eng.SetModuleRoot(name, modulePath)
 			resolvedModules = append(resolvedModules, resolvedModule{name: name, path: modulePath})
@@ -462,34 +463,38 @@ func pathBasename(m ModuleRef) string {
 	return filepath.Base(strings.TrimSuffix(m.URL, ".git"))
 }
 
-// locateModulePath returns the on-disk directory for a module — either the
-// local override or the cache directory under YOE_CACHE/modules. The
-// boolean is false when neither location exists (the module hasn't been
-// synced yet).
-func locateModulePath(m ModuleRef, projectRoot string) (string, bool) {
+// locateModulePath returns the on-disk MODULE.star directory and the
+// git clone root for a module — either the local override or the cache
+// directory under YOE_CACHE/modules. The two paths differ when the
+// module declares a `path = "..."` subdir; otherwise they are equal.
+// The boolean is false when neither location exists (the module hasn't
+// been synced yet).
+func locateModulePath(m ModuleRef, projectRoot string) (modulePath, cloneDir string, ok bool) {
 	base := pathBasename(m)
 	if m.Local != "" {
-		modulePath := m.Local
-		if !filepath.IsAbs(modulePath) {
-			modulePath = filepath.Join(projectRoot, modulePath)
+		cloneDir = m.Local
+		if !filepath.IsAbs(cloneDir) {
+			cloneDir = filepath.Join(projectRoot, cloneDir)
 		}
+		modulePath = cloneDir
 		if m.Path != "" {
-			modulePath = filepath.Join(modulePath, m.Path)
+			modulePath = filepath.Join(cloneDir, m.Path)
 		}
-		return modulePath, true
+		return modulePath, cloneDir, true
 	}
 	cacheDir := os.Getenv("YOE_CACHE")
 	if cacheDir == "" {
 		cacheDir = "cache"
 	}
-	moduleDir := filepath.Join(cacheDir, "modules", base)
+	cloneDir = filepath.Join(cacheDir, "modules", base)
+	modulePath = cloneDir
 	if m.Path != "" {
-		moduleDir = filepath.Join(moduleDir, m.Path)
+		modulePath = filepath.Join(cloneDir, m.Path)
 	}
-	if _, err := os.Stat(moduleDir); err != nil {
-		return "", false
+	if _, err := os.Stat(modulePath); err != nil {
+		return "", "", false
 	}
-	return moduleDir, true
+	return modulePath, cloneDir, true
 }
 
 // peekModuleName evaluates MODULE.star at modulePath in an isolated thread

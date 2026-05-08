@@ -238,7 +238,7 @@ func TestModuleSourceState_ReadsStateFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := model{moduleSrcStates: map[string]source.State{}}
-	rm := yoestar.ResolvedModule{Name: "foo", Dir: dir}
+	rm := yoestar.ResolvedModule{Name: "foo", Dir: dir, CloneDir: dir}
 	if got := m.moduleSourceState(rm); got != source.StateDev {
 		t.Errorf("moduleSourceState = %q, want dev", got)
 	}

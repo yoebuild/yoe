@@ -91,7 +91,7 @@ func (m model) openSourcePromptForModule(rmName string) (tea.Model, tea.Cmd) {
 		// Prefer the live origin URL — the user may have edited it in
 		// the clone — falling back to the declared rm.URL if the live
 		// probe fails (clone missing, no .git, etc.).
-		upstream := liveRemoteURL(rm.Dir)
+		upstream := liveRemoteURL(rm.CloneDir)
 		if upstream == "" {
 			upstream = rm.URL
 		}
@@ -595,7 +595,7 @@ func (m *model) armWatcherFromInitialStates() {
 	for _, rm := range m.proj.ResolvedModules {
 		state := m.moduleSourceState(rm)
 		if source.IsDev(state) {
-			m.srcWatcher.Arm(targetModule, rm.Name, rm.Dir, state)
+			m.srcWatcher.Arm(targetModule, rm.Name, rm.CloneDir, state)
 		}
 	}
 }
@@ -643,7 +643,7 @@ func (m model) invalidateModuleState(name string) {
 	}
 	state := m.moduleSourceState(rm)
 	if source.IsDev(state) {
-		m.srcWatcher.Arm(targetModule, name, rm.Dir, state)
+		m.srcWatcher.Arm(targetModule, name, rm.CloneDir, state)
 	} else {
 		m.srcWatcher.Disarm(targetModule, name)
 	}

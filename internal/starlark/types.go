@@ -57,7 +57,8 @@ type ResolvedModule struct {
 	Ref       string // declared git ref / branch / tag
 	Path      string // sub-path within the repo (declared)
 	Local     string // local override path (declared)
-	Dir       string // resolved on-disk directory; empty when not synced
+	Dir       string // dir holding MODULE.star (clone-root + Path); empty when not synced
+	CloneDir  string // git clone root (.git lives here); equals Dir when Path is empty
 	Available bool   // false when the module has not been synced
 }
 

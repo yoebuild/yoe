@@ -8,6 +8,15 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Module dev mode now works for sub-path modules.** Switching a module like
+  `module-rpi` (declared with `path = "modules/module-rpi"` inside a multi-
+  module repo) into dev mode previously failed with `is not a git repo` because
+  yoe was running git in the MODULE.star subdirectory instead of the clone root.
+  Git operations and the dev/pin state file now target the clone root, so `u`
+  works on every kind of module.
+- **Modules tab drops the URL column.** Long git URLs were eating most of the
+  row width and pushing the path and status columns off-screen. The URL still
+  appears in the detail strip below the table when a module is selected.
 - **Switching a unit/module to dev mode transfers far less data.** The
   depth-limited fetch (`last 100 / 1000 commits`, `last year`, `last month`) now
   narrows to the unit's pinned ref instead of fanning out across every branch
