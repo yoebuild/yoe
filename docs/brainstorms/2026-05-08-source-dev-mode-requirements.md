@@ -8,17 +8,18 @@ checkout, with visible state on the units tab, modules tab, and detail pages.
 
 Yoe units fetch source at a pinned ref into `build/<unit>/src/` as a tagged git
 repo (`upstream` points at the pinned commit; patches are applied on top). The
-CLI already supports a "dev workflow": if the source dir has commits beyond
-`upstream`, yoe leaves it alone, and `yoe dev extract` turns those commits into
-`*.patch` files. Modules behave similarly — they're git clones at a
-project-declared ref, and a developer might want to navigate them on a branch
-tracking upstream.
+clone is shallow — no history, no real remote — so the checkout is good for
+producing a build but useless for development. The CLI already supports a "dev
+workflow": if the source dir has commits beyond `upstream`, yoe leaves it alone,
+and `yoe dev extract` turns those commits into `*.patch` files. Modules behave
+similarly — they're git clones at a project-declared ref, but typically with
+full history because they're navigated by humans.
 
 What's missing:
 
 1. **No TUI affordance for the pin↔dev toggle.** A developer who wants to hack
-   on a unit has to manually `cd build/<unit>/src/`, set up the remote, switch
-   branches, etc.
+   on a unit has to manually `cd build/<unit>/src/`, unshallow the repo, set up
+   the remote, etc.
 2. **No visible state.** The TUI gives no indication whether a unit's source is
    fresh-from-pin, on a dev branch, has local commits, or has uncommitted edits
    — so it's easy to lose work to a `yoe build --clean` or to flip back without
@@ -26,24 +27,50 @@ What's missing:
 3. **No SSH/HTTPS choice.** When switching to dev mode, the pinned URL is
    typically HTTPS (read-only). Devs who need to push want SSH. Today they
    `git remote set-url` by hand.
+4. **No live status.** Once the TUI is running, edits made via the `$` shell
+   shortcut (or any other tool) don't update the displayed state until the TUI
+   is restarted.
 
-This brainstorm captures requirements for adding all three to the TUI.
+This brainstorm captures requirements for adding all four to the TUI.
+
+## What `dev` actually does
+
+Dev mode is **the same build as pinned**, plus connectivity. Concretely, when
+you switch from `pin` to `dev`, the working tree stays at the exact same commit
+(branch / tag / sha — whatever the unit's source declared); the build output is
+bit-identical. What changes:
+
+- **Remote URL becomes real.** Pinned clones are bare-bones (often shallow,
+  often without an `origin` pointing anywhere usable). Dev mode rewrites
+  `origin` to the upstream URL the user picks (HTTPS or SSH) so `git pull`,
+  `git push`, `git log origin/main`, etc. all work.
+- **History gets populated.** A `git fetch --unshallow` runs so the user can
+  browse log, blame, and diff against earlier upstream commits.
+- **The TUI stops rewriting the source on rebuild.** Once a unit is in dev mode,
+  yoe will never `git clean -fdx` or re-clone the source dir, even if the unit's
+  `source` URL or `tag` changes in the .star. Pin → dev is the user's commitment
+  to manage the checkout themselves; rebuild just warns and proceeds with
+  whatever's there.
+
+The user moves between branches, commits, or remote tags inside dev mode by hand
+(the detail page's `$` shortcut drops them into a shell). The toggle doesn't
+pick branches; it sets up the remote and history once.
 
 ## Goals
 
-- One TUI keystroke flips a unit (or module) between **pinned** and **dev**
-  mode. Pinned = fresh clone at the declared ref. Dev = remote rewritten to
-  point at upstream's main branch, ready to track and pull.
+- One TUI keystroke flips a unit (or module) between **pin** and **dev** mode.
+  Pin = fresh shallow clone at the declared ref, no remote. Dev = same commit
+  checked out, real remote (HTTPS or SSH), full history.
 - The active source state is visible at a glance on the units tab, the modules
   tab, and each detail page — including whether the work tree has uncommitted
   changes or commits beyond upstream.
-- Switching to dev mode prompts the user for HTTPS vs SSH so they don't have to
-  remember the `git remote set-url` incantation.
-- Any operation that would discard dirty or modified state (rebuild from pin,
-  force-clean, switch back) prompts before doing so.
-- State is per-unit/per-module, lives in the unit's build state file, and is
-  recoverable from the git state of the checkout itself — losing the state file
-  just means yoe re-detects on next view.
+- Switching to dev mode prompts for HTTPS vs SSH so users don't have to remember
+  the `git remote set-url` incantation.
+- The TUI keeps the displayed state fresh while running: edits made through the
+  `$` shell shortcut (or any external tool) update within seconds, with no
+  manual refresh.
+- Dev units are sacred: yoe never silently overwrites the source dir of a unit
+  in dev mode. Pin units rebuild their source freely; dev units only warn.
 
 ## Non-goals
 
@@ -52,9 +79,8 @@ This brainstorm captures requirements for adding all three to the TUI.
   ephemeral state is a real pain point.
 - **Multi-remote / fork management.** No "set my fork as origin, upstream as
   upstream" workflow; that's a fancier dev story for later.
-- **Branch picker.** Initial dev-mode checkout is whatever upstream HEAD's
-  default branch is. Picking a different branch = git checkout by hand (the unit
-  detail page already has a `$` shell shortcut).
+- **Branch picker.** Initial dev-mode checkout stays on the same commit pinned
+  mode produced. Switching branches = git checkout by hand from `$`.
 - **Auto-fetch on view.** State display reflects the local working tree only; it
   does not run `git fetch` to compare against remote HEAD.
 - **Touching the unit's `source` URL in the .star.** The toggle only rewrites
@@ -62,45 +88,79 @@ This brainstorm captures requirements for adding all three to the TUI.
 
 ## States
 
-Five states per unit/module, with a distinct color each. The state is derived
-from the local git checkout, not stored — but a one-line cache in the unit's
-`build.json` (and a sibling file for modules) avoids re-running git on every TUI
-render.
+Four states per unit/module, each a distinct color in the TUI. Detection is
+local — no network — and runs from `git status` plus
+`git rev-list upstream..HEAD`.
 
-| State       | Meaning                                                    | Color  |
-| ----------- | ---------------------------------------------------------- | ------ |
-| `pin`       | Fresh clone, HEAD == `upstream` tag, work tree clean       | gray   |
-| `pin-dirty` | At pinned ref but work tree has uncommitted edits          | yellow |
-| `dev`       | Remote rewritten to upstream, on upstream branch HEAD      | cyan   |
-| `dev-mod`   | Dev mode + has commits beyond upstream                     | green  |
-| `dev-dirty` | Dev mode + uncommitted edits (regardless of commits ahead) | red    |
+| State       | Meaning                                                    | Color |
+| ----------- | ---------------------------------------------------------- | ----- |
+| `pin`       | Pinned shallow clone, no upstream remote configured        | gray  |
+| `dev`       | Real remote configured, work tree clean, no commits beyond | cyan  |
+| `dev-mod`   | Dev mode + has commits beyond upstream                     | green |
+| `dev-dirty` | Dev mode + uncommitted edits in the work tree              | red   |
 
-`pin-dirty` is the silent-data-loss state: yoe rebuilds will overwrite those
-edits. Calling it out with a warning color earns its keep.
+There is intentionally no `pin-dirty`. The discipline is: **if you want to edit
+a unit's source, switch it to dev first.** Pin is for the build pipeline to
+manage; dev is for humans. A pin-mode src dir with edits is a misuse of pin
+mode, not a state worth modelling — yoe is allowed to overwrite it.
 
 `dev-mod` is the "I have work to extract" state. `yoe dev extract` is the
-intended next action; the TUI should hint at it.
+intended next action; the detail page should hint at it.
 
-`dev-dirty` is the "I have unsaved work even by git's standards" state. Most
-warnings should fire here.
+`dev-dirty` is the "I have unsaved edits" state — most warnings fire here.
 
-Modules use the same five states with the same semantics: `pin` = at the
-declared ref, `dev` = remote rewritten to upstream and tracking its default
-branch, `dirty`/`mod` track work tree and commits-ahead the same way. Symmetric
-mental model is worth more than per-domain simplification.
+### Modules
+
+Modules use the same four states with one nuance: modules are typically already
+cloned with a real remote (you `git clone`'d them) and may have full history.
+The pin → dev transition for a module is therefore lighter:
+
+- If the remote is already an HTTPS URL and the user wants SSH, rewrite it.
+- If the clone is shallow, unshallow it.
+- Otherwise no work — just flag the state as `dev` so the user sees the module
+  is consciously under their control.
+
+A locally-overridden module (`module(local = "../path")`) is shown as `local`
+instead of any of the four; the toggle is disabled for it. Whatever the user
+does in their local checkout is theirs to manage.
+
+## Live status detection
+
+The displayed state has to keep up with edits made outside the TUI (the `$`
+shell shortcut, an editor in another window, an external git command). Two
+mechanisms, in priority order:
+
+1. **fsnotify watcher** on each in-scope `src/` directory and module clone.
+   Recursive watch fires on any file create/modify/delete or any change under
+   `.git/` (which catches commits, branch switches, fetches). The TUI re-derives
+   state for that unit/module within ~100ms.
+2. **Periodic poll fallback** for filesystems where fsnotify can't watch
+   (network mounts, some FUSE filesystems): every 2-3 seconds,
+   `git status --porcelain` + `git rev-list --count upstream..HEAD` per dev
+   unit. Skip pin units (they don't change without yoe's involvement, and yoe
+   already triggers a state recompute when it rebuilds them).
+
+Watcher scope is bounded: only units/modules currently rendered in the TUI (the
+visible list) and the cursor's detail page if open. A 100-unit project with 5
+visible at a time watches 5 src dirs, not 100.
+
+State changes the user cares about — `dev` → `dev-dirty`, `dev-dirty` →
+`dev-mod` — surface in the TUI as the SRC column repaints. No popup; the
+color/token swap is its own notice.
 
 ## TUI surfaces
 
 ### Units tab — list view
 
-Add a column **SRC** between MODULE and SIZE, four characters wide, showing the
-state token (`pin`, `dev`, `dev-mod`, etc.) in its color. Empty for image and
-container units (which have no source dir).
+Add a column **SRC** between MODULE and SIZE, **9 characters wide** to fit the
+longest token (`dev-dirty`), showing the state token in its color. Empty for
+image and container units (which have no source dir).
 
 ### Modules tab — list view
 
-Same `SRC` column, in the same position alongside the existing module git-status
-column. The column reads `pin` / `dev` / etc. for the module's own clone.
+Same `SRC` column in the same position alongside the existing module git-status
+column. The column reads `pin` / `dev` / `dev-mod` / `dev-dirty` / `local` for
+the module's own clone.
 
 ### Unit detail page
 
@@ -111,74 +171,76 @@ A new "Source" line near the top of the metadata block:
            3 commits ahead of upstream
 ```
 
-Add a single keybinding (suggested: `u` for "upstream toggle") on the detail
-page. Pressing it:
+A new keybinding `u` ("upstream toggle") on the detail page. Pressing it:
 
-- From `pin*`: prompts SSH vs HTTPS, then runs the pin→dev transition (rewrite
-  remote, fetch, checkout upstream branch). If the source dir is `pin-dirty`,
-  prompts to confirm losing the dirty edits first.
-- From `dev*`: prompts to confirm the dev→pin transition (which discards any
-  commits beyond upstream and dirty edits). Single-keystroke confirm if the
-  state is plain `dev` (nothing at risk).
+- From `pin`: prompts SSH vs HTTPS, then runs the pin → dev transition (rewrite
+  remote, fetch unshallow, persist `dev` state).
+- From `dev` / `dev-mod` / `dev-dirty`: prompts to confirm the dev → pin
+  transition (which discards any commits beyond upstream and dirty edits).
+  Single-keystroke confirm if the state is plain `dev` (nothing at risk).
 
 ### Modules tab — detail/expand
 
 Same `u` binding from the module's expanded view. Same prompts. The "discard
-local commits" warning may matter more for modules since losing pushed-elsewhere
+local commits" warning matters more for modules since losing pushed-elsewhere
 work is more common than for unit checkouts.
 
-### Status bar warnings
+### Build-time warning, not overwrite
 
-When `yoe build` is invoked on a unit/module in `pin-dirty` state, emit a stderr
-warning before the unit is rebuilt:
+When `yoe build` is invoked on a unit/module in any `dev*` state, **the source
+dir is never touched**. yoe prints a warning if the unit's declared `source` /
+`tag` / `patches` would otherwise trigger a re-fetch or a re-apply:
 
 ```
-warning: busybox has uncommitted changes in build/busybox.x86_64/src/
-that will be overwritten. Switch to dev mode (`u`) or commit first.
+warning: busybox is in dev mode; source URL changed in the .star but
+yoe will not overwrite build/busybox.x86_64/src/ — switch back to pin
+mode (`u` in the TUI) to pick up the new source.
 ```
 
-Don't block the build — just warn.
+The build proceeds against whatever the user's checkout currently has. Pin units
+behave as before: source is freely re-fetched/re-cloned each rebuild.
 
 ## State machine
 
 ```
-                    +---------+
-                    |         | external file edits
-        pin <------>+ pin-dirty
-         ^   warn   |   ^
-         |          |   | git commit (still on upstream tag)
-         |          |   | / local edits
-         |          v   v
-        u           |   |
-         |          |   |
-         v          v   v
-        dev <----> dev-dirty
-         ^   ^
-         |   | git commit
-         v   |
-        dev-mod  (commits beyond upstream)
+                 [pin: shallow clone, no remote]
+                          │
+                          │  press `u` → SSH/HTTPS prompt
+                          │  → fetch --unshallow, set origin
+                          ▼
+              ┌──────── [dev] ────────┐
+              │            │           │
+   git commit │   edit     │  git      │
+              │   files    │  reset    │
+              ▼            ▼           │
+         [dev-mod]    [dev-dirty]      │
+              │            │           │
+              │  press `u` → confirm   │
+              │  → re-clone shallow    │
+              ▼            ▼           ▼
+                 [pin: shallow clone, no remote]
 ```
 
 Transitions:
 
-- **pin → dev** (`u`): if pin-dirty, prompt; ask SSH/HTTPS; rewrite remote,
-  `git fetch`, `git checkout <default-branch>`, set tracking. Persist `dev`
-  state to build.json.
-- **dev → pin** (`u`): if dev-mod or dev-dirty, prompt with warning about losing
-  local work. On confirm: re-clone at pinned ref (re-runs the existing
-  `source.Prepare` path).
-- **Auto-detected**: pin↔pin-dirty and dev↔dev-mod↔dev-dirty are detected by yoe
-  on TUI refresh from `git status` + `git rev-list upstream..HEAD` — no user
-  action needed.
+- **pin → dev** (`u`): SSH/HTTPS prompt; rewrite remote,
+  `git fetch --unshallow`, persist `dev` state to build.json. Working tree
+  commit unchanged.
+- **dev → pin** (`u`): if `dev-mod` or `dev-dirty`, prompt with warning about
+  losing local work. On confirm: re-clone via the existing `source.Prepare`
+  path.
+- **dev ↔ dev-mod ↔ dev-dirty**: auto-detected from `git status` +
+  `git rev-list upstream..HEAD`. No user action required.
 
 ## Persistence
 
 - Per-unit: extend `build/<unit>.<scope>/build.json`'s `BuildMeta` struct with a
-  `source_state` string field.
+  `source_state` string field — the cached last-known state token.
 - Per-module: new file `cache/modules/<module>/.yoe-state.json` (the cache dir
   is what yoe writes into when syncing modules; build/ is per-unit).
-- Both files are advisory. If absent, yoe re-derives state from the checkout.
-  Lost on a `yoe repo clean` of the build/, recovered silently on next refresh.
+- Both files are advisory. If absent or stale, yoe re-derives state from the
+  checkout. Lost on a `yoe repo clean` of build/, recovered silently on next
+  refresh.
 - Not synced to local.star. Defer that until cross-session persistence is a felt
   need.
 
@@ -190,35 +252,42 @@ These are pointers, not the design — planning doc owns specifics.
   with `DevToPin(unit)` / `DevToUpstream(unit, ssh bool)` /
   `DevDetectState(unit)` and reuse the same git-cmd scaffolding.
 - `BuildMeta.SourceState` string field; ReadMeta/WriteMeta unchanged.
+- `internal/source/Prepare` already short-circuits when the src dir has local
+  commits — extend the gate to "any unit in dev state" once the state file is
+  the source of truth.
 - TUI: new helpItem on the unit detail page, prompt rendering reuses the
   existing confirm-modal pattern (`m.confirm`).
+- fsnotify watcher set up per visible dev unit; tear down when scrolling out of
+  view to keep the kernel-watch budget bounded.
 - Module clones live under `cache/modules/<module>/` — `internal/module/` is the
   natural home for `ModuleDevToggle`.
 
 ## Risks / open questions
 
-- **Pin-dirty detection cost.** `git status` on every unit's src/ at TUI startup
-  may be noticeable on a project with 100+ units. Cache in the build state file;
-  only refresh on view.
-- **Modules in `local = "../path"` overrides.** A locally-overridden module
-  isn't really "pinned" — it's whatever the user has. Probably display `local`
-  as a fixed state with no toggle; needs decision in planning.
-- **Default branch detection.** `git remote show origin` to discover HEAD branch
-  is one network round trip per transition; alternative is to assume `main` and
-  fall back. Planning call.
-- **What happens when upstream's default branch is renamed (`master` → `main`)
-  after a switch to dev?** Probably fine — the user's local branch keeps
-  tracking whatever was set; rebuild from pin recovers. Not solving in v1.
+- **fsnotify on bind-mounts and network filesystems.** The watcher won't fire
+  reliably on every filesystem; the polling fallback is the safety net.
+  Detection of "watcher works here" is heuristic; planning to decide. Polling
+  alone (no watcher) at 2-3s would also be acceptable for v1.
+- **Modules in `local = "../path"` overrides.** Show `local` token, no toggle.
+  The user's local checkout is theirs to manage.
+- **`git fetch --unshallow` on huge upstream histories.** Linux kernel, llvm,
+  etc. take meaningful time and disk to unshallow. Show the command running with
+  a progress indicator; let the user cancel.
+- **Default branch detection.** When the user wants to check out upstream's
+  default branch (a follow-on we're not solving in v1), `git remote show origin`
+  is one network round trip. v1 doesn't need this because dev keeps the working
+  commit unchanged.
 
 ## Success criteria
 
 - One keystroke on a unit's detail page flips its source between pin and dev,
   with HTTPS/SSH prompted on the way to dev.
 - Units tab and modules tab both show the source state column. Color coding
-  visible at a glance distinguishes the five states.
-- A `pin-dirty` unit being rebuilt prints a warning before yoe overwrites the
+  visible at a glance distinguishes the four states (plus `local` for overridden
+  modules).
+- A `yoe build` against a `dev*` unit warns and proceeds without overwriting the
   work tree.
 - A `dev-mod` unit being switched back to pin shows the user the commit list and
   asks for confirmation before discarding.
-- State display recovers correctly after the user manually edits the checkout
-  from a shell (`$` shortcut), with no stale TUI state.
+- The displayed state updates within seconds of an external edit (shell via `$`,
+  an editor in another window) — no TUI restart required.
