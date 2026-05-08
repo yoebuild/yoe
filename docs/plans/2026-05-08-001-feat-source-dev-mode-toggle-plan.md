@@ -710,8 +710,18 @@ armed/disarmed in lockstep with each unit/module's dev-state membership.
 - [ ] U10. **Build-time guard for dev units**
 
 **Goal:** When `yoe build` runs against a unit (or implicitly via an image)
-whose state is `dev*`, leave the src dir alone and warn instead of re-running
-`source.Prepare` (which would re-clone or re-apply patches).
+whose state is `dev*`, skip the source-preparation step (fetch / extract /
+patch-apply) and let the build proceed against the user's existing src dir
+as-is. The unit still builds — the guard only protects the working tree from
+yoe's writes.
+
+This generalizes the existing `hasLocalCommits` short-circuit in
+`internal/source/workspace.go:29`: today, `Prepare()` already returns the
+existing src dir untouched when there are commits beyond `upstream`, and the
+executor proceeds straight into the unit's build tasks. U10 widens the trigger
+from "commits beyond upstream" to "any state in the `dev*` set." A warning is
+logged so the user knows the .star changes (changed `source` URL, `tag`,
+`patches`, …) won't be picked up until they switch back to pin.
 
 **Requirements:** R4.
 
