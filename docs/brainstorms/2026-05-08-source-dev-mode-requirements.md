@@ -130,19 +130,24 @@ The displayed state has to keep up with edits made outside the TUI (the `$`
 shell shortcut, an editor in another window, an external git command). Two
 mechanisms, in priority order:
 
-1. **fsnotify watcher** on each in-scope `src/` directory and module clone.
-   Recursive watch fires on any file create/modify/delete or any change under
-   `.git/` (which catches commits, branch switches, fetches). The TUI re-derives
-   state for that unit/module within ~100ms.
+1. **fsnotify watcher** on each `src/` directory and module clone currently in
+   any `dev*` state. Recursive watch fires on file create/modify/delete or any
+   change under `.git/` (which catches commits, branch switches, fetches). The
+   TUI re-derives state for that unit/module within ~100ms.
 2. **Periodic poll fallback** for filesystems where fsnotify can't watch
    (network mounts, some FUSE filesystems): every 2-3 seconds,
    `git status --porcelain` + `git rev-list --count upstream..HEAD` per dev
-   unit. Skip pin units (they don't change without yoe's involvement, and yoe
-   already triggers a state recompute when it rebuilds them).
+   unit. Skip pin units — they don't change without yoe's involvement, and yoe
+   already triggers a state recompute when it rebuilds them.
 
-Watcher scope is bounded: only units/modules currently rendered in the TUI (the
-visible list) and the cursor's detail page if open. A 100-unit project with 5
-visible at a time watches 5 src dirs, not 100.
+Watcher scope is **every unit and module in dev state**, not just the visible
+ones. The TUI's view shifts as the user scrolls or filters; the underlying state
+shouldn't. Dev units are usually a small handful in practice (the ones a
+developer is actively hacking on), so the kernel-watch budget is fine. Tying
+watcher lifecycle to "in dev state" instead of "on screen" also keeps the
+implementation simple — toggle a unit to dev, the watcher arms; toggle back to
+pin, the watcher disarms. No bookkeeping against scroll position, query filter,
+or detail-page-open state.
 
 State changes the user cares about — `dev` → `dev-dirty`, `dev-dirty` →
 `dev-mod` — surface in the TUI as the SRC column repaints. No popup; the
@@ -257,8 +262,10 @@ These are pointers, not the design — planning doc owns specifics.
   the source of truth.
 - TUI: new helpItem on the unit detail page, prompt rendering reuses the
   existing confirm-modal pattern (`m.confirm`).
-- fsnotify watcher set up per visible dev unit; tear down when scrolling out of
-  view to keep the kernel-watch budget bounded.
+- fsnotify watcher armed when a unit/module enters any `dev*` state and torn
+  down when it returns to `pin`. Lifecycle is tied to the state, not to TUI
+  rendering — typically just a handful of dev units, so the kernel-watch budget
+  stays small without per-render bookkeeping.
 - Module clones live under `cache/modules/<module>/` — `internal/module/` is the
   natural home for `ModuleDevToggle`.
 
