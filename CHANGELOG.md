@@ -8,6 +8,16 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Toggle any unit or module between pinned and dev mode from the TUI.** A new
+  SRC column on the units and modules tabs surfaces whether each source dir is
+  yoe-managed (`pin`), tracking upstream (`dev`), has commits beyond upstream
+  (`dev-mod`), or has uncommitted edits (`dev-dirty`). Press `u` on a unit's
+  detail page (or a module row) to switch between pin and dev — yoe asks whether
+  to rewrite origin to SSH, and warns before discarding local work. Once you're
+  happy with a `dev-mod` HEAD, `P` captures it back into the `.star` pin so
+  other people building the project pick it up. A `dev*` unit is left untouched
+  at build time, so `yoe build` won't overwrite your working tree or undo
+  in-flight changes.
 - **TUI size column no longer overflows on big artifacts.** Sizes like a 1003
   KiB kernel image render as `1003K` instead of `1003.4K`, keeping the column
   aligned. The decimal still shows for small values (e.g. `9.9K`, `1.2M`) where
