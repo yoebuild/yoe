@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -266,7 +267,10 @@ func (m model) applySourcePromptChoice(value string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// runDevToUpstream calls the unit-side dev toggle and reports outcome.
+// runDevToUpstream backgrounds DevToUpstream in a goroutine and parks
+// the TUI in viewSourceProgress with a spinner. The op is potentially
+// slow — `git fetch --unshallow` against a multi-GB repo can run for
+// tens of seconds — so blocking the Update loop would freeze the UI.
 func (m model) runDevToUpstream(unitName string, ssh bool) (tea.Model, tea.Cmd) {
 	u, ok := m.proj.Units[unitName]
 	if !ok {
@@ -274,18 +278,27 @@ func (m model) runDevToUpstream(unitName string, ssh bool) (tea.Model, tea.Cmd) 
 		return m, nil
 	}
 	scope := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
-	if err := yoe.DevToUpstream(m.projectDir, scope, u, ssh); err != nil {
-		m.message = fmt.Sprintf("dev mode failed: %v", err)
-		return m, nil
+	prevView := m.view
+	m.view = viewSourceProgress
+	m.sourceOp = newSourceOp(targetUnit, unitName,
+		fmt.Sprintf("Fetching upstream history for %s (this may take a while)", unitName),
+		prevView)
+	cmd := func() tea.Msg {
+		err := yoe.DevToUpstream(m.projectDir, scope, u, ssh)
+		return sourceOpDoneMsg{
+			target:     targetUnit,
+			name:       unitName,
+			err:        wrapDevErr(err, "dev mode"),
+			successMsg: fmt.Sprintf("%s switched to dev mode", unitName),
+		}
 	}
-	m.invalidateUnitState(unitName)
-	m.message = fmt.Sprintf("%s switched to dev mode", unitName)
-	return m, nil
+	return m, tea.Batch(m.sourceOp.spinner.Tick, cmd)
 }
 
-// runDevToPin calls the unit-side pin toggle. force=true skips the
-// "would discard work" guard inside DevToPin — the modal already
-// asked for explicit consent.
+// runDevToPin runs DevToPin in the background. Pin transitions are
+// usually quick (rm -rf the src dir) but big workspaces can take a
+// few seconds, so we keep the same spinner machinery for parity with
+// the upstream toggle.
 func (m model) runDevToPin(unitName string, force bool) (tea.Model, tea.Cmd) {
 	u, ok := m.proj.Units[unitName]
 	if !ok {
@@ -293,16 +306,25 @@ func (m model) runDevToPin(unitName string, force bool) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	scope := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
-	if err := yoe.DevToPin(m.projectDir, scope, u, force); err != nil {
-		m.message = fmt.Sprintf("pin failed: %v", err)
-		return m, nil
+	prevView := m.view
+	m.view = viewSourceProgress
+	m.sourceOp = newSourceOp(targetUnit, unitName,
+		fmt.Sprintf("Resetting %s to its pinned ref", unitName), prevView)
+	cmd := func() tea.Msg {
+		err := yoe.DevToPin(m.projectDir, scope, u, force)
+		return sourceOpDoneMsg{
+			target:     targetUnit,
+			name:       unitName,
+			err:        wrapDevErr(err, "pin"),
+			successMsg: fmt.Sprintf("%s switched back to pin", unitName),
+		}
 	}
-	m.invalidateUnitState(unitName)
-	m.message = fmt.Sprintf("%s switched back to pin", unitName)
-	return m, nil
+	return m, tea.Batch(m.sourceOp.spinner.Tick, cmd)
 }
 
-// runDevPromote captures HEAD into the .star and clears dev-mod state.
+// runDevPromote rewrites the .star pin from HEAD. Local-only, fast,
+// but routed through the same background path so the user always sees
+// a "working…" hint instead of a frozen screen.
 func (m model) runDevPromote(unitName, kindValue string) (tea.Model, tea.Cmd) {
 	u, ok := m.proj.Units[unitName]
 	if !ok {
@@ -322,29 +344,47 @@ func (m model) runDevPromote(unitName, kindValue string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	scope := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
-	if err := yoe.DevPromoteToPin(m.projectDir, scope, u, kind); err != nil {
-		m.message = fmt.Sprintf("promote failed: %v", err)
-		return m, nil
+	prevView := m.view
+	m.view = viewSourceProgress
+	m.sourceOp = newSourceOp(targetUnit, unitName,
+		fmt.Sprintf("Capturing %s HEAD as %s pin", unitName, kindValue), prevView)
+	cmd := func() tea.Msg {
+		err := yoe.DevPromoteToPin(m.projectDir, scope, u, kind)
+		return sourceOpDoneMsg{
+			target:     targetUnit,
+			name:       unitName,
+			err:        wrapDevErr(err, "promote"),
+			successMsg: fmt.Sprintf("%s promoted to %s pin", unitName, kindValue),
+		}
 	}
-	m.invalidateUnitState(unitName)
-	m.message = fmt.Sprintf("%s promoted to %s pin", unitName, kindValue)
-	return m, nil
+	return m, tea.Batch(m.sourceOp.spinner.Tick, cmd)
 }
 
-// runModuleToUpstream / runModuleToPin mirror the unit-side helpers.
+// runModuleToUpstream / runModuleToPin mirror the unit-side async
+// dispatch. ModuleToUpstream's `git fetch --unshallow` is the most
+// common reason the TUI ever feels slow, so the spinner is most
+// valuable here.
 func (m model) runModuleToUpstream(rmName string, ssh bool) (tea.Model, tea.Cmd) {
 	rm, ok := m.findModule(rmName)
 	if !ok {
 		m.message = fmt.Sprintf("module %s not found", rmName)
 		return m, nil
 	}
-	if err := module.ModuleToUpstream(rm, ssh); err != nil {
-		m.message = fmt.Sprintf("module dev failed: %v", err)
-		return m, nil
+	prevView := m.view
+	m.view = viewSourceProgress
+	m.sourceOp = newSourceOp(targetModule, rmName,
+		fmt.Sprintf("Fetching upstream history for module %s (this may take a while)", rmName),
+		prevView)
+	cmd := func() tea.Msg {
+		err := module.ModuleToUpstream(rm, ssh)
+		return sourceOpDoneMsg{
+			target:     targetModule,
+			name:       rmName,
+			err:        wrapDevErr(err, "module dev"),
+			successMsg: fmt.Sprintf("module %s switched to dev mode", rmName),
+		}
 	}
-	m.invalidateModuleState(rmName)
-	m.message = fmt.Sprintf("module %s switched to dev mode", rmName)
-	return m, nil
+	return m, tea.Batch(m.sourceOp.spinner.Tick, cmd)
 }
 
 func (m model) runModuleToPin(rmName string, force bool) (tea.Model, tea.Cmd) {
@@ -353,13 +393,64 @@ func (m model) runModuleToPin(rmName string, force bool) (tea.Model, tea.Cmd) {
 		m.message = fmt.Sprintf("module %s not found", rmName)
 		return m, nil
 	}
-	if err := module.ModuleToPin(rm, force); err != nil {
-		m.message = fmt.Sprintf("module pin failed: %v", err)
-		return m, nil
+	prevView := m.view
+	m.view = viewSourceProgress
+	m.sourceOp = newSourceOp(targetModule, rmName,
+		fmt.Sprintf("Resetting module %s to its declared ref", rmName), prevView)
+	cmd := func() tea.Msg {
+		err := module.ModuleToPin(rm, force)
+		return sourceOpDoneMsg{
+			target:     targetModule,
+			name:       rmName,
+			err:        wrapDevErr(err, "module pin"),
+			successMsg: fmt.Sprintf("module %s switched back to pin", rmName),
+		}
 	}
-	m.invalidateModuleState(rmName)
-	m.message = fmt.Sprintf("module %s switched back to pin", rmName)
-	return m, nil
+	return m, tea.Batch(m.sourceOp.spinner.Tick, cmd)
+}
+
+// newSourceOp constructs a sourceOp with a freshly initialized
+// spinner. Caller is responsible for kicking off the first tick via
+// op.spinner.Tick — usually batched with the work goroutine cmd.
+func newSourceOp(target sourceTarget, name, label string, prevView viewKind) *sourceOp {
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#e8863a")) // amber, matches yoe logo
+	return &sourceOp{
+		target:   target,
+		name:     name,
+		label:    label,
+		spinner:  s,
+		prevView: prevView,
+	}
+}
+
+// wrapDevErr formats a dev-mode action's error with a human prefix
+// for the status strip. nil errors pass through unchanged.
+func wrapDevErr(err error, action string) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s failed: %w", action, err)
+}
+
+// viewSourceProgress renders the in-flight dev-mode action: the
+// spinner, a one-line description of what's happening, and a hint
+// about why we're sitting here.
+func (m model) viewSourceProgress() string {
+	if m.sourceOp == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n  ")
+	b.WriteString(titleStyle.Render("Working…"))
+	b.WriteString("\n\n  ")
+	b.WriteString(m.sourceOp.spinner.View())
+	b.WriteString("  ")
+	b.WriteString(m.sourceOp.label)
+	b.WriteString("\n\n  ")
+	b.WriteString(dimStyle.Render("(this can take a moment for large repos — please wait)"))
+	return b.String()
 }
 
 // armWatcherFromInitialStates seeds the source watcher with every

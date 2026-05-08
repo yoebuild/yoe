@@ -2,11 +2,13 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/yoebuild/yoe/internal/source"
@@ -439,6 +441,99 @@ func TestUpdateSourcePrompt_Esc_RestoresPrevView(t *testing.T) {
 	}
 	if got.sourcePrompt != nil {
 		t.Errorf("prompt should be cleared after esc")
+	}
+}
+
+func TestRunDevToUpstream_ParksInProgressView(t *testing.T) {
+	m := newModelWithUnit(t, t.TempDir(), "foo", source.StatePin)
+	updated, cmd := m.runDevToUpstream("foo", false)
+	got := updated.(model)
+	if got.view != viewSourceProgress {
+		t.Errorf("view = %v, want viewSourceProgress", got.view)
+	}
+	if got.sourceOp == nil {
+		t.Fatal("expected sourceOp to be set")
+	}
+	if got.sourceOp.target != targetUnit || got.sourceOp.name != "foo" {
+		t.Errorf("op target/name = (%v, %s), want (unit, foo)",
+			got.sourceOp.target, got.sourceOp.name)
+	}
+	if !strings.Contains(got.sourceOp.label, "Fetching upstream history") {
+		t.Errorf("label should mention fetching upstream, got %q", got.sourceOp.label)
+	}
+	if cmd == nil {
+		t.Fatal("expected a tea.Cmd to dispatch the goroutine work")
+	}
+}
+
+func TestSourceOpDoneMsg_Success_RestoresPrevView(t *testing.T) {
+	m := model{
+		view: viewSourceProgress,
+		sourceOp: &sourceOp{
+			target:   targetUnit,
+			name:     "foo",
+			prevView: viewDetail,
+		},
+		unitSrcStates: map[string]source.State{"foo": source.StatePin},
+	}
+	updated, _ := m.Update(sourceOpDoneMsg{
+		target:     targetUnit,
+		name:       "foo",
+		successMsg: "foo switched to dev mode",
+	})
+	got := updated.(model)
+	if got.view != viewDetail {
+		t.Errorf("view = %v, want viewDetail", got.view)
+	}
+	if got.sourceOp != nil {
+		t.Errorf("sourceOp should be cleared after done")
+	}
+	if got.message != "foo switched to dev mode" {
+		t.Errorf("message = %q, want success message", got.message)
+	}
+	if _, cached := got.unitSrcStates["foo"]; cached {
+		t.Errorf("unit cache entry should be invalidated after success")
+	}
+}
+
+func TestSourceOpDoneMsg_Error_SurfacesError(t *testing.T) {
+	m := model{
+		view: viewSourceProgress,
+		sourceOp: &sourceOp{
+			target:   targetUnit,
+			name:     "foo",
+			prevView: viewDetail,
+		},
+	}
+	updated, _ := m.Update(sourceOpDoneMsg{
+		target: targetUnit,
+		name:   "foo",
+		err:    fmt.Errorf("dev mode failed: network timeout"),
+	})
+	got := updated.(model)
+	if got.view != viewDetail {
+		t.Errorf("view = %v, want viewDetail (restore on error)", got.view)
+	}
+	if !strings.Contains(got.message, "network timeout") {
+		t.Errorf("error message should be in status, got %q", got.message)
+	}
+}
+
+func TestViewSourceProgress_RendersLabelAndSpinner(t *testing.T) {
+	m := model{
+		view: viewSourceProgress,
+		sourceOp: &sourceOp{
+			label:    "Fetching upstream history for foo",
+			spinner:  spinner.New(),
+			prevView: viewDetail,
+		},
+	}
+	got := m.viewSourceProgress()
+	if !strings.Contains(got, "Working") {
+		t.Errorf("expected Working header: %q", got)
+	}
+	if !strings.Contains(got, "Fetching upstream history for foo") {
+		t.Errorf("expected label: %q", got)
 	}
 }
 

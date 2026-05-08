@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -115,6 +116,7 @@ const (
 	viewFlash
 	viewDeploy
 	viewSourcePrompt
+	viewSourceProgress
 )
 
 // sourcePromptKind names which dev-mode modal is showing. Each kind has
@@ -149,6 +151,28 @@ type sourcePrompt struct {
 	options    []sourcePromptOption
 	cursor     int
 	prevView   viewKind
+}
+
+// sourceOp tracks an in-flight dev-mode action so the UI can render
+// a "working…" view while a goroutine does the (potentially slow)
+// git work. The spinner ticks autonomously via spinner.Tick; the
+// completion message arrives as sourceOpDoneMsg.
+type sourceOp struct {
+	target   sourceTarget // unit or module — drives cache invalidation on done
+	name     string
+	label    string // user-facing description ("fetching upstream history for foo")
+	spinner  spinner.Model
+	prevView viewKind
+}
+
+// sourceOpDoneMsg is the completion signal for a dev-mode action. err
+// is nil on success; successMsg is set in that case for the status
+// strip ("foo switched to dev mode").
+type sourceOpDoneMsg struct {
+	target     sourceTarget
+	name       string
+	err        error
+	successMsg string
 }
 
 // fileEntry is one row in the Files tab of the detail view: a path
@@ -402,6 +426,12 @@ type model struct {
 	// discard-confirm). Nil when no prompt is showing.
 	sourcePrompt *sourcePrompt
 
+	// In-flight dev-mode operation (e.g. DevToUpstream's
+	// `git fetch --unshallow` against a 100MB repo). The TUI parks
+	// here while the goroutine works so the UI doesn't freeze and the
+	// user has visible feedback. Nil when no operation is active.
+	sourceOp *sourceOp
+
 	// Background watcher that polls the on-disk state of every dev*
 	// unit/module and pushes a sourceStateChangedMsg when DetectState
 	// returns something new. Invariant: watcher membership matches
@@ -575,6 +605,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, doTick()
 
+	case spinner.TickMsg:
+		// Forward to the in-flight op's spinner so its frame advances.
+		// Ignored when no op is pending — a stale tick can arrive after
+		// the op has already completed and shouldn't crash us.
+		if m.sourceOp != nil {
+			var cmd tea.Cmd
+			m.sourceOp.spinner, cmd = m.sourceOp.spinner.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+
+	case sourceOpDoneMsg:
+		// Completion from a backgrounded dev-mode action. Pop the
+		// progress view, surface success/error, and reconcile the
+		// source-state cache so the next render shows the new token.
+		op := m.sourceOp
+		m.sourceOp = nil
+		prev := viewUnits
+		if op != nil {
+			prev = op.prevView
+		}
+		m.view = prev
+		if msg.err != nil {
+			m.message = fmt.Sprintf("%s", msg.err)
+			return m, nil
+		}
+		m.message = msg.successMsg
+		switch msg.target {
+		case targetUnit:
+			m.invalidateUnitState(msg.name)
+		case targetModule:
+			m.invalidateModuleState(msg.name)
+		}
+		return m, nil
+
 	case sourceStateChangedMsg:
 		// Watcher saw a state transition (e.g. user committed in a
 		// dev clone outside the TUI). Update the cache directly so
@@ -746,6 +811,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateDeploy(msg)
 		case viewSourcePrompt:
 			return m.updateSourcePrompt(msg)
+		case viewSourceProgress:
+			// Keys are inert while a dev-mode op is in flight — the
+			// goroutine will finish on its own schedule, and a stray
+			// `q` press shouldn't kill the TUI mid-fetch and leave the
+			// clone half-rewritten.
+			return m, nil
 		}
 	}
 	return m, nil
@@ -1980,6 +2051,8 @@ func (m model) View() string {
 		return m.viewDeploy()
 	case viewSourcePrompt:
 		return m.viewSourcePrompt()
+	case viewSourceProgress:
+		return m.viewSourceProgress()
 	default:
 		return m.viewUnits()
 	}
