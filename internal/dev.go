@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/yoebuild/yoe/internal/source"
@@ -318,6 +319,147 @@ func writeUnitSourceState(projectDir, scopeDir, unitName string, state source.St
 		return err
 	}
 	return os.WriteFile(metaPath, out, 0o644)
+}
+
+// PinKind selects which form of pin to write when promoting a dev-mod
+// unit's HEAD into the .star.
+type PinKind string
+
+const (
+	// PinKindTag pins to the git tag at HEAD. Errors if HEAD has no
+	// tag — the caller should disable this option in the UI prompt.
+	PinKindTag PinKind = "tag"
+	// PinKindHash pins to the 40-char sha at HEAD. Always available;
+	// most reproducible.
+	PinKindHash PinKind = "hash"
+	// PinKindBranch pins to the current branch name. Mutable —
+	// breaks build reproducibility — surface a warning in the UI.
+	PinKindBranch PinKind = "branch"
+)
+
+// DevPromoteToPin captures the dev-mode checkout's current HEAD into
+// the unit's .star definition. State must be StateDevMod (commits
+// beyond upstream, work tree clean); other states return an error so
+// the caller can render an appropriate UI hint instead of silently
+// no-oping.
+//
+// On success: rewrites the unit's `tag` (PinKindTag/Hash) or `branch`
+// (PinKindBranch) field, removes the now-stale alternate field, and
+// advances the local `upstream` git tag to HEAD so
+// `git rev-list upstream..HEAD` returns 0 — the unit transitions from
+// `dev-mod` to plain `dev` as the visible acknowledgement that
+// pinned == checked-out.
+//
+// The unit's working tree commit is unchanged. A subsequent
+// pin-mode rebuild will re-clone shallow at the new ref; the user's
+// branch and any uncommitted state-dirty work would survive in dev
+// mode (uncommitted edits aren't possible in StateDevMod by
+// definition).
+func DevPromoteToPin(projectDir, scopeDir string, unit *yoestar.Unit, kind PinKind) error {
+	srcDir := devSrcDir(projectDir, scopeDir, unit.Name)
+	state, _ := source.DetectState(srcDir)
+	if state != source.StateDevMod {
+		return fmt.Errorf("DevPromoteToPin: unit %q is in state %q; promote requires dev-mod (commit dirty edits or there's nothing to promote)",
+			unit.Name, state)
+	}
+
+	starPath, err := findUnitStarFile(unit.DefinedIn, unit.Name)
+	if err != nil {
+		return fmt.Errorf("DevPromoteToPin: %w", err)
+	}
+
+	var newField, newValue, removeField string
+	switch kind {
+	case PinKindTag:
+		// Pick a git tag pointing at HEAD. If there are several, pick
+		// the first sorted lexicographically — deterministic without
+		// requiring annotated tags.
+		out, err := gitCmd(srcDir, "tag", "--points-at", "HEAD")
+		if err != nil {
+			return fmt.Errorf("DevPromoteToPin: %w", err)
+		}
+		tags := strings.Fields(out)
+		if len(tags) == 0 {
+			return fmt.Errorf("DevPromoteToPin: HEAD has no tag — pick PinKindHash or PinKindBranch instead")
+		}
+		newField, newValue = "tag", tags[0]
+		removeField = "branch"
+	case PinKindHash:
+		out, err := gitCmd(srcDir, "rev-parse", "HEAD")
+		if err != nil {
+			return fmt.Errorf("DevPromoteToPin: %w", err)
+		}
+		newField, newValue = "tag", strings.TrimSpace(out)
+		removeField = "branch"
+	case PinKindBranch:
+		out, err := gitCmd(srcDir, "rev-parse", "--abbrev-ref", "HEAD")
+		if err != nil {
+			return fmt.Errorf("DevPromoteToPin: %w", err)
+		}
+		branch := strings.TrimSpace(out)
+		if branch == "HEAD" {
+			return fmt.Errorf("DevPromoteToPin: detached HEAD has no branch — pick PinKindTag or PinKindHash")
+		}
+		newField, newValue = "branch", branch
+		removeField = "tag"
+	default:
+		return fmt.Errorf("DevPromoteToPin: unknown PinKind %q", kind)
+	}
+
+	if err := yoestar.RewriteUnitField(starPath, unit.Name, newField, newValue); err != nil {
+		return fmt.Errorf("DevPromoteToPin: rewriting %s: %w", newField, err)
+	}
+	if err := yoestar.RemoveUnitField(starPath, unit.Name, removeField); err != nil {
+		return fmt.Errorf("DevPromoteToPin: removing stale %s: %w", removeField, err)
+	}
+
+	// Move upstream tag forward so the state transitions from dev-mod
+	// to dev. -f overwrites the existing upstream tag.
+	if _, err := gitCmd(srcDir, "tag", "-f", "upstream", "HEAD"); err != nil {
+		return fmt.Errorf("DevPromoteToPin: advancing upstream tag: %w", err)
+	}
+
+	return writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StateDev)
+}
+
+// findUnitStarFile locates the .star file that registers a unit with
+// the given name within a directory. Tries the convention
+// (`<dir>/<unitName>.star`) first, falls back to scanning every .star
+// file in the dir for a matching `name = "<unitName>"` declaration.
+//
+// The fallback covers cases where a helper function (e.g.,
+// base_files() in modules/module-core/units/base/base-files.star)
+// registers a unit with a different name than the file that defines
+// the helper.
+func findUnitStarFile(dir, unitName string) (string, error) {
+	if dir == "" {
+		return "", fmt.Errorf("unit %q has no DefinedIn — was it loaded from disk?", unitName)
+	}
+	nameRE := regexp.MustCompile(`(?m)name\s*=\s*"` + regexp.QuoteMeta(unitName) + `"`)
+
+	candidate := filepath.Join(dir, unitName+".star")
+	if data, err := os.ReadFile(candidate); err == nil && nameRE.Match(data) {
+		return candidate, nil
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", fmt.Errorf("scanning %s: %w", dir, err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".star") {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if nameRE.Match(data) {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("could not locate .star file defining unit %q in %s", unitName, dir)
 }
 
 // devIsGitURL is a small mirror of source.isGitURL (which is unexported).

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/yoebuild/yoe/internal/source"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -367,4 +368,187 @@ func readUnitState(t *testing.T, projectDir, unitName string) string {
 
 func jsonUnmarshalTest(data []byte, v any) error {
 	return json.Unmarshal(data, v)
+}
+
+// --- U5: DevPromoteToPin --------------------------------------------------
+
+// setupDevModUnit produces the same shape as setupPinnedSrc → DevToUpstream
+// → add a local commit, so the unit ends up in StateDevMod with a .star
+// file the rewriter can target. Returns the .star file path so tests can
+// read it back after the rewrite.
+func setupDevModUnit(t *testing.T, dir, unitName, starBody string) (srcDir, starPath string, unit *yoestar.Unit) {
+	t.Helper()
+	srcDir, upstreamURL := setupPinnedSrc(t, dir, unitName)
+
+	// Write the .star file in a definition dir alongside the upstream.
+	defDir := filepath.Join(dir, "_units")
+	if err := os.MkdirAll(defDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	starPath = filepath.Join(defDir, unitName+".star")
+	if err := os.WriteFile(starPath, []byte(starBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	unit = &yoestar.Unit{Name: unitName, Source: upstreamURL, DefinedIn: defDir}
+	if err := DevToUpstream(dir, "x86_64", unit, false); err != nil {
+		t.Fatalf("DevToUpstream: %v", err)
+	}
+	// Add a local commit beyond upstream → state is dev-mod.
+	if err := os.WriteFile(filepath.Join(srcDir, "patch.c"), []byte("// patch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(t, srcDir, "git", "add", "-A")
+	run(t, srcDir, "git", "commit", "-q", "-m", "local fix")
+	return
+}
+
+func TestDevPromoteToPin_Hash(t *testing.T) {
+	dir := t.TempDir()
+	starBody := `unit(
+    name = "openssh",
+    version = "9.6p1",
+    tag = "v9.6p1",
+    source = "https://example.com/openssh.git",
+)
+`
+	srcDir, starPath, unit := setupDevModUnit(t, dir, "openssh", starBody)
+	if err := DevPromoteToPin(dir, "x86_64", unit, PinKindHash); err != nil {
+		t.Fatalf("DevPromoteToPin: %v", err)
+	}
+	headSha, _ := gitCmd(srcDir, "rev-parse", "HEAD")
+	wantSha := strings.TrimSpace(headSha)
+	got, _ := os.ReadFile(starPath)
+	if !strings.Contains(string(got), `tag = "`+wantSha+`"`) {
+		t.Errorf(".star tag should be HEAD sha %q, got:\n%s", wantSha, got)
+	}
+	// State should be dev (upstream tag advanced to HEAD).
+	state, _ := source.DetectState(srcDir)
+	if state != source.StateDev {
+		t.Errorf("post-promote state = %q, want %q", state, source.StateDev)
+	}
+}
+
+func TestDevPromoteToPin_Tag(t *testing.T) {
+	dir := t.TempDir()
+	starBody := `unit(
+    name = "foo",
+    tag = "v1.0",
+    source = "https://example.com/foo.git",
+)
+`
+	srcDir, starPath, unit := setupDevModUnit(t, dir, "foo", starBody)
+	// Add a tag on the local commit so PinKindTag has something to find.
+	run(t, srcDir, "git", "tag", "v1.1.0")
+
+	if err := DevPromoteToPin(dir, "x86_64", unit, PinKindTag); err != nil {
+		t.Fatalf("DevPromoteToPin: %v", err)
+	}
+	got, _ := os.ReadFile(starPath)
+	if !strings.Contains(string(got), `tag = "v1.1.0"`) {
+		t.Errorf(".star tag should be v1.1.0, got:\n%s", got)
+	}
+}
+
+func TestDevPromoteToPin_TagButHEADHasNoTag(t *testing.T) {
+	dir := t.TempDir()
+	starBody := `unit(
+    name = "foo",
+    tag = "v1.0",
+    source = "https://example.com/foo.git",
+)
+`
+	_, _, unit := setupDevModUnit(t, dir, "foo", starBody)
+	err := DevPromoteToPin(dir, "x86_64", unit, PinKindTag)
+	if err == nil {
+		t.Fatal("expected error when HEAD has no tag")
+	}
+	if !strings.Contains(err.Error(), "no tag") {
+		t.Errorf("error should mention missing tag: %v", err)
+	}
+}
+
+func TestDevPromoteToPin_Branch(t *testing.T) {
+	dir := t.TempDir()
+	starBody := `unit(
+    name = "foo",
+    tag = "v1.0",
+    source = "https://example.com/foo.git",
+)
+`
+	srcDir, starPath, unit := setupDevModUnit(t, dir, "foo", starBody)
+	// Make sure we're on a named branch.
+	run(t, srcDir, "git", "checkout", "-q", "-B", "feature-x")
+
+	if err := DevPromoteToPin(dir, "x86_64", unit, PinKindBranch); err != nil {
+		t.Fatalf("DevPromoteToPin: %v", err)
+	}
+	got, _ := os.ReadFile(starPath)
+	if !strings.Contains(string(got), `branch = "feature-x"`) {
+		t.Errorf(".star should have branch = feature-x, got:\n%s", got)
+	}
+	// tag line should be removed (mutually exclusive with branch).
+	if strings.Contains(string(got), "tag = ") {
+		t.Errorf("tag line should be removed when promoting to branch:\n%s", got)
+	}
+}
+
+func TestDevPromoteToPin_RefusesNonDevMod(t *testing.T) {
+	dir := t.TempDir()
+	srcDir, upstreamURL := setupPinnedSrc(t, dir, "foo")
+	defDir := filepath.Join(dir, "_units")
+	os.MkdirAll(defDir, 0o755)
+	os.WriteFile(filepath.Join(defDir, "foo.star"), []byte(`unit(name = "foo", tag = "v1", source = "https://example.com/foo.git")`), 0o644)
+	unit := &yoestar.Unit{Name: "foo", Source: upstreamURL, DefinedIn: defDir}
+	// Stay in pin state — DevToUpstream not called.
+
+	err := DevPromoteToPin(dir, "x86_64", unit, PinKindHash)
+	if err == nil {
+		t.Fatal("expected error promoting from pin state")
+	}
+	if !strings.Contains(err.Error(), "dev-mod") {
+		t.Errorf("error should mention dev-mod requirement: %v", err)
+	}
+	// Also test from dev-dirty (uncommitted edits).
+	if err := DevToUpstream(dir, "x86_64", unit, false); err != nil {
+		t.Fatalf("DevToUpstream: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "dirty.c"), []byte("// dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err = DevPromoteToPin(dir, "x86_64", unit, PinKindHash)
+	if err == nil {
+		t.Fatal("expected error promoting from dev-dirty")
+	}
+}
+
+func TestFindUnitStarFile_PrefersConvention(t *testing.T) {
+	dir := t.TempDir()
+	// Write two files: foo.star (matching convention) and bar.star
+	// (also defines foo). Convention path wins.
+	os.WriteFile(filepath.Join(dir, "foo.star"), []byte(`unit(name = "foo")`), 0o644)
+	os.WriteFile(filepath.Join(dir, "other.star"), []byte(`unit(name = "foo", tag = "v0")`), 0o644)
+	got, err := findUnitStarFile(dir, "foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(got) != "foo.star" {
+		t.Errorf("convention path should win, got %s", got)
+	}
+}
+
+func TestFindUnitStarFile_FallsBackToScan(t *testing.T) {
+	dir := t.TempDir()
+	// foo.star doesn't exist; bar.star defines foo.
+	os.WriteFile(filepath.Join(dir, "bar.star"), []byte(`
+def helper():
+    unit(name = "foo", tag = "v1")
+`), 0o644)
+	got, err := findUnitStarFile(dir, "foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(got) != "bar.star" {
+		t.Errorf("fallback scan should find bar.star, got %s", got)
+	}
 }
