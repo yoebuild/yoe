@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -829,5 +830,106 @@ func TestRefreshDetailFiles_WalksDestdir(t *testing.T) {
 	}
 	if m.detailFiles[len(m.detailFiles)-1].Path == "/usr/lib/libfoo.so.1" {
 		t.Fatalf("size-desc should not put libfoo.so.1 last")
+	}
+}
+
+// TestBuildProgress_TracksWaitingAndDone verifies the progress totals
+// driven off the executor's pre-scan: each "waiting" event grows the
+// queue, each "done"/"failed" advances the bar.
+func TestBuildProgress_TracksWaitingAndDone(t *testing.T) {
+	m := &model{
+		buildProgress: progress.New(progress.WithoutPercentage()),
+		buildPending:  make(map[string]bool),
+	}
+
+	m.markBuildUnitWaiting("a")
+	m.markBuildUnitWaiting("b")
+	m.markBuildUnitWaiting("c")
+	if m.buildTotal != 3 || m.buildDone != 0 {
+		t.Fatalf("after 3 waiting: total=%d done=%d, want 3/0", m.buildTotal, m.buildDone)
+	}
+
+	// A duplicate "waiting" (e.g. from a second concurrent BuildUnits
+	// pre-scan picking up the same dep) must not double-count.
+	m.markBuildUnitWaiting("a")
+	if m.buildTotal != 3 {
+		t.Fatalf("duplicate waiting bumped total to %d, want 3", m.buildTotal)
+	}
+
+	m.markBuildUnitFinished("a")
+	m.markBuildUnitFinished("b")
+	if m.buildDone != 2 {
+		t.Fatalf("after 2 finished: done=%d, want 2", m.buildDone)
+	}
+	if pct := m.buildPercent(); pct < 0.66 || pct > 0.67 {
+		t.Fatalf("percent = %v, want ~0.666", pct)
+	}
+
+	// "done" for a unit that was never queued (e.g. cached) is a no-op.
+	m.markBuildUnitFinished("never-queued")
+	if m.buildDone != 2 {
+		t.Fatalf("done for unqueued bumped done to %d, want 2", m.buildDone)
+	}
+}
+
+// TestBuildProgress_ResetClearsSession ensures resetBuildProgress
+// drops all per-session state so the next build starts at zero.
+func TestBuildProgress_ResetClearsSession(t *testing.T) {
+	m := &model{
+		buildProgress: progress.New(progress.WithoutPercentage()),
+		buildPending:  make(map[string]bool),
+	}
+	m.markBuildUnitWaiting("a")
+	m.markBuildUnitFinished("a")
+	if !m.buildSessionActive() {
+		t.Fatalf("session should be active after one waiting event")
+	}
+	m.resetBuildProgress()
+	if m.buildSessionActive() {
+		t.Fatalf("session should be inactive after reset")
+	}
+	if m.buildTotal != 0 || m.buildDone != 0 || len(m.buildPending) != 0 {
+		t.Fatalf("reset left state behind: total=%d done=%d pending=%v",
+			m.buildTotal, m.buildDone, m.buildPending)
+	}
+}
+
+// TestRenderHomeHeader_ProgressReplacesFeed confirms the header swaps
+// the feed banner for the progress bar while a build is active and
+// puts the feed banner back once the session resets.
+func TestRenderHomeHeader_ProgressReplacesFeed(t *testing.T) {
+	m := model{
+		proj: &yoestar.Project{
+			Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "dev-image"},
+		},
+		feedStatus:    "serving http://host:8765",
+		buildProgress: progress.New(progress.WithoutPercentage()),
+		buildPending:  make(map[string]bool),
+		width:         120,
+	}
+
+	// No active build — feed banner is visible.
+	if !strings.Contains(m.renderHomeHeader(), "feed: serving") {
+		t.Fatalf("expected feed banner when no build active")
+	}
+
+	// Kick off a build session.
+	m.markBuildUnitWaiting("a")
+	m.markBuildUnitWaiting("b")
+	m.markBuildUnitFinished("a")
+	out := m.renderHomeHeader()
+	if strings.Contains(out, "feed: serving") {
+		t.Fatalf("feed banner should be hidden during build, got:\n%s", out)
+	}
+	for _, want := range []string{"50%", "1/2 done", "1 left"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("progress label missing %q in:\n%s", want, out)
+		}
+	}
+
+	// Session ends — feed banner returns.
+	m.resetBuildProgress()
+	if !strings.Contains(m.renderHomeHeader(), "feed: serving") {
+		t.Fatalf("feed banner should return after session reset")
 	}
 }
