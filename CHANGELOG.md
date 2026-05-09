@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Build progress bar.** While a build is in flight the feed banner at the top
+  of the screen swaps out for a live progress bar showing the percentage done,
+  how many units have finished, and how many are still to build. The bar
+  disappears and the feed banner returns once the build settles.
+
 ## [0.10.4] - 2026-05-08
 
 - **Search bar clears with `Ctrl+U`.** Readline's kill-line shortcut wipes the

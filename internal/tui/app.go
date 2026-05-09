@@ -418,6 +418,17 @@ type model struct {
 	// Feed (yoe serve) status — set at startup by startProjectFeed.
 	feedStatus string
 
+	// Build progress — replaces the feed line at the top of the screen
+	// while at least one build is in flight. buildPending is the set of
+	// units that emitted "waiting" but haven't yet emitted "done"/"failed",
+	// used to dedup events when the user kicks off overlapping builds.
+	// buildTotal is the count of non-cached units across the active
+	// session and buildDone is how many have completed.
+	buildProgress progress.Model
+	buildTotal    int
+	buildDone     int
+	buildPending  map[string]bool
+
 	// Per-unit display metrics — recomputed on project reload and after
 	// builds so the unit table reflects fresh on-disk state.
 	unitSize map[string]int64 // installed bytes (image units: .img file size)
@@ -532,6 +543,8 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 		srcWatcher:      newSourceWatcher(),
 		machines:       machines,
 		flashProgress:  progress.New(progress.WithDefaultGradient()),
+		buildProgress:  progress.New(progress.WithDefaultGradient(), progress.WithoutPercentage()),
+		buildPending:   make(map[string]bool),
 		deployHost:     ov.DeployHost,
 		loadOpts:       cfg.LoadOpts,
 		globalFlagArgs: cfg.GlobalFlagArgs,
@@ -677,8 +690,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// recomputeMetrics — otherwise sizes for transitive deps stay
 			// blank for the entire duration of a multi-unit image build.
 			m.refreshUnitSize(msg.unit)
+			cmd := m.markBuildUnitFinished(msg.unit)
+			return m, cmd
 		case "waiting":
 			m.statuses[msg.unit] = statusWaiting
+			m.markBuildUnitWaiting(msg.unit)
 		case "building":
 			m.statuses[msg.unit] = statusBuilding
 			// When a build starts (often a transitive dep of the unit
@@ -691,6 +707,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "failed":
 			m.statuses[msg.unit] = statusFailed
+			cmd := m.markBuildUnitFinished(msg.unit)
+			return m, cmd
 		}
 		return m, nil
 
@@ -715,6 +733,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sortVisible()
 			}
 		}
+		// All goroutines are done — drop the progress bar and let the
+		// feed banner come back. A fresh "waiting" event from a later
+		// build will start a new session from zero.
+		if len(m.building) == 0 {
+			m.resetBuildProgress()
+		}
 		return m, nil
 
 	case execDoneMsg:
@@ -734,10 +758,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case progress.FrameMsg:
-		var pm tea.Model
-		pm, cmd := m.flashProgress.Update(msg)
-		m.flashProgress = pm.(progress.Model)
-		return m, cmd
+		// Both the flash and the build bars use progress.Model and
+		// route by id internally, so it's safe to forward the same
+		// frame to each — whichever one owns the id will animate.
+		fp, fcmd := m.flashProgress.Update(msg)
+		m.flashProgress = fp.(progress.Model)
+		bp, bcmd := m.buildProgress.Update(msg)
+		m.buildProgress = bp.(progress.Model)
+		return m, tea.Batch(fcmd, bcmd)
 
 	case flashDoneMsg:
 		if errors.Is(msg.err, device.ErrPermission) {
@@ -2103,7 +2131,9 @@ func (m model) renderHomeHeader() string {
 		notifyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Bold(true)
 		fmt.Fprintf(&b, "  %s\n", notifyStyle.Render("⏳ "+m.notification))
 	}
-	if m.feedStatus != "" {
+	if m.buildSessionActive() {
+		fmt.Fprintf(&b, "  %s\n", m.renderBuildProgress())
+	} else if m.feedStatus != "" {
 		feedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 		fmt.Fprintf(&b, "  %s\n", feedStyle.Render("feed: "+m.feedStatus))
 	}
@@ -3387,6 +3417,61 @@ func (m model) renderName(padded string, base lipgloss.Style) string {
 
 // ----- Helpers -----
 
+// buildSessionActive reports whether the home-screen header should
+// show the build progress bar. We key off buildTotal rather than
+// len(m.building) so the bar can complete its animation to 100% even
+// after the last goroutine returned, before resetBuildProgress clears
+// the state on the next idle tick.
+func (m model) buildSessionActive() bool {
+	return m.buildTotal > 0
+}
+
+// markBuildUnitWaiting records a "waiting" event from the executor's
+// pre-scan. Each unit only counts once per session even if multiple
+// concurrent BuildUnits invocations both schedule it.
+func (m *model) markBuildUnitWaiting(unit string) {
+	if m.buildPending == nil {
+		m.buildPending = make(map[string]bool)
+	}
+	if m.buildPending[unit] {
+		return
+	}
+	m.buildPending[unit] = true
+	m.buildTotal++
+}
+
+// markBuildUnitFinished records a "done" or "failed" event and returns
+// a command that animates the progress bar to its new percentage. Only
+// units that were previously announced as "waiting" count — a "done"
+// for a cached unit is a no-op as far as the bar is concerned.
+func (m *model) markBuildUnitFinished(unit string) tea.Cmd {
+	if !m.buildPending[unit] {
+		return nil
+	}
+	delete(m.buildPending, unit)
+	m.buildDone++
+	return m.buildProgress.SetPercent(m.buildPercent())
+}
+
+// buildPercent returns the current build progress as a 0..1 fraction,
+// or 0 when no session is active.
+func (m model) buildPercent() float64 {
+	if m.buildTotal == 0 {
+		return 0
+	}
+	return float64(m.buildDone) / float64(m.buildTotal)
+}
+
+// resetBuildProgress drops the active session — called once every
+// running goroutine has reported back via buildDoneMsg. The bar
+// disappears on the next render and the feed banner returns.
+func (m *model) resetBuildProgress() {
+	m.buildTotal = 0
+	m.buildDone = 0
+	m.buildPending = make(map[string]bool)
+	m.buildProgress.SetPercent(0)
+}
+
 func (m *model) startBuild(name string) tea.Cmd {
 	if m.statuses[name] == statusBuilding || m.statuses[name] == statusWaiting {
 		return nil
@@ -4288,11 +4373,36 @@ func (m model) homeHeaderLines() int {
 	if m.notification != "" {
 		n++
 	}
-	if m.feedStatus != "" {
+	if m.buildSessionActive() || m.feedStatus != "" {
 		n++
 	}
 	n++ // tab bar
 	return n
+}
+
+// renderBuildProgress draws the progress bar that replaces the feed
+// status line during builds. The text label sits to the right of the
+// bar so the percentage, total, and remaining counts stay visible
+// even on narrow terminals where the bar shrinks.
+func (m model) renderBuildProgress() string {
+	left := m.buildTotal - m.buildDone
+	pct := int(m.buildPercent()*100 + 0.5)
+	label := fmt.Sprintf(" %d%% · %d/%d done · %d left",
+		pct, m.buildDone, m.buildTotal, left)
+
+	// Indent (2) + label width is the chrome around the bar.
+	bar := m.buildProgress
+	avail := m.width - 2 - lipgloss.Width(label)
+	switch {
+	case avail < 10:
+		bar.Width = 10
+	case avail > 60:
+		bar.Width = 60
+	default:
+		bar.Width = avail
+	}
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	return bar.View() + labelStyle.Render(label)
 }
 
 func findUnitFile(projectDir, name string) string {
