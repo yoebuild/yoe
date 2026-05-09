@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-05-09
+
 - **Build progress bar.** While a build is in flight the feed banner at the top
   of the screen swaps out for a live progress bar showing the percentage done,
   how many units have finished, and how many are still to build. The bar
