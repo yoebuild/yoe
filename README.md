@@ -37,9 +37,10 @@ these:
    Rust agents, Python ML, container workloads, and kernel drivers side by side.
    Pulling these together should be straightforward, not a custom integration
    project each time.
-3. **Scale to build anything.** From a tiny sensor image to a full multi-arch
-   product line — one tool, one mental model. The same workflow on a laptop, a
-   build farm, or cloud CI, with caching that keeps up as projects grow.
+3. **Scale to build anything.** From tiny Zephyr images to complex AI
+   workloads. From one application to a complete distributed system. One tool,
+   one mental model — the same workflow on a laptop, a build farm, or cloud CI,
+   with caching that keeps up as projects grow.
 
 ## Is `[yoe]` Right for You?
 
