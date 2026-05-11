@@ -18,11 +18,28 @@ on your laptop, on native hardware, or in cloud CI — one integrated tool, same
 config, same results.
 
 We took what we learned from many years of maintaining and building products
-with the [Yoe Distribution](https://yoedistro.org/), started over, and built the
-tool we always wanted.
+with the [Yoe Distribution](https://yoedistro.org/), started over, and began
+building the tool we always wanted. `[yoe]` _next generation_ is an experiment
+in progress — we're sharing the work in the open as it takes shape.
 
 _Note: Not everything in the documentation has been implemented yet as this
 project is in the early stages._
+
+## 🎯 Goals
+
+Three north stars guide the experiment — everything else is in service of
+these:
+
+1. **Drastically improve developer productivity.** Shrink the loop between an
+   idea and a running image. Fewer rebuilds, fewer context switches, fewer tools
+   to learn — so engineers spend their time on the product, not on the build.
+2. **Easily integrate complex workloads.** Modern edge devices ship Go services,
+   Rust agents, Python ML, container workloads, and kernel drivers side by side.
+   Pulling these together should be straightforward, not a custom integration
+   project each time.
+3. **Scale to build anything.** From a tiny sensor image to a full multi-arch
+   product line — one tool, one mental model. The same workflow on a laptop, a
+   build farm, or cloud CI, with caching that keeps up as projects grow.
 
 ## Is `[yoe]` Right for You?
 
