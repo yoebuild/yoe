@@ -90,3 +90,33 @@ produce packages, packages assemble into images**:
 For an explanation of why this split exists — versus Yocto's recipe/layer model
 — see [Comparisons](comparisons.md). For the language used to express units and
 configuration, see [Build & Configuration Languages](build-languages.md).
+
+## Where units build
+
+Builds run on the host through a tiered environment. The host provides only
+`yoe` and a container runtime; everything else is nested inside the container
+that `yoe` spawns:
+
+![Build environment tiers](assets/build-environment-tiers.png)
+
+Each unit builds inside its own bwrap sandbox with only its declared deps
+visible. See [Build Environment](build-environment.md) for the tier-by-tier
+details, the bootstrap process, and the rationale behind bwrap-over-Docker for
+per-unit isolation.
+
+## What feeds a unit build
+
+A unit pulls inputs from four independent sources, each managed by the right
+tool for the job:
+
+![Build dependencies](assets/build-dependencies.png)
+
+Host tools (compilers, language runtimes) come from Docker containers; library
+deps from the apk sysroot built up by other yoe units; distro packages (full
+libraries, runtime services, applications) come from prebuilt upstream apks via
+`module-alpine`; and language-native deps (Go modules, Cargo crates, pip
+wheels) are handled by each language's own package manager inside the
+container. See
+[Build Dependencies and Caching](build-dependencies-and-caching.md) for why
+this split exists and how it interacts with the build cache, and
+[Alpine apk Passthrough](apk-passthrough.md) for the prebuilt-apk path.

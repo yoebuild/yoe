@@ -9,6 +9,8 @@ diverge, and "it works on my machine" becomes "it works with my SDK version."
 `[yoe]` eliminates this boundary by recognizing that there are distinct kinds of
 build dependencies, and they should be managed differently:
 
+![Build dependencies — three sources feeding a unit build](assets/build-dependencies.png)
+
 - **Host tools** (compilers, build utilities, code generators) — these come from
   Docker containers. Every unit can specify its own container, so one team's
   toolchain requirements don't constrain another. A kernel unit can use a
