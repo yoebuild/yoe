@@ -147,6 +147,23 @@ Alpine's abuild convention and lets Alpine prebuilts that declare
 The mirror — auto-emit `depend = so:<soname>` from `DT_NEEDED` — is on the
 roadmap (see `docs/roadmap.md`'s "Auto-depend from ELF DT_NEEDED").
 
+## Auto-versioned `provides`
+
+Explicit virtuals listed in a unit's `provides = [...]` field are also stamped
+with `=<ver>-r<rel>` on emit. So:
+
+```python
+unit(name = "openssl", version = "3.4.1", provides = ["libssl3", "libcrypto3"])
+```
+
+emits `provides = libssl3=3.4.1-r0` and `provides = libcrypto3=3.4.1-r0` in the
+package's PKGINFO. Without the version, apk treats the provide as unversioned
+and refuses to use it to satisfy consumer constraints like
+`depend = libssl3>=3.3.0` (which is what Alpine's prebuilt python3 ships). If
+the entry already carries a constraint (`=`, `<`, `>`, `~`), it's emitted
+verbatim — useful when a unit needs to claim a specific older version's API
+contract.
+
 ## Worked example: why we couldn't use Alpine's docker-openrc
 
 Tested end-to-end during the OpenRC switch. Documenting because the same shape

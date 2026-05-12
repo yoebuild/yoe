@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`yoe deploy python3` (and other openssl consumers) now installs onto a
+  running device.** Previously apk rejected the install with a `libssl3>=3.3.0`
+  conflict against the source-built openssl. Source units that declare virtual
+  `provides` now publish them with this unit's version, so `>=` constraints
+  resolve the way they do on Alpine.
 - **`<hostname>.local` now resolves over IPv4.** On DHCP networks mdnsd was
   announcing only the IPv6 link-local address, so `ssh user@host.local` failed
   on plain IPv4 LANs. The host's A record is now published as soon as the lease
