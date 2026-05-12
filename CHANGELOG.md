@@ -8,10 +8,14 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **TUI help bar stays pinned to the bottom of the screen on the Units tab,**
+  even when only a handful of units are visible. The unit list pads with blank
+  rows so the keyboard shortcuts and the cursor-name strip don't float up under
+  a short query result.
 - **`yoe module sync` works even when modules have errors.** The command now
   reads only `PROJECT.star` and re-syncs the declared modules, so a broken
-  module that's blocking the rest of the build can be re-fetched as soon as
-  the upstream fix lands — no more chicken-and-egg.
+  module that's blocking the rest of the build can be re-fetched as soon as the
+  upstream fix lands — no more chicken-and-egg.
 - **One `ctx` struct in `.star` files instead of five separate globals.** Unit
   and image definitions now reference `ctx.arch`, `ctx.machine`,
   `ctx.project_version`, `ctx.machine_config`, `ctx.provides`, and
@@ -19,6 +23,12 @@ and this project adheres to
   `MACHINE_CONFIG`, `PROVIDES`, and `RUNTIME_DEPS`. One named entry point is
   easier to discover and reason about than five floating predeclared names.
   External modules that referenced the old globals need a one-line rename.
+- **Pip dependencies can ship as part of an image.** A new `python_venv` class
+  packages a Python virtualenv plus its pip dependencies as a regular yoe unit,
+  so apps that need a specific set of PyPI packages get them baked into the apk
+  instead of installed at first boot. `python-image` ships a `python-hello` demo
+  — log in and run `python-hello "..."` to see the bundled `pyfiglet` dependency
+  render an ASCII-art greeting.
 - **New `python-image`.** A ready-to-boot image with `python3`, `pip`, and the
   dev-image diagnostic userland, so `pip install <pkg>` works on first login
   without a separate `apk add`.

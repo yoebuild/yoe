@@ -13,7 +13,9 @@ base_files(
 # Boots into a userland that already has python3 and pip installed, so
 # `pip install <pkg>` works on first login without an extra apk pull. The
 # dev-image's diagnostic and networking userland is included so the device
-# is usable for actual Python work, not just `python3 --version`.
+# is usable for actual Python work, not just `python3 --version`. Also
+# bundles the python-hello demo app so a fresh boot can show off a venv-
+# packaged pip dependency with `python-hello "..."`.
 image(
     name = "python-image",
     artifacts = [
@@ -24,5 +26,6 @@ image(
         "curl", "bash", "less", "file", "procps-ng",
         "htop", "strace", "apk-tools",
         "python3", "py3-pip",
+        "python-hello",
     ],
 )
