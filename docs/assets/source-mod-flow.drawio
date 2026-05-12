@@ -1,0 +1,92 @@
+<mxfile host="Electron" agent="claude-code" version="29.3.0">
+  <diagram name="source-mod-flow" id="diagram1">
+    <mxGraphModel dx="1200" dy="700" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="500" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="proj-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;strokeWidth=2;arcSize=8;" parent="1" vertex="1">
+          <mxGeometry x="20" y="40" width="260" height="400" as="geometry" />
+        </mxCell>
+        <mxCell id="proj-title" value="📂 &lt;b&gt;Project repo&lt;/b&gt; — version-controlled" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="30" y="50" width="240" height="22" as="geometry" />
+        </mxCell>
+
+        <mxCell id="unit-star" value="🛠 &lt;b&gt;units/openssh.star&lt;/b&gt;&lt;br&gt;&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;source = git URL&lt;br&gt;version = &#34;9.7p1&#34;&lt;br&gt;patches = [&#34;0001-…&#34;, &#34;0002-…&#34;]&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;strokeWidth=1;arcSize=8;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="35" y="95" width="230" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="patches" value="📑 &lt;b&gt;openssh/&lt;/b&gt; &lt;span style='font-size:10px;color:#666;'&gt;(next to openssh.star)&lt;/span&gt;&lt;br&gt;&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;0001-fix-auth-timeout.patch&lt;br&gt;0002-add-config-flag.patch&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;strokeWidth=1;arcSize=8;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="35" y="220" width="230" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="proj-foot" value="&lt;i&gt;source of truth — committed in your project repo and reviewed in PRs&lt;/i&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#666666;" parent="1" vertex="1">
+          <mxGeometry x="30" y="340" width="240" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="build-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;arcSize=8;" parent="1" vertex="1">
+          <mxGeometry x="320" y="40" width="260" height="400" as="geometry" />
+        </mxCell>
+        <mxCell id="build-title" value="🔧 &lt;b&gt;build/openssh/src/&lt;/b&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="330" y="50" width="240" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="build-sub" value="&lt;i&gt;a regular git repo — edit, commit, branch, rebase as usual&lt;/i&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#666666;" parent="1" vertex="1">
+          <mxGeometry x="330" y="72" width="240" height="35" as="geometry" />
+        </mxCell>
+
+        <mxCell id="commit-head" value="🟢 &lt;b&gt;HEAD&lt;/b&gt; — your local commit&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;&#34;fix auth timeout handling&#34;&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;arcSize=8;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="335" y="115" width="230" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="commit-p2" value="🟣 patch commit&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;0002-add-config-flag&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;strokeWidth=1;arcSize=8;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="335" y="185" width="230" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="commit-p1" value="🟣 patch commit&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;0001-fix-auth-timeout&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;strokeWidth=1;arcSize=8;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="335" y="250" width="230" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="commit-up" value="🏷 &lt;b&gt;upstream&lt;/b&gt; (tag)&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;openssh-9.7p1 pristine source&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=2;arcSize=8;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="335" y="315" width="230" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="build-foot" value="&lt;i&gt;upstream..HEAD = your modifications&lt;/i&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#666666;" parent="1" vertex="1">
+          <mxGeometry x="330" y="385" width="240" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cli-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;strokeWidth=2;arcSize=8;" parent="1" vertex="1">
+          <mxGeometry x="620" y="40" width="260" height="400" as="geometry" />
+        </mxCell>
+        <mxCell id="cli-title" value="💻 &lt;b&gt;yoe dev commands&lt;/b&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="630" y="50" width="240" height="22" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cli-diff" value="🔍 &lt;b&gt;yoe dev diff &amp;lt;unit&amp;gt;&lt;/b&gt;&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;git log upstream..HEAD&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;strokeWidth=1;arcSize=8;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="635" y="90" width="230" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cli-status" value="📋 &lt;b&gt;yoe dev status&lt;/b&gt;&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;which units have local commits&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;strokeWidth=1;arcSize=8;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="635" y="160" width="230" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cli-extract" value="📤 &lt;b&gt;yoe dev extract &amp;lt;unit&amp;gt;&lt;/b&gt;&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;git format-patch upstream..HEAD&lt;br&gt;→ writes to &amp;lt;unit-dir&amp;gt;/&amp;lt;unit&amp;gt;/&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;strokeWidth=2;arcSize=8;fontSize=11;align=center;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="635" y="230" width="230" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cli-foot" value="&lt;i&gt;no separate workspace · no mode to enter · git is the only state&lt;/i&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#666666;" parent="1" vertex="1">
+          <mxGeometry x="630" y="330" width="240" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-apply" value="yoe build&lt;br&gt;&lt;span style='font-size:9px;'&gt;fetch + tag upstream + apply patches&lt;/span&gt;" style="endArrow=classic;html=1;rounded=1;strokeWidth=2;strokeColor=#82b366;edgeStyle=orthogonalEdgeStyle;exitX=1;exitY=0.4;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;fontSize=10;fontColor=#444;" parent="1" source="patches" target="commit-p1" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-extract" value="yoe dev extract&lt;br&gt;&lt;span style='font-size:9px;'&gt;writes local commits back as .patch files&lt;/span&gt;" style="endArrow=classic;html=1;rounded=1;strokeWidth=2;strokeColor=#9673a6;edgeStyle=orthogonalEdgeStyle;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.4;entryDx=0;entryDy=0;fontSize=10;fontColor=#444;" parent="1" source="commit-head" target="patches" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="caption" value="&lt;i&gt;Every unit's build dir is a git repo with an &lt;b&gt;upstream&lt;/b&gt; tag at the pristine source. Patches apply as commits on top; your edits become further commits. &lt;b&gt;yoe dev extract&lt;/b&gt; turns them back into reviewable .patch files in your project repo.&lt;/i&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;fontColor=#666666;" parent="1" vertex="1">
+          <mxGeometry x="40" y="455" width="820" height="40" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

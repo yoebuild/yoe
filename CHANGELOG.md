@@ -8,6 +8,47 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.7] - 2026-05-12
+
+- **Bun apps can ship as part of an image.** A new `bun_app` class packages a
+  Bun project plus its `node_modules` tree as a regular yoe unit, so apps that
+  need a specific set of npm packages get them baked into the apk. Bun runs
+  TypeScript natively, so the entry point can be a plain `.ts` file with no
+  compile step. `bun-image` ships a `bun-hello` demo — log in and run
+  `bun-hello "..."` to see the bundled `figlet` dependency render an ASCII-art
+  greeting.
+- **New `bun-image`.** A ready-to-boot image with the `bun` runtime (and `bunx`)
+  plus the dev-image diagnostic userland, so `bun install <pkg>` and `bun run`
+  work on first login without a separate `apk add`.
+- **npm dependencies can ship as part of an image.** A new `nodejs_app` class
+  packages a Node.js app plus its `node_modules` tree as a regular yoe unit, so
+  apps that need a specific set of npm packages get them baked into the apk
+  instead of installed at first boot. Drop a normal `package.json` (and
+  optionally `package-lock.json`) next to your unit and the class runs
+  `npm install` / `npm ci` against it at build time. `nodejs-image` ships a
+  `nodejs-hello` demo — log in and run `nodejs-hello "..."` to see the bundled
+  `figlet` dependency render an ASCII-art greeting.
+- **New `nodejs-image`.** A ready-to-boot image with `node`, `npm`, and the
+  dev-image diagnostic userland, so `npm install <pkg>` works on first login
+  without a separate `apk add`.
+- **`yoe init` projects now pin `zstd` to Alpine.** Source-built `zstd` ships
+  `libzstd.so.1` at a different soversion than Alpine's `zstd-libs`, so any
+  image that mixes source consumers (curl, file) with Alpine prebuilts that link
+  against Alpine's libzstd (nodejs, bun) used to fail with an apk conflict over
+  the shared `.so`. New projects get the pin out of the box; existing projects
+  can copy the `"zstd": "alpine"` entry into their `prefer_modules` block.
+- **Patches live next to the unit, not under a separate `patches/` tree.** A
+  unit's `patches = [...]` paths are now relative to the unit's own directory
+  with no `patches/` prefix — e.g., `patches = ["mdnsd/0001-….patch"]` next to
+  `mdnsd.star`. `yoe dev extract` writes patches into `<unit-dir>/<unit>/`
+  alongside the `.star` file, so a module's patches travel with the module that
+  defines them. **Migration:** drop the leading `patches/` from existing
+  `patches = [...]` entries and move the files to match.
+- **`yoe dev status` works through project errors.** It now walks the build
+  directory directly instead of evaluating the project, so unrelated issues like
+  a duplicate-provides collision in a module no longer block you from seeing
+  which units have uncommitted local edits.
+
 ## [0.10.6] - 2026-05-12
 
 - **TUI help bar stays pinned to the bottom of the screen on the Units tab,**

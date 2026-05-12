@@ -1,0 +1,11 @@
+{
+  "name": "bun-hello",
+  "version": "1.0.0",
+  "private": true,
+  "description": "yoe demo: greet with ASCII art via figlet, run natively as TypeScript",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "figlet": "1.7.0"
+  }
+}

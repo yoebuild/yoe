@@ -129,8 +129,9 @@ func TestPrepare_WithPatches(t *testing.T) {
 	projectDir := t.TempDir()
 	t.Setenv("YOE_CACHE", filepath.Join(projectDir, "cache"))
 
-	// Create a patch file
-	patchDir := filepath.Join(projectDir, "patches", "test-pkg")
+	// Create a patch file in <projectDir>/test-pkg/ — the new layout
+	// where patches live alongside the unit, not under a patches/ tree.
+	patchDir := filepath.Join(projectDir, "test-pkg")
 	os.MkdirAll(patchDir, 0755)
 	patchContent := `--- a/hello.txt
 +++ b/hello.txt
@@ -144,7 +145,7 @@ func TestPrepare_WithPatches(t *testing.T) {
 		Name:    "test-pkg",
 		Version: "1.0",
 		Source:  srv.URL + "/test-1.0.tar.gz",
-		Patches: []string{"patches/test-pkg/fix.patch"},
+		Patches: []string{"test-pkg/fix.patch"},
 	}
 
 	srcDir, err := Prepare(projectDir, "x86_64", unit, "", os.Stdout)
@@ -189,7 +190,7 @@ func TestPrepare_PatchesRelativeToDefinedIn(t *testing.T) {
 	// Module lives outside the project (typical local-module layout).
 	moduleDir := t.TempDir()
 	unitDir := filepath.Join(moduleDir, "units", "bsp")
-	patchDir := filepath.Join(unitDir, "patches", "test-pkg")
+	patchDir := filepath.Join(unitDir, "test-pkg")
 	if err := os.MkdirAll(patchDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +206,7 @@ func TestPrepare_PatchesRelativeToDefinedIn(t *testing.T) {
 		Name:      "test-pkg",
 		Version:   "1.0",
 		Source:    srv.URL + "/test-1.0.tar.gz",
-		Patches:   []string{"patches/test-pkg/fix.patch"},
+		Patches:   []string{"test-pkg/fix.patch"},
 		DefinedIn: unitDir,
 	}
 

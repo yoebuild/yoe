@@ -50,6 +50,13 @@ func RunInit(projectDir string, machine string) error {
     # depmod needs the shared liblzma.so.5).
     prefer_modules = {
         "xz": "alpine",
+        # module-core's source-built zstd ships libzstd.so.1 at its own
+        # soversion. Alpine's nodejs links against libzstd.so.1 from
+        # Alpine's zstd-libs, so mixing the two trips an apk conflict
+        # (both packages own the same .so path with incompatible
+        # versions). Pin zstd to Alpine so the .so and CLI come from one
+        # source.
+        "zstd": "alpine",
     },
 )
 `, name, defaultMachine)

@@ -47,10 +47,11 @@ func TestDevExtract(t *testing.T) {
 		t.Errorf("output should mention 1 patch, got: %s", output)
 	}
 
-	// Verify patch file was created
-	patches, _ := filepath.Glob(filepath.Join(dir, "patches", "openssh", "*.patch"))
+	// Verify patch file was created next to the unit's .star file
+	// (units/openssh.star → units/openssh/*.patch).
+	patches, _ := filepath.Glob(filepath.Join(dir, "units", "openssh", "*.patch"))
 	if len(patches) != 1 {
-		t.Errorf("expected 1 patch file, got %d", len(patches))
+		t.Errorf("expected 1 patch file under units/openssh/, got %d", len(patches))
 	}
 
 	// Verify patch content

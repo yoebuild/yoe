@@ -8,15 +8,15 @@
 
 ## Next
 
+- yoe unit
+
+- why do modules not show pin on startup?
 - module dev status should update
 - video on src modifications
-- block diagram on src modifications
+- block diagram on src modifications (needs some work)
 - mDNS on rPI does not work
 - Units output multiple packages. Seems like this will be required for
   compatibility with Alpine and other distros.
-- Python working on target.
-- Node.js working on target.
-- Bun working on target.
 - Weight units by how much time they take to build for displaying accurate build
   progress
 - Why does simpleiot list musl as dep?
@@ -157,17 +157,6 @@ Existing units can be found via `yoe list` or by browsing
 - `ripgrep`, `fd`.
 - `tailscale` (or `headscale`) — remote-dev tunnel.
 
-## Container Host on Devices
-
-Ship a `container-host-image` that runs containerd (later Podman, then Docker
-CE) on yoe-built devices. Design and reference architecture in
-[containers.md](containers.md).
-
-`docker-image` already ships the Docker userspace (engine, CLI, buildx,
-containerd, runc) alongside dev-image content. The remaining gating work is the
-`kernel-container-host.cfg` fragment (overlayfs, bridge/veth, netfilter, cgroup
-v2, seccomp, namespaces) and an init system that supervises `dockerd`.
-
 ## Image Assembly on Host
 
 Move image assembly (`mkfs.ext4`, bootloader install) from the build container
@@ -299,8 +288,6 @@ Compilers stay in the build containers (gcc, binutils, headers, language
 toolchains live in `toolchain-musl` and friends, not the rootfs). What the
 device itself needs:
 
-- **Container host on the device** so it can run the build containers. See
-  [Container Host on Devices](#container-host-on-devices).
 - **`yoe` binary in the project's apk repo** so a yoe-built device can
   `apk add yoe` like any other unit.
 - **Go on-device** for editing yoe source comfortably (`gopls`, `delve`), not

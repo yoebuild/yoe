@@ -8,6 +8,8 @@
 - [AI Skills](ai-skills.md)
 - [Go Workflows](go.md)
 - [Python Workflows](python.md)
+- [Node.js Workflows](nodejs.md)
+- [Bun Workflows](bun.md)
 - [Feed Server and yoe deploy](feed-server.md)
 - [On-Device Package Management](on-device-apk.md)
 

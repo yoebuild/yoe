@@ -27,8 +27,7 @@ project is in the early stages._
 
 ## 🎯 Goals
 
-Three north stars guide the experiment — everything else is in service of
-these:
+Three north stars guide the experiment — everything else is in service of these:
 
 1. **Drastically improve developer productivity.** Shrink the loop between an
    idea and a running image. Fewer rebuilds, fewer context switches, fewer tools
@@ -37,10 +36,10 @@ these:
    Rust agents, Python ML, container workloads, and kernel drivers side by side.
    Pulling these together should be straightforward, not a custom integration
    project each time.
-3. **Scale to build anything.** From tiny Zephyr images to complex AI
-   workloads. From one application to a complete distributed system. One tool,
-   one mental model — the same workflow on a laptop, a build farm, or cloud CI,
-   with caching that keeps up as projects grow.
+3. **Scale to build anything.** From tiny Zephyr images to complex AI workloads.
+   From one application to a complete distributed system. One tool, one mental
+   model — the same workflow on a laptop, a build farm, or cloud CI, with
+   caching that keeps up as projects grow.
 
 ## Is `[yoe]` Right for You?
 
