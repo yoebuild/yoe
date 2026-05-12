@@ -16,7 +16,6 @@
 - [Unit & Configuration Format](metadata-format.md)
 - [Naming and Resolution](naming-and-resolution.md)
 - [File Templates](file-templates.md)
-- [Starlark Packaging and Image Assembly](starlark-packaging-images.md)
 - [Build & Configuration Languages](build-languages.md)
 
 # Build System
