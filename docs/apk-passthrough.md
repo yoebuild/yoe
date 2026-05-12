@@ -72,6 +72,8 @@ published apk is _not_ repackaged from that destdir.
   stream (PKGINFO + install scripts) with the project key, and concatenates
   `[new_sig, control, data]` into the published apk.
 
+![RepackAPK pipeline](assets/apk-passthrough-repack.png)
+
 `RepackAPK` does not rewrite anything inside the control or data segments.
 Alpine's `PKGINFO`, `replaces`, `provides`, `triggers`, install scripts, file
 checksums — all unchanged.

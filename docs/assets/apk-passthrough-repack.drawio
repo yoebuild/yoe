@@ -1,0 +1,80 @@
+<mxfile host="Electron" agent="claude-code" version="29.3.0">
+  <diagram name="apk-passthrough-repack" id="diagram1">
+    <mxGraphModel dx="1200" dy="700" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="500" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="in-title" value="📦 &lt;b&gt;Upstream Alpine .apk&lt;/b&gt;&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;three concatenated gzip streams&lt;/span&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="40" y="60" width="220" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="in-sig" value="🔒 &lt;b&gt;Alpine signature&lt;/b&gt;&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;signed by Alpine key&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;strokeWidth=2;arcSize=8;fontSize=12;align=center;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="40" y="110" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="in-ctrl" value="📝 &lt;b&gt;Control&lt;/b&gt;&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;PKGINFO · install scripts · file checksums&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;arcSize=8;fontSize=12;align=center;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="40" y="195" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="in-data" value="📁 &lt;b&gt;Data&lt;/b&gt;&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;the package's files&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;arcSize=8;fontSize=12;align=center;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="40" y="280" width="220" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="out-title" value="📦 &lt;b&gt;Yoe-published .apk&lt;/b&gt;&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;same streams, new signature&lt;/span&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="640" y="60" width="220" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="out-sig" value="🔒 &lt;b&gt;Project signature&lt;/b&gt;&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;signed by &lt;b&gt;project key&lt;/b&gt;&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;strokeWidth=2;arcSize=8;fontSize=12;align=center;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="640" y="110" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="out-ctrl" value="📝 &lt;b&gt;Control&lt;/b&gt;&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;&lt;i&gt;byte-for-byte unchanged&lt;/i&gt;&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;arcSize=8;fontSize=12;align=center;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="640" y="195" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="out-data" value="📁 &lt;b&gt;Data&lt;/b&gt;&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;&lt;i&gt;byte-for-byte unchanged&lt;/i&gt;&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;arcSize=8;fontSize=12;align=center;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="640" y="280" width="220" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="repack" value="🔄 &lt;b&gt;RepackAPK&lt;/b&gt;&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;internal/artifact&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;strokeWidth=2;arcSize=8;fontSize=12;align=center;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="370" y="195" width="160" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="key" value="🔑 &lt;b&gt;Project key&lt;/b&gt;&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;~/.config/yoe/keys/&amp;lt;project&amp;gt;.rsa&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=2;arcSize=8;fontSize=12;align=center;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="370" y="60" width="160" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="drop-mark" value="✗ &lt;b&gt;dropped&lt;/b&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;fontColor=#b85450;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="280" y="130" width="80" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="caption" value="&lt;i&gt;Control segment (PKGINFO, install scripts, checksums) is byte-for-byte preserved — so apk-tools on the device sees Alpine's package metadata, scripts, and file deps unchanged.&lt;/i&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;fontColor=#666666;" parent="1" vertex="1">
+          <mxGeometry x="40" y="400" width="820" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-sig-drop" style="endArrow=classic;html=1;rounded=0;strokeWidth=2;strokeColor=#b85450;dashed=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="in-sig" target="drop-mark" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-ctrl" value="passthrough" style="endArrow=classic;html=1;rounded=0;strokeWidth=2;strokeColor=#82b366;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;fontSize=10;fontColor=#444;" parent="1" source="in-ctrl" target="repack" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-data" value="passthrough" style="endArrow=classic;html=1;rounded=1;strokeWidth=2;strokeColor=#6c8ebf;edgeStyle=orthogonalEdgeStyle;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;fontSize=10;fontColor=#444;" parent="1" source="in-data" target="repack" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-key" value="sign control" style="endArrow=classic;html=1;rounded=0;strokeWidth=2;strokeColor=#d6b656;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;fontSize=10;fontColor=#444;" parent="1" source="key" target="repack" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-out-sig" style="endArrow=classic;html=1;rounded=1;strokeWidth=2;strokeColor=#d79b00;edgeStyle=orthogonalEdgeStyle;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="repack" target="out-sig" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-out-ctrl" style="endArrow=classic;html=1;rounded=0;strokeWidth=2;strokeColor=#82b366;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="repack" target="out-ctrl" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-out-data" style="endArrow=classic;html=1;rounded=1;strokeWidth=2;strokeColor=#6c8ebf;edgeStyle=orthogonalEdgeStyle;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="repack" target="out-data" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

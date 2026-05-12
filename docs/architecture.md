@@ -114,9 +114,38 @@ tool for the job:
 Host tools (compilers, language runtimes) come from Docker containers; library
 deps from the apk sysroot built up by other yoe units; distro packages (full
 libraries, runtime services, applications) come from prebuilt upstream apks via
-`module-alpine`; and language-native deps (Go modules, Cargo crates, pip
-wheels) are handled by each language's own package manager inside the
-container. See
-[Build Dependencies and Caching](build-dependencies-and-caching.md) for why
-this split exists and how it interacts with the build cache, and
+`module-alpine`; and language-native deps (Go modules, Cargo crates, pip wheels)
+are handled by each language's own package manager inside the container. See
+[Build Dependencies and Caching](build-dependencies-and-caching.md) for why this
+split exists and how it interacts with the build cache, and
 [Alpine apk Passthrough](apk-passthrough.md) for the prebuilt-apk path.
+
+## How packages reach a running device
+
+Built packages flow from the workstation to a running yoe device through a small
+set of orthogonal channels: mDNS for discovery, HTTP for the apk pull, and SSH
+for orchestration. The same apk repo, signing key, and `APKINDEX` serve
+image-time installs, the dev loop, and on-device OTA:
+
+![Feed server topology](assets/feed-server-topology.png)
+
+`yoe serve` is the long-lived HTTP + mDNS server, `yoe device repo add` does the
+one-time `/etc/apk/repositories` setup, and `yoe deploy` orchestrates the whole
+"build → ship → install" round trip. See
+[Feed Server and yoe deploy](feed-server.md) for the workflows, command
+reference, and trust model.
+
+## How distro packages enter the pipeline
+
+`module-alpine` units don't rebuild Alpine packages — they repack each upstream
+`.apk`, swapping the signature so the device's apk-tools verifies against the
+project key like any other yoe-built package:
+
+![apk passthrough repack pipeline](assets/apk-passthrough-repack.png)
+
+The control segment (PKGINFO, install scripts, file checksums) and data segment
+pass through byte-for-byte, so apk-tools on the device sees Alpine's metadata,
+install behavior, and shared-library deps unchanged. Only the signature changes.
+See [Alpine apk Passthrough](apk-passthrough.md) for the two-metadata-systems
+story (`.star` fields drive the yoe resolver; PKGINFO drives apk-tools at
+install time) and the noarch routing details.
