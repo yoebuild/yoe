@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.7] - 2026-05-12
+
 - **Bun apps can ship as part of an image.** A new `bun_app` class packages a
   Bun project plus its `node_modules` tree as a regular yoe unit, so apps that
   need a specific set of npm packages get them baked into the apk. Bun runs
@@ -29,13 +31,12 @@ and this project adheres to
 - **New `nodejs-image`.** A ready-to-boot image with `node`, `npm`, and the
   dev-image diagnostic userland, so `npm install <pkg>` works on first login
   without a separate `apk add`.
-- **`yoe init` projects now pin `zstd` to Alpine.** Source-built `zstd`
-  ships `libzstd.so.1` at a different soversion than Alpine's `zstd-libs`,
-  so any image that mixes source consumers (curl, file) with Alpine
-  prebuilts that link against Alpine's libzstd (nodejs, bun) used to fail
-  with an apk conflict over the shared `.so`. New projects get the pin out
-  of the box; existing projects can copy the `"zstd": "alpine"` entry into
-  their `prefer_modules` block.
+- **`yoe init` projects now pin `zstd` to Alpine.** Source-built `zstd` ships
+  `libzstd.so.1` at a different soversion than Alpine's `zstd-libs`, so any
+  image that mixes source consumers (curl, file) with Alpine prebuilts that link
+  against Alpine's libzstd (nodejs, bun) used to fail with an apk conflict over
+  the shared `.so`. New projects get the pin out of the box; existing projects
+  can copy the `"zstd": "alpine"` entry into their `prefer_modules` block.
 - **Patches live next to the unit, not under a separate `patches/` tree.** A
   unit's `patches = [...]` paths are now relative to the unit's own directory
   with no `patches/` prefix — e.g., `patches = ["mdnsd/0001-….patch"]` next to
