@@ -223,27 +223,27 @@ The GitHub Actions workflow (`doc-check.yaml`) runs `prettier --check` on all
   `yoe init` get a project that builds out of the box. The two diverge only in
   module references — e2e uses `local = "../.."` to test the in-tree modules,
   while init uses upstream URLs.
-- **External-module fixes go in the cached copy — and must be pushed before
-  the next `yoe build`.** When the right place to change something is an
-  external module (e.g. `module-alpine`, `module-jetson`), edit the file in
-  place under `testdata/<project>/cache/modules/<module>/...` rather than
-  creating a local override in `module-core`. After making the edit, surface
-  this clearly to the user with three pieces of information:
-  1. **Which file(s) changed** (full path so the user can `cd` to the
-     module's git repo and confirm the diff).
-  2. **An explicit reminder to commit AND push** the change to the
-     module's upstream remote — not just commit locally.
-  3. **A warning that `yoe build` will overwrite the cached edit on its
-     next sync** if the upstream hasn't been updated yet. The sync does
+- **External-module fixes go in the cached copy — and must be pushed before the
+  next `yoe build`.** When the right place to change something is an external
+  module (e.g. `module-alpine`, `module-jetson`), edit the file in place under
+  `testdata/<project>/cache/modules/<module>/...` rather than creating a local
+  override in `module-core`. After making the edit, surface this clearly to the
+  user with three pieces of information:
+  1. **Which file(s) changed** (full path so the user can `cd` to the module's
+     git repo and confirm the diff).
+  2. **An explicit reminder to commit AND push** the change to the module's
+     upstream remote — not just commit locally.
+  3. **A warning that `yoe build` will overwrite the cached edit on its next
+     sync** if the upstream hasn't been updated yet. The sync does
      `git fetch && git checkout FETCH_HEAD`, which silently discards
      uncommitted/un-pushed local edits in the cache. So uncommitted-but-not-
      pushed isn't enough — the change must be on the upstream's tracked ref
-     (typically `main`) before the next build, or the build will fail again
-     with the same error.
+     (typically `main`) before the next build, or the build will fail again with
+     the same error.
 
   Never do the upstream commit/push yourself — the user manages those repos.
-  Pause and wait for confirmation that the push landed before re-running
-  any command that triggers a module sync.
+  Pause and wait for confirmation that the push landed before re-running any
+  command that triggers a module sync.
 
 ## Diagrams
 

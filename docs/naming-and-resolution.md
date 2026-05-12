@@ -53,10 +53,10 @@ Module names are used in `load()` statements:
 1. **Phase 1** — `PROJECT.star` is evaluated. Modules are synced
    (cloned/fetched).
 2. **Phase 1b** — Machine definitions from all modules are evaluated.
-3. **Phase 2** — Units and images from all modules are evaluated. A single
-   `ctx` struct is predeclared, exposing the active build context:
-   `ctx.arch`, `ctx.machine`, `ctx.project_version`, `ctx.machine_config`,
-   `ctx.provides`, and `ctx.runtime_deps`.
+3. **Phase 2** — Units and images from all modules are evaluated. A single `ctx`
+   struct is predeclared, exposing the active build context: `ctx.arch`,
+   `ctx.machine`, `ctx.project_version`, `ctx.machine_config`, `ctx.provides`,
+   and `ctx.runtime_deps`.
 
 Within each phase, modules are evaluated in declaration order. Within a module,
 `.star` files are evaluated in filesystem walk order.
