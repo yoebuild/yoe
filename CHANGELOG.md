@@ -8,6 +8,42 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.6] - 2026-05-12
+
+- **TUI help bar stays pinned to the bottom of the screen on the Units tab,**
+  even when only a handful of units are visible. The unit list pads with blank
+  rows so the keyboard shortcuts and the cursor-name strip don't float up under
+  a short query result.
+- **`yoe module sync` works even when modules have errors.** The command now
+  reads only `PROJECT.star` and re-syncs the declared modules, so a broken
+  module that's blocking the rest of the build can be re-fetched as soon as the
+  upstream fix lands — no more chicken-and-egg.
+- **One `ctx` struct in `.star` files instead of five separate globals.** Unit
+  and image definitions now reference `ctx.arch`, `ctx.machine`,
+  `ctx.project_version`, `ctx.machine_config`, `ctx.provides`, and
+  `ctx.runtime_deps` — what used to be `ARCH`, `MACHINE`, `PROJECT_VERSION`,
+  `MACHINE_CONFIG`, `PROVIDES`, and `RUNTIME_DEPS`. One named entry point is
+  easier to discover and reason about than five floating predeclared names.
+  External modules that referenced the old globals need a one-line rename.
+- **Pip dependencies can ship as part of an image.** A new `python_venv` class
+  packages a Python virtualenv plus its pip dependencies as a regular yoe unit,
+  so apps that need a specific set of PyPI packages get them baked into the apk
+  instead of installed at first boot. `python-image` ships a `python-hello` demo
+  — log in and run `python-hello "..."` to see the bundled `pyfiglet` dependency
+  render an ASCII-art greeting.
+- **New `python-image`.** A ready-to-boot image with `python3`, `pip`, and the
+  dev-image diagnostic userland, so `pip install <pkg>` works on first login
+  without a separate `apk add`.
+- **`yoe deploy python3` (and other openssl consumers) now installs onto a
+  running device.** Previously apk rejected the install with a `libssl3>=3.3.0`
+  conflict against the source-built openssl. Source units that declare virtual
+  `provides` now publish them with this unit's version, so `>=` constraints
+  resolve the way they do on Alpine.
+- **`<hostname>.local` now resolves over IPv4.** On DHCP networks mdnsd was
+  announcing only the IPv6 link-local address, so `ssh user@host.local` failed
+  on plain IPv4 LANs. The host's A record is now published as soon as the lease
+  arrives.
+
 ## [0.10.5] - 2026-05-09
 
 - **Build progress bar.** While a build is in flight the feed banner at the top

@@ -8,14 +8,20 @@
 
 ## Next
 
+- module dev status should update
+- video on src modifications
+- block diagram on src modifications
+- mDNS on rPI does not work
+- Units output multiple packages. Seems like this will be required for
+  compatibility with Alpine and other distros.
+- Python working on target.
+- Node.js working on target.
+- Bun working on target.
 - Weight units by how much time they take to build for displaying accurate build
   progress
 - Why does simpleiot list musl as dep?
-- Pin modules from dev src
 - Should we pin modules in default projects? Seems like we should
-- Progress bar for build and build status, units complete/total, % done
-- Search completion can we display a list vertical under search bar?
-- Warn if units specify Git branches. These are not deterministic.
+- Warn if units or modules specify Git branches. These are not deterministic.
 - Use alpine docker-init. Had some problems with consuming packages with
   multiple outputs.
 - Is there any advantage in sources to storing filename as a hash? What is this
@@ -38,8 +44,6 @@
 - Data partition for rPI targets
   - Fill/format data partition
 - rPI updater
-- Error reading OS version: searching /etc/os-release, got: field VERSION not
-  found
 - Parallel build
 - Flash progress bar rewinds before display if there has been a previous flash
 - Multiple projects

@@ -10,6 +10,12 @@ autotools(
     # --sysconfdir=/etc moves mdnsd's default config search path from
     # /usr/etc/mdns.d (autotools default with prefix=/usr) to /etc/mdns.d.
     configure_args = ["--without-systemd", "--sysconfdir=/etc"],
+    # Upstream commit a654c19 (post-v0.12): rebuild A/AAAA records every
+    # time the interface address changes. Without this, mdnsd publishes only
+    # the addresses present at startup — on DHCP boxes that race the init
+    # script, the IPv4 A record never appears and <host>.local resolves to
+    # the IPv6 link-local only.
+    patches = ["patches/mdnsd/0001-Update-the-records-when-the-iface-has-changed.patch"],
     services = ["mdnsd"],
     runtime_deps = ["musl", "busybox", "openrc"],
     deps = ["toolchain-musl"],

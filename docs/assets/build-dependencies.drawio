@@ -1,0 +1,93 @@
+<mxfile host="Electron" agent="claude-code" version="29.3.0">
+  <diagram name="build-dependencies" id="diagram1">
+    <mxGraphModel dx="1200" dy="700" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="500" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="unit-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=3;arcSize=8;" parent="1" vertex="1">
+          <mxGeometry x="350" y="200" width="200" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="unit-title" value="🛠 &lt;b&gt;Unit build&lt;/b&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;" parent="1" vertex="1">
+          <mxGeometry x="360" y="215" width="180" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="unit-sub" value="bwrap sandbox · ${BUILD_STEPS}" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;fontColor=#666666;" parent="1" vertex="1">
+          <mxGeometry x="360" y="245" width="180" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="unit-out" value="&lt;i&gt;→ .apk artifact&lt;/i&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;fontColor=#666666;" parent="1" vertex="1">
+          <mxGeometry x="360" y="268" width="180" height="22" as="geometry" />
+        </mxCell>
+
+        <mxCell id="container-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;strokeWidth=2;arcSize=8;" parent="1" vertex="1">
+          <mxGeometry x="40" y="40" width="240" height="125" as="geometry" />
+        </mxCell>
+        <mxCell id="container-title" value="🐳 &lt;b&gt;Host tools&lt;/b&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="50" y="50" width="220" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="container-src" value="&lt;i&gt;Docker container&lt;/i&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#666666;" parent="1" vertex="1">
+          <mxGeometry x="50" y="72" width="220" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="container-content" value="compilers · linkers · code generators · language runtimes&lt;br&gt;&lt;span style='color:#666;'&gt;e.g. gcc, golang:1.23, rust:nightly&lt;/span&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="55" y="95" width="210" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="sysroot-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;arcSize=8;" parent="1" vertex="1">
+          <mxGeometry x="40" y="335" width="240" height="125" as="geometry" />
+        </mxCell>
+        <mxCell id="sysroot-title" value="📚 &lt;b&gt;Library deps&lt;/b&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="50" y="345" width="220" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="sysroot-src" value="&lt;i&gt;apk sysroot, from yoe-built units&lt;/i&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#666666;" parent="1" vertex="1">
+          <mxGeometry x="50" y="367" width="220" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="sysroot-content" value="headers · shared libraries to link against&lt;br&gt;&lt;span style='color:#666;'&gt;e.g. openssl, zlib, sqlite — cached as .apk&lt;/span&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="55" y="390" width="210" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="distro-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=2;arcSize=8;" parent="1" vertex="1">
+          <mxGeometry x="620" y="335" width="240" height="125" as="geometry" />
+        </mxCell>
+        <mxCell id="distro-title" value="📦 &lt;b&gt;Distro packages&lt;/b&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="630" y="345" width="220" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="distro-src" value="&lt;i&gt;prebuilt apks via module-alpine&lt;/i&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#666666;" parent="1" vertex="1">
+          <mxGeometry x="630" y="367" width="220" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="distro-content" value="libraries · runtime services · applications&lt;br&gt;&lt;span style='color:#666;'&gt;e.g. curl, docker, full Alpine packages&lt;/span&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="635" y="390" width="210" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="langpm-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;strokeWidth=2;arcSize=8;" parent="1" vertex="1">
+          <mxGeometry x="620" y="40" width="240" height="125" as="geometry" />
+        </mxCell>
+        <mxCell id="langpm-title" value="🌐 &lt;b&gt;Language-native deps&lt;/b&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="630" y="50" width="220" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="langpm-src" value="&lt;i&gt;the language's own package manager&lt;/i&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#666666;" parent="1" vertex="1">
+          <mxGeometry x="630" y="72" width="220" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="langpm-content" value="Go modules · npm · Cargo crates · pip wheels&lt;br&gt;&lt;span style='color:#666;'&gt;runs inside the container, fetches native-arch binaries&lt;/span&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="635" y="95" width="210" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cache-label" value="🎁 &lt;b&gt;Cached .apk shared across developers and CI&lt;/b&gt; — most units never rebuild" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12;fontStyle=2;fontColor=#666666;" parent="1" vertex="1">
+          <mxGeometry x="40" y="470" width="820" height="25" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-c-u" style="endArrow=classic;html=1;rounded=1;strokeWidth=2;strokeColor=#9673a6;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.25;entryDx=0;entryDy=0;edgeStyle=orthogonalEdgeStyle;" parent="1" source="container-box" target="unit-box" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-s-u" style="endArrow=classic;html=1;rounded=1;strokeWidth=2;strokeColor=#82b366;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.75;entryDx=0;entryDy=0;edgeStyle=orthogonalEdgeStyle;" parent="1" source="sysroot-box" target="unit-box" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-l-u" style="endArrow=classic;html=1;rounded=1;strokeWidth=2;strokeColor=#d79b00;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.25;entryDx=0;entryDy=0;edgeStyle=orthogonalEdgeStyle;" parent="1" source="langpm-box" target="unit-box" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-d-u" style="endArrow=classic;html=1;rounded=1;strokeWidth=2;strokeColor=#d6b656;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.75;entryDx=0;entryDy=0;edgeStyle=orthogonalEdgeStyle;" parent="1" source="distro-box" target="unit-box" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

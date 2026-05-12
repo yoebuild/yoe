@@ -1,0 +1,35 @@
+From a654c190e9990a4208d9feb6c4d3ac60be1983c2 Mon Sep 17 00:00:00 2001
+From: Zhu Yongjian <zhuyongjianpy@126.com>
+Date: Fri, 12 Sep 2025 14:46:34 +0800
+Subject: [PATCH] Update the records when the iface has changed
+
+---
+ src/mdnsd.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/mdnsd.c b/src/mdnsd.c
+index bfb4095..61f0027 100644
+--- a/src/mdnsd.c
++++ b/src/mdnsd.c
+@@ -153,7 +153,6 @@ static void setup_iface(struct iface *iface)
+ 
+ 		mdnsd_set_address(iface->mdns, iface->inaddr);
+ 		mdnsd_set_ipv6_address(iface->mdns, iface->in6addr);
+-		conf_init(iface, path, hostnm);
+ 		mdnsd_register_receive_callback(iface->mdns, record_received, NULL);
+ 	}
+ 
+@@ -167,6 +166,10 @@ static void setup_iface(struct iface *iface)
+ 
+ 	mdnsd_set_address(iface->mdns, iface->inaddr);
+ 	mdnsd_set_ipv6_address(iface->mdns, iface->in6addr);
++
++	records_clear(iface->mdns);
++	conf_init(iface, path, hostnm);
++
+ 	iface->changed = 0;
+ }
+ 
+-- 
+2.54.0
+

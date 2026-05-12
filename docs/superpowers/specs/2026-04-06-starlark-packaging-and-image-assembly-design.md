@@ -1,11 +1,11 @@
 # Starlark Packaging and Image Assembly
 
+**Date:** 2026-04-06 **Status:** Spec
+
 Move packaging (APK creation, repo management) and image assembly (rootfs
 population, disk generation) from hardcoded Go into composable Starlark tasks.
 This makes packaging format a project-level policy choice and image assembly
 fully customizable per-image.
-
-## Status: Spec
 
 ## Motivation
 

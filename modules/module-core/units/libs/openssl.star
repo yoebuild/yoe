@@ -1,6 +1,7 @@
 unit(
     name = "openssl",
     version = "3.4.1",
+    release = 1,
     source = "https://github.com/openssl/openssl.git",
     tag = "openssl-3.4.1",
     license = "Apache-2.0",

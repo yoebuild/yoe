@@ -53,9 +53,10 @@ Module names are used in `load()` statements:
 1. **Phase 1** — `PROJECT.star` is evaluated. Modules are synced
    (cloned/fetched).
 2. **Phase 1b** — Machine definitions from all modules are evaluated.
-3. **Phase 2** — Units and images from all modules are evaluated. `ARCH`,
-   `MACHINE`, `MACHINE_CONFIG`, and `PROVIDES` are available as predeclared
-   variables.
+3. **Phase 2** — Units and images from all modules are evaluated. A single `ctx`
+   struct is predeclared, exposing the active build context: `ctx.arch`,
+   `ctx.machine`, `ctx.project_version`, `ctx.machine_config`, `ctx.provides`,
+   and `ctx.runtime_deps`.
 
 Within each phase, modules are evaluated in declaration order. Within a module,
 `.star` files are evaluated in filesystem walk order.
@@ -117,11 +118,12 @@ that module's root. Otherwise it resolves to the project root. This means a unit
 in `module-core` can `load("//classes/autotools.star", ...)` and it resolves
 within `module-core`, not the project root.
 
-## Virtual packages (PROVIDES)
+## Virtual packages (ctx.provides)
 
-The `PROVIDES` predeclared variable maps virtual names to concrete unit names.
-This allows images to reference abstract capabilities rather than specific
-units:
+The `ctx.provides` dict maps virtual names to concrete unit names. This allows
+images to reference abstract capabilities rather than specific units:
+
+![ctx.provides resolution](assets/provides-resolution.png)
 
 ```python
 # Machine definition contributes:
@@ -135,7 +137,7 @@ unit(name = "linux-rpi4", provides = ["linux"], ...)
 
 # Image uses the virtual name:
 image(name = "base-image", artifacts = ["busybox", "linux", "init"], ...)
-# "linux" resolves to "linux-rpi4" via PROVIDES
+# "linux" resolves to "linux-rpi4" via ctx.provides
 # "init" resolves to whichever init system the project includes
 ```
 
@@ -171,7 +173,7 @@ project(name = "product-b", modules = [
 Images reference `init` in their artifacts — they don't need to know whether the
 product uses systemd or busybox init.
 
-`PROVIDES` is populated in two stages:
+`ctx.provides` is populated in two stages:
 
 1. After phase 1 (machines) — `kernel.provides` entries are added
 2. After phase 2 (units) — unit `provides` fields are added
@@ -244,7 +246,7 @@ image(name = "base", artifacts = ["busybox", "linux"])
 ```
 
 Both kernel units coexist in the namespace — they have distinct real names — and
-`PROVIDES["linux"]` is set per machine. This is something shadowing can't
+`ctx.provides["linux"]` is set per machine. This is something shadowing can't
 express: shadowing requires identical real names, so multiple alternatives can't
 both be present.
 
@@ -413,7 +415,7 @@ and a notice is emitted to stderr. Priority is project root > last module in the
 list > … > first module in the list. See
 [Unit replacement via name shadowing](#unit-replacement-via-name-shadowing).
 
-### PROVIDES duplicates
+### ctx.provides duplicates
 
 If two units from the **same module** provide the same virtual name, the build
 errors. If two units from **different modules** provide the same virtual name,

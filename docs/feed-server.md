@@ -11,6 +11,8 @@ commands, layered:
   device in one command. Pulls the unit and all its transitive deps via apk on
   the device side, so dependency resolution mirrors production OTA.
 
+![Feed server topology](assets/feed-server-topology.png)
+
 The model is **pull**, not push. Every install — image-time, on-device OTA, and
 the dev loop — uses the same apk repo, the same `APKINDEX.tar.gz`, and the same
 signing key. Adding a new runtime dep to a unit doesn't require updating deploy

@@ -153,7 +153,7 @@ The GitHub Actions workflow (`doc-check.yaml`) runs `prettier --check` on all
   commands during build with full error traces to `.star` source lines.
 - **Machine-portable images** — images list abstract requirements ("linux",
   "base-files"). Machines provide concrete implementations via `provides` and
-  inject hardware-specific packages/partitions via `MACHINE_CONFIG`.
+  inject hardware-specific packages/partitions via `ctx.machine_config`.
 - **One unit, one .apk; resolve variation at runtime.** A unit produces a single
   binary artifact that every project and every machine shares. When two images
   need different behavior from the same package, prefer runtime mechanisms —
@@ -223,11 +223,62 @@ The GitHub Actions workflow (`doc-check.yaml`) runs `prettier --check` on all
   `yoe init` get a project that builds out of the box. The two diverge only in
   module references — e2e uses `local = "../.."` to test the in-tree modules,
   while init uses upstream URLs.
-- **External-module fixes go in the cached copy.** When the right place to
-  change something is an external module (e.g. `module-alpine`,
-  `module-jetson`), edit the file in place under
+- **External-module fixes go in the cached copy — and must be pushed before the
+  next `yoe build`.** When the right place to change something is an external
+  module (e.g. `module-alpine`, `module-jetson`), edit the file in place under
   `testdata/<project>/cache/modules/<module>/...` rather than creating a local
-  override in `module-core`. After making the edit, tell the user which file
-  changed and remind them to commit it back to the upstream module repo (and
-  push when ready). Never do the upstream commit/push yourself — the user
-  manages those repos.
+  override in `module-core`. After making the edit, surface this clearly to the
+  user with three pieces of information:
+  1. **Which file(s) changed** (full path so the user can `cd` to the module's
+     git repo and confirm the diff).
+  2. **An explicit reminder to commit AND push** the change to the module's
+     upstream remote — not just commit locally.
+  3. **A warning that `yoe build` will overwrite the cached edit on its next
+     sync** if the upstream hasn't been updated yet. The sync does
+     `git fetch && git checkout FETCH_HEAD`, which silently discards
+     uncommitted/un-pushed local edits in the cache. So uncommitted-but-not-
+     pushed isn't enough — the change must be on the upstream's tracked ref
+     (typically `main`) before the next build, or the build will fail again with
+     the same error.
+
+  Never do the upstream commit/push yourself — the user manages those repos.
+  Pause and wait for confirmation that the push landed before re-running any
+  command that triggers a module sync.
+
+## Diagrams
+
+Diagrams (architecture, DAG, build flow, etc.) for `docs/` and presentations
+should follow these guidelines. **draw.io is the preferred tool** — author
+`.drawio` files and export to PNG/SVG for embedding.
+
+### Composition
+
+- No title in the diagram — the surrounding heading or caption provides it.
+- Prefer a simple drawing over a block diagram when possible; boxes-with-text is
+  the fallback, not the goal.
+- Keep the image simple enough that a reader can glance and decide if they're
+  interested. Resist packing in all the details.
+- Embed images/icons (downloading if needed) where they convey more than a
+  labeled box would.
+- Default size: 900x500 points.
+
+### Style
+
+- Rounded rectangles with colored fills for categories/groups.
+- Clear, readable fonts: 14pt for titles, 11-12pt for content.
+- Emojis in section headers for visual interest.
+- Arrows to show relationships/flow.
+- Color palette: blue (#dae8fc), green (#d5e8d4), yellow (#fff2cc), purple
+  (#e1d5e7), red (#f8cecc), orange (#ffe6cc).
+- Keep text concise — bullet points, not paragraphs.
+- For vertical arrows using `mxgraph.arrows2.arrow`, add `direction=north;` to
+  the style and use a wide width (the shape is natively horizontal, so
+  width/height effectively swap when direction changes). For a downward arrow,
+  also add `rotation=180;`.
+
+### Sources for free icons and images
+
+- Icons: <https://icon-icons.com/>, <https://heroicons.com/>,
+  <https://react-icons.github.io/react-icons/>
+- Images: <https://unsplash.com>, <https://www.pexels.com/>,
+  <https://pixabay.com/>

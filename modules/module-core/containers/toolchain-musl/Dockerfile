@@ -58,6 +58,7 @@ RUN apk add --no-cache \
     sed \
     python3 \
     py3-setuptools \
+    py3-pip \
     cmake
 
 # x86-only packages (bootloader, firmware) — skip on other arches

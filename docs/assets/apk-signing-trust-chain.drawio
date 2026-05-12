@@ -1,0 +1,92 @@
+<mxfile host="Electron" agent="claude-code" version="29.3.0">
+  <diagram name="apk-signing-trust-chain" id="diagram1">
+    <mxGraphModel dx="1200" dy="700" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="500" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="ws-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=2;arcSize=8;" parent="1" vertex="1">
+          <mxGeometry x="300" y="20" width="300" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="ws-title" value="💻 &lt;b&gt;Workstation&lt;/b&gt; — yoe key generate" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="310" y="28" width="280" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="ws-key" value="🔐 &lt;b&gt;Project RSA keypair&lt;/b&gt; (2048-bit)&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;~/.config/yoe/keys/&amp;lt;project&amp;gt;.rsa  +  .rsa.pub&lt;/span&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="310" y="55" width="280" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="build-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;arcSize=8;" parent="1" vertex="1">
+          <mxGeometry x="20" y="155" width="380" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="build-title" value="✍️ &lt;b&gt;yoe build signs&lt;/b&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="30" y="163" width="360" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="build-content" value="every .apk · APKINDEX.tar.gz&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;RSA-PKCS#1 v1.5 SHA-1, matching apk-tools 2.x&lt;/span&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="30" y="187" width="360" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="repo-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;arcSize=8;" parent="1" vertex="1">
+          <mxGeometry x="20" y="265" width="380" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="repo-title" value="📦 &lt;b&gt;Project repo&lt;/b&gt; — published artifacts" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="30" y="275" width="360" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="repo-content" value="repo/&amp;lt;project&amp;gt;/&amp;lt;arch&amp;gt;/*.apk &lt;b&gt;(signed)&lt;/b&gt;&lt;br&gt;APKINDEX.tar.gz &lt;b&gt;(signed)&lt;/b&gt;&lt;br&gt;keys/&amp;lt;project&amp;gt;.rsa.pub" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="30" y="300" width="360" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="basefiles-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;strokeWidth=2;arcSize=8;" parent="1" vertex="1">
+          <mxGeometry x="500" y="155" width="380" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="basefiles-title" value="🗂 &lt;b&gt;base-files bundles the public key&lt;/b&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="510" y="163" width="360" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="basefiles-content" value="copies &amp;lt;project&amp;gt;.rsa.pub into the rootfs at /etc/apk/keys/&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;baked into the image at build time&lt;/span&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="510" y="187" width="360" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="device-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;strokeWidth=2;arcSize=8;" parent="1" vertex="1">
+          <mxGeometry x="500" y="265" width="380" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="device-title" value="🍓 &lt;b&gt;Device&lt;/b&gt; — flashed/upgraded image" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="510" y="275" width="360" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="device-content" value="/etc/apk/keys/&amp;lt;project&amp;gt;.rsa.pub&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;trust anchor for every apk add and apk upgrade&lt;/span&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="510" y="300" width="360" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="verify-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=3;arcSize=8;" parent="1" vertex="1">
+          <mxGeometry x="230" y="400" width="440" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="verify-title" value="✅ &lt;b&gt;apk-tools on the device verifies every signature&lt;/b&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="240" y="408" width="420" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="verify-content" value="signed .apk + APKINDEX + project public key → install proceeds, no --allow-untrusted needed" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;fontColor=#444444;" parent="1" vertex="1">
+          <mxGeometry x="240" y="432" width="420" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-priv" value="🔐 private key" style="endArrow=classic;html=1;rounded=1;strokeWidth=2;strokeColor=#b85450;edgeStyle=orthogonalEdgeStyle;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;fontSize=10;fontColor=#444;" parent="1" source="ws-box" target="build-box" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-pub" value="🔓 public key" style="endArrow=classic;html=1;rounded=1;strokeWidth=2;strokeColor=#82b366;edgeStyle=orthogonalEdgeStyle;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;fontSize=10;fontColor=#444;" parent="1" source="ws-box" target="basefiles-box" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-build-repo" style="endArrow=classic;html=1;rounded=0;strokeWidth=2;strokeColor=#6c8ebf;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="build-box" target="repo-box" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-bf-device" style="endArrow=classic;html=1;rounded=0;strokeWidth=2;strokeColor=#9673a6;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="basefiles-box" target="device-box" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-repo-verify" value="signed .apk" style="endArrow=classic;html=1;rounded=1;strokeWidth=2;strokeColor=#82b366;edgeStyle=orthogonalEdgeStyle;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.25;entryY=0;entryDx=0;entryDy=0;fontSize=10;fontColor=#444;" parent="1" source="repo-box" target="verify-box" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-device-verify" value="🔓 public key" style="endArrow=classic;html=1;rounded=1;strokeWidth=2;strokeColor=#d79b00;edgeStyle=orthogonalEdgeStyle;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.75;entryY=0;entryDx=0;entryDy=0;fontSize=10;fontColor=#444;" parent="1" source="device-box" target="verify-box" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -25,11 +25,11 @@ func CacheDir() (string, error) {
 	return dir, nil
 }
 
-// Sync fetches all modules declared in the project. For each module:
+// Sync fetches the given modules. For each module:
 // - If Local is set, skip (use the local path directly)
 // - Otherwise, git clone/fetch into $YOE_CACHE/modules/<name>/
 // Returns a map of module name -> directory path.
-func Sync(proj *yoestar.Project, w io.Writer) (map[string]string, error) {
+func Sync(modules []yoestar.ModuleRef, w io.Writer) (map[string]string, error) {
 	cacheDir, err := CacheDir()
 	if err != nil {
 		return nil, err
@@ -37,7 +37,7 @@ func Sync(proj *yoestar.Project, w io.Writer) (map[string]string, error) {
 
 	result := make(map[string]string)
 
-	for _, m := range proj.Modules {
+	for _, m := range modules {
 		name := ModuleName(m)
 
 		if m.Local != "" {

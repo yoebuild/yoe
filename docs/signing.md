@@ -6,6 +6,8 @@ systems include the matching public key under `/etc/apk/keys/`, so on-target
 `apk add`, `apk upgrade`, and image-time package installation all run without
 `--allow-untrusted`.
 
+![apk signing trust chain](assets/apk-signing-trust-chain.png)
+
 ## What you need to know
 
 - yoe auto-generates a 2048-bit RSA keypair on first build and stores it at

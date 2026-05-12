@@ -554,9 +554,19 @@ func generatePKGINFO(unit *yoestar.Unit, destDir, dataHashHex, arch, commit stri
 	}
 
 	// Virtual package names this unit satisfies — apk consumers can depend
-	// on the virtual name and apk picks any package that provides it.
+	// on the virtual name and apk picks any package that provides it. If
+	// the entry already carries a constraint operator (`=`, `<`, `>`, `~`),
+	// emit it verbatim; otherwise stamp it with this unit's `<ver>-r<rel>`
+	// so it satisfies versioned consumer deps like `libssl3>=3.3.0`. apk
+	// will not let an unversioned provide satisfy a versioned dep, and
+	// Alpine's abuild applies the same auto-stamp.
+	soVersion := fmt.Sprintf("%s-r%d", unit.Version, unit.Release)
 	for _, p := range unit.Provides {
-		fmt.Fprintf(&b, "provides = %s\n", p)
+		if strings.ContainsAny(p, "=<>~") {
+			fmt.Fprintf(&b, "provides = %s\n", p)
+		} else {
+			fmt.Fprintf(&b, "provides = %s=%s\n", p, soVersion)
+		}
 	}
 
 	// Auto-emit `provides = so:<soname>=<ver>-r<rel>` for every shared
@@ -565,7 +575,6 @@ func generatePKGINFO(unit *yoestar.Unit, destDir, dataHashHex, arch, commit stri
 	// declares `depend = so:libcrypto.so.3` resolve cleanly against
 	// yoe-source-built openssl/zlib/etc. without the unit author having
 	// to maintain SONAME tables by hand.
-	soVersion := fmt.Sprintf("%s-r%d", unit.Version, unit.Release)
 	if sonames, err := scanSONAMEs(destDir); err == nil {
 		for _, s := range sonames {
 			fmt.Fprintf(&b, "provides = so:%s=%s\n", s, soVersion)

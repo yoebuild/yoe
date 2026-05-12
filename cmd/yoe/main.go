@@ -192,8 +192,14 @@ func cmdModule(args []string) {
 
 	switch args[0] {
 	case "sync":
-		proj := loadProject()
-		if _, err := module.Sync(proj, os.Stdout); err != nil {
+		// Read only PROJECT.star, not module contents — so a broken module
+		// can still be re-synced to pull in the fix that unblocks it.
+		modules, err := yoestar.ProjectModuleRefs(dir, projectLoadOpts()...)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if _, err := module.Sync(modules, os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}

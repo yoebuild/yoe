@@ -2360,6 +2360,13 @@ func (m model) viewUnitsTab() string {
 			status))
 	}
 
+	// Pad with blanks when the visible slice is shorter than the
+	// viewport so the help bar stays pinned to the bottom of the screen.
+	// Matches the pattern used by viewModulesTab and viewDiagnosticsTab.
+	for i := end - m.listOffset; i < maxRows; i++ {
+		b.WriteString("\n")
+	}
+
 	// Same treatment as ↑ above — always one line, blank when there
 	// isn't more below — so the bottom row's position is independent
 	// of the scroll state.
