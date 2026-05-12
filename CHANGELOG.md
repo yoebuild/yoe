@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`<hostname>.local` now resolves over IPv4.** On DHCP networks mdnsd was
+  announcing only the IPv6 link-local address, so `ssh user@host.local` failed
+  on plain IPv4 LANs. The host's A record is now published as soon as the lease
+  arrives.
+
 ## [0.10.5] - 2026-05-09
 
 - **Build progress bar.** While a build is in flight the feed banner at the top
