@@ -8,6 +8,9 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **New `python-image`.** A ready-to-boot image with `python3`, `pip`, and the
+  dev-image diagnostic userland, so `pip install <pkg>` works on first login
+  without a separate `apk add`.
 - **`yoe deploy python3` (and other openssl consumers) now installs onto a
   running device.** Previously apk rejected the install with a `libssl3>=3.3.0`
   conflict against the source-built openssl. Source units that declare virtual
