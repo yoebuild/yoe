@@ -2,7 +2,7 @@ load("//classes/tasks.star", "merge_tasks")
 
 # binary class — install prebuilt binaries from upstream release URLs.
 #
-# Resolves URL + SHA per ARCH at Starlark eval time, fetches the asset
+# Resolves URL + SHA per ctx.arch at Starlark eval time, fetches the asset
 # (yoe's source workspace handles tar/zip extraction or bare-file copy
 # automatically), and generates a single install task that copies or
 # symlinks files from $SRCDIR into $DESTDIR.
@@ -11,7 +11,7 @@ load("//classes/tasks.star", "merge_tasks")
 #   asset = "{arch}/foo"    — templated; arch comes from arch_map (default
 #                              x86_64→amd64, arm64→arm64) and {version}
 #                              expands to the unit's version
-#   assets = {ARCH: "..."}  — literal per-arch path (no {arch} substitution)
+#   assets = {"x86_64": "...", "arm64": "..."}  — literal per-arch dict
 #
 # Layout knobs:
 #   binaries     — None (default to a single $PREFIX/bin/<name>),
@@ -143,9 +143,9 @@ def binary(name, version, base_url, sha256,
            license = "", description = "",
            services = [], conffiles = [], scope = "",
            tasks = [], **kwargs):
-    # ARCH is predeclared by the engine.
-    if ARCH not in sha256:
-        fail("binary %s: sha256 has no entry for ARCH=%s" % (name, ARCH))
+    # ctx.arch is predeclared by the engine.
+    if ctx.arch not in sha256:
+        fail("binary %s: sha256 has no entry for arch=%s" % (name, ctx.arch))
 
     if (asset == None) == (assets == None):
         fail("binary %s: set exactly one of 'asset' (template) or 'assets' (per-arch dict)" % name)
@@ -153,26 +153,26 @@ def binary(name, version, base_url, sha256,
     amap = arch_map if arch_map != None else _DEFAULT_ARCH_MAP
 
     if assets != None:
-        if ARCH not in assets:
-            fail("binary %s: assets has no entry for ARCH=%s" % (name, ARCH))
+        if ctx.arch not in assets:
+            fail("binary %s: assets has no entry for arch=%s" % (name, ctx.arch))
         # arch token isn't used for literal assets, but {version} still substitutes.
         arch_token = ""
-        asset_path = _subst(assets[ARCH], version, arch_token)
+        asset_path = _subst(assets[ctx.arch], version, arch_token)
     else:
-        if ARCH not in amap:
-            fail("binary %s: arch_map has no entry for ARCH=%s" % (name, ARCH))
-        arch_token = amap[ARCH]
+        if ctx.arch not in amap:
+            fail("binary %s: arch_map has no entry for arch=%s" % (name, ctx.arch))
+        arch_token = amap[ctx.arch]
         asset_path = _subst(asset, version, arch_token)
 
     # In src paths inside the archive, {arch} substitutes with the same
-    # token the URL used (templated form) or with arch_map[ARCH] for the
+    # token the URL used (templated form) or with arch_map[ctx.arch] for the
     # literal-assets form (consistent default).
     src_arch_token = arch_token
     if src_arch_token == "":
-        src_arch_token = amap[ARCH] if ARCH in amap else ARCH
+        src_arch_token = amap[ctx.arch] if ctx.arch in amap else ctx.arch
 
     binaries_pairs = _normalise_binaries(binaries, name, version, src_arch_token)
-    sha = sha256[ARCH]
+    sha = sha256[ctx.arch]
 
     final_base_url = _subst(base_url, version, src_arch_token)
     source_url = final_base_url + "/" + asset_path

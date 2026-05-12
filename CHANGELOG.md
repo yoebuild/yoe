@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **One `ctx` struct in `.star` files instead of five separate globals.** Unit
+  and image definitions now reference `ctx.arch`, `ctx.machine`,
+  `ctx.project_version`, `ctx.machine_config`, `ctx.provides`, and
+  `ctx.runtime_deps` — what used to be `ARCH`, `MACHINE`, `PROJECT_VERSION`,
+  `MACHINE_CONFIG`, `PROVIDES`, and `RUNTIME_DEPS`. One named entry point is
+  easier to discover and reason about than five floating predeclared names.
+  External modules that referenced the old globals need a one-line rename.
 - **New `python-image`.** A ready-to-boot image with `python3`, `pip`, and the
   dev-image diagnostic userland, so `pip install <pkg>` works on first login
   without a separate `apk add`.

@@ -4,26 +4,26 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
           version=None, **kwargs):
     """Create a bootable disk image from packages.
 
-    `version` defaults to PROJECT_VERSION (from PROJECT.star) so the TUI's
+    `version` defaults to ctx.project_version (from PROJECT.star) so the TUI's
     VERSION column shows what build the image represents and `/etc/os-release`
     on the device matches.
 
-    `hostname` defaults to MACHINE so a fleet of identically-imaged devices is
-    distinguishable on the LAN by board (raspberrypi4.local, qemu-x86_64.local,
-    etc.). Pass an explicit string to override (e.g. a kiosk image that wants
-    its own brand).
+    `hostname` defaults to ctx.machine so a fleet of identically-imaged devices
+    is distinguishable on the LAN by board (raspberrypi4.local,
+    qemu-x86_64.local, etc.). Pass an explicit string to override (e.g. a kiosk
+    image that wants its own brand).
     """
     if version == None:
-        version = PROJECT_VERSION
+        version = ctx.project_version
     if hostname == None:
-        hostname = MACHINE
+        hostname = ctx.machine
     # Merge machine packages
-    all_artifacts = list(artifacts) + list(MACHINE_CONFIG.packages)
+    all_artifacts = list(artifacts) + list(ctx.machine_config.packages)
 
     # Resolve provides (e.g., "linux" → "linux-rpi4")
     explicit = []
     for a in all_artifacts:
-        r = PROVIDES.get(a, None)
+        r = ctx.provides.get(a, None)
         explicit.append(r if r != None else a)
 
     # Resolve transitive runtime dependencies for the rootfs / build path.
@@ -33,7 +33,7 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
     resolved = _resolve_runtime_deps(explicit)
 
     # Use machine partitions if image doesn't specify its own
-    all_partitions = partitions if partitions else list(MACHINE_CONFIG.partitions)
+    all_partitions = partitions if partitions else list(ctx.machine_config.partitions)
 
     # Merge class deps with user deps
     all_deps = list(deps)
@@ -207,7 +207,7 @@ def _create_disk_image(name, partitions):
                 fail("\nrootfs (%d MB) won't fit in partition '%s' (%d MB) with %d MB headroom;\nincrease the partition size in your image definition" % (rootfs_mb, p.label, size_mb, headroom_mb))
 
             # Disable ext4 features that syslinux 6.03 can't read (x86 only)
-            ext4_opts = "-O ^64bit,^metadata_csum,^extent " if ARCH == "x86_64" else ""
+            ext4_opts = "-O ^64bit,^metadata_csum,^extent " if ctx.arch == "x86_64" else ""
             run("mkfs.ext4 %s-d $DESTDIR/rootfs -L %s %s %dM" % (ext4_opts, p.label, part_img, size_mb),
                 privileged = True)
 
@@ -216,7 +216,7 @@ def _create_disk_image(name, partitions):
         offset += size_mb
 
     # Install bootloader (x86 syslinux)
-    if ARCH == "x86_64":
+    if ctx.arch == "x86_64":
         _install_syslinux(img, partitions)
 
     # Restore destdir ownership to the host build user. The chown -R above,
@@ -278,10 +278,10 @@ def _resolve_runtime_deps(packages):
         if name in seen:
             continue
         seen[name] = True
-        deps = RUNTIME_DEPS.get(name, None)
+        deps = ctx.runtime_deps.get(name, None)
         if deps != None:
             for dep in deps:
-                resolved = PROVIDES.get(dep, None)
+                resolved = ctx.provides.get(dep, None)
                 d = resolved if resolved != None else dep
                 if d not in seen:
                     queue = queue + [d]
@@ -293,11 +293,11 @@ def _resolve_runtime_deps(packages):
     for _round in range(len(remaining) + 1):
         next_remaining = []
         for name in remaining:
-            deps = RUNTIME_DEPS.get(name, None)
+            deps = ctx.runtime_deps.get(name, None)
             ready = True
             if deps != None:
                 for dep in deps:
-                    resolved = PROVIDES.get(dep, None)
+                    resolved = ctx.provides.get(dep, None)
                     d = resolved if resolved != None else dep
                     if d in seen and d not in emitted:
                         ready = False

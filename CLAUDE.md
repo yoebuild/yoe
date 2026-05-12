@@ -153,7 +153,7 @@ The GitHub Actions workflow (`doc-check.yaml`) runs `prettier --check` on all
   commands during build with full error traces to `.star` source lines.
 - **Machine-portable images** — images list abstract requirements ("linux",
   "base-files"). Machines provide concrete implementations via `provides` and
-  inject hardware-specific packages/partitions via `MACHINE_CONFIG`.
+  inject hardware-specific packages/partitions via `ctx.machine_config`.
 - **One unit, one .apk; resolve variation at runtime.** A unit produces a single
   binary artifact that every project and every machine shares. When two images
   need different behavior from the same package, prefer runtime mechanisms —

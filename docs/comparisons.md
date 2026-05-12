@@ -42,15 +42,16 @@ resolved to).
 `[yoe]`'s model is function-based, which covers the same use cases more
 explicitly:
 
-| Yocto override                     | `[yoe]` equivalent                                        |
-| ---------------------------------- | --------------------------------------------------------- |
-| `DEPENDS:append:raspberrypi4`      | `if MACHINE == "raspberrypi4": extra_deps = [...]`        |
-| `SRC_URI:append:aarch64`           | `if ARCH == "aarch64": ...` in the unit                   |
-| `PACKAGECONFIG:remove:musl`        | Module scoping — musl project doesn't include that module |
-| `FILESEXTRAPATHS:prepend` + append | `load()` the upstream function, call with different args  |
+| Yocto override                     | `[yoe]` equivalent                                            |
+| ---------------------------------- | ------------------------------------------------------------- |
+| `DEPENDS:append:raspberrypi4`      | `if ctx.machine == "raspberrypi4": extra_deps = [...]`        |
+| `SRC_URI:append:aarch64`           | `if ctx.arch == "aarch64": ...` in the unit                   |
+| `PACKAGECONFIG:remove:musl`        | Module scoping — musl project doesn't include that module     |
+| `FILESEXTRAPATHS:prepend` + append | `load()` the upstream function, call with different args      |
 
-Starlark has `if` with predeclared variables (`MACHINE`, `ARCH`), and the
-function composition pattern handles the "extend from downstream" case. When
+Starlark has `if` with fields on the predeclared `ctx` struct (`ctx.machine`,
+`ctx.arch`), and the function composition pattern handles the "extend from
+downstream" case. When
 machine-specific behavior is needed, it's right there in the `.star` file — no
 hidden layering of string operations.
 

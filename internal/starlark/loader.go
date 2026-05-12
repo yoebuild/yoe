@@ -196,89 +196,52 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		}
 	}
 
-	// Set ARCH variable for phase 2 so Starlark files can use it
-	// (e.g., conditional artifacts in image definitions).
-	// Always set a value — default to x86_64 if no machine is configured.
+	// Build ctx — a single Starlark struct exposing the active machine /
+	// project context to unit and image definitions. Replaces what used to
+	// be five separate globals (ARCH, MACHINE, PROJECT_VERSION,
+	// MACHINE_CONFIG, PROVIDES, RUNTIME_DEPS) with one named entry point.
+	// Defaults: arch = x86_64 if no machine is configured; machine and
+	// project_version are empty strings; machine_config is absent if no
+	// machine is configured.
+	//
+	// ctx.provides and ctx.runtime_deps are mutable *starlark.Dict
+	// instances. We keep local Go references (`provides`, `runtimeDeps`)
+	// and embed the same pointers in the struct. Phase 2 mutations on the
+	// Go side flow through to image-time lookups because the struct holds
+	// dict identity, not a snapshot.
 	arch := "x86_64"
-	if proj := eng.Project(); proj != nil {
-		if m, ok := eng.Machines()[proj.Defaults.Machine]; ok {
-			arch = m.Arch
-		}
-	}
-	eng.SetVar("ARCH", starlark.String(arch))
-
-	// Set MACHINE variable so image definitions can conditionally include
-	// board-specific units (e.g., different kernels per RPi board).
 	machine := ""
+	projectVersion := ""
+	var activeMachine *Machine
 	if proj := eng.Project(); proj != nil {
 		machine = proj.Defaults.Machine
-	}
-	eng.SetVar("MACHINE", starlark.String(machine))
-
-	// Set PROJECT_VERSION — the version string declared in PROJECT.star —
-	// so the image() class can default each image unit's `version` to it.
-	// That value flows into PKGINFO, the TUI's VERSION column, and (via
-	// the project_version template key) /etc/os-release on the device.
-	projectVersion := ""
-	if proj := eng.Project(); proj != nil {
 		projectVersion = proj.Version
-	}
-	eng.SetVar("PROJECT_VERSION", starlark.String(projectVersion))
-
-	// Set MACHINE_CONFIG — a Starlark struct exposing the active machine's
-	// configuration to unit and image definitions.
-	if proj := eng.Project(); proj != nil {
 		if m, ok := eng.Machines()[proj.Defaults.Machine]; ok {
-			machineDict := starlark.StringDict{
-				"name":     starlark.String(m.Name),
-				"arch":     starlark.String(m.Arch),
-				"packages": toStarlarkStringList(m.Packages),
-			}
-			// Add partitions as a Starlark list
-			var partList []starlark.Value
-			for _, p := range m.Partitions {
-				fields := starlark.StringDict{
-					"label": starlark.String(p.Label),
-					"type":  starlark.String(p.Type),
-					"size":  starlark.String(p.Size),
-					"root":  starlark.Bool(p.Root),
-				}
-				if len(p.Contents) > 0 {
-					fields["contents"] = toStarlarkStringList(p.Contents)
-				}
-				partList = append(partList, starlarkstruct.FromStringDict(starlark.String("partition"), fields))
-			}
-			machineDict["partitions"] = starlark.NewList(partList)
-
-			// Add kernel info
-			if m.Kernel.Unit != "" {
-				machineDict["kernel"] = starlarkstruct.FromStringDict(
-					starlark.String("kernel"), starlark.StringDict{
-						"unit":      starlark.String(m.Kernel.Unit),
-						"provides":  starlark.String(m.Kernel.Provides),
-						"defconfig": starlark.String(m.Kernel.Defconfig),
-						"cmdline":   starlark.String(m.Kernel.Cmdline),
-					})
-			}
-
-			eng.SetVar("MACHINE_CONFIG", starlarkstruct.FromStringDict(
-				starlark.String("machine_config"), machineDict))
+			arch = m.Arch
+			activeMachine = m
 		}
 	}
 
-	// Set PROVIDES — a Starlark dict mapping virtual package names to concrete
-	// unit names. Initially populated from kernel.provides; updated after phase 2
-	// with unit provides.
 	provides := starlark.NewDict(4)
-	if proj := eng.Project(); proj != nil {
-		if m, ok := eng.Machines()[proj.Defaults.Machine]; ok {
-			if m.Kernel.Provides != "" {
-				_ = provides.SetKey(starlark.String(m.Kernel.Provides),
-					starlark.String(m.Kernel.Unit))
-			}
-		}
+	if activeMachine != nil && activeMachine.Kernel.Provides != "" {
+		_ = provides.SetKey(
+			starlark.String(activeMachine.Kernel.Provides),
+			starlark.String(activeMachine.Kernel.Unit),
+		)
 	}
-	eng.SetVar("PROVIDES", provides)
+	runtimeDeps := starlark.NewDict(0)
+
+	ctxFields := starlark.StringDict{
+		"arch":            starlark.String(arch),
+		"machine":         starlark.String(machine),
+		"project_version": starlark.String(projectVersion),
+		"provides":        provides,
+		"runtime_deps":    runtimeDeps,
+	}
+	if activeMachine != nil {
+		ctxFields["machine_config"] = buildMachineConfigStruct(activeMachine)
+	}
+	eng.SetVar("ctx", starlarkstruct.FromStringDict(starlark.String("ctx"), ctxFields))
 
 	// Phase 1b: Evaluate container definitions (project + modules).
 	// Containers must be loaded before units so that units can reference them.
@@ -308,50 +271,48 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	// Now that all units are loaded, update predeclared variables before
 	// evaluating images (phase 2b).
 
-	// Add unit provides to PROVIDES dict, checking for conflicts. A unit may
-	// declare multiple virtual names (apk-style); each is registered
-	// independently with the same module-priority conflict rules.
-	if prov, ok := eng.vars["PROVIDES"].(*starlark.Dict); ok {
-		for _, u := range eng.Units() {
-			for _, virt := range u.Provides {
-				if virt == "" {
-					continue
-				}
-				if existing, found, _ := prov.Get(starlark.String(virt)); found {
-					existingName := string(existing.(starlark.String))
-					// Look up the existing unit to compare module priority.
-					existingUnit := eng.Units()[existingName]
-					if existingUnit == nil || u.ModuleIndex == existingUnit.ModuleIndex {
-						if !eng.allowDuplicateProvides {
-							return nil, fmt.Errorf("virtual package %q provided by both %q and %q",
-								virt, existingName, u.Name)
-						}
-						// First-wins: leave PROVIDES pointing at existingName.
-						continue
-					}
-					if u.ModuleIndex > existingUnit.ModuleIndex {
-						if eng.showShadows {
-							fmt.Fprintf(os.Stderr, "notice: %q from %s overrides %q via provides %q\n",
-								u.Name, moduleSource(u.Module), existingName, virt)
-						}
-						_ = prov.SetKey(starlark.String(virt), starlark.String(u.Name))
-					}
-					// If u.ModuleIndex < existingUnit.ModuleIndex, skip — higher priority already won.
-					continue
-				}
-				_ = prov.SetKey(starlark.String(virt), starlark.String(u.Name))
+	// Add unit provides to ctx.provides (mutating the dict in place — the
+	// ctx struct already holds a reference to it). A unit may declare
+	// multiple virtual names (apk-style); each is registered independently
+	// with the same module-priority conflict rules.
+	for _, u := range eng.Units() {
+		for _, virt := range u.Provides {
+			if virt == "" {
+				continue
 			}
+			if existing, found, _ := provides.Get(starlark.String(virt)); found {
+				existingName := string(existing.(starlark.String))
+				// Look up the existing unit to compare module priority.
+				existingUnit := eng.Units()[existingName]
+				if existingUnit == nil || u.ModuleIndex == existingUnit.ModuleIndex {
+					if !eng.allowDuplicateProvides {
+						return nil, fmt.Errorf("virtual package %q provided by both %q and %q",
+							virt, existingName, u.Name)
+					}
+					// First-wins: leave provides pointing at existingName.
+					continue
+				}
+				if u.ModuleIndex > existingUnit.ModuleIndex {
+					if eng.showShadows {
+						fmt.Fprintf(os.Stderr, "notice: %q from %s overrides %q via provides %q\n",
+							u.Name, moduleSource(u.Module), existingName, virt)
+					}
+					_ = provides.SetKey(starlark.String(virt), starlark.String(u.Name))
+				}
+				// If u.ModuleIndex < existingUnit.ModuleIndex, skip — higher priority already won.
+				continue
+			}
+			_ = provides.SetKey(starlark.String(virt), starlark.String(u.Name))
 		}
 	}
 
-	// Set RUNTIME_DEPS: unit name → list of runtime dep names.
-	runtimeDeps := starlark.NewDict(len(eng.Units()))
+	// Populate ctx.runtime_deps: unit name → list of runtime dep names.
+	// Mutates the dict in place; ctx already references it.
 	for _, u := range eng.Units() {
 		if len(u.RuntimeDeps) > 0 {
 			_ = runtimeDeps.SetKey(starlark.String(u.Name), toStarlarkStringList(u.RuntimeDeps))
 		}
 	}
-	eng.SetVar("RUNTIME_DEPS", runtimeDeps)
 
 	// Phase 2b: Evaluate image definitions (project + modules).
 	eng.SetCurrentModule("", projectIdx)
@@ -375,17 +336,15 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	proj.ResolvedModules = resolvedForProject
 	proj.Diagnostics.Shadows = eng.Shadows()
 
-	// Mirror the Starlark PROVIDES dict onto the Go side so callers that
+	// Mirror the Starlark ctx.provides dict onto the Go side so callers that
 	// don't run inside a Starlark thread (the build executor, deploy path,
 	// describe command) can route virtual deps to concrete units.
 	proj.Provides = map[string]string{}
-	if prov, ok := eng.vars["PROVIDES"].(*starlark.Dict); ok {
-		for _, item := range prov.Items() {
-			k, kok := item[0].(starlark.String)
-			v, vok := item[1].(starlark.String)
-			if kok && vok {
-				proj.Provides[string(k)] = string(v)
-			}
+	for _, item := range provides.Items() {
+		k, kok := item[0].(starlark.String)
+		v, vok := item[1].(starlark.String)
+		if kok && vok {
+			proj.Provides[string(k)] = string(v)
 		}
 	}
 
@@ -530,6 +489,42 @@ func peekModuleName(modulePath string) string {
 		"module":      moduleStub,
 	})
 	return captured
+}
+
+// buildMachineConfigStruct produces the ctx.machine_config struct from a
+// resolved *Machine. Exposes name, arch, packages, partitions, and (when
+// declared) kernel info to Starlark unit/image definitions.
+func buildMachineConfigStruct(m *Machine) *starlarkstruct.Struct {
+	machineDict := starlark.StringDict{
+		"name":     starlark.String(m.Name),
+		"arch":     starlark.String(m.Arch),
+		"packages": toStarlarkStringList(m.Packages),
+	}
+	var partList []starlark.Value
+	for _, p := range m.Partitions {
+		fields := starlark.StringDict{
+			"label": starlark.String(p.Label),
+			"type":  starlark.String(p.Type),
+			"size":  starlark.String(p.Size),
+			"root":  starlark.Bool(p.Root),
+		}
+		if len(p.Contents) > 0 {
+			fields["contents"] = toStarlarkStringList(p.Contents)
+		}
+		partList = append(partList, starlarkstruct.FromStringDict(starlark.String("partition"), fields))
+	}
+	machineDict["partitions"] = starlark.NewList(partList)
+
+	if m.Kernel.Unit != "" {
+		machineDict["kernel"] = starlarkstruct.FromStringDict(
+			starlark.String("kernel"), starlark.StringDict{
+				"unit":      starlark.String(m.Kernel.Unit),
+				"provides":  starlark.String(m.Kernel.Provides),
+				"defconfig": starlark.String(m.Kernel.Defconfig),
+				"cmdline":   starlark.String(m.Kernel.Cmdline),
+			})
+	}
+	return starlarkstruct.FromStringDict(starlark.String("machine_config"), machineDict)
 }
 
 func evalDir(eng *Engine, root, subdir string) error {
