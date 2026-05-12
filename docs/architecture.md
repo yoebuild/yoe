@@ -91,7 +91,13 @@ For an explanation of why this split exists — versus Yocto's recipe/layer mode
 — see [Comparisons](comparisons.md). For the language used to express units and
 configuration, see [Build & Configuration Languages](build-languages.md).
 
-## Where units build
+The rest of this page follows a unit through its lifecycle: **build** (where and
+how it compiles, what feeds it, how abstract names resolve), **packaging** (how
+distro apks join the pipeline, how signing locks the chain), **deployment** (how
+the finished package reaches a running device), and **development** (how local
+source edits round-trip through git).
+
+## Build: where units build
 
 Builds run on the host through a tiered environment. The host provides only
 `yoe` and a container runtime; everything else is nested inside the container
@@ -104,7 +110,7 @@ visible. See [Build Environment](build-environment.md) for the tier-by-tier
 details, the bootstrap process, and the rationale behind bwrap-over-Docker for
 per-unit isolation.
 
-## What feeds a unit build
+## Build: what feeds a unit
 
 A unit pulls inputs from four independent sources, each managed by the right
 tool for the job:
@@ -120,50 +126,7 @@ are handled by each language's own package manager inside the container. See
 split exists and how it interacts with the build cache, and
 [Alpine apk Passthrough](apk-passthrough.md) for the prebuilt-apk path.
 
-## How packages reach a running device
-
-Built packages flow from the workstation to a running yoe device through a small
-set of orthogonal channels: mDNS for discovery, HTTP for the apk pull, and SSH
-for orchestration. The same apk repo, signing key, and `APKINDEX` serve
-image-time installs, the dev loop, and on-device OTA:
-
-![Feed server topology](assets/feed-server-topology.png)
-
-`yoe serve` is the long-lived HTTP + mDNS server, `yoe device repo add` does the
-one-time `/etc/apk/repositories` setup, and `yoe deploy` orchestrates the whole
-"build → ship → install" round trip. See
-[Feed Server and yoe deploy](feed-server.md) for the workflows, command
-reference, and trust model.
-
-## How distro packages enter the pipeline
-
-`module-alpine` units don't rebuild Alpine packages — they repack each upstream
-`.apk`, swapping the signature so the device's apk-tools verifies against the
-project key like any other yoe-built package:
-
-![apk passthrough repack pipeline](assets/apk-passthrough-repack.png)
-
-The control segment (PKGINFO, install scripts, file checksums) and data segment
-pass through byte-for-byte, so apk-tools on the device sees Alpine's metadata,
-install behavior, and shared-library deps unchanged. Only the signature changes.
-See [Alpine apk Passthrough](apk-passthrough.md) for the two-metadata-systems
-story (`.star` fields drive the yoe resolver; PKGINFO drives apk-tools at
-install time) and the noarch routing details.
-
-## How signatures keep the chain trustworthy
-
-Every `.apk` and the per-arch `APKINDEX.tar.gz` are signed at build time with a
-per-project RSA key. The public half rides into the device via `base-files`, so
-on-device installs verify without `--allow-untrusted`:
-
-![apk signing trust chain](assets/apk-signing-trust-chain.png)
-
-The private key never leaves the workstation; the public key travels through two
-independent channels (the project repo for inspection, the rootfs for
-verification). See [apk Signing](signing.md) for key generation, rotation, and
-the exact bytes that get signed.
-
-## How abstract names resolve to concrete units
+## Build: how abstract names resolve
 
 An image's `artifacts` list and a unit's `runtime_deps`/`build_deps` can
 reference _abstract_ names like `linux` or `init`. The resolver matches each
@@ -178,3 +141,61 @@ a Jetson machine points it at a Tegra kernel — same image, different hardware.
 Concrete names that match directly skip the registry. See
 [Naming and Resolution](naming-and-resolution.md) for collision rules, name
 shadowing, and the `replaces` mechanism.
+
+## Packaging: distro passthrough
+
+`module-alpine` units don't rebuild Alpine packages — they repack each upstream
+`.apk`, swapping the signature so the device's apk-tools verifies against the
+project key like any other yoe-built package:
+
+![apk passthrough repack pipeline](assets/apk-passthrough-repack.png)
+
+The control segment (PKGINFO, install scripts, file checksums) and data segment
+pass through byte-for-byte, so apk-tools on the device sees Alpine's metadata,
+install behavior, and shared-library deps unchanged. Only the signature changes.
+See [Alpine apk Passthrough](apk-passthrough.md) for the two-metadata-systems
+story (`.star` fields drive the yoe resolver; PKGINFO drives apk-tools at
+install time) and the noarch routing details.
+
+## Packaging: signing and trust
+
+Every `.apk` and the per-arch `APKINDEX.tar.gz` are signed at build time with a
+per-project RSA key. The public half rides into the device via `base-files`, so
+on-device installs verify without `--allow-untrusted`:
+
+![apk signing trust chain](assets/apk-signing-trust-chain.png)
+
+The private key never leaves the workstation; the public key travels through two
+independent channels (the project repo for inspection, the rootfs for
+verification). See [apk Signing](signing.md) for key generation, rotation, and
+the exact bytes that get signed.
+
+## Deployment: reaching a running device
+
+Built packages flow from the workstation to a running yoe device through a small
+set of orthogonal channels: mDNS for discovery, HTTP for the apk pull, and SSH
+for orchestration. The same apk repo, signing key, and `APKINDEX` serve
+image-time installs, the dev loop, and on-device OTA:
+
+![Feed server topology](assets/feed-server-topology.png)
+
+`yoe serve` is the long-lived HTTP + mDNS server, `yoe device repo add` does the
+one-time `/etc/apk/repositories` setup, and `yoe deploy` orchestrates the whole
+"build → ship → install" round trip. See
+[Feed Server and yoe deploy](feed-server.md) for the workflows, command
+reference, and trust model.
+
+## Development: source modifications round-trip
+
+Every unit's build directory is a regular git repo. Upstream source is checked
+out at the version pinned by the unit and tagged `upstream`; any patches the
+unit declares are applied as commits on top; your local edits become further
+commits. There's no separate workspace, no mode to enter:
+
+![Source modification flow](assets/source-mod-flow.png)
+
+`yoe dev extract` turns the commits above `upstream` back into reviewable
+`.patch` files in your project repo — `git format-patch` under the hood — so the
+source of truth stays version-controlled even when iteration happens in the
+build dir. See [`yoe dev`](yoe-tool.md#yoe-dev) for the command surface and the
+upstream-rebase workflow.
