@@ -16,7 +16,9 @@ import (
 )
 
 // DevExtract extracts local commits in a unit's build directory as patch
-// files and updates the unit's patches list.
+// files and updates the unit's patches list. Patches land in <unitDir>/<unit>/
+// — alongside the unit's .star file — so the patch paths in `patches = [...]`
+// stay relative to the unit and ship with the module that defines it.
 func DevExtract(projectDir, arch, unitName string, w io.Writer) error {
 	proj, err := yoestar.LoadProject(projectDir)
 	if err != nil {
@@ -44,8 +46,14 @@ func DevExtract(projectDir, arch, unitName string, w io.Writer) error {
 		return nil
 	}
 
-	// Create patches directory
-	patchDir := filepath.Join(projectDir, "patches", unitName)
+	// Patches live next to the unit's .star file in a directory named after
+	// the unit. unit.DefinedIn is already the directory holding the .star
+	// file; fall back to the project root if it isn't set.
+	unitDir := unit.DefinedIn
+	if unitDir == "" {
+		unitDir = projectDir
+	}
+	patchDir := filepath.Join(unitDir, unitName)
 	if err := os.MkdirAll(patchDir, 0755); err != nil {
 		return fmt.Errorf("creating patch directory: %w", err)
 	}
@@ -69,10 +77,11 @@ func DevExtract(projectDir, arch, unitName string, w io.Writer) error {
 		return nil
 	}
 
-	// Build the patches list relative to project root
+	// Build the patches list relative to the unit's directory — that's what
+	// the unit's `patches = [...]` field expects.
 	var patchPaths []string
 	for _, p := range patches {
-		rel, _ := filepath.Rel(projectDir, p)
+		rel, _ := filepath.Rel(unitDir, p)
 		patchPaths = append(patchPaths, rel)
 		fmt.Fprintf(w, "  %s\n", rel)
 	}
@@ -118,20 +127,30 @@ func DevDiff(projectDir, arch, unitName string, w io.Writer) error {
 	return nil
 }
 
-// DevStatus shows which units have local modifications.
+// DevStatus shows which units have local modifications. It walks the
+// build directory directly rather than loading the project, so it stays
+// useful when PROJECT.star or a module has an evaluation error — that's
+// often exactly when you want to know which units have uncommitted local
+// work waiting to be extracted.
 func DevStatus(projectDir, arch string, w io.Writer) error {
-	proj, err := yoestar.LoadProject(projectDir)
+	buildDir := filepath.Join(projectDir, "build", arch)
+	entries, err := os.ReadDir(buildDir)
 	if err != nil {
-		return err
+		if os.IsNotExist(err) {
+			fmt.Fprintln(w, "No units with local modifications")
+			return nil
+		}
+		return fmt.Errorf("reading %s: %w", buildDir, err)
 	}
 
-	buildDir := filepath.Join(projectDir, "build", arch)
 	found := false
-
-	for name := range proj.Units {
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
 		srcDir := filepath.Join(buildDir, name, "src")
-		gitDir := filepath.Join(srcDir, ".git")
-		if _, err := os.Stat(gitDir); os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(srcDir, ".git")); os.IsNotExist(err) {
 			continue
 		}
 

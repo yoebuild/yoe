@@ -379,15 +379,18 @@ unit(
     version = "1.36.1",
     source = "https://busybox.net/downloads/busybox-1.36.1.tar.bz2",
     patches = [
-        "patches/busybox/fix-ash-segfault.patch",
-        "patches/busybox/add-custom-applet.patch",
+        "busybox/fix-ash-segfault.patch",
+        "busybox/add-custom-applet.patch",
     ],
     build = ["make -j$NPROC", "make DESTDIR=$DESTDIR install"],
 )
 ```
 
-Patch file paths are relative to the project root. Patch contents are included
-in the unit's cache hash — changing a patch triggers a rebuild.
+Patch file paths are relative to the directory holding the unit's `.star` file,
+so a module ships its patches alongside the unit that uses them (e.g.,
+`modules/module-core/units/net/mdnsd/0001-…patch` for a unit at
+`modules/module-core/units/net/mdnsd.star`). Patch contents are included in the
+unit's cache hash — changing a patch triggers a rebuild.
 
 **Module overrides for patches** work through the standard function composition
 pattern:
@@ -400,7 +403,7 @@ def busybox(extra_patches=[], **overrides):
         version = "1.36.1",
         source = "https://busybox.net/downloads/busybox-1.36.1.tar.bz2",
         patches = [
-            "patches/busybox/fix-ash-segfault.patch",
+            "busybox/fix-ash-segfault.patch",
         ] + extra_patches,
         build = ["make -j$NPROC", "make DESTDIR=$DESTDIR install"],
         **overrides,
@@ -408,7 +411,7 @@ def busybox(extra_patches=[], **overrides):
 
 # vendor module: adds a patch without modifying upstream
 load("@module-core//busybox.star", "busybox")
-busybox(extra_patches=["patches/vendor-busybox-audit.patch"])
+busybox(extra_patches=["vendor-busybox-audit.patch"])
 ```
 
 **Alternatives to patches:**

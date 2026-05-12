@@ -8,6 +8,18 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Patches live next to the unit, not under a separate `patches/` tree.** A
+  unit's `patches = [...]` paths are now relative to the unit's own directory
+  with no `patches/` prefix — e.g., `patches = ["mdnsd/0001-….patch"]` next to
+  `mdnsd.star`. `yoe dev extract` writes patches into `<unit-dir>/<unit>/`
+  alongside the `.star` file, so a module's patches travel with the module that
+  defines them. **Migration:** drop the leading `patches/` from existing
+  `patches = [...]` entries and move the files to match.
+- **`yoe dev status` works through project errors.** It now walks the build
+  directory directly instead of evaluating the project, so unrelated issues like
+  a duplicate-provides collision in a module no longer block you from seeing
+  which units have uncommitted local edits.
+
 ## [0.10.6] - 2026-05-12
 
 - **TUI help bar stays pinned to the bottom of the screen on the Units tab,**

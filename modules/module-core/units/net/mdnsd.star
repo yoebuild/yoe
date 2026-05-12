@@ -15,7 +15,7 @@ autotools(
     # the addresses present at startup — on DHCP boxes that race the init
     # script, the IPv4 A record never appears and <host>.local resolves to
     # the IPv6 link-local only.
-    patches = ["patches/mdnsd/0001-Update-the-records-when-the-iface-has-changed.patch"],
+    patches = ["mdnsd/0001-Update-the-records-when-the-iface-has-changed.patch"],
     services = ["mdnsd"],
     runtime_deps = ["musl", "busybox", "openrc"],
     deps = ["toolchain-musl"],

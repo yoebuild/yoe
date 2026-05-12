@@ -280,8 +280,8 @@ unit(
     version = "1.36.1",
     source = "https://busybox.net/downloads/busybox-1.36.1.tar.bz2",
     patches = [
-        "patches/busybox/fix-ash-segfault.patch",
-        "patches/busybox/add-custom-applet.patch",
+        "busybox/fix-ash-segfault.patch",
+        "busybox/add-custom-applet.patch",
     ],
     tasks = [
         task("build", steps = ["make -j$NPROC", "make DESTDIR=$DESTDIR install"]),
@@ -296,7 +296,7 @@ unit(
 	if len(r.Patches) != 2 {
 		t.Errorf("Patches = %v, want 2 entries", r.Patches)
 	}
-	if r.Patches[0] != "patches/busybox/fix-ash-segfault.patch" {
+	if r.Patches[0] != "busybox/fix-ash-segfault.patch" {
 		t.Errorf("Patches[0] = %q, want fix-ash-segfault.patch", r.Patches[0])
 	}
 }

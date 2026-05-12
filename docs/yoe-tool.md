@@ -876,6 +876,8 @@ applied as commits on top. Local edits are just git commits.
 There is no "dev mode" to enter or exit. If the build directory has commits
 beyond `upstream`, `yoe build` uses them directly instead of re-fetching source.
 
+![Source modification flow](assets/source-mod-flow.png)
+
 ```sh
 # After building, edit source in place
 yoe build openssh
@@ -891,7 +893,8 @@ yoe dev diff openssh
 
 # Extract commits as patch files
 yoe dev extract openssh
-# Writes patches/openssh/0001-fix-auth-timeout-handling.patch
+# Writes <unit-dir>/openssh/0001-fix-auth-timeout-handling.patch
+# (alongside openssh.star, so the patches ship with the module that defines it)
 # Prints updated patches list for your unit
 
 # Check which units have local modifications
@@ -900,11 +903,11 @@ yoe dev status
 
 **Subcommands:**
 
-| Subcommand               | Description                                                                                   |
-| ------------------------ | --------------------------------------------------------------------------------------------- |
-| `yoe dev extract <unit>` | Run `git format-patch upstream..HEAD`, write to `patches/<unit>/`, print updated patches list |
-| `yoe dev diff <unit>`    | Show `git log upstream..HEAD` — your local commits                                            |
-| `yoe dev status`         | List all units with commits beyond upstream                                                   |
+| Subcommand               | Description                                                                                                                      |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `yoe dev extract <unit>` | Run `git format-patch upstream..HEAD`, write to `<unit-dir>/<unit>/` next to the unit's `.star` file, print updated patches list |
+| `yoe dev diff <unit>`    | Show `git log upstream..HEAD` — your local commits                                                                               |
+| `yoe dev status`         | List all units with commits beyond upstream                                                                                      |
 
 **Rebasing on upstream updates:**
 
