@@ -123,6 +123,8 @@ within `module-core`, not the project root.
 The `ctx.provides` dict maps virtual names to concrete unit names. This allows
 images to reference abstract capabilities rather than specific units:
 
+![ctx.provides resolution](assets/provides-resolution.png)
+
 ```python
 # Machine definition contributes:
 machine(

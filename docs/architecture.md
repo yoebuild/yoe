@@ -149,3 +149,32 @@ install behavior, and shared-library deps unchanged. Only the signature changes.
 See [Alpine apk Passthrough](apk-passthrough.md) for the two-metadata-systems
 story (`.star` fields drive the yoe resolver; PKGINFO drives apk-tools at
 install time) and the noarch routing details.
+
+## How signatures keep the chain trustworthy
+
+Every `.apk` and the per-arch `APKINDEX.tar.gz` are signed at build time with a
+per-project RSA key. The public half rides into the device via `base-files`, so
+on-device installs verify without `--allow-untrusted`:
+
+![apk signing trust chain](assets/apk-signing-trust-chain.png)
+
+The private key never leaves the workstation; the public key travels through two
+independent channels (the project repo for inspection, the rootfs for
+verification). See [apk Signing](signing.md) for key generation, rotation, and
+the exact bytes that get signed.
+
+## How abstract names resolve to concrete units
+
+An image's `artifacts` list and a unit's `runtime_deps`/`build_deps` can
+reference _abstract_ names like `linux` or `init`. The resolver matches each
+abstract name against a registry of `provides` claims from every unit across
+every module, with module declaration order in `project()` deciding ties:
+
+![ctx.provides resolution](assets/provides-resolution.png)
+
+This is what makes images machine- and project-portable: an image asks for
+`linux`, and a Raspberry Pi machine config points `linux` at `linux-rpi4` while
+a Jetson machine points it at a Tegra kernel — same image, different hardware.
+Concrete names that match directly skip the registry. See
+[Naming and Resolution](naming-and-resolution.md) for collision rules, name
+shadowing, and the `replaces` mechanism.
