@@ -2,13 +2,17 @@
 
 [Introduction](intro.md)
 
-# Getting Started
+# User Guide
 
 - [The `[yoe]` Tool](yoe-tool.md)
 - [AI Skills](ai-skills.md)
+- [Go Workflows](go.md)
+- [Feed Server and yoe deploy](feed-server.md)
+- [On-Device Package Management](on-device-apk.md)
 
 # Reference
 
+- [Architecture](architecture.md)
 - [Unit & Configuration Format](metadata-format.md)
 - [Naming and Resolution](naming-and-resolution.md)
 - [File Templates](file-templates.md)
@@ -20,14 +24,11 @@
 - [Build Dependencies and Caching](build-dependencies-and-caching.md)
 - [Build Environment](build-environment.md)
 - [Development Environments](dev-env.md)
-- [Go Workflows](go.md)
 - [Testing](testing.md)
 
 # Packages and Devices
 
 - [apk Signing](signing.md)
-- [On-Device Package Management](on-device-apk.md)
-- [Feed Server and yoe deploy](feed-server.md)
 - [module-alpine](module-alpine.md)
 - [Alpine apk Passthrough](apk-passthrough.md)
 

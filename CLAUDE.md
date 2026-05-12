@@ -241,8 +241,8 @@ should follow these guidelines. **draw.io is the preferred tool** — author
 ### Composition
 
 - No title in the diagram — the surrounding heading or caption provides it.
-- Prefer a simple drawing over a block diagram when possible; boxes-with-text
-  is the fallback, not the goal.
+- Prefer a simple drawing over a block diagram when possible; boxes-with-text is
+  the fallback, not the goal.
 - Keep the image simple enough that a reader can glance and decide if they're
   interested. Resist packing in all the details.
 - Embed images/icons (downloading if needed) where they convey more than a

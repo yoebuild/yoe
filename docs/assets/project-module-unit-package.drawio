@@ -1,0 +1,92 @@
+<mxfile host="Electron" agent="claude-code" version="29.3.0">
+  <diagram name="project-module-unit-package" id="diagram1">
+    <mxGraphModel dx="1200" dy="700" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="500" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="row-project" value="📋 &lt;b&gt;Project&lt;/b&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="20" y="40" width="120" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="row-modules" value="📦 &lt;b&gt;Modules&lt;/b&gt;&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;Git repos&lt;/span&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="20" y="125" width="120" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="row-units" value="🛠 &lt;b&gt;Units&lt;/b&gt;&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;.star files&lt;/span&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="20" y="225" width="120" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="row-packages" value="🎁 &lt;b&gt;Packages&lt;/b&gt;&lt;br&gt;&lt;span style='font-size:10px;color:#666;'&gt;.apk files&lt;/span&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="20" y="325" width="120" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="project-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;strokeWidth=2;arcSize=8;" parent="1" vertex="1">
+          <mxGeometry x="290" y="30" width="380" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="project-title" value="PROJECT.star" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="300" y="35" width="360" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="project-sub" value="declares modules, machine, prefer_modules" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;fontColor=#666666;" parent="1" vertex="1">
+          <mxGeometry x="300" y="62" width="360" height="28" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mod-core" value="module-core" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;strokeWidth=2;arcSize=8;fontSize=12;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="240" y="125" width="200" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="mod-bsp" value="module-jetson" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;strokeWidth=2;arcSize=8;fontSize=12;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="540" y="125" width="200" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="unit-bb" value="busybox.star" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;arcSize=8;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="170" y="225" width="180" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="unit-ssl" value="openssl.star" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;arcSize=8;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="380" y="225" width="180" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="unit-kern" value="linux.star" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;arcSize=8;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="590" y="225" width="180" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="pkg-bb" value="busybox.apk" style="shape=document;whiteSpace=wrap;html=1;boundedLbl=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;fontSize=12;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="180" y="325" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pkg-ssl" value="openssl.apk" style="shape=document;whiteSpace=wrap;html=1;boundedLbl=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;fontSize=12;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="390" y="325" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pkg-kern" value="linux.apk" style="shape=document;whiteSpace=wrap;html=1;boundedLbl=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;fontSize=12;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="600" y="325" width="160" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="caption" value="&lt;i&gt;One unit → one .apk. Packages are assembled into images by apk.&lt;/i&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;fontColor=#666666;" parent="1" vertex="1">
+          <mxGeometry x="40" y="420" width="820" height="25" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-pm1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#9673a6;endArrow=classic;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="project-box" target="mod-core" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-pm2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#9673a6;endArrow=classic;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="project-box" target="mod-bsp" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-mu1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#6c8ebf;endArrow=classic;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="mod-core" target="unit-bb" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-mu2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#6c8ebf;endArrow=classic;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="mod-core" target="unit-ssl" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-mu3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#6c8ebf;endArrow=classic;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="mod-bsp" target="unit-kern" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-up1" style="endArrow=classic;html=1;strokeWidth=2;strokeColor=#82b366;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="unit-bb" target="pkg-bb" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-up2" style="endArrow=classic;html=1;strokeWidth=2;strokeColor=#82b366;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="unit-ssl" target="pkg-ssl" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-up3" style="endArrow=classic;html=1;strokeWidth=2;strokeColor=#82b366;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="unit-kern" target="pkg-kern" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
