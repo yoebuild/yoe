@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.6] - 2026-05-12
+
 - **TUI help bar stays pinned to the bottom of the screen on the Units tab,**
   even when only a handful of units are visible. The unit list pads with blank
   rows so the keyboard shortcuts and the cursor-name strip don't float up under

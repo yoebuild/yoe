@@ -10,7 +10,6 @@
 
 - module dev status should update
 - video on src modifications
-- block diagram on how we use alpine packages
 - block diagram on src modifications
 - mDNS on rPI does not work
 - Units output multiple packages. Seems like this will be required for
