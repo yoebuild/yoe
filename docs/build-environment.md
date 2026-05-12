@@ -4,25 +4,10 @@ How `[yoe]` manages host tools, build isolation, and the bootstrap process.
 
 ## Architecture
 
-`[yoe]` uses a tiered build environment with three tiers:
+`[yoe]` uses a tiered build environment with three tiers, nested inside the
+container that yoe spawns on the host:
 
-```
-┌─────────────────────────────────────────────────────┐
-│  Tier 0: Host / Alpine Container                    │
-│  Provides: apk-tools, bubblewrap, yoe (Go binary)  │
-│  libc: doesn't matter (musl or glibc)              │
-├─────────────────────────────────────────────────────┤
-│  Tier 1: `[yoe]` Build Root (chroot/bwrap)           │
-│  Populated by: apk from `[yoe]`'s package repo       │
-│  Provides: glibc, gcc, make, cmake, language SDKs   │
-│  libc: glibc (`[yoe]`'s own packages)               │
-├─────────────────────────────────────────────────────┤
-│  Tier 2: Per-Unit Build Environment               │
-│  Populated by: apk with only declared build deps    │
-│  Isolated via bubblewrap                            │
-│  Produces: .apk artifacts                            │
-└─────────────────────────────────────────────────────┘
-```
+![Build environment tiers](assets/build-environment-tiers.png)
 
 ### Tier 0: Bootstrap Module (Automatic Container)
 
@@ -45,19 +30,6 @@ the container — no source checkout or Go toolchain is needed on the host.
 Subsequent invocations reuse the cached image. When the container version
 changes (i.e., a new `yoe` binary with updated container dependencies), the
 image is rebuilt automatically.
-
-**How it works:**
-
-```
-Host                              Container (Alpine)
-┌─────────────┐                   ┌──────────────────────────┐
-│ yoe build   │ ──docker run──▶   │ yoe build openssh        │
-│ openssh     │   -v $PWD:/project│ (has bwrap, apk, gcc...) │
-│             │   -v cache:/cache │                          │
-│ (no bwrap,  │                   │ Tier 1: build root       │
-│  no apk)    │                   │ Tier 2: per-unit bwrap │
-└─────────────┘                   └──────────────────────────┘
-```
 
 The `yoe` CLI always runs on the host. The container is a stateless build worker
 invoked only when container-provided tools (gcc, bwrap, mkfs, etc.) are needed.
@@ -126,19 +98,21 @@ That's it. Everything else is inside the container.
 
 ### Tier 1: `[yoe]` Build Root
 
-A glibc-based environment populated from `[yoe]`'s own package repository. This
-is where the actual compilers, toolchains, and language SDKs live.
+An environment populated from `[yoe]`'s own package repository. This is where
+the actual compilers, toolchains, and language SDKs live. `[yoe]` targets musl
+today (Alpine-based); the libc choice is a separate decision from the tier
+structure.
 
 ```sh
 # yoe creates this automatically during build
 apk --root /var/yoe/buildroot \
     --repo https://repo.yoebuild.org/packages \
-    add glibc gcc g++ make cmake go rust
+    add gcc g++ make cmake go rust
 ```
 
 This build root is:
 
-- **glibc-based** — `[yoe]`'s own packages, not Alpine's.
+- **Built from `[yoe]`'s own packages**, not pulled from Alpine's repos.
 - **Persistent** — created once, updated as needed. Not torn down between
   builds.
 - **Architecture-native** — on an ARM64 machine, it's an ARM64 build root. No
