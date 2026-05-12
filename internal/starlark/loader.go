@@ -69,6 +69,45 @@ func LoadProject(startDir string, opts ...LoadOption) (*Project, error) {
 	return LoadProjectFromRoot(root, opts...)
 }
 
+// ProjectModuleRefs finds the project root and evaluates only PROJECT.star,
+// returning the declared module list. It does NOT evaluate MODULE.star or any
+// unit files, so it succeeds even when module contents have errors. Use this
+// when you need the module declarations alone — `yoe module sync` relies on
+// it so a broken module can still be re-synced to pull in a fix.
+//
+// Honored LoadOptions: WithProjectFile. Others (machine, shadows, sync
+// callback) don't apply because no module content is loaded.
+func ProjectModuleRefs(startDir string, opts ...LoadOption) ([]ModuleRef, error) {
+	root, err := findProjectRoot(startDir)
+	if err != nil {
+		return nil, err
+	}
+
+	var cfg loadConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
+
+	eng := NewEngine()
+	eng.SetProjectRoot(root)
+
+	projFile := filepath.Join(root, "PROJECT.star")
+	if cfg.projectFile != "" {
+		projFile = cfg.projectFile
+		if !filepath.IsAbs(projFile) {
+			projFile = filepath.Join(root, projFile)
+		}
+	}
+	if err := eng.ExecFile(projFile); err != nil {
+		return nil, fmt.Errorf("evaluating %s: %w", projFile, err)
+	}
+	proj := eng.Project()
+	if proj == nil {
+		return nil, nil
+	}
+	return proj.Modules, nil
+}
+
 // findProjectRoot walks up from startDir looking for PROJECT.star.
 func findProjectRoot(startDir string) (string, error) {
 	dir, err := filepath.Abs(startDir)

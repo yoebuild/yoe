@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`yoe module sync` works even when modules have errors.** The command now
+  reads only `PROJECT.star` and re-syncs the declared modules, so a broken
+  module that's blocking the rest of the build can be re-fetched as soon as
+  the upstream fix lands — no more chicken-and-egg.
 - **One `ctx` struct in `.star` files instead of five separate globals.** Unit
   and image definitions now reference `ctx.arch`, `ctx.machine`,
   `ctx.project_version`, `ctx.machine_config`, `ctx.provides`, and
