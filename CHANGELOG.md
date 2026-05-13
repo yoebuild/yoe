@@ -8,6 +8,25 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Dev mode can track an upstream branch automatically.** A unit that declares
+  both `tag` and `branch` now flips to `origin/<branch>` HEAD when toggled into
+  dev mode — the working tree advances to whatever the branch has accumulated
+  past the pin, and the detail-page SOURCE line surfaces
+  `tracking origin/<branch> (N commits past <tag>)` so the move is visible.
+  Units with only `tag` keep the bit-identical pin↔dev behavior.
+
+- **`P` pins the current HEAD with no picker.** The tag/hash/branch popup is
+  gone. `P` now writes HEAD's tag name when one exists, otherwise the 40-char
+  SHA, into the unit's `tag` field. The `branch` field is never touched — branch
+  tracking is declared by the unit author, not derived from the checkout. `P` is
+  enabled in `dev` and `dev-mod`; `dev-dirty` surfaces "commit or stash first"
+  instead.
+
+- **`pin` shows in the SRC column.** Built units explicitly record their source
+  state in `build.json`, so the TUI's SRC column renders `pin` in cyan for
+  yoe-managed checkouts instead of leaving the cell blank. Unbuilt units (or
+  image/container units with no source dir) still render blank.
+
 - **Fix patch application when the cache path is relative.** `applyPatches`
   built the patch path relative to the project root (e.g.
   `cache/modules/.../*.patch`) but invoked `git am` with `cmd.Dir = srcDir`, so

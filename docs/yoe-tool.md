@@ -683,20 +683,43 @@ both units (`build/<unit>/src/`) and modules (`<cache>/modules/<name>/`).
 | ----------- | ------ | --------------------------------------------------------- |
 | (blank)     | —      | Never built / no source dir / image or container unit     |
 | `pin`       | blue   | Yoe-managed clone at the `.star`'s declared ref           |
-| `dev`       | green  | Tracking upstream, work tree clean, at the upstream tag   |
-| `dev-mod`   | yellow | Tracking upstream + commits beyond `upstream` tag (clean) |
+| `dev`       | green  | Tracking upstream, work tree clean, at the dev anchor     |
+| `dev-mod`   | yellow | Tracking upstream + commits beyond the dev anchor (clean) |
 | `dev-dirty` | red    | Tracking upstream + uncommitted edits in the work tree    |
 | `local`     | dim    | Module overridden via `module(local = "...")`             |
 
 Toggle a unit's source between `pin` and `dev` with `u` on its detail page (or
-on the cursor row in the modules tab). When a `dev-mod` unit is ready to ship
-its commits, `P` rewrites the unit's `.star` `tag`/`branch` field to capture the
-current HEAD; the SRC column flips back to `dev` the next time the row renders.
+on the cursor row in the modules tab). When a `dev` or `dev-mod` checkout is
+ready to ship, `P` rewrites the unit's `.star` `tag` field — to HEAD's tag name
+when one exists, otherwise to the 40-char SHA. `P` never writes the `branch`
+field; branch tracking is declared by the unit author. The SRC column flips back
+to `dev` the next time the row renders.
 
 While a unit is in any `dev*` state, `yoe build` reuses your working tree
 without re-fetching, re-extracting, or re-applying patches. A warning is logged
 so you know `.star` source/tag/patches edits won't apply until you toggle the
 unit back to `pin`.
+
+##### Tracking an upstream branch in dev mode
+
+Units can opt into automatic branch tracking by declaring a `branch` field
+alongside `tag`:
+
+```python
+unit(
+    name = "busybox",
+    source = "https://git.busybox.net/busybox",
+    tag = "1_36_1",      # the pin — what `pin` mode builds
+    branch = "master",    # dev-mode tracking ref
+)
+```
+
+`tag` and `branch` are orthogonal. Without `branch`, pin and dev build the same
+commit (today's behavior). With `branch` set, toggling `pin → dev` fetches
+upstream and checks out `origin/<branch>` HEAD — the working tree advances to
+whatever branch HEAD has accumulated past the pinned tag. The detail-page SOURCE
+line shows `tracking origin/<branch> (N commits past <tag>)` so the move is
+visible. Press `P` to capture the new HEAD as the new pin.
 
 #### Key bindings (unit list)
 
@@ -758,7 +781,7 @@ omitted. Empty until the unit has been built at least once.
 | `r`         | Run (image units) — boot in QEMU _(Info tab)_      |
 | `$`         | Open `$SHELL` in the unit's checked-out source     |
 | `u`         | Toggle source between pin and dev mode             |
-| `P`         | Promote a `dev-mod` HEAD into the `.star` pin      |
+| `P`         | Pin current HEAD into the unit's `.star` `tag`     |
 | `d`         | Launch `claude diagnose` _(Info tab)_              |
 | `l`         | Open build log in `$EDITOR` _(Info tab)_           |
 | `/`         | Search the build log _(Info tab)_                  |
