@@ -421,6 +421,14 @@ func initGitRepo(srcDir string) error {
 	return nil
 }
 
+// ApplyPatches applies the unit's patches list as commits on top of the
+// current HEAD. Exported so callers outside the build flow (e.g.
+// internal/dev.go's reset-in-place pin transition) can re-apply patches
+// without re-running the entire Prepare flow.
+func ApplyPatches(projectDir, srcDir string, unit *yoestar.Unit) error {
+	return applyPatches(projectDir, srcDir, unit)
+}
+
 func applyPatches(projectDir, srcDir string, unit *yoestar.Unit) error {
 	// Patches resolve relative to the directory containing the unit's .star
 	// file (unit.DefinedIn). This lets a module ship patches alongside the

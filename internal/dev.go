@@ -342,15 +342,16 @@ func devPinnedRef(unit *yoestar.Unit) string {
 	return ""
 }
 
-// DevToPin throws away the dev-mode checkout and re-runs source.Prepare
-// on the next build. Without `force=true`, refuses to proceed when there
-// are commits beyond `upstream` or uncommitted edits in the work tree —
-// the caller (TUI or CLI) is responsible for surfacing a confirmation
-// to the user when local work is at stake.
+// DevToPin resets the existing dev-mode checkout back to its pinned ref
+// in place, without re-cloning from the source cache. The clone already
+// has the pin commit in its local history (DevToUpstream's unshallow
+// fetch pulled everything), so we just move HEAD, clean any orphaned
+// state, re-apply patches, and drop the origin remote.
 //
-// Implementation is dead simple: remove the src dir and clear the
-// cached state. The next build's source.Prepare re-clones at the
-// pinned ref.
+// Without `force=true`, refuses to proceed when there are commits
+// beyond `upstream` or uncommitted edits in the work tree — the caller
+// (TUI or CLI) is responsible for surfacing a confirmation to the user
+// when local work is at stake.
 func DevToPin(projectDir, scopeDir string, unit *yoestar.Unit, force bool) error {
 	srcDir := devSrcDir(projectDir, scopeDir, unit.Name)
 	state, _ := source.DetectState(srcDir)
@@ -362,11 +363,40 @@ func DevToPin(projectDir, scopeDir string, unit *yoestar.Unit, force bool) error
 			return fmt.Errorf("DevToPin: %s has commits beyond upstream; switch back will discard them — pass force=true to confirm", unit.Name)
 		}
 	}
-	if err := os.RemoveAll(srcDir); err != nil {
-		return fmt.Errorf("DevToPin: removing %s: %w", srcDir, err)
+	if unit.Tag == "" {
+		return fmt.Errorf("DevToPin: %s has no tag — nothing to pin to", unit.Name)
 	}
-	if err := writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StateEmpty); err != nil {
-		return fmt.Errorf("DevToPin: clearing state: %w", err)
+
+	// Move the working tree to the pin tag. --force discards any
+	// dev-dirty edits; dev-mod commits become orphaned (still in the
+	// git database but unreachable from HEAD).
+	if _, err := gitCmd(srcDir, "checkout", "--detach", "--force", unit.Tag); err != nil {
+		return fmt.Errorf("DevToPin: checking out %s: %w", unit.Tag, err)
+	}
+	// Remove untracked files that survived the checkout (build output,
+	// editor swap files, etc. — anything the user dropped into the work
+	// tree while in dev mode).
+	if _, err := gitCmd(srcDir, "clean", "-fdx"); err != nil {
+		return fmt.Errorf("DevToPin: cleaning %s: %w", srcDir, err)
+	}
+	// Re-apply patches on top of the pin tag. They were committed in the
+	// original Prepare run but the dev-mode branch checkout orphaned
+	// them, so we replay from the unit's patches list.
+	if err := source.ApplyPatches(projectDir, srcDir, unit); err != nil {
+		return fmt.Errorf("DevToPin: re-applying patches: %w", err)
+	}
+	// Pin semantics: no upstream remote configured. Removing origin is
+	// what flips DetectState from dev → pin. Ignore the error — git
+	// returns non-zero when origin is already absent.
+	_, _ = gitCmd(srcDir, "remote", "remove", "origin")
+	// Reset the local `upstream` git tag back to the pin commit (the
+	// commit pre-patches), matching what source.Prepare leaves behind
+	// for a fresh pin clone.
+	if _, err := gitCmd(srcDir, "tag", "-f", "upstream", unit.Tag); err != nil {
+		return fmt.Errorf("DevToPin: resetting upstream tag: %w", err)
+	}
+	if err := writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StatePin); err != nil {
+		return fmt.Errorf("DevToPin: persisting pin state: %w", err)
 	}
 	return nil
 }

@@ -291,18 +291,23 @@ func TestDevToUpstream_Idempotent(t *testing.T) {
 func TestDevToPin_CleanDev(t *testing.T) {
 	dir := t.TempDir()
 	srcDir, upstreamURL := setupPinnedSrc(t, dir, "openssh")
-	unit := &yoestar.Unit{Name: "openssh", Source: upstreamURL}
+	unit := &yoestar.Unit{Name: "openssh", Source: upstreamURL, Tag: "upstream"}
 	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
 	if err := DevToPin(dir, "x86_64", unit, false); err != nil {
 		t.Fatalf("DevToPin: %v", err)
 	}
-	if _, err := os.Stat(srcDir); !os.IsNotExist(err) {
-		t.Errorf("src dir should be removed after DevToPin, got err=%v", err)
+	// Src dir should exist and be a fresh pin clone (re-cloned by Prepare).
+	if _, err := os.Stat(filepath.Join(srcDir, ".git")); err != nil {
+		t.Errorf("src dir should be re-cloned after DevToPin, got err=%v", err)
 	}
-	if state := readUnitState(t, dir, "openssh"); state != "" {
-		t.Errorf("source_state = %q, want empty", state)
+	gotState, _ := source.DetectState(srcDir)
+	if gotState != source.StatePin {
+		t.Errorf("DetectState after DevToPin = %q, want pin", gotState)
+	}
+	if state := readUnitState(t, dir, "openssh"); state != "pin" {
+		t.Errorf("persisted source_state = %q, want pin", state)
 	}
 }
 
@@ -332,7 +337,7 @@ func TestDevToPin_RefusesDevModWithoutForce(t *testing.T) {
 func TestDevToPin_ForceDiscardsDevMod(t *testing.T) {
 	dir := t.TempDir()
 	srcDir, upstreamURL := setupPinnedSrc(t, dir, "openssh")
-	unit := &yoestar.Unit{Name: "openssh", Source: upstreamURL}
+	unit := &yoestar.Unit{Name: "openssh", Source: upstreamURL, Tag: "upstream"}
 	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
@@ -345,8 +350,12 @@ func TestDevToPin_ForceDiscardsDevMod(t *testing.T) {
 	if err := DevToPin(dir, "x86_64", unit, true); err != nil {
 		t.Fatalf("DevToPin force=true: %v", err)
 	}
-	if _, err := os.Stat(srcDir); !os.IsNotExist(err) {
-		t.Errorf("src dir should be removed after force pin, got err=%v", err)
+	// Src dir re-clones at the pinned ref; the local commit is gone.
+	if _, err := os.Stat(filepath.Join(srcDir, ".git")); err != nil {
+		t.Errorf("src dir should be re-cloned after force pin, got err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(srcDir, "extra.c")); !os.IsNotExist(err) {
+		t.Errorf("local commit's file should be gone after force pin, got err=%v", err)
 	}
 }
 
