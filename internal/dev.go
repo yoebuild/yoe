@@ -262,16 +262,25 @@ func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, opts DevUpst
 		return fmt.Errorf("DevToUpstream: %w", err)
 	}
 
-	// Branch-tracking: advance the working tree to origin/<branch> and
-	// re-point the local `upstream` tag so it counts past branch HEAD.
-	// Order matters — checkout first so a failed checkout doesn't leave
-	// the upstream tag pointing at a ref the work tree never reached.
+	// Branch-tracking: advance the working tree to the branch HEAD and
+	// re-point the local `upstream` tag so dev-mod counts past branch
+	// HEAD. The initial pin clone was single-branch at the pinned tag,
+	// so `refs/remotes/origin/<branch>` may not exist after the
+	// unshallow above. Explicitly fetch the branch and pivot off
+	// FETCH_HEAD, which the fetch always sets — that avoids depending
+	// on the remote-tracking ref being populated.
 	if unit.Branch != "" {
-		ref := "origin/" + unit.Branch
-		if _, err := gitCmd(srcDir, "checkout", "--detach", ref); err != nil {
-			return fmt.Errorf("DevToUpstream: checking out %s: %w", ref, err)
+		if _, err := gitCmd(srcDir, "fetch", "origin", unit.Branch); err != nil {
+			return fmt.Errorf("DevToUpstream: fetching origin %s: %w", unit.Branch, err)
 		}
-		if _, err := gitCmd(srcDir, "tag", "-f", "upstream", ref); err != nil {
+		// Update the remote-tracking ref so the user can `git log
+		// origin/<branch>` from $-shell sessions without re-fetching.
+		// Best-effort — checkout below uses FETCH_HEAD regardless.
+		_, _ = gitCmd(srcDir, "update-ref", "refs/remotes/origin/"+unit.Branch, "FETCH_HEAD")
+		if _, err := gitCmd(srcDir, "checkout", "--detach", "FETCH_HEAD"); err != nil {
+			return fmt.Errorf("DevToUpstream: checking out FETCH_HEAD (origin %s): %w", unit.Branch, err)
+		}
+		if _, err := gitCmd(srcDir, "tag", "-f", "upstream", "FETCH_HEAD"); err != nil {
 			return fmt.Errorf("DevToUpstream: re-pointing upstream tag: %w", err)
 		}
 	}
