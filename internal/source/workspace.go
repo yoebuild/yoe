@@ -42,6 +42,28 @@ func Prepare(projectDir, scopeDir string, unit *yoestar.Unit, cachedSourceState 
 		// fresh prep so the build can proceed instead of erroring.
 	}
 
+	// If the cached state says pin and the existing src dir is a valid
+	// clone whose `upstream` git tag points at the unit's declared pin,
+	// trust it. DevToPin produces exactly this state in place; without
+	// this short-circuit, a cache-miss build (apk deleted, hash drift)
+	// would tear down a freshly-reset dev → pin checkout via the
+	// RemoveAll+clone path below — wasted work, and brittle when the
+	// dir contains files RemoveAll can't handle.
+	//
+	// A .star tag bump invalidates the unit's hash so we wouldn't be
+	// here at all on a cache hit; the check `upstream == unit.Tag`
+	// also catches the cache-miss-with-stale-tag case (user bumped
+	// tag, srcDir is still at the old commit) — that falls through to
+	// clean+clone correctly.
+	if cachedSourceState == string(StatePin) && unit.Tag != "" {
+		if _, err := os.Stat(filepath.Join(srcDir, ".git")); err == nil {
+			if upstreamMatchesTag(srcDir, unit.Tag) {
+				fmt.Fprintf(w, "Using existing pin checkout for %s (upstream at %s)\n", unit.Name, unit.Tag)
+				return srcDir, nil
+			}
+		}
+	}
+
 	// Legacy fallback: a src dir with commits beyond upstream pre-dates
 	// the BuildMeta.SourceState mechanism. Treat it the same as a
 	// dev-mod state so existing yoe-dev workflows keep working.
@@ -101,6 +123,23 @@ func Prepare(projectDir, scopeDir string, unit *yoestar.Unit, cachedSourceState 
 	}
 
 	return srcDir, nil
+}
+
+// upstreamMatchesTag reports whether the local `upstream` git tag in
+// srcDir resolves to the same commit as the unit's declared pin tag.
+// Used to recognize a valid pin checkout (produced by DevToPin or by
+// the freshly-cloned path below). Both refs must resolve cleanly; any
+// git error returns false so the caller falls through to clean+clone.
+func upstreamMatchesTag(srcDir, tag string) bool {
+	upstream, err := exec.Command("git", "-C", srcDir, "rev-parse", "upstream^{commit}").Output()
+	if err != nil {
+		return false
+	}
+	pin, err := exec.Command("git", "-C", srcDir, "rev-parse", tag+"^{commit}").Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(upstream)) == strings.TrimSpace(string(pin))
 }
 
 // makeRemovable walks dir and chmods every entry so a subsequent
