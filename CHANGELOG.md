@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.8] - 2026-05-13
+
 - **Fix patch application when the cache path is relative.** `applyPatches`
   built the patch path relative to the project root (e.g.
   `cache/modules/.../*.patch`) but invoked `git am` with `cmd.Dir = srcDir`, so
