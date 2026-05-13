@@ -197,3 +197,72 @@ func run(t *testing.T, dir, name string, args ...string) {
 		t.Fatalf("%s %s: %v\n%s", name, strings.Join(args, " "), err, out)
 	}
 }
+
+// TestFinalizeSourceState verifies the helper that maps live src dir
+// state into the persisted BuildMeta.SourceState. Fresh pin clones get
+// "pin"; any dev-mode state collapses to "dev"; missing src dirs return
+// empty so the caller preserves whatever the dev toggle set.
+func TestFinalizeSourceState(t *testing.T) {
+	t.Run("missing src dir → empty", func(t *testing.T) {
+		got := finalizeSourceState(filepath.Join(t.TempDir(), "no-src"))
+		if got != "" {
+			t.Errorf("got %q, want empty", got)
+		}
+	})
+
+	t.Run("pin clone → pin", func(t *testing.T) {
+		srcDir := setupPinClone(t)
+		got := finalizeSourceState(srcDir)
+		if got != "pin" {
+			t.Errorf("got %q, want pin", got)
+		}
+	})
+
+	t.Run("dev with origin → dev", func(t *testing.T) {
+		srcDir := setupPinClone(t)
+		// Adding an origin remote flips DetectState to dev.
+		run(t, srcDir, "git", "remote", "add", "origin", "https://example.com/foo.git")
+		got := finalizeSourceState(srcDir)
+		if got != "dev" {
+			t.Errorf("got %q, want dev", got)
+		}
+	})
+
+	t.Run("dev-mod collapses to dev", func(t *testing.T) {
+		srcDir := setupPinClone(t)
+		run(t, srcDir, "git", "remote", "add", "origin", "https://example.com/foo.git")
+		// One commit beyond upstream → DetectState returns dev-mod.
+		os.WriteFile(filepath.Join(srcDir, "patch.c"), []byte("// patch\n"), 0o644)
+		run(t, srcDir, "git", "add", "-A")
+		run(t, srcDir, "git", "commit", "-q", "-m", "local fix")
+		got := finalizeSourceState(srcDir)
+		if got != "dev" {
+			t.Errorf("dev-mod should collapse to dev, got %q", got)
+		}
+	})
+
+	t.Run("dev-dirty collapses to dev", func(t *testing.T) {
+		srcDir := setupPinClone(t)
+		run(t, srcDir, "git", "remote", "add", "origin", "https://example.com/foo.git")
+		os.WriteFile(filepath.Join(srcDir, "dirty.c"), []byte("// dirty\n"), 0o644)
+		got := finalizeSourceState(srcDir)
+		if got != "dev" {
+			t.Errorf("dev-dirty should collapse to dev, got %q", got)
+		}
+	})
+}
+
+// setupPinClone makes a pin-state src dir: a git repo with one commit
+// tagged `upstream`, no origin remote, clean work tree.
+func setupPinClone(t *testing.T) string {
+	t.Helper()
+	srcDir := t.TempDir()
+	run(t, srcDir, "git", "init", "-q", "-b", "main")
+	run(t, srcDir, "git", "config", "user.email", "test@test.com")
+	run(t, srcDir, "git", "config", "user.name", "Test")
+	os.WriteFile(filepath.Join(srcDir, "main.c"), []byte("int main() {}\n"), 0o644)
+	run(t, srcDir, "git", "add", "-A")
+	run(t, srcDir, "git", "commit", "-q", "-m", "upstream commit")
+	run(t, srcDir, "git", "tag", "upstream")
+	return srcDir
+}

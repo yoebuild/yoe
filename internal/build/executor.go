@@ -315,6 +315,14 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 			installedRoot = filepath.Join(installedRoot, "rootfs")
 		}
 		meta.InstalledBytes = DirSize(installedRoot)
+		// Persist live source state so the TUI can render pin/dev
+		// without re-running git on every paint. Detection happens
+		// after build so the src dir is in its final state. Empty
+		// (missing src dir) doesn't overwrite — preserves whatever the
+		// dev toggle set.
+		if persisted := finalizeSourceState(filepath.Join(buildDir, "src")); persisted != source.StateEmpty {
+			meta.SourceState = string(persisted)
+		}
 		// For dev units, capture `git describe --dirty --always` so the
 		// TUI's SOURCE line and the build log can show a meaningful
 		// reference (e.g. v3.4.1-3-gabc1234-dirty). Empty for pin units
@@ -881,4 +889,21 @@ func repoRelPath(proj *yoestar.Project, projectDir string) string {
 		return "repo"
 	}
 	return rel
+}
+
+// finalizeSourceState observes the live state of a unit's src dir and
+// reduces it to the toggle decision (pin or dev) for BuildMeta. The
+// dev-mod / dev-dirty refinements collapse to plain `dev` since only
+// the toggle decision is persisted — the live refinement is observed
+// at TUI render time. Returns StateEmpty when the src dir is missing,
+// signalling the caller to preserve any existing meta.SourceState.
+func finalizeSourceState(srcDir string) source.State {
+	live, err := source.DetectState(srcDir)
+	if err != nil || live == source.StateEmpty {
+		return source.StateEmpty
+	}
+	if source.IsDev(live) {
+		return source.StateDev
+	}
+	return live
 }
