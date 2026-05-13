@@ -5,9 +5,9 @@ load("//classes/tasks.star", "merge_tasks")
 #
 # The class:
 #   1. creates a venv under `install_path` (default /usr/lib/python-venvs/<name>)
-#      inside $DESTDIR using the toolchain container's python3, which is the
-#      same Alpine python3 the target rootfs gets from py3-pip's runtime_dep
-#      chain (so absolute paths baked into the venv resolve at runtime),
+#      inside $DESTDIR using the python3 apk installed into the build sysroot
+#      via deps. The same apk is what the runtime image gets via runtime_deps,
+#      so absolute paths baked into the venv resolve identically on-target.
 #   2. pip-installs the packages listed in `pip_packages`,
 #   3. rewrites every reference to the build-time $DESTDIR-prefixed path back
 #      to the on-target absolute path so the venv is relocatable to /,
@@ -75,6 +75,13 @@ ln -sfn python "$VENV_BUILD/bin/python3"
     all_deps = list(deps)
     if container and ":" not in container and container not in all_deps:
         all_deps.append(container)
+    # python3 and py3-pip aren't in the toolchain container — pull them
+    # into the build sysroot so `python3 -m venv` / pip install run here.
+    # The same apks are used at runtime via runtime_deps.
+    if "python3" not in all_deps:
+        all_deps.append("python3")
+    if "py3-pip" not in all_deps:
+        all_deps.append("py3-pip")
 
     unit(
         name = name,

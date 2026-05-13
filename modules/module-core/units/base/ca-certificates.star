@@ -5,7 +5,7 @@ unit(
     sha256 = "33b44ef78653ecd3f0f2f13e5bba6be466be2e7da72182f737912b81798ba5d2",
     license = "MPL-2.0",
     description = "Mozilla CA certificates bundle for TLS verification",
-    deps = ["openssl", "toolchain-musl"],
+    deps = ["openssl", "toolchain-musl", "python3"],
     runtime_deps = ["openssl"],
     # Source-built ca-certificates ships both the cert bundle (cert.pem,
     # certs/ca-certificates.crt) and the individual certs that Alpine
