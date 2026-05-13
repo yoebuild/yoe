@@ -302,7 +302,7 @@ func TestDevToPin_CleanDev(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(srcDir, ".git")); err != nil {
 		t.Errorf("src dir should be re-cloned after DevToPin, got err=%v", err)
 	}
-	gotState, _ := source.DetectState(srcDir)
+	gotState, _ := source.DetectState(srcDir, source.StatePin)
 	if gotState != source.StatePin {
 		t.Errorf("DetectState after DevToPin = %q, want pin", gotState)
 	}
@@ -433,7 +433,7 @@ func TestDevPromoteToPin_HEADWithoutTag_WritesSHA(t *testing.T) {
 		t.Errorf(".star tag should be HEAD sha %q, got:\n%s", wantSha, got)
 	}
 	// State should be dev (upstream tag advanced to HEAD).
-	state, _ := source.DetectState(srcDir)
+	state, _ := source.DetectState(srcDir, source.StateDev)
 	if state != source.StateDev {
 		t.Errorf("post-pin state = %q, want %q", state, source.StateDev)
 	}

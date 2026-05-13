@@ -27,6 +27,14 @@ and this project adheres to
   yoe-managed checkouts instead of leaving the cell blank. Unbuilt units (or
   image/container units with no source dir) still render blank.
 
+- **`dev → pin` resets the existing clone instead of deleting it.** Toggling
+  back to pin used to remove the src dir and wait for the next `yoe build` to
+  re-clone, which looked like data loss. It now resets the working tree to the
+  pin tag in place, re-applies patches, and keeps the clone's full history — no
+  cache lookup, no re-fetch. The origin remote stays configured so a future
+  toggle back to dev is immediate, and the pin/dev distinction lives entirely in
+  the persisted toggle decision rather than whether origin is set.
+
 - **Fix patch application when the cache path is relative.** `applyPatches`
   built the patch path relative to the project root (e.g.
   `cache/modules/.../*.patch`) but invoked `git am` with `cmd.Dir = srcDir`, so

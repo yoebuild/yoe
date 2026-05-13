@@ -204,7 +204,7 @@ func run(t *testing.T, dir, name string, args ...string) {
 // empty so the caller preserves whatever the dev toggle set.
 func TestFinalizeSourceState(t *testing.T) {
 	t.Run("missing src dir → empty", func(t *testing.T) {
-		got := finalizeSourceState(filepath.Join(t.TempDir(), "no-src"))
+		got := finalizeSourceState(filepath.Join(t.TempDir(), "no-src"), "")
 		if got != "" {
 			t.Errorf("got %q, want empty", got)
 		}
@@ -212,7 +212,7 @@ func TestFinalizeSourceState(t *testing.T) {
 
 	t.Run("pin clone → pin", func(t *testing.T) {
 		srcDir := setupPinClone(t)
-		got := finalizeSourceState(srcDir)
+		got := finalizeSourceState(srcDir, "")
 		if got != "pin" {
 			t.Errorf("got %q, want pin", got)
 		}
@@ -222,7 +222,7 @@ func TestFinalizeSourceState(t *testing.T) {
 		srcDir := setupPinClone(t)
 		// Adding an origin remote flips DetectState to dev.
 		run(t, srcDir, "git", "remote", "add", "origin", "https://example.com/foo.git")
-		got := finalizeSourceState(srcDir)
+		got := finalizeSourceState(srcDir, "")
 		if got != "dev" {
 			t.Errorf("got %q, want dev", got)
 		}
@@ -235,7 +235,7 @@ func TestFinalizeSourceState(t *testing.T) {
 		os.WriteFile(filepath.Join(srcDir, "patch.c"), []byte("// patch\n"), 0o644)
 		run(t, srcDir, "git", "add", "-A")
 		run(t, srcDir, "git", "commit", "-q", "-m", "local fix")
-		got := finalizeSourceState(srcDir)
+		got := finalizeSourceState(srcDir, "")
 		if got != "dev" {
 			t.Errorf("dev-mod should collapse to dev, got %q", got)
 		}
@@ -245,9 +245,20 @@ func TestFinalizeSourceState(t *testing.T) {
 		srcDir := setupPinClone(t)
 		run(t, srcDir, "git", "remote", "add", "origin", "https://example.com/foo.git")
 		os.WriteFile(filepath.Join(srcDir, "dirty.c"), []byte("// dirty\n"), 0o644)
-		got := finalizeSourceState(srcDir)
+		got := finalizeSourceState(srcDir, "")
 		if got != "dev" {
 			t.Errorf("dev-dirty should collapse to dev, got %q", got)
+		}
+	})
+
+	t.Run("clean+origin+cached-pin → pin", func(t *testing.T) {
+		// New design: pin keeps origin configured. Cached state is
+		// authoritative for distinguishing pin from dev.
+		srcDir := setupPinClone(t)
+		run(t, srcDir, "git", "remote", "add", "origin", "https://example.com/foo.git")
+		got := finalizeSourceState(srcDir, "pin")
+		if got != "pin" {
+			t.Errorf("origin+cached-pin should stay pin, got %q", got)
 		}
 	})
 }

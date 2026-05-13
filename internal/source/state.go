@@ -18,14 +18,16 @@ const (
 	// unit hasn't been built yet, or its source dir was wiped.
 	StateEmpty State = ""
 
-	// StatePin is a yoe-managed shallow clone: no upstream remote
-	// configured. Yoe owns this dir and is free to overwrite it on
-	// rebuild.
+	// StatePin is a yoe-managed clone whose working tree is the unit's
+	// pinned ref + applied patches. Yoe owns this dir and is free to
+	// overwrite it on rebuild. Origin may or may not be configured —
+	// the pin/dev distinction is the user's toggle decision, persisted
+	// in BuildMeta.SourceState, not a git-state observation.
 	StatePin State = "pin"
 
-	// StateDev is a dev-mode checkout: upstream remote configured,
-	// HEAD on the upstream tag's commit, work tree clean, no local
-	// commits beyond upstream.
+	// StateDev is a dev-mode checkout: user-managed, origin remote
+	// configured (so push/pull/fetch work), HEAD wherever the user
+	// chose, work tree clean, no local commits beyond the dev anchor.
 	StateDev State = "dev"
 
 	// StateDevMod is dev mode plus commits beyond the upstream tag,
@@ -53,9 +55,18 @@ func IsDev(s State) bool {
 }
 
 // DetectState returns the source state for the working tree at srcDir.
-// The result is derived purely from local git state — `git remote
-// get-url origin`, `git status --porcelain`, `git rev-list --count
-// upstream..HEAD`. No fetch, no network.
+// The result is derived from local git state — `git status --porcelain`,
+// `git rev-list --count upstream..HEAD` — plus the caller's `cached`
+// toggle decision. No fetch, no network.
+//
+// `cached` is the unit's previously-persisted BuildMeta.SourceState
+// (StatePin or StateDev). It disambiguates clean checkouts, where the
+// git state is identical for pin and dev. Pass StateEmpty (or
+// equivalently the empty string) when the cache is unknown — the
+// result then falls back to:
+//   - StatePin if no origin remote is configured (legacy pin clones
+//     from before pin kept origin set, or a totally fresh checkout)
+//   - StateDev otherwise
 //
 // StateEmpty is returned (with no error) when the src dir doesn't exist
 // or has no `.git` directory. Both are normal conditions for an unbuilt
@@ -65,20 +76,12 @@ func IsDev(s State) bool {
 // missing because the dir was hand-edited into a corrupted state),
 // DetectState returns the best-effort state plus a non-nil error so the
 // caller can log without losing the visible rendering.
-func DetectState(srcDir string) (State, error) {
+func DetectState(srcDir string, cached State) (State, error) {
 	if _, err := os.Stat(filepath.Join(srcDir, ".git")); err != nil {
 		if os.IsNotExist(err) {
 			return StateEmpty, nil
 		}
 		return StateEmpty, err
-	}
-
-	// `git remote get-url origin` exits non-zero when origin isn't
-	// configured — that's the pin signal, not an error. We swallow
-	// the error and look at the output: empty string means no remote.
-	remote, _ := stateGit(srcDir, "remote", "get-url", "origin")
-	if strings.TrimSpace(remote) == "" {
-		return StatePin, nil
 	}
 
 	dirty, err := stateGit(srcDir, "status", "--porcelain")
@@ -97,6 +100,22 @@ func DetectState(srcDir string) (State, error) {
 	}
 	if strings.TrimSpace(ahead) != "0" {
 		return StateDevMod, nil
+	}
+
+	// Clean working tree: pin vs dev is the toggle decision, not
+	// derivable from git state alone. Honor the cached value when set.
+	if cached == StatePin {
+		return StatePin, nil
+	}
+	if cached == StateDev {
+		return StateDev, nil
+	}
+	// Unknown cache: fall back to the origin-remote heuristic. No
+	// origin means a legacy pin (pre-keep-origin-in-pin builds) or a
+	// brand-new shallow clone; otherwise default to dev.
+	remote, _ := stateGit(srcDir, "remote", "get-url", "origin")
+	if strings.TrimSpace(remote) == "" {
+		return StatePin, nil
 	}
 	return StateDev, nil
 }

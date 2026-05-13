@@ -104,7 +104,7 @@ func ModuleToPin(m yoestar.ResolvedModule, force bool) error {
 	}
 
 	if !force {
-		state, _ := source.DetectState(repo)
+		state, _ := source.DetectState(repo, ReadState(repo))
 		switch state {
 		case source.StateDevDirty:
 			return fmt.Errorf("ModuleToPin: %s has uncommitted edits; commit/stash or pass force=true", m.Name)

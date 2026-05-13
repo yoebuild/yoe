@@ -354,7 +354,7 @@ func devPinnedRef(unit *yoestar.Unit) string {
 // when local work is at stake.
 func DevToPin(projectDir, scopeDir string, unit *yoestar.Unit, force bool) error {
 	srcDir := devSrcDir(projectDir, scopeDir, unit.Name)
-	state, _ := source.DetectState(srcDir)
+	state, _ := source.DetectState(srcDir, readUnitSourceState(projectDir, scopeDir, unit.Name))
 	if !force {
 		switch state {
 		case source.StateDevDirty:
@@ -385,10 +385,10 @@ func DevToPin(projectDir, scopeDir string, unit *yoestar.Unit, force bool) error
 	if err := source.ApplyPatches(projectDir, srcDir, unit); err != nil {
 		return fmt.Errorf("DevToPin: re-applying patches: %w", err)
 	}
-	// Pin semantics: no upstream remote configured. Removing origin is
-	// what flips DetectState from dev → pin. Ignore the error — git
-	// returns non-zero when origin is already absent.
-	_, _ = gitCmd(srcDir, "remote", "remove", "origin")
+	// Origin remote stays configured — keeping the user's full history
+	// and saving a re-fetch if they toggle back to dev later. The
+	// pin/dev distinction is the persisted toggle decision, not whether
+	// origin is set.
 	// Reset the local `upstream` git tag back to the pin commit (the
 	// commit pre-patches), matching what source.Prepare leaves behind
 	// for a fresh pin clone.
@@ -419,6 +419,25 @@ func httpsToSSH(httpsURL string) (string, bool) {
 		return httpsURL, false
 	}
 	return "git@" + u.Host + ":" + path, true
+}
+
+// readUnitSourceState reads the cached BuildMeta.SourceState for a
+// unit. Returns StateEmpty when the meta file is missing or
+// unreadable — the caller passes that to DetectState, which falls
+// back to the origin-remote heuristic.
+func readUnitSourceState(projectDir, scopeDir, unitName string) source.State {
+	buildDir := filepath.Join(projectDir, "build", unitName+"."+scopeDir)
+	data, err := os.ReadFile(filepath.Join(buildDir, "build.json"))
+	if err != nil {
+		return source.StateEmpty
+	}
+	var meta struct {
+		SourceState string `json:"source_state,omitempty"`
+	}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return source.StateEmpty
+	}
+	return source.State(meta.SourceState)
 }
 
 // writeUnitSourceState updates BuildMeta.SourceState in the unit's
@@ -479,7 +498,7 @@ func writeUnitSourceState(projectDir, scopeDir, unitName string, state source.St
 // `dev`. The working tree commit is unchanged.
 func DevPromoteToPin(projectDir, scopeDir string, unit *yoestar.Unit) error {
 	srcDir := devSrcDir(projectDir, scopeDir, unit.Name)
-	state, _ := source.DetectState(srcDir)
+	state, _ := source.DetectState(srcDir, readUnitSourceState(projectDir, scopeDir, unit.Name))
 	switch state {
 	case source.StateDev, source.StateDevMod:
 		// proceed

@@ -125,7 +125,10 @@ func (w *sourceWatcher) tick() {
 	w.mu.Unlock()
 
 	for _, it := range snapshot {
-		cur, _ := source.DetectState(it.dir)
+		// Pass `it.last` as the cached state so DetectState can
+		// distinguish pin from clean dev (their git state is identical
+		// when origin is set, which is now the default for pin too).
+		cur, _ := source.DetectState(it.dir, it.last)
 		if cur == it.last {
 			continue
 		}

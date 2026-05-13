@@ -155,7 +155,7 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 			return ""
 		}
 		srcDir := filepath.Join(buildDir, "src")
-		liveState, _ := source.DetectState(srcDir)
+		liveState, _ := source.DetectState(srcDir, persisted)
 		if !source.IsDev(liveState) {
 			// Persisted says dev but the live dir disagrees (user
 			// wiped it, no .git, etc.). Fall back to the persisted
@@ -320,8 +320,8 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		// after build so the src dir is in its final state. Empty
 		// (missing src dir) doesn't overwrite — preserves whatever the
 		// dev toggle set.
-		if persisted := finalizeSourceState(filepath.Join(buildDir, "src")); persisted != source.StateEmpty {
-			meta.SourceState = string(persisted)
+		if next := finalizeSourceState(filepath.Join(buildDir, "src"), source.State(meta.SourceState)); next != source.StateEmpty {
+			meta.SourceState = string(next)
 		}
 		// For dev units, capture `git describe --dirty --always` so the
 		// TUI's SOURCE line and the build log can show a meaningful
@@ -895,10 +895,13 @@ func repoRelPath(proj *yoestar.Project, projectDir string) string {
 // reduces it to the toggle decision (pin or dev) for BuildMeta. The
 // dev-mod / dev-dirty refinements collapse to plain `dev` since only
 // the toggle decision is persisted — the live refinement is observed
-// at TUI render time. Returns StateEmpty when the src dir is missing,
-// signalling the caller to preserve any existing meta.SourceState.
-func finalizeSourceState(srcDir string) source.State {
-	live, err := source.DetectState(srcDir)
+// at TUI render time. `cached` is the previously-persisted SourceState
+// (or empty for a fresh build), used to disambiguate clean checkouts
+// where pin and dev share identical git state. Returns StateEmpty when
+// the src dir is missing, signalling the caller to preserve any
+// existing meta.SourceState.
+func finalizeSourceState(srcDir string, cached source.State) source.State {
+	live, err := source.DetectState(srcDir, cached)
 	if err != nil || live == source.StateEmpty {
 		return source.StateEmpty
 	}
