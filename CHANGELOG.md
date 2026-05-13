@@ -8,6 +8,14 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`yoe deploy` actually installs dev-mode rebuilds.** Deploy now runs
+  `apk add --force-reinstall` instead of `apk add --upgrade` on the target. Dev
+  iteration rebuilds the apk content without bumping the `pkgver-r<rel>`
+  version, so the old `--upgrade` path saw same-version and skipped the install
+  — silently dropping the user's edits. A deploy is an explicit "put this
+  content on the device" action, so reinstall regardless of version is the right
+  semantic.
+
 - **Dev mode can track an upstream branch automatically.** A unit that declares
   both `tag` and `branch` now flips to `origin/<branch>` HEAD on a local branch
   named `<branch>` when toggled into dev mode — `git pull`, `git push`, and
