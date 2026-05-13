@@ -382,6 +382,14 @@ func devPinnedRef(unit *yoestar.Unit) string {
 // when local work is at stake.
 func DevToPin(projectDir, scopeDir string, unit *yoestar.Unit, force bool) error {
 	srcDir := devSrcDir(projectDir, scopeDir, unit.Name)
+	// Refuse to touch anything if srcDir isn't a self-contained git
+	// repo. Without this guard, git commands run with cmd.Dir=srcDir
+	// silently walk up to a parent .git (the user's project repo) and
+	// destructively operate on the WRONG tree — git clean -fdx wiping
+	// the project's build/, cache/, etc.
+	if _, err := os.Stat(filepath.Join(srcDir, ".git")); err != nil {
+		return fmt.Errorf("DevToPin: %s is not a git repo (missing .git) — build the unit first", srcDir)
+	}
 	state, _ := source.DetectState(srcDir, readUnitSourceState(projectDir, scopeDir, unit.Name))
 	if !force {
 		switch state {
@@ -397,15 +405,15 @@ func DevToPin(projectDir, scopeDir string, unit *yoestar.Unit, force bool) error
 
 	// Move the working tree to the pin tag. --force discards any
 	// dev-dirty edits; dev-mod commits become orphaned (still in the
-	// git database but unreachable from HEAD).
+	// git database but unreachable from HEAD). We deliberately do NOT
+	// follow this with `git clean -fdx` — that command operates on the
+	// whole working tree and, if git's view of the work tree is wrong
+	// for any reason, can destructively touch directories outside the
+	// unit's src dir. Untracked files that survive the checkout (build
+	// output, editor swap files) are tolerable as a pin-mode soft
+	// edge; correctness trumps tidiness.
 	if _, err := gitCmd(srcDir, "checkout", "--detach", "--force", unit.Tag); err != nil {
 		return fmt.Errorf("DevToPin: checking out %s: %w", unit.Tag, err)
-	}
-	// Remove untracked files that survived the checkout (build output,
-	// editor swap files, etc. — anything the user dropped into the work
-	// tree while in dev mode).
-	if _, err := gitCmd(srcDir, "clean", "-fdx"); err != nil {
-		return fmt.Errorf("DevToPin: cleaning %s: %w", srcDir, err)
 	}
 	// Re-apply patches on top of the pin tag. They were committed in the
 	// original Prepare run but the dev-mode branch checkout orphaned
