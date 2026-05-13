@@ -1,7 +1,7 @@
 ---
 title: "feat: Branch-aware dev mode and simplified pin-to-current"
 type: feat
-status: active
+status: completed
 date: 2026-05-13
 origin: docs/brainstorms/2026-05-08-source-dev-mode-requirements.md
 supersedes: docs/plans/2026-05-08-001-feat-source-dev-mode-toggle-plan.md
