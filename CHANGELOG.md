@@ -8,6 +8,29 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Fix patch application when the cache path is relative.** `applyPatches`
+  built the patch path relative to the project root (e.g.
+  `cache/modules/.../*.patch`) but invoked `git am` with `cmd.Dir = srcDir`, so
+  git looked for the file inside the source tree and failed with
+  `could not open '...patch'`. The path is now resolved to absolute before exec.
+  The bug was masked in long-lived build dirs because `src/` already had the
+  patches committed and the prep step short-circuits via the "commits beyond
+  upstream" check; fresh builds (or any project with `YOE_CACHE` unset and
+  modules pulled from cache) hit it.
+
+- **Language runtimes move out of the toolchain container.** `nodejs`, `npm`,
+  `python3`, `py3-setuptools`, and `py3-pip` are no longer baked into
+  `toolchain-musl`'s Dockerfile. `nodejs_app` and `python_venv` now add the
+  matching apks to `deps`, so the same Alpine prebuilt the device runs is also
+  what builds the unit. Projects that don't use Python or Node.js stop paying
+  for them entirely; bumping a runtime version is now a unit edit rather than a
+  Dockerfile change. Matches the bun setup and CLAUDE.md's "no installing
+  packages in the container" rule. **Migration:** any unit that invokes
+  `python3`, `node`, or `npm` in its build steps without using the corresponding
+  class now needs the runtime in its `deps` (`meson` and `ca-certificates` are
+  updated in this release as examples). The `toolchain-musl` container version
+  bumps to 19 so the leaner image rebuilds on first use.
+
 ## [0.10.7] - 2026-05-12
 
 - **Bun apps can ship as part of an image.** A new `bun_app` class packages a

@@ -56,12 +56,13 @@ RUN apk add --no-cache \
     diffutils \
     findutils \
     sed \
-    python3 \
-    py3-setuptools \
-    py3-pip \
-    nodejs \
-    npm \
     cmake
+
+# Per-language runtimes (python3, nodejs/npm, bun) are NOT installed here.
+# The python_venv and nodejs_app / bun_app classes add their runtimes to
+# unit.deps so the apks land in the per-unit sysroot at build time —
+# matching CLAUDE.md's "no installing packages in the container" rule and
+# letting each project pin its own runtime version.
 
 # x86-only packages (bootloader, firmware) — skip on other arches
 RUN if [ "$(uname -m)" = "x86_64" ]; then \

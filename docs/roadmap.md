@@ -8,8 +8,14 @@
 
 ## Next
 
-- yoe unit
-
+- yoe unit that builds in place
+- Record tasks that succeed in build.json, and build starts with the first
+  uncompleted task. This eliminates re-running configure steps when doing
+  incremental development.
+- on unit detail, list tasks and allow restarting the build at a certain task.
+  Useful for incremental development.
+- Allow running yoe build/deploy in a unit build src dir. We walk up the
+  directory to learn what unit it is, and load the project.
 - why do modules not show pin on startup?
 - module dev status should update
 - video on src modifications

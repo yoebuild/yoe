@@ -102,6 +102,13 @@ fi
     all_deps = list(deps)
     if container and ":" not in container and container not in all_deps:
         all_deps.append(container)
+    # nodejs and npm aren't in the toolchain container — pull them into
+    # the build sysroot so `npm install` / `npm ci` run here. The same
+    # apks are used at runtime via runtime_deps.
+    if "nodejs" not in all_deps:
+        all_deps.append("nodejs")
+    if "npm" not in all_deps:
+        all_deps.append("npm")
 
     unit(
         name = name,
