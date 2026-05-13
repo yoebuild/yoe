@@ -628,6 +628,12 @@ func TestDevToUpstream_BranchDeclared_ChecksOutBranchHead(t *testing.T) {
 	if count != "0" {
 		t.Errorf("rev-list upstream..HEAD = %s, want 0", count)
 	}
+	// User should land on a local branch named `main`, not detached HEAD,
+	// so `git pull`/`git push` work in the $-shell.
+	branch := strings.TrimSpace(runOut(t, srcDir, "git", "rev-parse", "--abbrev-ref", "HEAD"))
+	if branch != "main" {
+		t.Errorf("HEAD is on %q, want local branch main (not detached)", branch)
+	}
 }
 
 func TestDevToUpstream_TagOnly_LeavesWorkingTreeAtPin(t *testing.T) {

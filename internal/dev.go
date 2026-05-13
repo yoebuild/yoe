@@ -262,25 +262,39 @@ func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, opts DevUpst
 		return fmt.Errorf("DevToUpstream: %w", err)
 	}
 
-	// Branch-tracking: advance the working tree to the branch HEAD and
-	// re-point the local `upstream` tag so dev-mod counts past branch
-	// HEAD. The initial pin clone was single-branch at the pinned tag,
-	// so `refs/remotes/origin/<branch>` may not exist after the
-	// unshallow above. Explicitly fetch the branch and pivot off
-	// FETCH_HEAD, which the fetch always sets — that avoids depending
-	// on the remote-tracking ref being populated.
+	// Branch-tracking: check out a local branch named after the
+	// declared branch, tracking origin/<branch>, so the user gets a
+	// natural dev workflow — `git pull`, `git push`, and `git log @{u}..`
+	// all work without thinking about detached HEAD.
+	//
+	// The initial pin clone was single-branch at the pinned tag, so
+	// `refs/remotes/origin/<branch>` may not exist and the repo may
+	// still be shallow at the pin's neighborhood. Force a deep fetch
+	// of the branch (`--depth=2147483647` deepens to the full history
+	// available, ignoring any prior shallow constraint), then create
+	// or reset a local branch at FETCH_HEAD and configure it to track
+	// origin/<branch>.
 	if unit.Branch != "" {
-		if _, err := gitCmd(srcDir, "fetch", "origin", unit.Branch); err != nil {
+		if _, err := gitCmd(srcDir, "fetch", "--depth=2147483647", "origin", unit.Branch); err != nil {
 			return fmt.Errorf("DevToUpstream: fetching origin %s: %w", unit.Branch, err)
 		}
-		// Update the remote-tracking ref so the user can `git log
-		// origin/<branch>` from $-shell sessions without re-fetching.
-		// Best-effort — checkout below uses FETCH_HEAD regardless.
+		// Update the remote-tracking ref so `git log origin/<branch>`
+		// works from $-shell without re-fetching, and the local-branch
+		// upstream setup below has something to point at.
 		_, _ = gitCmd(srcDir, "update-ref", "refs/remotes/origin/"+unit.Branch, "FETCH_HEAD")
-		if _, err := gitCmd(srcDir, "checkout", "--detach", "FETCH_HEAD"); err != nil {
-			return fmt.Errorf("DevToUpstream: checking out FETCH_HEAD (origin %s): %w", unit.Branch, err)
+		// -B creates or resets the local branch to FETCH_HEAD. On the
+		// first toggle this creates <branch>; on subsequent toggles it
+		// resets — fine because pin → dev is always a fresh start,
+		// and DevToPin already required force=true for dev-mod to
+		// discard prior local work.
+		if _, err := gitCmd(srcDir, "checkout", "-B", unit.Branch, "FETCH_HEAD"); err != nil {
+			return fmt.Errorf("DevToUpstream: creating local branch %s: %w", unit.Branch, err)
 		}
-		if _, err := gitCmd(srcDir, "tag", "-f", "upstream", "FETCH_HEAD"); err != nil {
+		// Set the local branch's upstream so plain `git pull` /
+		// `git push` work. Best-effort — the checkout above is the
+		// load-bearing step.
+		_, _ = gitCmd(srcDir, "branch", "--set-upstream-to=origin/"+unit.Branch, unit.Branch)
+		if _, err := gitCmd(srcDir, "tag", "-f", "upstream", "HEAD"); err != nil {
 			return fmt.Errorf("DevToUpstream: re-pointing upstream tag: %w", err)
 		}
 	}
