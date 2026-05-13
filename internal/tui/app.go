@@ -1652,6 +1652,10 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.message = fmt.Sprintf("Clean failed: %v", err)
 			} else {
 				m.statuses[name] = statusNone
+				// Drop the cached source state and disarm the watcher
+				// — BuildMeta.SourceState is gone, the next render
+				// shows the SRC column as blank (empty state).
+				m.invalidateUnitState(name)
 				m.message = fmt.Sprintf("Cleaned %s", name)
 			}
 		} else if action == "quit" {
@@ -1667,6 +1671,7 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				for _, name := range m.units {
 					m.statuses[name] = statusNone
+					m.invalidateUnitState(name)
 				}
 				m.message = "Cleaned all build artifacts"
 			}
