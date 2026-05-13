@@ -11,6 +11,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -4102,10 +4103,42 @@ func (m model) detailSourceLine() string {
 	if state == source.StatePin && u.Tag != "" {
 		parts = append(parts, dimStyle.Render("(pinned at "+u.Tag+")"))
 	}
+	// Branch-tracking dev unit: surface "tracking origin/<branch>" plus,
+	// when the working tree has moved past the pin tag, "(N commits past
+	// <tag>)". The count comes from `git rev-list <tag>..HEAD` — a one-off
+	// invocation per detail-page render, fast enough not to warrant
+	// caching alongside the state cache.
+	if source.IsDev(state) && u.Branch != "" {
+		hint := "tracking origin/" + u.Branch
+		if u.Tag != "" {
+			if n := commitsPast(srcDir, u.Tag); n > 0 {
+				hint += fmt.Sprintf(" (%d commits past %s)", n, u.Tag)
+			}
+		}
+		parts = append(parts, dimStyle.Render(hint))
+	}
 	if meta := build.ReadMeta(buildDir); meta != nil && meta.SourceDescribe != "" {
 		parts = append(parts, dimStyle.Render(meta.SourceDescribe))
 	}
 	return strings.Join(parts, "  ")
+}
+
+// commitsPast returns how many commits HEAD is past the given ref in
+// srcDir. Returns 0 on any error (ref unknown, not a git dir, etc.) —
+// the hint is purely informational, so silently dropping it is the
+// right failure mode.
+func commitsPast(srcDir, ref string) int {
+	cmd := exec.Command("git", "rev-list", "--count", ref+"..HEAD")
+	cmd.Dir = srcDir
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // remoteOriginURL returns `git remote get-url origin` for srcDir, or
