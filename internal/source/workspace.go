@@ -435,6 +435,11 @@ func applyPatches(projectDir, srcDir string, unit *yoestar.Unit) error {
 		if _, err := os.Stat(patchPath); os.IsNotExist(err) {
 			return fmt.Errorf("patch file not found: %s", patchFile)
 		}
+		// git am/apply runs with cmd.Dir = srcDir, so a project-relative
+		// path won't resolve. Convert to absolute before invoking git.
+		if abs, err := filepath.Abs(patchPath); err == nil {
+			patchPath = abs
+		}
 
 		// Apply with git am (preserves commit message from patch)
 		cmd := exec.Command("git", "am", "--3way", patchPath)
