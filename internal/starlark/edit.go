@@ -43,31 +43,6 @@ func RewriteUnitField(starPath, unitName, field, value string) error {
 	return atomicWrite(starPath, content[:start]+updated+content[end:])
 }
 
-// RemoveUnitField drops the `field = ...` line from the unit's call
-// block if present. No-op if the field doesn't exist (returns nil).
-// Used together with RewriteUnitField when promoting from one
-// pin-form to another (e.g. branch → tag): rewrite the new field, then
-// remove the now-stale field.
-func RemoveUnitField(starPath, unitName, field string) error {
-	data, err := os.ReadFile(starPath)
-	if err != nil {
-		return fmt.Errorf("reading %s: %w", starPath, err)
-	}
-	content := string(data)
-
-	start, end, ok := findUnitBlock(content, unitName)
-	if !ok {
-		return fmt.Errorf("%s: unit %q not found", starPath, unitName)
-	}
-
-	block := content[start:end]
-	updated := removeFieldFromBlock(block, field)
-	if updated == block {
-		return nil
-	}
-	return atomicWrite(starPath, content[:start]+updated+content[end:])
-}
-
 // findUnitBlock returns the byte range of the call expression whose
 // `name = "<unitName>"` field matches. The returned span starts at the
 // function-name token (`unit`, `autotools`, etc.) and ends at the
@@ -176,17 +151,6 @@ func rewriteFieldInBlock(block, field, value string) (string, error) {
 	indent := block[loc[2]:loc[3]]
 	insertion := indent + field + ` = "` + value + `",` + "\n"
 	return block[:loc[1]] + insertion + block[loc[1]:], nil
-}
-
-// removeFieldFromBlock drops the `field = ...` line from block,
-// including its trailing newline. Returns block unchanged if the field
-// isn't present.
-func removeFieldFromBlock(block, field string) string {
-	// Match the whole line including the trailing \n so we don't leave
-	// a blank line behind.
-	lineRE := regexp.MustCompile(`(?m)^[ \t]+` + regexp.QuoteMeta(field) +
-		`\s*=\s*"[^"]*"\s*,?[^\n]*\n`)
-	return lineRE.ReplaceAllString(block, "")
 }
 
 // atomicWrite writes data to path via a tmp file in the same dir and

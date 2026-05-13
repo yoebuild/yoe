@@ -429,45 +429,34 @@ func writeUnitSourceState(projectDir, scopeDir, unitName string, state source.St
 	return os.WriteFile(metaPath, out, 0o644)
 }
 
-// PinKind selects which form of pin to write when promoting a dev-mod
-// unit's HEAD into the .star.
-type PinKind string
-
-const (
-	// PinKindTag pins to the git tag at HEAD. Errors if HEAD has no
-	// tag — the caller should disable this option in the UI prompt.
-	PinKindTag PinKind = "tag"
-	// PinKindHash pins to the 40-char sha at HEAD. Always available;
-	// most reproducible.
-	PinKindHash PinKind = "hash"
-	// PinKindBranch pins to the current branch name. Mutable —
-	// breaks build reproducibility — surface a warning in the UI.
-	PinKindBranch PinKind = "branch"
-)
-
 // DevPromoteToPin captures the dev-mode checkout's current HEAD into
-// the unit's .star definition. State must be StateDevMod (commits
-// beyond upstream, work tree clean); other states return an error so
-// the caller can render an appropriate UI hint instead of silently
-// no-oping.
+// the unit's .star `tag` field. Picks the form automatically:
 //
-// On success: rewrites the unit's `tag` (PinKindTag/Hash) or `branch`
-// (PinKindBranch) field, removes the now-stale alternate field, and
-// advances the local `upstream` git tag to HEAD so
-// `git rev-list upstream..HEAD` returns 0 — the unit transitions from
-// `dev-mod` to plain `dev` as the visible acknowledgement that
-// pinned == checked-out.
+//   - if HEAD has a git tag (annotated or lightweight), the tag name is
+//     written;
+//   - otherwise the 40-char SHA is written.
 //
-// The unit's working tree commit is unchanged. A subsequent
-// pin-mode rebuild will re-clone shallow at the new ref; the user's
-// branch and any uncommitted state-dirty work would survive in dev
-// mode (uncommitted edits aren't possible in StateDevMod by
-// definition).
-func DevPromoteToPin(projectDir, scopeDir string, unit *yoestar.Unit, kind PinKind) error {
+// Never writes the `branch` field — branch tracking is declared by the
+// unit author, the pin command only updates the pin.
+//
+// Allowed in StateDev and StateDevMod. StateDevDirty returns an error
+// (commit or stash first so the captured state is reproducible). Other
+// states (pin, empty) are no-ops with an informative error.
+//
+// On success: rewrites the unit's `tag` field and advances the local
+// `upstream` git tag to HEAD so `git rev-list upstream..HEAD` returns 0
+// — the unit transitions from `dev-mod` (if it was there) to plain
+// `dev`. The working tree commit is unchanged.
+func DevPromoteToPin(projectDir, scopeDir string, unit *yoestar.Unit) error {
 	srcDir := devSrcDir(projectDir, scopeDir, unit.Name)
 	state, _ := source.DetectState(srcDir)
-	if state != source.StateDevMod {
-		return fmt.Errorf("DevPromoteToPin: unit %q is in state %q; promote requires dev-mod (commit dirty edits or there's nothing to promote)",
+	switch state {
+	case source.StateDev, source.StateDevMod:
+		// proceed
+	case source.StateDevDirty:
+		return fmt.Errorf("DevPromoteToPin: %s has uncommitted edits; commit or stash first to pin current state", unit.Name)
+	default:
+		return fmt.Errorf("DevPromoteToPin: unit %q is in state %q; pin requires dev or dev-mod",
 			unit.Name, state)
 	}
 
@@ -476,49 +465,25 @@ func DevPromoteToPin(projectDir, scopeDir string, unit *yoestar.Unit, kind PinKi
 		return fmt.Errorf("DevPromoteToPin: %w", err)
 	}
 
-	var newField, newValue, removeField string
-	switch kind {
-	case PinKindTag:
-		// Pick a git tag pointing at HEAD. If there are several, pick
-		// the first sorted lexicographically — deterministic without
-		// requiring annotated tags.
-		out, err := gitCmd(srcDir, "tag", "--points-at", "HEAD")
-		if err != nil {
-			return fmt.Errorf("DevPromoteToPin: %w", err)
+	// Pick a git tag pointing at HEAD when one exists; otherwise the
+	// 40-char SHA. Multiple tags at HEAD: take the first (deterministic
+	// without requiring annotated tags).
+	var value string
+	if out, err := gitCmd(srcDir, "tag", "--points-at", "HEAD"); err == nil {
+		if tags := strings.Fields(out); len(tags) > 0 {
+			value = tags[0]
 		}
-		tags := strings.Fields(out)
-		if len(tags) == 0 {
-			return fmt.Errorf("DevPromoteToPin: HEAD has no tag — pick PinKindHash or PinKindBranch instead")
-		}
-		newField, newValue = "tag", tags[0]
-		removeField = "branch"
-	case PinKindHash:
+	}
+	if value == "" {
 		out, err := gitCmd(srcDir, "rev-parse", "HEAD")
 		if err != nil {
 			return fmt.Errorf("DevPromoteToPin: %w", err)
 		}
-		newField, newValue = "tag", strings.TrimSpace(out)
-		removeField = "branch"
-	case PinKindBranch:
-		out, err := gitCmd(srcDir, "rev-parse", "--abbrev-ref", "HEAD")
-		if err != nil {
-			return fmt.Errorf("DevPromoteToPin: %w", err)
-		}
-		branch := strings.TrimSpace(out)
-		if branch == "HEAD" {
-			return fmt.Errorf("DevPromoteToPin: detached HEAD has no branch — pick PinKindTag or PinKindHash")
-		}
-		newField, newValue = "branch", branch
-		removeField = "tag"
-	default:
-		return fmt.Errorf("DevPromoteToPin: unknown PinKind %q", kind)
+		value = strings.TrimSpace(out)
 	}
 
-	if err := yoestar.RewriteUnitField(starPath, unit.Name, newField, newValue); err != nil {
-		return fmt.Errorf("DevPromoteToPin: rewriting %s: %w", newField, err)
-	}
-	if err := yoestar.RemoveUnitField(starPath, unit.Name, removeField); err != nil {
-		return fmt.Errorf("DevPromoteToPin: removing stale %s: %w", removeField, err)
+	if err := yoestar.RewriteUnitField(starPath, unit.Name, "tag", value); err != nil {
+		return fmt.Errorf("DevPromoteToPin: rewriting tag: %w", err)
 	}
 
 	// Move upstream tag forward so the state transitions from dev-mod

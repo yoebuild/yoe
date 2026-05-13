@@ -127,7 +127,6 @@ type sourcePromptKind int
 const (
 	promptSSHHTTPS     sourcePromptKind = iota // pin → dev, stage 1: pick remote scheme
 	promptHistoryDepth                         // pin → dev, stage 2: pick fetch depth
-	promptPinKind                              // dev-mod → dev: pick tag / hash / branch to write into .star
 	promptDiscardDev                           // dev-mod / dev-dirty → pin: confirm discard
 )
 
@@ -2451,7 +2450,7 @@ var (
 	detailHelpItems = []helpItem{
 		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
 		{"/", "search"}, {"b", "build"}, {"$", "shell"}, {"u", "src"},
-		{"P", "promote"}, {"d", "diagnose"}, {"l", "log"},
+		{"P", "pin"}, {"d", "diagnose"}, {"l", "log"},
 	}
 	detailImageHelpItems = []helpItem{
 		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},

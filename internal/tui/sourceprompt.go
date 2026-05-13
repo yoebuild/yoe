@@ -130,54 +130,28 @@ func (m model) openSourcePromptForModule(rmName string) (tea.Model, tea.Cmd) {
 }
 
 // openPromotePrompt handles the `P` keypress on a unit's detail page.
-// Promote is only meaningful in dev-mod (HEAD has commits beyond the
-// declared upstream and the work tree is clean); other states surface
-// a hint instead of a no-op.
+// Pin-to-current is meaningful in dev and dev-mod (HEAD is on a valid
+// commit, work tree is clean). Dev-dirty surfaces a hint to commit
+// first; pin and empty are no-ops. No modal — the action writes HEAD's
+// tag name (when one exists) or 40-char SHA directly to the unit's .star
+// `tag` field.
 func (m model) openPromotePrompt(unitName string) (tea.Model, tea.Cmd) {
 	u, ok := m.proj.Units[unitName]
 	if !ok || u.Class == "image" || u.Class == "container" {
-		m.message = fmt.Sprintf("%s has no source dir to promote", unitName)
+		m.message = fmt.Sprintf("%s has no source dir to pin", unitName)
 		return m, nil
 	}
 	state := m.unitSourceState(unitName)
-	if state != source.StateDevMod {
-		m.message = fmt.Sprintf("%s is %s — promote requires dev-mod (commit your work first)", unitName, srcStateToken(state))
+	switch state {
+	case source.StateDev, source.StateDevMod:
+		return m.runDevPromote(unitName)
+	case source.StateDevDirty:
+		m.message = fmt.Sprintf("%s has uncommitted edits — commit or stash first to pin current state", unitName)
+		return m, nil
+	default:
+		m.message = fmt.Sprintf("%s is %s — pin requires dev or dev-mod", unitName, srcStateToken(state))
 		return m, nil
 	}
-	srcDir := m.unitSrcDir(unitName)
-	hasTag := headHasTag(srcDir)
-	branch := headBranch(srcDir)
-	branchOpt := sourcePromptOption{
-		label: "branch", desc: "pin to current branch (mutable)", value: "branch",
-	}
-	if branch == "HEAD" || branch == "" {
-		branchOpt.disabled = true
-		branchOpt.desc = "(detached HEAD — no branch to pin)"
-	} else {
-		branchOpt.desc = fmt.Sprintf("pin to branch '%s' (mutable)", branch)
-	}
-	tagOpt := sourcePromptOption{
-		label: "tag", desc: "pin to git tag at HEAD", value: "tag",
-	}
-	if !hasTag {
-		tagOpt.disabled = true
-		tagOpt.desc = "(HEAD has no tag — pick hash or branch)"
-	}
-	m.sourcePrompt = &sourcePrompt{
-		kind:       promptPinKind,
-		target:     "unit",
-		targetName: unitName,
-		header:     fmt.Sprintf("Promote %s's HEAD to its .star pin", unitName),
-		options: []sourcePromptOption{
-			tagOpt,
-			{label: "hash", desc: "pin to the 40-char SHA at HEAD (most reproducible)", value: "hash"},
-			branchOpt,
-			{label: "cancel", desc: "leave the unit in dev-mod", value: "cancel"},
-		},
-		prevView: m.view,
-	}
-	m.view = viewSourcePrompt
-	return m, nil
 }
 
 // updateSourcePrompt handles keyboard input while a dev-mode modal is
@@ -284,11 +258,6 @@ func (m model) applySourcePromptChoice(value string) (tea.Model, tea.Cmd) {
 		}
 		return m.runModuleToPin(name, true)
 
-	case promptPinKind:
-		prevView := m.sourcePrompt.prevView
-		m.sourcePrompt = nil
-		m.view = prevView
-		return m.runDevPromote(name, value)
 	}
 	return m, nil
 }
@@ -448,36 +417,24 @@ func (m model) runDevToPin(unitName string, force bool) (tea.Model, tea.Cmd) {
 // runDevPromote rewrites the .star pin from HEAD. Local-only, fast,
 // but routed through the same background path so the user always sees
 // a "working…" hint instead of a frozen screen.
-func (m model) runDevPromote(unitName, kindValue string) (tea.Model, tea.Cmd) {
+func (m model) runDevPromote(unitName string) (tea.Model, tea.Cmd) {
 	u, ok := m.proj.Units[unitName]
 	if !ok {
 		m.message = fmt.Sprintf("unit %s not found", unitName)
-		return m, nil
-	}
-	var kind yoe.PinKind
-	switch kindValue {
-	case "tag":
-		kind = yoe.PinKindTag
-	case "hash":
-		kind = yoe.PinKindHash
-	case "branch":
-		kind = yoe.PinKindBranch
-	default:
-		m.message = fmt.Sprintf("unknown promote kind %q", kindValue)
 		return m, nil
 	}
 	scope := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
 	prevView := m.view
 	m.view = viewSourceProgress
 	m.sourceOp = newSourceOp(targetUnit, unitName,
-		fmt.Sprintf("Capturing %s HEAD as %s pin", unitName, kindValue), prevView)
+		fmt.Sprintf("Pinning %s to current HEAD", unitName), prevView)
 	cmd := func() tea.Msg {
-		err := yoe.DevPromoteToPin(m.projectDir, scope, u, kind)
+		err := yoe.DevPromoteToPin(m.projectDir, scope, u)
 		return sourceOpDoneMsg{
 			target:     targetUnit,
 			name:       unitName,
-			err:        wrapDevErr(err, "promote"),
-			successMsg: fmt.Sprintf("%s promoted to %s pin", unitName, kindValue),
+			err:        wrapDevErr(err, "pin"),
+			successMsg: fmt.Sprintf("%s pinned to current HEAD", unitName),
 		}
 	}
 	return m, tea.Batch(m.sourceOp.spinner.Tick, cmd)
@@ -677,32 +634,6 @@ func (m model) modifiedCount(unitName string) int {
 		return n
 	}
 	return 0
-}
-
-// headHasTag reports whether HEAD has at least one tag pointing at it.
-// Used to gray out the "tag" option in the promote prompt.
-func headHasTag(srcDir string) bool {
-	if srcDir == "" {
-		return false
-	}
-	out, err := runGit(srcDir, "tag", "--points-at", "HEAD")
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(out) != ""
-}
-
-// headBranch returns the current branch name in srcDir, or "HEAD"
-// when detached. Empty string on git error.
-func headBranch(srcDir string) string {
-	if srcDir == "" {
-		return ""
-	}
-	out, err := runGit(srcDir, "rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(out)
 }
 
 // runGit runs git in dir and returns combined output. Mirrors

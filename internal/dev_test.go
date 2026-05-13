@@ -404,7 +404,7 @@ func setupDevModUnit(t *testing.T, dir, unitName, starBody string) (srcDir, star
 	return
 }
 
-func TestDevPromoteToPin_Hash(t *testing.T) {
+func TestDevPromoteToPin_HEADWithoutTag_WritesSHA(t *testing.T) {
 	dir := t.TempDir()
 	starBody := `unit(
     name = "openssh",
@@ -414,7 +414,7 @@ func TestDevPromoteToPin_Hash(t *testing.T) {
 )
 `
 	srcDir, starPath, unit := setupDevModUnit(t, dir, "openssh", starBody)
-	if err := DevPromoteToPin(dir, "x86_64", unit, PinKindHash); err != nil {
+	if err := DevPromoteToPin(dir, "x86_64", unit); err != nil {
 		t.Fatalf("DevPromoteToPin: %v", err)
 	}
 	headSha, _ := gitCmd(srcDir, "rev-parse", "HEAD")
@@ -426,11 +426,11 @@ func TestDevPromoteToPin_Hash(t *testing.T) {
 	// State should be dev (upstream tag advanced to HEAD).
 	state, _ := source.DetectState(srcDir)
 	if state != source.StateDev {
-		t.Errorf("post-promote state = %q, want %q", state, source.StateDev)
+		t.Errorf("post-pin state = %q, want %q", state, source.StateDev)
 	}
 }
 
-func TestDevPromoteToPin_Tag(t *testing.T) {
+func TestDevPromoteToPin_HEADWithTag_WritesTagName(t *testing.T) {
 	dir := t.TempDir()
 	starBody := `unit(
     name = "foo",
@@ -439,10 +439,10 @@ func TestDevPromoteToPin_Tag(t *testing.T) {
 )
 `
 	srcDir, starPath, unit := setupDevModUnit(t, dir, "foo", starBody)
-	// Add a tag on the local commit so PinKindTag has something to find.
+	// Add a tag on the local commit so the pin picks it up automatically.
 	run(t, srcDir, "git", "tag", "v1.1.0")
 
-	if err := DevPromoteToPin(dir, "x86_64", unit, PinKindTag); err != nil {
+	if err := DevPromoteToPin(dir, "x86_64", unit); err != nil {
 		t.Fatalf("DevPromoteToPin: %v", err)
 	}
 	got, _ := os.ReadFile(starPath)
@@ -451,50 +451,32 @@ func TestDevPromoteToPin_Tag(t *testing.T) {
 	}
 }
 
-func TestDevPromoteToPin_TagButHEADHasNoTag(t *testing.T) {
+func TestDevPromoteToPin_PreservesBranchField(t *testing.T) {
 	dir := t.TempDir()
 	starBody := `unit(
     name = "foo",
     tag = "v1.0",
-    source = "https://example.com/foo.git",
-)
-`
-	_, _, unit := setupDevModUnit(t, dir, "foo", starBody)
-	err := DevPromoteToPin(dir, "x86_64", unit, PinKindTag)
-	if err == nil {
-		t.Fatal("expected error when HEAD has no tag")
-	}
-	if !strings.Contains(err.Error(), "no tag") {
-		t.Errorf("error should mention missing tag: %v", err)
-	}
-}
-
-func TestDevPromoteToPin_Branch(t *testing.T) {
-	dir := t.TempDir()
-	starBody := `unit(
-    name = "foo",
-    tag = "v1.0",
+    branch = "main",
     source = "https://example.com/foo.git",
 )
 `
 	srcDir, starPath, unit := setupDevModUnit(t, dir, "foo", starBody)
-	// Make sure we're on a named branch.
-	run(t, srcDir, "git", "checkout", "-q", "-B", "feature-x")
+	run(t, srcDir, "git", "tag", "v1.1.0")
 
-	if err := DevPromoteToPin(dir, "x86_64", unit, PinKindBranch); err != nil {
+	if err := DevPromoteToPin(dir, "x86_64", unit); err != nil {
 		t.Fatalf("DevPromoteToPin: %v", err)
 	}
 	got, _ := os.ReadFile(starPath)
-	if !strings.Contains(string(got), `branch = "feature-x"`) {
-		t.Errorf(".star should have branch = feature-x, got:\n%s", got)
+	if !strings.Contains(string(got), `tag = "v1.1.0"`) {
+		t.Errorf(".star tag should be v1.1.0, got:\n%s", got)
 	}
-	// tag line should be removed (mutually exclusive with branch).
-	if strings.Contains(string(got), "tag = ") {
-		t.Errorf("tag line should be removed when promoting to branch:\n%s", got)
+	// branch line must be left untouched — pin command never writes branch.
+	if !strings.Contains(string(got), `branch = "main"`) {
+		t.Errorf("branch field should be preserved, got:\n%s", got)
 	}
 }
 
-func TestDevPromoteToPin_RefusesNonDevMod(t *testing.T) {
+func TestDevPromoteToPin_RefusesNonDev(t *testing.T) {
 	dir := t.TempDir()
 	srcDir, upstreamURL := setupPinnedSrc(t, dir, "foo")
 	defDir := filepath.Join(dir, "_units")
@@ -503,12 +485,12 @@ func TestDevPromoteToPin_RefusesNonDevMod(t *testing.T) {
 	unit := &yoestar.Unit{Name: "foo", Source: upstreamURL, DefinedIn: defDir}
 	// Stay in pin state — DevToUpstream not called.
 
-	err := DevPromoteToPin(dir, "x86_64", unit, PinKindHash)
+	err := DevPromoteToPin(dir, "x86_64", unit)
 	if err == nil {
-		t.Fatal("expected error promoting from pin state")
+		t.Fatal("expected error pinning from pin state")
 	}
-	if !strings.Contains(err.Error(), "dev-mod") {
-		t.Errorf("error should mention dev-mod requirement: %v", err)
+	if !strings.Contains(err.Error(), "dev") {
+		t.Errorf("error should mention dev requirement: %v", err)
 	}
 	// Also test from dev-dirty (uncommitted edits).
 	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
@@ -517,9 +499,12 @@ func TestDevPromoteToPin_RefusesNonDevMod(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(srcDir, "dirty.c"), []byte("// dirty\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err = DevPromoteToPin(dir, "x86_64", unit, PinKindHash)
+	err = DevPromoteToPin(dir, "x86_64", unit)
 	if err == nil {
-		t.Fatal("expected error promoting from dev-dirty")
+		t.Fatal("expected error pinning from dev-dirty")
+	}
+	if !strings.Contains(err.Error(), "uncommitted") {
+		t.Errorf("dev-dirty error should mention uncommitted edits: %v", err)
 	}
 }
 
