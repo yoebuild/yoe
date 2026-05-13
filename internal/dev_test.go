@@ -602,6 +602,13 @@ func setupPinnedSrcWithBranch(t *testing.T, projectDir, unitName, branch string)
 func TestDevToUpstream_BranchDeclared_ChecksOutBranchHead(t *testing.T) {
 	dir := t.TempDir()
 	srcDir, upstreamURL, branchHead := setupPinnedSrcWithBranch(t, dir, "openssh", "main")
+	// Capture the pin commit before the toggle so we can verify the
+	// `upstream` tag stays anchored at it.
+	pinCommit, err := gitCmd(srcDir, "rev-parse", "upstream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinCommit = strings.TrimSpace(pinCommit)
 
 	unit := &yoestar.Unit{
 		Name:   "openssh",
@@ -618,15 +625,18 @@ func TestDevToUpstream_BranchDeclared_ChecksOutBranchHead(t *testing.T) {
 	if head != branchHead {
 		t.Errorf("HEAD = %s, want branch HEAD %s", head, branchHead)
 	}
-	// `upstream` git tag should also point at branch HEAD now.
+	// `upstream` tag should stay at the pin commit so dev-mod counts
+	// commits past pin — surfacing "build would differ from pin" at a
+	// glance.
 	upstreamSha := strings.TrimSpace(runOut(t, srcDir, "git", "rev-parse", "upstream"))
-	if upstreamSha != branchHead {
-		t.Errorf("upstream tag = %s, want branch HEAD %s", upstreamSha, branchHead)
+	if upstreamSha != pinCommit {
+		t.Errorf("upstream tag = %s, want pin commit %s (must stay at pin, not move to branch HEAD)", upstreamSha, pinCommit)
 	}
-	// And rev-list upstream..HEAD should be zero (state is clean dev).
+	// rev-list upstream..HEAD should now be 2 (two commits past pin)
+	// → DetectState returns dev-mod, signalling divergence from pin.
 	count := strings.TrimSpace(runOut(t, srcDir, "git", "rev-list", "--count", "upstream..HEAD"))
-	if count != "0" {
-		t.Errorf("rev-list upstream..HEAD = %s, want 0", count)
+	if count != "2" {
+		t.Errorf("rev-list upstream..HEAD = %s, want 2 (branch is 2 commits past pin)", count)
 	}
 	// User should land on a local branch named `main`, not detached HEAD,
 	// so `git pull`/`git push` work in the $-shell.

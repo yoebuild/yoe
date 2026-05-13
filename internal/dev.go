@@ -294,8 +294,13 @@ func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, opts DevUpst
 		// `git push` work. Best-effort — the checkout above is the
 		// load-bearing step.
 		_, _ = gitCmd(srcDir, "branch", "--set-upstream-to=origin/"+unit.Branch, unit.Branch)
-		if _, err := gitCmd(srcDir, "tag", "-f", "upstream", "HEAD"); err != nil {
-			return fmt.Errorf("DevToUpstream: re-pointing upstream tag: %w", err)
+		// Anchor the local `upstream` git tag at the pin commit, not
+		// at branch HEAD. dev-mod then counts commits past the pin —
+		// answering "would a build here produce different output than
+		// pin mode?" at a glance. A branch that's advanced past the
+		// pin tag flips the unit to dev-mod immediately on toggle.
+		if _, err := gitCmd(srcDir, "tag", "-f", "upstream", unit.Tag); err != nil {
+			return fmt.Errorf("DevToUpstream: anchoring upstream tag at %s: %w", unit.Tag, err)
 		}
 	}
 

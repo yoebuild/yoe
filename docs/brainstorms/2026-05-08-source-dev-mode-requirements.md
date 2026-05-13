@@ -60,11 +60,12 @@ What changes on every pin → dev transition (regardless of which shape):
   `git push`, `git log origin/main`, etc. all work.
 - **History gets populated.** A `git fetch --unshallow` runs so the user can
   browse log, blame, and diff against earlier upstream commits.
-- **The local `upstream` git tag tracks the dev-mode anchor.** With no declared
-  `branch`, `upstream` stays at the pinned commit (today's behavior). With a
-  declared `branch`, `upstream` mirrors `origin/<branch>` and moves whenever the
-  user fetches — `git rev-list upstream..HEAD` then counts commits beyond branch
-  HEAD, the natural git mental model.
+- **The local `upstream` git tag always stays at the pinned commit.** That way
+  `git rev-list upstream..HEAD` counts commits past the pin regardless of
+  whether the unit declares a `branch`. The dev-mod signal then answers "would a
+  build here produce different output than pin mode?" at a glance — a unit with
+  `branch` declared that just toggled to dev sits on `origin/<branch>` HEAD,
+  which is typically past the pin, so it goes straight to dev-mod.
 - **The TUI stops rewriting the source on rebuild.** Once a unit is in dev mode,
   yoe will never `git clean -fdx` or re-clone the source dir, even if the unit's
   `source` URL or `tag` changes in the .star. Pin → dev is the user's commitment
@@ -125,13 +126,13 @@ a unit's source, switch it to dev first.** Pin is for the build pipeline to
 manage; dev is for humans. A pin-mode src dir with edits is a misuse of pin
 mode, not a state worth modelling — yoe is allowed to overwrite it.
 
-`dev-mod` is the "I have work to extract" state. `yoe dev extract` is the
-intended next action; the detail page should hint at it. The exact meaning of
-"commits beyond upstream" depends on the unit's declaration: with no `branch`,
-`upstream` points at the pinned commit (so `dev-mod` means "commits past the
-pin"); with a declared `branch`, `upstream` mirrors `origin/<branch>` (so
-`dev-mod` means "commits past the tracked branch"). The displayed token is the
-same either way.
+`dev-mod` is the "build would differ from pin" state. `upstream` always anchors
+at the pinned commit, so `dev-mod` means "commits past the pin" regardless of
+whether the unit declares a `branch`. A branch-tracking unit that just toggled
+to dev typically lands in `dev-mod` immediately because `origin/<branch>` HEAD
+is past the pin tag — that's the visible signal that yoe is now building
+something different from the pinned reference. `yoe dev extract` is still the
+natural next action when the diff represents work to extract as patches.
 
 `dev-dirty` is the "I have unsaved edits" state — most warnings fire here.
 
@@ -327,10 +328,11 @@ These are pointers, not the design — planning doc owns specifics.
   `DevDetectState(unit)` / `DevPinToCurrent(unit)` and reuse the same git-cmd
   scaffolding.
 - `DevToUpstream` reads the unit's declared `branch` field (if any) and checks
-  out `origin/<branch>` after the unshallow fetch. With no branch declared the
-  working tree stays at the pinned commit. The local `upstream` git tag is
-  re-pointed to match: at the pinned commit when no branch, at `origin/<branch>`
-  when a branch is declared (and re-pointed on each fetch while in dev mode).
+  out a local branch named `<branch>` at `origin/<branch>` HEAD after fetching.
+  With no branch declared the working tree stays at the pinned commit. The local
+  `upstream` git tag is always anchored at the pinned commit so dev-mod counts
+  commits past the pin — a branch-tracked unit toggled into dev with branch HEAD
+  ahead of pin lands in dev-mod immediately.
 - `DevPinToCurrent` writes HEAD into the unit's `tag` field (tag name when HEAD
   has one, otherwise 40-char SHA) and moves the local `upstream` tag to HEAD.
   Only writes to `tag` — `branch` is never touched. A regex-based `.star` field

@@ -9,11 +9,13 @@ and this project adheres to
 ## [Unreleased]
 
 - **Dev mode can track an upstream branch automatically.** A unit that declares
-  both `tag` and `branch` now flips to `origin/<branch>` HEAD when toggled into
-  dev mode — the working tree advances to whatever the branch has accumulated
-  past the pin, and the detail-page SOURCE line surfaces
-  `tracking origin/<branch> (N commits past <tag>)` so the move is visible.
-  Units with only `tag` keep the bit-identical pin↔dev behavior.
+  both `tag` and `branch` now flips to `origin/<branch>` HEAD on a local branch
+  named `<branch>` when toggled into dev mode — `git pull`, `git push`, and
+  `git log @{u}..` all work without explicit refspecs. The SRC column shows
+  `dev-mod` when the branch is past the pin (so "build would differ from pin" is
+  visible at a glance), and the detail-page SOURCE line surfaces
+  `tracking origin/<branch> (N commits past <tag>)`. Units with only `tag` keep
+  the bit-identical pin↔dev behavior.
 
 - **`P` pins the current HEAD with no picker.** The tag/hash/branch popup is
   gone. `P` now writes HEAD's tag name when one exists, otherwise the 40-char
