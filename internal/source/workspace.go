@@ -60,8 +60,16 @@ func Prepare(projectDir, scopeDir string, unit *yoestar.Unit, cachedSourceState 
 		return "", err
 	}
 
-	// Remove old source dir and recreate
-	os.RemoveAll(srcDir)
+	// Remove old source dir and recreate. The chmod walk handles
+	// read-only files Go's module cache leaves behind (mode 0400 on
+	// every fetched module). Without it RemoveAll silently fails on
+	// those entries, MkdirAll succeeds (dir already exists), and the
+	// later git clone errors with "destination already exists and is
+	// not an empty directory" — masking the real failure.
+	makeRemovable(srcDir)
+	if err := os.RemoveAll(srcDir); err != nil {
+		return "", fmt.Errorf("removing existing %s: %w (file may be owned by a different user — try `sudo rm -rf %s`)", srcDir, err, srcDir)
+	}
 	if err := os.MkdirAll(srcDir, 0755); err != nil {
 		return "", err
 	}
@@ -93,6 +101,28 @@ func Prepare(projectDir, scopeDir string, unit *yoestar.Unit, cachedSourceState 
 	}
 
 	return srcDir, nil
+}
+
+// makeRemovable walks dir and chmods every entry so a subsequent
+// os.RemoveAll can delete it. The Go module cache fetches dependencies
+// with mode 0400 (read-only) by design — RemoveAll fails silently on
+// those without a prior chmod. Best-effort: any error from chmod is
+// swallowed, since the user's only signal is whether RemoveAll later
+// succeeds.
+func makeRemovable(dir string) {
+	if _, err := os.Stat(dir); err != nil {
+		return
+	}
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		// Make every entry user-rwx so unlinkat (used by RemoveAll)
+		// works on read-only files inside writable parent dirs, and
+		// can recurse into read-only directories.
+		_ = os.Chmod(path, 0o700)
+		return nil
+	})
 }
 
 // hasLocalCommits checks if a source directory is a git repo with commits
