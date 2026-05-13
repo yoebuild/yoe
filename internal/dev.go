@@ -220,9 +220,17 @@ type DevUpstreamOpts struct {
 // (github.com, gitlab.com, generic SSH-on-:22 servers). Hosts that don't
 // fit that pattern fall through to HTTPS regardless of the SSH flag.
 //
-// The unit's working tree is not moved — pin and dev mode for the same
-// commit produce bit-identical builds. The transition adds connectivity
-// and history; it doesn't change source content.
+// Working-tree commit depends on whether the unit declares branch:
+//
+//   - Tag only: the working tree stays at the pinned commit. Pin and dev
+//     build the same source; the transition only adds connectivity.
+//   - Tag + Branch: after the fetch, the working tree is checked out
+//     (detached HEAD) at origin/<branch>, and the local `upstream` git
+//     tag is re-pointed to origin/<branch> so dev-mod counts commits past
+//     branch HEAD rather than past the pin tag.
+//
+// Branch-only (Branch set, Tag empty) is malformed: tag is the pin, branch
+// only tracks dev. Returns an error before touching git.
 func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, opts DevUpstreamOpts) error {
 	srcDir := devSrcDir(projectDir, scopeDir, unit.Name)
 	if _, err := os.Stat(filepath.Join(srcDir, ".git")); err != nil {
@@ -230,6 +238,9 @@ func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, opts DevUpst
 	}
 	if !devIsGitURL(unit.Source) {
 		return fmt.Errorf("DevToUpstream: %s has a non-git source (%s); only git-based units support dev mode", unit.Name, unit.Source)
+	}
+	if unit.Branch != "" && unit.Tag == "" {
+		return fmt.Errorf("DevToUpstream: %s declares branch=%q but no tag — tag is the pin, branch only tracks dev", unit.Name, unit.Branch)
 	}
 
 	target := unit.Source
@@ -249,6 +260,20 @@ func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, opts DevUpst
 
 	if err := devFetchOrigin(srcDir, opts, devPinnedRef(unit)); err != nil {
 		return fmt.Errorf("DevToUpstream: %w", err)
+	}
+
+	// Branch-tracking: advance the working tree to origin/<branch> and
+	// re-point the local `upstream` tag so it counts past branch HEAD.
+	// Order matters — checkout first so a failed checkout doesn't leave
+	// the upstream tag pointing at a ref the work tree never reached.
+	if unit.Branch != "" {
+		ref := "origin/" + unit.Branch
+		if _, err := gitCmd(srcDir, "checkout", "--detach", ref); err != nil {
+			return fmt.Errorf("DevToUpstream: checking out %s: %w", ref, err)
+		}
+		if _, err := gitCmd(srcDir, "tag", "-f", "upstream", ref); err != nil {
+			return fmt.Errorf("DevToUpstream: re-pointing upstream tag: %w", err)
+		}
 	}
 
 	if err := writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StateDev); err != nil {

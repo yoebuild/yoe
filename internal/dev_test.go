@@ -553,3 +553,125 @@ def helper():
 		t.Errorf("fallback scan should find bar.star, got %s", got)
 	}
 }
+
+// --- Branch-aware dev mode ---------------------------------------------
+//
+// Tests that DevToUpstream advances the working tree to origin/<branch>
+// when the unit declares a branch, and re-points the local `upstream`
+// tag accordingly.
+
+// runOut runs a command and returns its trimmed stdout, fataling on
+// failure. Same shape as `run` but for cases that need the output.
+func runOut(t *testing.T, dir, name string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s %s: %v\n%s", name, strings.Join(args, " "), err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// setupPinnedSrcWithBranch is setupPinnedSrc plus two more commits on
+// the upstream's branch beyond the pin. The pin clone still sits at
+// the first commit (tagged `upstream`); origin/<branch> in the
+// upstream repo is two commits ahead.
+func setupPinnedSrcWithBranch(t *testing.T, projectDir, unitName, branch string) (srcDir, upstreamURL, branchHead string) {
+	t.Helper()
+	srcDir, upstreamURL = setupPinnedSrc(t, projectDir, unitName)
+
+	// The upstream repo was initialized with main; if the test wants a
+	// different branch, create it here. Either way, add two commits.
+	upstream := filepath.Join(projectDir, "_upstream", unitName+".git")
+	if branch != "main" {
+		run(t, upstream, "git", "checkout", "-q", "-b", branch)
+	}
+	if err := os.WriteFile(filepath.Join(upstream, "feat.c"), []byte("/* new */\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(t, upstream, "git", "add", "-A")
+	run(t, upstream, "git", "commit", "-q", "-m", "branch commit 1")
+	if err := os.WriteFile(filepath.Join(upstream, "feat2.c"), []byte("/* more */\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(t, upstream, "git", "add", "-A")
+	run(t, upstream, "git", "commit", "-q", "-m", "branch commit 2")
+
+	out, err := gitCmd(upstream, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return srcDir, upstreamURL, strings.TrimSpace(out)
+}
+
+func TestDevToUpstream_BranchDeclared_ChecksOutBranchHead(t *testing.T) {
+	dir := t.TempDir()
+	srcDir, upstreamURL, branchHead := setupPinnedSrcWithBranch(t, dir, "openssh", "main")
+
+	unit := &yoestar.Unit{
+		Name:   "openssh",
+		Source: upstreamURL,
+		Tag:    "upstream", // arbitrary pin name; the existing `upstream` git tag in the src clone stands in
+		Branch: "main",
+	}
+	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
+		t.Fatalf("DevToUpstream: %v", err)
+	}
+
+	// Working tree should be at branch HEAD (two commits past the pin).
+	head := strings.TrimSpace(runOut(t, srcDir, "git", "rev-parse", "HEAD"))
+	if head != branchHead {
+		t.Errorf("HEAD = %s, want branch HEAD %s", head, branchHead)
+	}
+	// `upstream` git tag should also point at branch HEAD now.
+	upstreamSha := strings.TrimSpace(runOut(t, srcDir, "git", "rev-parse", "upstream"))
+	if upstreamSha != branchHead {
+		t.Errorf("upstream tag = %s, want branch HEAD %s", upstreamSha, branchHead)
+	}
+	// And rev-list upstream..HEAD should be zero (state is clean dev).
+	count := strings.TrimSpace(runOut(t, srcDir, "git", "rev-list", "--count", "upstream..HEAD"))
+	if count != "0" {
+		t.Errorf("rev-list upstream..HEAD = %s, want 0", count)
+	}
+}
+
+func TestDevToUpstream_TagOnly_LeavesWorkingTreeAtPin(t *testing.T) {
+	dir := t.TempDir()
+	srcDir, upstreamURL, _ := setupPinnedSrcWithBranch(t, dir, "openssh", "main")
+	pinHead := strings.TrimSpace(runOut(t, srcDir, "git", "rev-parse", "HEAD"))
+
+	unit := &yoestar.Unit{
+		Name:   "openssh",
+		Source: upstreamURL,
+		Tag:    "upstream",
+		// No Branch — today's behavior preserved.
+	}
+	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
+		t.Fatalf("DevToUpstream: %v", err)
+	}
+
+	head := strings.TrimSpace(runOut(t, srcDir, "git", "rev-parse", "HEAD"))
+	if head != pinHead {
+		t.Errorf("HEAD = %s, want pinned commit %s (unchanged)", head, pinHead)
+	}
+}
+
+func TestDevToUpstream_BranchWithoutTag_Rejects(t *testing.T) {
+	dir := t.TempDir()
+	_, upstreamURL := setupPinnedSrc(t, dir, "openssh")
+
+	unit := &yoestar.Unit{
+		Name:   "openssh",
+		Source: upstreamURL,
+		Branch: "main",
+		// No Tag — malformed.
+	}
+	err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{})
+	if err == nil {
+		t.Fatal("expected DevToUpstream to refuse a branch-only unit")
+	}
+	if !strings.Contains(err.Error(), "branch") || !strings.Contains(err.Error(), "tag") {
+		t.Errorf("error %v should mention branch and tag", err)
+	}
+}
