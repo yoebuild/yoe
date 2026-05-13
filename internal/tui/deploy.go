@@ -112,7 +112,7 @@ func (m model) startDeployCmd() tea.Cmd {
 			return deployDoneMsg{err: err}
 		}
 
-		emit(fmt.Sprintf("→ ssh %s — apk add --force-reinstall %s", target.Host, unitName))
+		emit(fmt.Sprintf("→ ssh %s — apk add %s + apk fix --reinstall", target.Host, unitName))
 		err = device.Deploy(ctx, device.DeployInput{
 			Target:  target,
 			Unit:    unitName,

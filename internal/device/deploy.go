@@ -54,15 +54,19 @@ sed -i '/^# >>> yoe-dev$/,/^# <<< yoe-dev$/d' /etc/apk/repositories
 # (observed when the yoe-dev feed pushes a new package between deploys),
 # silently giving "no such package" errors for the new package.
 apk --no-cache update
-# --force-reinstall installs the apk from the feed even when the apk
-# version (pkgver-r<rel>) hasn't changed. Dev iteration on a unit
-# rebuilds the apk content without bumping the version, so a plain
-# 'apk add --upgrade' sees the same version on the device and skips
-# the install — silently dropping the user's edits. --force-reinstall
-# is the right behavior for an explicit deploy: the user asked for
-# this content on the device, install it.
-apk add --force-reinstall %s
-`, in.FeedURL, in.Unit)
+# Dev iteration rebuilds an apk with the same pkgver-r<rel> string
+# (the unit's Version/Release fields don't change between toggles), so
+# 'apk add --upgrade' sees same version on the device and skips the
+# install — silently dropping the user's edits.
+#
+# Two-step install is the portable fix for apk-tools 2.x (apk-tools 3.x
+# would let us write 'apk add --force-reinstall', but Alpine ships 2.x):
+#   1. apk add ensures the package is in world and pulls in any new deps
+#   2. apk fix --reinstall forces a fresh file lay-down even when the
+#      version string already matches what's installed
+apk add %s
+apk fix --reinstall %s
+`, in.FeedURL, in.Unit, in.Unit)
 
 	return ssh(ctx, in.Target, script, in.Out, in.Out)
 }

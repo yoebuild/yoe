@@ -9,12 +9,13 @@ and this project adheres to
 ## [Unreleased]
 
 - **`yoe deploy` actually installs dev-mode rebuilds.** Deploy now runs
-  `apk add --force-reinstall` instead of `apk add --upgrade` on the target. Dev
+  `apk add <unit>` followed by `apk fix --reinstall <unit>` on the target. Dev
   iteration rebuilds the apk content without bumping the `pkgver-r<rel>`
-  version, so the old `--upgrade` path saw same-version and skipped the install
-  — silently dropping the user's edits. A deploy is an explicit "put this
-  content on the device" action, so reinstall regardless of version is the right
-  semantic.
+  version, so the old `apk add --upgrade` path saw same-version and skipped the
+  install — silently dropping the user's edits. The two-step sequence is
+  portable across apk-tools 2.x (Alpine's default): the first call ensures the
+  package is in world and pulls in any new deps; the second forces a fresh file
+  lay-down even when the version string already matches what's installed.
 
 - **Dev mode can track an upstream branch automatically.** A unit that declares
   both `tag` and `branch` now flips to `origin/<branch>` HEAD on a local branch
