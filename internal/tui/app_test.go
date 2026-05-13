@@ -382,6 +382,48 @@ func TestDetailSourceLine_DevModSurfacesDescribe(t *testing.T) {
 	}
 }
 
+func TestDetailSourceLine_PinShowsTag(t *testing.T) {
+	projDir := t.TempDir()
+	buildDir := filepath.Join(projDir, "build", "foo.x86_64")
+	writeMetaWithSourceState(t, buildDir, "pin", "")
+	m := model{
+		projectDir: projDir,
+		arch:       "x86_64",
+		detailUnit: "foo",
+		proj: &yoestar.Project{
+			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
+			Units: map[string]*yoestar.Unit{
+				"foo": {Name: "foo", Class: "unit", Source: "https://example.com/foo.git", Tag: "v1.36.1"},
+			},
+		},
+		unitSrcStates: map[string]source.State{},
+	}
+	got := m.detailSourceLine()
+	if !strings.Contains(got, "pin") {
+		t.Errorf("missing pin token: %q", got)
+	}
+	if !strings.Contains(got, "pinned at v1.36.1") {
+		t.Errorf("missing pin tag hint: %q", got)
+	}
+}
+
+func TestRenderSrcCell_Pin_RendersPin(t *testing.T) {
+	m := newModelWithUnit(t, t.TempDir(), "foo", source.StatePin)
+	cell := m.renderSrcCell("foo")
+	if !strings.Contains(cell, "pin") {
+		t.Errorf("pin unit should render 'pin' in SRC column, got %q", cell)
+	}
+}
+
+func TestRenderSrcCell_Empty_RendersBlank(t *testing.T) {
+	m := newModelWithUnit(t, t.TempDir(), "foo", source.StateEmpty)
+	cell := m.renderSrcCell("foo")
+	// Blank cell is padded to width 9 of spaces; "pin" should not appear.
+	if strings.Contains(cell, "pin") {
+		t.Errorf("unbuilt unit should render blank, got %q", cell)
+	}
+}
+
 // helper: build a model with one pinned unit and the source-state cache wired up.
 func newModelWithUnit(t *testing.T, projDir, unitName string, state source.State) model {
 	t.Helper()

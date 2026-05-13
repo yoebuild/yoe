@@ -4095,6 +4095,13 @@ func (m model) detailSourceLine() string {
 	if url != "" {
 		parts = append(parts, dimStyle.Render(url))
 	}
+	// Pin: surface the declared tag so the line reads e.g. "SOURCE pin
+	// <url> (pinned at v1.36.1)". Dev: rely on the live SourceDescribe
+	// below (e.g. v3.4.1-3-gabc1234-dirty) — it's more informative than
+	// the static .star pin once the user is hacking on the source.
+	if state == source.StatePin && u.Tag != "" {
+		parts = append(parts, dimStyle.Render("(pinned at "+u.Tag+")"))
+	}
 	if meta := build.ReadMeta(buildDir); meta != nil && meta.SourceDescribe != "" {
 		parts = append(parts, dimStyle.Render(meta.SourceDescribe))
 	}
