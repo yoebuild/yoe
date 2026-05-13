@@ -9,13 +9,15 @@ and this project adheres to
 ## [Unreleased]
 
 - **`yoe deploy` actually installs dev-mode rebuilds.** Deploy now runs
-  `apk add <unit>` followed by `apk fix --reinstall <unit>` on the target. Dev
+  `apk del --no-scripts <unit>` followed by `apk add <unit>` on the target. Dev
   iteration rebuilds the apk content without bumping the `pkgver-r<rel>`
-  version, so the old `apk add --upgrade` path saw same-version and skipped the
-  install — silently dropping the user's edits. The two-step sequence is
-  portable across apk-tools 2.x (Alpine's default): the first call ensures the
-  package is in world and pulls in any new deps; the second forces a fresh file
-  lay-down even when the version string already matches what's installed.
+  version, so `apk add --upgrade` saw same-version and skipped the install —
+  silently dropping the user's edits. The del+add sequence works across all
+  apk-tools versions yoe ships against and avoids the apk-tools 2.x quirks with
+  `--force-reinstall` (3.x only) and `apk fix --reinstall` (which can silently
+  no-op with "APK unavailable, skipped"). `--no-scripts` skips the pre-uninstall
+  hook so OpenRC keeps the service enabled; restart the service from `$` to pick
+  up the new binary.
 
 - **Dev mode can track an upstream branch automatically.** A unit that declares
   both `tag` and `branch` now flips to `origin/<branch>` HEAD on a local branch

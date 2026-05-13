@@ -54,18 +54,20 @@ sed -i '/^# >>> yoe-dev$/,/^# <<< yoe-dev$/d' /etc/apk/repositories
 # (observed when the yoe-dev feed pushes a new package between deploys),
 # silently giving "no such package" errors for the new package.
 apk --no-cache update
-# Dev iteration rebuilds an apk with the same pkgver-r<rel> string
-# (the unit's Version/Release fields don't change between toggles), so
-# 'apk add --upgrade' sees same version on the device and skips the
-# install — silently dropping the user's edits.
+# Dev iteration rebuilds an apk with the same pkgver-r<rel> string,
+# so the various --upgrade / --force-reinstall / fix --reinstall paths
+# all skip the install on apk-tools 2.x (--force-reinstall isn't a
+# valid flag in 2.x, and fix --reinstall reports 'APK unavailable,
+# skipped' in some apk-tools builds even when the index is fresh).
 #
-# Two-step install is the portable fix for apk-tools 2.x (apk-tools 3.x
-# would let us write 'apk add --force-reinstall', but Alpine ships 2.x):
-#   1. apk add ensures the package is in world and pulls in any new deps
-#   2. apk fix --reinstall forces a fresh file lay-down even when the
-#      version string already matches what's installed
+# The portable, always-works pattern is del+add: remove the existing
+# package (with --no-scripts so we don't fire the pre-uninstall hook
+# that disables the service in OpenRC), then add the fresh apk. The
+# 2>/dev/null ignores the "not installed" case on a first deploy.
+# The user is expected to restart the service to pick up the new
+# binary; apk doesn't restart services on its own anyway.
+apk del --no-scripts %s 2>/dev/null || true
 apk add %s
-apk fix --reinstall %s
 `, in.FeedURL, in.Unit, in.Unit)
 
 	return ssh(ctx, in.Target, script, in.Out, in.Out)
