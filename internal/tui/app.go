@@ -690,6 +690,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// recomputeMetrics — otherwise sizes for transitive deps stay
 			// blank for the entire duration of a multi-unit image build.
 			m.refreshUnitSize(msg.unit)
+			// Drop any cached source state — the build just wrote a
+			// fresh SourceState (pin or dev) to BuildMeta, and the
+			// renderer's lazy cache might have a stale empty value from
+			// a mid-build render. The next paint re-reads BuildMeta.
+			m.invalidateUnitState(msg.unit)
 			cmd := m.markBuildUnitFinished(msg.unit)
 			return m, cmd
 		case "waiting":

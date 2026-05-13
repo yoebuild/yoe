@@ -320,7 +320,15 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		// after build so the src dir is in its final state. Empty
 		// (missing src dir) doesn't overwrite — preserves whatever the
 		// dev toggle set.
-		if next := finalizeSourceState(filepath.Join(buildDir, "src"), source.State(meta.SourceState)); next != source.StateEmpty {
+		// Default an unbuilt unit's cached state to pin so finalize
+		// doesn't fall through DetectState's origin-heuristic and label
+		// a yoe-managed clone as dev. The toggle path is the only way a
+		// unit acquires dev state, and it writes BuildMeta first.
+		cachedState := source.State(meta.SourceState)
+		if cachedState == source.StateEmpty {
+			cachedState = source.StatePin
+		}
+		if next := finalizeSourceState(filepath.Join(buildDir, "src"), cachedState); next != source.StateEmpty {
 			meta.SourceState = string(next)
 		}
 		// For dev units, capture `git describe --dirty --always` so the
