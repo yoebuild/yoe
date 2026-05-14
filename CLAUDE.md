@@ -170,10 +170,49 @@ The GitHub Actions workflow (`doc-check.yaml`) runs `prettier --check` on all
   easier for AI to reason about the system and for humans to understand what a
   unit does without reading class internals. If a value is required, error when
   it is missing rather than silently defaulting.
+- **Installed packages run their services.** If a package ships an init script
+  (`/etc/init.d/<svc>`) or systemd unit
+  (`/usr/lib/systemd/system/<svc>.service`), installing the package means the
+  service runs at boot. Image assembly discovers services by scanning the
+  assembled rootfs and wires the appropriate runlevel/target symlinks
+  automatically. Do not add a `services = [...]` field on units and do not add
+  an `enable_services = [...]` field on images — both push policy to the wrong
+  place. The right way to "not run a service" is to not install the package; if
+  a project genuinely needs a package installed but a service disabled, that's
+  an explicit per-image opt-out (not an opt-in), and the bar for adding one is
+  high.
 - **No backward compatibility concerns.** The project is pre-1.0. Do not add
   compatibility shims, legacy conversion paths, or deprecated-but-still-working
   code. When a design changes, update everything to the new design and delete
   the old code.
+
+## Plugin output directories
+
+All plugin-generated planning artifacts go to two directories at the repo root,
+regardless of which plugin produced them:
+
+- `docs/specs/` — requirements documents, brainstorming outputs, design docs,
+  feature briefs. Naming: `YYYY-MM-DD-<topic>.md` (drop the
+  `-requirements` / `-design` suffix; the directory name already classifies
+  the artifact).
+- `docs/plans/` — implementation plans, step-by-step execution plans.
+  Naming: `YYYY-MM-DD-<topic>-plan.md` or
+  `YYYY-MM-DD-NNN-<topic>-plan.md` if multiple plans land on the same day.
+
+This rule overrides each plugin's default path. Specifically:
+
+- `compound-engineering:ce-brainstorm` writes its requirements doc to
+  `docs/specs/`, not `docs/brainstorms/`.
+- `compound-engineering:ce-plan` writes its plan to `docs/plans/` (unchanged).
+- `superpowers:brainstorming` writes its design doc to `docs/specs/`,
+  not `docs/superpowers/specs/`.
+- `superpowers:writing-plans` writes its plan to `docs/plans/`, not
+  `docs/superpowers/plans/`.
+
+If a plugin's skill instructions reference its default directory anywhere
+(search hints, "look for existing docs in …"), redirect those lookups to
+`docs/specs/` and `docs/plans/` as well. The goal is one location per
+artifact kind; consumers should never have to check three places.
 
 ## Working on This Codebase
 
