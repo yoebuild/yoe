@@ -17,7 +17,8 @@ import (
 
 // Prepare sets up the build source directory for a unit:
 // 1. Fetches source (from cache or network)
-// 2. Extracts into build/<unit>/src/ as a git repo with "upstream" tag
+// 2. Extracts into build/<unit>/src/ as a git repo with yoe/pin tag
+//    marking the pinned commit
 // 3. Applies patches from the unit as git commits
 //
 // cachedSourceState is the unit's BuildMeta.SourceState from the previous
@@ -101,7 +102,8 @@ func Prepare(projectDir, scopeDir string, unit *yoestar.Unit, cachedSourceState 
 		if err := checkoutGit(cachedPath, srcDir, unit); err != nil {
 			return "", err
 		}
-		// Git source is already a repo — just tag current HEAD as upstream
+		// Git source is already a repo — just tag current HEAD with
+		// the yoe/pin marker.
 		if err := tagUpstream(srcDir); err != nil {
 			return "", err
 		}
@@ -125,13 +127,13 @@ func Prepare(projectDir, scopeDir string, unit *yoestar.Unit, cachedSourceState 
 	return srcDir, nil
 }
 
-// upstreamMatchesTag reports whether the local `upstream` git tag in
+// upstreamMatchesTag reports whether the local yoe/pin git tag in
 // srcDir resolves to the same commit as the unit's declared pin tag.
 // Used to recognize a valid pin checkout (produced by DevToPin or by
 // the freshly-cloned path below). Both refs must resolve cleanly; any
 // git error returns false so the caller falls through to clean+clone.
 func upstreamMatchesTag(srcDir, tag string) bool {
-	upstream, err := exec.Command("git", "-C", srcDir, "rev-parse", "upstream^{commit}").Output()
+	upstream, err := exec.Command("git", "-C", srcDir, "rev-parse", PinTag+"^{commit}").Output()
 	if err != nil {
 		return false
 	}
@@ -172,7 +174,7 @@ func hasLocalCommits(srcDir string) bool {
 		return false
 	}
 
-	cmd := exec.Command("git", "rev-list", "--count", "upstream..HEAD")
+	cmd := exec.Command("git", "rev-list", "--count", PinTag+"..HEAD")
 	cmd.Dir = srcDir
 	out, err := cmd.Output()
 	if err != nil {
@@ -454,17 +456,19 @@ func extractWithTar(tarPath, destDir string) error {
 	return nil
 }
 
-// tagUpstream tags the current HEAD as "upstream" in an existing git repo.
-// Used for git-sourced recipes where the checkout is already a git repo.
+// tagUpstream tags the current HEAD as the yoe-internal pin marker
+// in an existing git repo. The tag name is namespaced (yoe/pin) so it
+// can never collide with real upstream tags — important for
+// DevPromoteToPin's "pick a tag pointing at HEAD" logic.
 func tagUpstream(srcDir string) error {
 	// Ensure we're on a branch (shallow clones may be detached)
 	branchCmd := exec.Command("git", "checkout", "-b", "yoe-work")
 	branchCmd.Dir = srcDir
 	branchCmd.Run() // ignore error if branch already exists
-	cmd := exec.Command("git", "tag", "-f", "upstream")
+	cmd := exec.Command("git", "tag", "-f", PinTag)
 	cmd.Dir = srcDir
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git tag upstream: %s\n%s", err, out)
+		return fmt.Errorf("git tag %s: %s\n%s", PinTag, err, out)
 	}
 	return nil
 }
@@ -476,7 +480,7 @@ func initGitRepo(srcDir string) error {
 		{"git", "config", "user.name", "yoe"},
 		{"git", "add", "-A"},
 		{"git", "commit", "-m", "upstream source"},
-		{"git", "tag", "upstream"},
+		{"git", "tag", PinTag},
 	}
 
 	for _, args := range cmds {

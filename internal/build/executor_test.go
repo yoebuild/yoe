@@ -148,7 +148,7 @@ func TestBuildUnits_WithDeps(t *testing.T) {
 	run(t, srcDir, "git", "config", "user.name", "Test")
 	run(t, srcDir, "git", "add", "-A")
 	run(t, srcDir, "git", "commit", "-m", "upstream")
-	run(t, srcDir, "git", "tag", "upstream")
+	run(t, srcDir, "git", "tag", "yoe/pin")
 	// Add a local commit so Prepare treats it as dev mode
 	os.WriteFile(filepath.Join(srcDir, "local.txt"), []byte("local\n"), 0644)
 	run(t, srcDir, "git", "add", "-A")
@@ -274,6 +274,6 @@ func setupPinClone(t *testing.T) string {
 	os.WriteFile(filepath.Join(srcDir, "main.c"), []byte("int main() {}\n"), 0o644)
 	run(t, srcDir, "git", "add", "-A")
 	run(t, srcDir, "git", "commit", "-q", "-m", "upstream commit")
-	run(t, srcDir, "git", "tag", "upstream")
+	run(t, srcDir, "git", "tag", "yoe/pin")
 	return srcDir
 }

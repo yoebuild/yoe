@@ -288,12 +288,13 @@ func initRepo(t *testing.T) string {
 	return dir
 }
 
-// markUpstream tags the current HEAD as `upstream`, matching what
-// source.Prepare does after a fresh clone. Named to avoid colliding
-// with the package-level `tagUpstream` helper in workspace.go.
+// markUpstream tags the current HEAD with yoe's internal pin marker
+// (yoe/pin), matching what source.Prepare does after a fresh clone.
+// Named to avoid colliding with the package-level `tagUpstream`
+// helper in workspace.go.
 func markUpstream(t *testing.T, dir string) {
 	t.Helper()
-	run(t, dir, "git", "tag", "upstream")
+	run(t, dir, "git", "tag", PinTag)
 }
 
 // addOriginRemote configures a stub origin remote — the URL doesn't have

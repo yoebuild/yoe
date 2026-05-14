@@ -60,10 +60,10 @@ What changes on every pin → dev transition (regardless of which shape):
   `git push`, `git log origin/main`, etc. all work.
 - **History gets populated.** A `git fetch --unshallow` runs so the user can
   browse log, blame, and diff against earlier upstream commits.
-- **The local `upstream` git tag always stays at the pinned commit.** That way
-  `git rev-list upstream..HEAD` counts commits past the pin regardless of
-  whether the unit declares a `branch`. The dev-mod signal then answers "would a
-  build here produce different output than pin mode?" at a glance — a unit with
+- **The local `yoe/pin` git tag always stays at the pinned commit.** That way
+  `git rev-list yoe/pin..HEAD` counts commits past the pin regardless of whether
+  the unit declares a `branch`. The dev-mod signal then answers "would a build
+  here produce different output than pin mode?" at a glance — a unit with
   `branch` declared that just toggled to dev sits on `origin/<branch>` HEAD,
   which is typically past the pin, so it goes straight to dev-mod.
 - **The TUI stops rewriting the source on rebuild.** Once a unit is in dev mode,
@@ -112,7 +112,7 @@ prompt for a branch — the unit declaration is the policy.
 
 Four states per unit/module, each a distinct color in the TUI. Detection is
 local — no network — and runs from `git status` plus
-`git rev-list upstream..HEAD`.
+`git rev-list yoe/pin..HEAD`.
 
 | State       | Meaning                                                    | Color |
 | ----------- | ---------------------------------------------------------- | ----- |
@@ -232,8 +232,8 @@ deliberately simple — no popup, no tag/hash/branch picker:
 - The `branch` field is never written by `P`. Branch tracking is declared by the
   unit author; the pin command only updates the pin.
 
-After the rewrite, yoe re-points the local `upstream` git tag to HEAD so
-`git rev-list upstream..HEAD` returns zero, and persists pin state in
+After the rewrite, yoe re-points the local `yoe/pin` git tag to HEAD so
+`git rev-list yoe/pin..HEAD` returns zero, and persists pin state in
 `BuildMeta`. The working tree, the `.star` declaration, and the SRC column now
 all agree on the new pin. The user can toggle `u` again if they want to go back
 to dev mode and keep iterating from this point.
@@ -304,11 +304,11 @@ Transitions:
   losing local work. On confirm: re-clone via the existing `source.Prepare`
   path.
 - **dev / dev-mod → dev** (`P`): rewrite the unit's `tag` field to HEAD (tag
-  name if HEAD has one, otherwise 40-char SHA); move the local `upstream` tag to
+  name if HEAD has one, otherwise 40-char SHA); move the local `yoe/pin` tag to
   HEAD so `dev-mod` collapses back to `dev`. Disabled in `dev-dirty` (commit or
   stash first) and in `pin`.
 - **dev ↔ dev-mod ↔ dev-dirty**: auto-detected from `git status` +
-  `git rev-list upstream..HEAD`. No user action required.
+  `git rev-list yoe/pin..HEAD`. No user action required.
 
 ## Persistence
 
@@ -333,11 +333,11 @@ These are pointers, not the design — planning doc owns specifics.
 - `DevToUpstream` reads the unit's declared `branch` field (if any) and checks
   out a local branch named `<branch>` at `origin/<branch>` HEAD after fetching.
   With no branch declared the working tree stays at the pinned commit. The local
-  `upstream` git tag is always anchored at the pinned commit so dev-mod counts
+  `yoe/pin` git tag is always anchored at the pinned commit so dev-mod counts
   commits past the pin — a branch-tracked unit toggled into dev with branch HEAD
   ahead of pin lands in dev-mod immediately.
 - `DevPinToCurrent` writes HEAD into the unit's `tag` field (tag name when HEAD
-  has one, otherwise 40-char SHA) and moves the local `upstream` tag to HEAD.
+  has one, otherwise 40-char SHA) and moves the local `yoe/pin` tag to HEAD.
   Only writes to `tag` — `branch` is never touched. A regex-based `.star` field
   rewriter (`internal/starlark/edit.go`) preserves surrounding comments and
   whitespace.
@@ -395,7 +395,7 @@ These are pointers, not the design — planning doc owns specifics.
   tree at the pinned commit. The `dev-mod` count reflects commits beyond the
   tracked anchor (branch HEAD when declared, the pin otherwise).
 - The `P` keystroke on the detail page rewrites the unit's `tag` field to HEAD's
-  tag (when one exists) or its 40-char SHA, advances the local `upstream` tag to
+  tag (when one exists) or its 40-char SHA, advances the local `yoe/pin` tag to
   HEAD, and leaves the unit in `dev` state. Disabled in `dev-dirty` and `pin`.
   Never writes the `branch` field.
 - The displayed state updates within seconds of an external edit (shell via `$`,

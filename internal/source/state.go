@@ -13,6 +13,12 @@ import (
 // tree, the git index, or any state file.
 type State string
 
+// PinTag is the name of yoe's local git tag marking the pin commit
+// inside a unit's src dir. Namespaced under "yoe/" so it can never
+// collide with real upstream tags (e.g., `v0.18.5`) — which matters
+// for DevPromoteToPin's "pick a tag pointing at HEAD" logic.
+const PinTag = "yoe/pin"
+
 const (
 	// StateEmpty means the src dir doesn't exist or has no .git — the
 	// unit hasn't been built yet, or its source dir was wiped.
@@ -56,7 +62,7 @@ func IsDev(s State) bool {
 
 // DetectState returns the source state for the working tree at srcDir.
 // The result is derived from local git state — `git status --porcelain`,
-// `git rev-list --count upstream..HEAD` — plus the caller's `cached`
+// `git rev-list --count yoe/pin..HEAD` — plus the caller's `cached`
 // toggle decision. No fetch, no network.
 //
 // `cached` is the unit's previously-persisted BuildMeta.SourceState
@@ -92,7 +98,7 @@ func DetectState(srcDir string, cached State) (State, error) {
 		return StateDevDirty, nil
 	}
 
-	ahead, err := stateGit(srcDir, "rev-list", "--count", "upstream..HEAD")
+	ahead, err := stateGit(srcDir, "rev-list", "--count", PinTag+"..HEAD")
 	if err != nil {
 		// Likely no `upstream` tag — surface the error but report
 		// dev so the caller can still render something useful.

@@ -36,7 +36,7 @@ func DevExtract(projectDir, arch, unitName string, w io.Writer) error {
 	}
 
 	// Check if there are commits beyond upstream
-	out, err := gitCmd(srcDir, "rev-list", "upstream..HEAD")
+	out, err := gitCmd(srcDir, "rev-list", source.PinTag+"..HEAD")
 	if err != nil {
 		return fmt.Errorf("no 'upstream' tag in %s — was this source fetched by yoe?", srcDir)
 	}
@@ -65,7 +65,7 @@ func DevExtract(projectDir, arch, unitName string, w io.Writer) error {
 	}
 
 	// Extract patches with git format-patch
-	_, err = gitCmd(srcDir, "format-patch", "--output-directory", patchDir, "upstream..HEAD")
+	_, err = gitCmd(srcDir, "format-patch", "--output-directory", patchDir, source.PinTag+"..HEAD")
 	if err != nil {
 		return fmt.Errorf("git format-patch: %w", err)
 	}
@@ -112,7 +112,7 @@ func DevDiff(projectDir, arch, unitName string, w io.Writer) error {
 		return fmt.Errorf("%s is not a git repo — build the recipe first", srcDir)
 	}
 
-	out, err := gitCmd(srcDir, "log", "--oneline", "upstream..HEAD")
+	out, err := gitCmd(srcDir, "log", "--oneline", source.PinTag+"..HEAD")
 	if err != nil {
 		return fmt.Errorf("no 'upstream' tag in %s", srcDir)
 	}
@@ -154,7 +154,7 @@ func DevStatus(projectDir, arch string, w io.Writer) error {
 			continue
 		}
 
-		out, err := gitCmd(srcDir, "rev-list", "--count", "upstream..HEAD")
+		out, err := gitCmd(srcDir, "rev-list", "--count", source.PinTag+"..HEAD")
 		if err != nil {
 			continue
 		}
@@ -299,7 +299,7 @@ func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, opts DevUpst
 		// answering "would a build here produce different output than
 		// pin mode?" at a glance. A branch that's advanced past the
 		// pin tag flips the unit to dev-mod immediately on toggle.
-		if _, err := gitCmd(srcDir, "tag", "-f", "upstream", unit.Tag); err != nil {
+		if _, err := gitCmd(srcDir, "tag", "-f", source.PinTag, unit.Tag); err != nil {
 			return fmt.Errorf("DevToUpstream: anchoring upstream tag at %s: %w", unit.Tag, err)
 		}
 	}
@@ -428,7 +428,7 @@ func DevToPin(projectDir, scopeDir string, unit *yoestar.Unit, force bool) error
 	// Reset the local `upstream` git tag back to the pin commit (the
 	// commit pre-patches), matching what source.Prepare leaves behind
 	// for a fresh pin clone.
-	if _, err := gitCmd(srcDir, "tag", "-f", "upstream", unit.Tag); err != nil {
+	if _, err := gitCmd(srcDir, "tag", "-f", source.PinTag, unit.Tag); err != nil {
 		return fmt.Errorf("DevToPin: resetting upstream tag: %w", err)
 	}
 	if err := writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StatePin); err != nil {
@@ -515,11 +515,11 @@ func writeUnitSourceState(projectDir, scopeDir, unitName string, state source.St
 }
 
 // DevPromoteToPin captures the dev-mode checkout's current HEAD into
-// the unit's .star `tag` field as a 40-char SHA. SHAs are unambiguous
-// and reproducible across upstream rebases / force-pushes / tag
-// deletions; tag names aren't. yoe's source layer accepts a SHA in the
-// `tag` field, same as a tag name — if the user wants a tag-named pin
-// they can hand-edit the .star.
+// the unit's .star `tag` field. Prefers a real upstream tag name when
+// HEAD has one (e.g., `v0.18.5`) — those are human-readable and
+// survive a clean re-pin. yoe-internal markers (`yoe/pin` and any
+// future `yoe/*` tags) are skipped. When HEAD has no real upstream
+// tag, falls back to the 40-char SHA, which is always unambiguous.
 //
 // Never writes the `branch` field — branch tracking is declared by the
 // unit author, the pin command only updates the pin.
@@ -552,16 +552,28 @@ func DevPromoteToPin(projectDir, scopeDir string, unit *yoestar.Unit) error {
 		return fmt.Errorf("DevPromoteToPin: %w", err)
 	}
 
-	// Always write the 40-char SHA of HEAD. Tag names are mutable
-	// (upstream can rebase, delete, or force-push them); a SHA is
-	// unambiguous and reproducible. yoe's source layer accepts a SHA
-	// in the `tag` field — same code path as a tag name. If the user
-	// wants a tag-named pin instead, they can hand-edit the .star.
-	out, err := gitCmd(srcDir, "rev-parse", "HEAD")
-	if err != nil {
-		return fmt.Errorf("DevPromoteToPin: %w", err)
+	// Pick the first upstream tag pointing at HEAD that isn't in the
+	// yoe-internal namespace. yoe/pin (and any future yoe/* markers)
+	// must be filtered out — they're our own bookkeeping, not upstream
+	// references. If HEAD has no real tag, fall back to the 40-char
+	// SHA, which is always unambiguous.
+	var value string
+	if out, err := gitCmd(srcDir, "tag", "--points-at", "HEAD"); err == nil {
+		for _, t := range strings.Fields(out) {
+			if strings.HasPrefix(t, "yoe/") {
+				continue
+			}
+			value = t
+			break
+		}
 	}
-	value := strings.TrimSpace(out)
+	if value == "" {
+		out, err := gitCmd(srcDir, "rev-parse", "HEAD")
+		if err != nil {
+			return fmt.Errorf("DevPromoteToPin: %w", err)
+		}
+		value = strings.TrimSpace(out)
+	}
 
 	if err := yoestar.RewriteUnitField(starPath, unit.Name, "tag", value); err != nil {
 		return fmt.Errorf("DevPromoteToPin: rewriting tag: %w", err)
@@ -570,8 +582,8 @@ func DevPromoteToPin(projectDir, scopeDir string, unit *yoestar.Unit) error {
 	// Move upstream tag forward so rev-list upstream..HEAD returns 0
 	// and DetectState reports pin (matching the new .star). -f
 	// overwrites the existing upstream tag.
-	if _, err := gitCmd(srcDir, "tag", "-f", "upstream", "HEAD"); err != nil {
-		return fmt.Errorf("DevPromoteToPin: advancing upstream tag: %w", err)
+	if _, err := gitCmd(srcDir, "tag", "-f", source.PinTag, "HEAD"); err != nil {
+		return fmt.Errorf("DevPromoteToPin: advancing %s tag: %w", source.PinTag, err)
 	}
 
 	// Persist pin state. The action is called "pin to current" — the
