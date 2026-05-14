@@ -656,6 +656,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.target {
 		case targetUnit:
 			m.invalidateUnitState(msg.name)
+			// The previous build status reflected a different source
+			// state; toggling pin↔dev (or P-pinning) invalidates that
+			// — clear the cached/built status so the row doesn't
+			// misleadingly show a green check for the old build.
+			delete(m.statuses, msg.name)
 		case targetModule:
 			m.invalidateModuleState(msg.name)
 		}
