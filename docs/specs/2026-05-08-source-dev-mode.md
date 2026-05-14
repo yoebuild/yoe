@@ -232,8 +232,10 @@ deliberately simple — no popup, no tag/hash/branch picker:
   unit author; the pin command only updates the pin.
 
 After the rewrite, yoe re-points the local `upstream` git tag to HEAD so
-`git rev-list upstream..HEAD` returns zero and the unit transitions from
-`dev-mod` (if it was there) back to plain `dev`.
+`git rev-list upstream..HEAD` returns zero, and persists pin state in
+`BuildMeta`. The working tree, the `.star` declaration, and the SRC column now
+all agree on the new pin. The user can toggle `u` again if they want to go back
+to dev mode and keep iterating from this point.
 
 `P` is available in `dev` and `dev-mod`. In `dev-dirty` it's disabled with a
 hint (`P pin: commit or stash first`) so the captured state is reproducible. In

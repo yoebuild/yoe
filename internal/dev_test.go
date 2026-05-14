@@ -432,10 +432,10 @@ func TestDevPromoteToPin_HEADWithoutTag_WritesSHA(t *testing.T) {
 	if !strings.Contains(string(got), `tag = "`+wantSha+`"`) {
 		t.Errorf(".star tag should be HEAD sha %q, got:\n%s", wantSha, got)
 	}
-	// State should be dev (upstream tag advanced to HEAD).
-	state, _ := source.DetectState(srcDir, source.StateDev)
-	if state != source.StateDev {
-		t.Errorf("post-pin state = %q, want %q", state, source.StateDev)
+	// State should be pin (working tree now matches the new pin in .star).
+	state, _ := source.DetectState(srcDir, source.StatePin)
+	if state != source.StatePin {
+		t.Errorf("post-pin state = %q, want %q", state, source.StatePin)
 	}
 }
 

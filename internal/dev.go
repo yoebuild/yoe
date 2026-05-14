@@ -528,10 +528,12 @@ func writeUnitSourceState(projectDir, scopeDir, unitName string, state source.St
 // (commit or stash first so the captured state is reproducible). Other
 // states (pin, empty) are no-ops with an informative error.
 //
-// On success: rewrites the unit's `tag` field and advances the local
-// `upstream` git tag to HEAD so `git rev-list upstream..HEAD` returns 0
-// — the unit transitions from `dev-mod` (if it was there) to plain
-// `dev`. The working tree commit is unchanged.
+// On success: rewrites the unit's `tag` field, advances the local
+// `upstream` git tag to HEAD so `git rev-list upstream..HEAD` returns 0,
+// and persists pin state to BuildMeta — the working tree, the .star,
+// and the source-state column now agree on the new pin. The working
+// tree commit is unchanged; the user can toggle `u` to go back to dev
+// mode if they want to keep iterating from this point.
 func DevPromoteToPin(projectDir, scopeDir string, unit *yoestar.Unit) error {
 	srcDir := devSrcDir(projectDir, scopeDir, unit.Name)
 	state, _ := source.DetectState(srcDir, readUnitSourceState(projectDir, scopeDir, unit.Name))
@@ -571,13 +573,18 @@ func DevPromoteToPin(projectDir, scopeDir string, unit *yoestar.Unit) error {
 		return fmt.Errorf("DevPromoteToPin: rewriting tag: %w", err)
 	}
 
-	// Move upstream tag forward so the state transitions from dev-mod
-	// to dev. -f overwrites the existing upstream tag.
+	// Move upstream tag forward so rev-list upstream..HEAD returns 0
+	// and DetectState reports pin (matching the new .star). -f
+	// overwrites the existing upstream tag.
 	if _, err := gitCmd(srcDir, "tag", "-f", "upstream", "HEAD"); err != nil {
 		return fmt.Errorf("DevPromoteToPin: advancing upstream tag: %w", err)
 	}
 
-	return writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StateDev)
+	// Persist pin state. The action is called "pin to current" — the
+	// .star and the working tree now agree on the new pin, and the
+	// SRC column should reflect that. If the user wants to keep
+	// iterating in dev mode after pinning, they can toggle `u` again.
+	return writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StatePin)
 }
 
 // findUnitStarFile locates the .star file that registers a unit with
