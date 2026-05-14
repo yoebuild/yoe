@@ -567,22 +567,60 @@ func (m model) findModule(name string) (yoestar.ResolvedModule, bool) {
 	return yoestar.ResolvedModule{}, false
 }
 
-// invalidateUnitState drops the cached source state for a unit so the
-// next render re-reads BuildMeta.SourceState. Also reconciles the
-// background watcher: if the new state is dev*, arm; otherwise disarm.
+// invalidateUnitState refreshes the cached source state for a unit
+// from the live working tree (not just BuildMeta's persisted toggle
+// decision) and reconciles the background watcher: if the new state is
+// dev*, arm; otherwise disarm.
+//
+// Seeding from DetectState directly — rather than from BuildMeta's
+// collapsed "dev" / "pin" value — prevents the watcher's first
+// post-build poll from "discovering" dev-mod or dev-dirty as a state
+// change and incorrectly clearing the just-set [cached] status. The
+// live state is what the SRC column should show anyway.
 func (m model) invalidateUnitState(name string) {
 	if m.unitSrcStates != nil {
 		delete(m.unitSrcStates, name)
 	}
+	// Tests construct models directly without populating proj — bail
+	// out early in that case rather than dereferencing nil through
+	// unitSrcDir.
+	if m.proj == nil {
+		return
+	}
+	if _, ok := m.proj.Units[name]; !ok {
+		return
+	}
+	srcDir := m.unitSrcDir(name)
+	cached := m.persistedUnitSourceState(name)
+	live, _ := source.DetectState(srcDir, cached)
+	if m.unitSrcStates != nil {
+		m.unitSrcStates[name] = live
+	}
 	if m.srcWatcher == nil {
 		return
 	}
-	state := m.unitSourceState(name)
-	if source.IsDev(state) {
-		m.srcWatcher.Arm(targetUnit, name, m.unitSrcDir(name), state)
+	if source.IsDev(live) {
+		m.srcWatcher.Arm(targetUnit, name, srcDir, live)
 	} else {
 		m.srcWatcher.Disarm(targetUnit, name)
 	}
+}
+
+// persistedUnitSourceState reads the BuildMeta-persisted toggle
+// decision for a unit ("pin" / "dev" / empty). Used as the `cached`
+// argument to DetectState so a clean checkout is disambiguated
+// correctly.
+func (m model) persistedUnitSourceState(name string) source.State {
+	u, ok := m.proj.Units[name]
+	if !ok {
+		return source.StateEmpty
+	}
+	sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
+	buildDir := build.UnitBuildDir(m.projectDir, sd, name)
+	if meta := build.ReadMeta(buildDir); meta != nil {
+		return source.State(meta.SourceState)
+	}
+	return source.StateEmpty
 }
 
 // invalidateModuleState drops the cached source state for a module
