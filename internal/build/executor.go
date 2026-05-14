@@ -144,26 +144,7 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 	// state — without that step, an uncommitted edit didn't change
 	// the hash and the build was served from cache, silently
 	// dropping the user's edits.
-	srcInputs := func(u *yoestar.Unit) string {
-		sd := ScopeDir(u, opts.Arch, opts.Machine)
-		buildDir := UnitBuildDir(opts.ProjectDir, sd, u.Name)
-		persisted := source.StateEmpty
-		if meta := ReadMeta(buildDir); meta != nil {
-			persisted = source.State(meta.SourceState)
-		}
-		if !source.IsDev(persisted) {
-			return ""
-		}
-		srcDir := filepath.Join(buildDir, "src")
-		liveState, _ := source.DetectState(srcDir, persisted)
-		if !source.IsDev(liveState) {
-			// Persisted says dev but the live dir disagrees (user
-			// wiped it, no .git, etc.). Fall back to the persisted
-			// state so we still produce a stable hash component.
-			liveState = persisted
-		}
-		return source.SrcHashInputs(srcDir, liveState)
-	}
+	srcInputs := SrcInputsFn(opts.ProjectDir, opts.Arch, opts.Machine)
 	hashes, err := resolve.ComputeAllHashes(dag, opts.Arch, opts.Machine, srcInputs)
 	if err != nil {
 		return err
@@ -897,6 +878,41 @@ func repoRelPath(proj *yoestar.Project, projectDir string) string {
 		return "repo"
 	}
 	return rel
+}
+
+// SrcInputsFn returns the srcInputs callback for ComputeAllHashes: a
+// per-unit function that folds dev-state observations into the unit's
+// content hash. Pin units (and any unit without a persisted dev
+// SourceState) return empty so they're cache-neutral; dev units return
+// source.SrcHashInputs against the live working tree.
+//
+// Shared between the executor (build path) and the TUI (startup +
+// recomputeStatuses), so both compute the same hash and IsBuildCached
+// agrees about what's cached. Without sharing, the TUI passing nil
+// would treat dev units as cache-neutral at startup, never matching
+// the executor-written marker, and dev units would always show as
+// uncached on TUI restart.
+func SrcInputsFn(projectDir, arch, machine string) func(u *yoestar.Unit) string {
+	return func(u *yoestar.Unit) string {
+		sd := ScopeDir(u, arch, machine)
+		buildDir := UnitBuildDir(projectDir, sd, u.Name)
+		persisted := source.StateEmpty
+		if meta := ReadMeta(buildDir); meta != nil {
+			persisted = source.State(meta.SourceState)
+		}
+		if !source.IsDev(persisted) {
+			return ""
+		}
+		srcDir := filepath.Join(buildDir, "src")
+		liveState, _ := source.DetectState(srcDir, persisted)
+		if !source.IsDev(liveState) {
+			// Persisted says dev but the live dir disagrees (user
+			// wiped it, no .git, etc.). Fall back to the persisted
+			// state so we still produce a stable hash component.
+			liveState = persisted
+		}
+		return source.SrcHashInputs(srcDir, liveState)
+	}
 }
 
 // finalizeSourceState observes the live state of a unit's src dir and
