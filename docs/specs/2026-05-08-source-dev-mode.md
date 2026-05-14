@@ -225,9 +225,10 @@ A second keybinding on the detail page (`P` for "pin to current") captures the
 working tree's current HEAD into the unit's `tag` field. The action is
 deliberately simple — no popup, no tag/hash/branch picker:
 
-- If HEAD has an annotated or lightweight tag pointing at it, the tag name is
-  written: `tag = "v1.38.0"`.
-- Otherwise the 40-char SHA is written: `tag = "abc123def..."`.
+- Always writes the 40-char SHA: `tag = "abc123def..."`. Tag names can be
+  mutated by upstream (rebase, delete, force-push); the SHA is unambiguous and
+  reproducible. The user can hand-edit the `.star` to swap in a tag name when
+  they want a more readable pin.
 - The `branch` field is never written by `P`. Branch tracking is declared by the
   unit author; the pin command only updates the pin.
 

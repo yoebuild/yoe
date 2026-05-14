@@ -439,7 +439,7 @@ func TestDevPromoteToPin_HEADWithoutTag_WritesSHA(t *testing.T) {
 	}
 }
 
-func TestDevPromoteToPin_HEADWithTag_WritesTagName(t *testing.T) {
+func TestDevPromoteToPin_AlwaysWritesSHA(t *testing.T) {
 	dir := t.TempDir()
 	starBody := `unit(
     name = "foo",
@@ -448,15 +448,22 @@ func TestDevPromoteToPin_HEADWithTag_WritesTagName(t *testing.T) {
 )
 `
 	srcDir, starPath, unit := setupDevModUnit(t, dir, "foo", starBody)
-	// Add a tag on the local commit so the pin picks it up automatically.
+	// Even when HEAD has a tag pointing at it, P writes the SHA.
+	// Tag names can be rebased/deleted/force-pushed upstream; the SHA
+	// is unambiguous and reproducible.
 	run(t, srcDir, "git", "tag", "v1.1.0")
+	headSha, _ := gitCmd(srcDir, "rev-parse", "HEAD")
+	wantSha := strings.TrimSpace(headSha)
 
 	if err := DevPromoteToPin(dir, "x86_64", unit); err != nil {
 		t.Fatalf("DevPromoteToPin: %v", err)
 	}
 	got, _ := os.ReadFile(starPath)
-	if !strings.Contains(string(got), `tag = "v1.1.0"`) {
-		t.Errorf(".star tag should be v1.1.0, got:\n%s", got)
+	if !strings.Contains(string(got), `tag = "`+wantSha+`"`) {
+		t.Errorf(".star tag should be HEAD sha %q, got:\n%s", wantSha, got)
+	}
+	if strings.Contains(string(got), `tag = "v1.1.0"`) {
+		t.Errorf(".star should not contain the local tag name v1.1.0:\n%s", got)
 	}
 }
 
@@ -470,14 +477,15 @@ func TestDevPromoteToPin_PreservesBranchField(t *testing.T) {
 )
 `
 	srcDir, starPath, unit := setupDevModUnit(t, dir, "foo", starBody)
-	run(t, srcDir, "git", "tag", "v1.1.0")
+	headSha, _ := gitCmd(srcDir, "rev-parse", "HEAD")
+	wantSha := strings.TrimSpace(headSha)
 
 	if err := DevPromoteToPin(dir, "x86_64", unit); err != nil {
 		t.Fatalf("DevPromoteToPin: %v", err)
 	}
 	got, _ := os.ReadFile(starPath)
-	if !strings.Contains(string(got), `tag = "v1.1.0"`) {
-		t.Errorf(".star tag should be v1.1.0, got:\n%s", got)
+	if !strings.Contains(string(got), `tag = "`+wantSha+`"`) {
+		t.Errorf(".star tag should be HEAD sha %q, got:\n%s", wantSha, got)
 	}
 	// branch line must be left untouched — pin command never writes branch.
 	if !strings.Contains(string(got), `branch = "main"`) {

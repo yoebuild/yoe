@@ -515,11 +515,11 @@ func writeUnitSourceState(projectDir, scopeDir, unitName string, state source.St
 }
 
 // DevPromoteToPin captures the dev-mode checkout's current HEAD into
-// the unit's .star `tag` field. Picks the form automatically:
-//
-//   - if HEAD has a git tag (annotated or lightweight), the tag name is
-//     written;
-//   - otherwise the 40-char SHA is written.
+// the unit's .star `tag` field as a 40-char SHA. SHAs are unambiguous
+// and reproducible across upstream rebases / force-pushes / tag
+// deletions; tag names aren't. yoe's source layer accepts a SHA in the
+// `tag` field, same as a tag name — if the user wants a tag-named pin
+// they can hand-edit the .star.
 //
 // Never writes the `branch` field — branch tracking is declared by the
 // unit author, the pin command only updates the pin.
@@ -552,22 +552,16 @@ func DevPromoteToPin(projectDir, scopeDir string, unit *yoestar.Unit) error {
 		return fmt.Errorf("DevPromoteToPin: %w", err)
 	}
 
-	// Pick a git tag pointing at HEAD when one exists; otherwise the
-	// 40-char SHA. Multiple tags at HEAD: take the first (deterministic
-	// without requiring annotated tags).
-	var value string
-	if out, err := gitCmd(srcDir, "tag", "--points-at", "HEAD"); err == nil {
-		if tags := strings.Fields(out); len(tags) > 0 {
-			value = tags[0]
-		}
+	// Always write the 40-char SHA of HEAD. Tag names are mutable
+	// (upstream can rebase, delete, or force-push them); a SHA is
+	// unambiguous and reproducible. yoe's source layer accepts a SHA
+	// in the `tag` field — same code path as a tag name. If the user
+	// wants a tag-named pin instead, they can hand-edit the .star.
+	out, err := gitCmd(srcDir, "rev-parse", "HEAD")
+	if err != nil {
+		return fmt.Errorf("DevPromoteToPin: %w", err)
 	}
-	if value == "" {
-		out, err := gitCmd(srcDir, "rev-parse", "HEAD")
-		if err != nil {
-			return fmt.Errorf("DevPromoteToPin: %w", err)
-		}
-		value = strings.TrimSpace(out)
-	}
+	value := strings.TrimSpace(out)
 
 	if err := yoestar.RewriteUnitField(starPath, unit.Name, "tag", value); err != nil {
 		return fmt.Errorf("DevPromoteToPin: rewriting tag: %w", err)
