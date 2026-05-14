@@ -540,26 +540,35 @@ func (m model) viewSourceProgress() string {
 // what we want — the watcher and the SRC column should agree on
 // initial membership.
 //
-// Seeds both the SRC-column state cache and the watcher's "last"
-// observation from DetectState (the live working-tree state), not
-// from BuildMeta's collapsed toggle decision. Without this, the
-// watcher's first poll sees the live dev-dirty state, compares it to
-// the cached "dev" from BuildMeta, treats it as a fresh state change,
-// and clears the just-loaded [cached] indicator.
+// Only runs DetectState for units whose BuildMeta says they're in dev
+// mode. Pin units get their state from BuildMeta directly:
+//
+//   - DetectState involves git invocations and a status scan, which
+//     for a large project (many units, each with a full upstream src
+//     tree) takes seconds to minutes if run on every startup.
+//   - `git status --porcelain` flags any untracked build artifacts as
+//     dirty. For pin units yoe owns the dir, so untracked files
+//     shouldn't drive the SRC column to dev-dirty — the brainstorm's
+//     "no pin-dirty" discipline says pin is whatever yoe last built,
+//     edits there are misuse, not a state worth modelling.
+//
+// So pin units skip DetectState entirely; the BuildMeta value drives
+// the SRC column for them.
 func (m *model) armWatcherFromInitialStates() {
 	if m.srcWatcher == nil {
 		return
 	}
 	for name := range m.proj.Units {
+		persisted := m.persistedUnitSourceState(name)
+		if !source.IsDev(persisted) {
+			continue // pin/empty — BuildMeta is the truth, no scan needed
+		}
 		srcDir := m.unitSrcDir(name)
-		cached := m.persistedUnitSourceState(name)
-		live, _ := source.DetectState(srcDir, cached)
+		live, _ := source.DetectState(srcDir, persisted)
 		if m.unitSrcStates != nil {
 			m.unitSrcStates[name] = live
 		}
-		if source.IsDev(live) {
-			m.srcWatcher.Arm(targetUnit, name, srcDir, live)
-		}
+		m.srcWatcher.Arm(targetUnit, name, srcDir, live)
 	}
 	for _, rm := range m.proj.ResolvedModules {
 		state := m.moduleSourceState(rm)
