@@ -589,15 +589,18 @@ func (m model) findModule(name string) (yoestar.ResolvedModule, bool) {
 }
 
 // invalidateUnitState refreshes the cached source state for a unit
-// from the live working tree (not just BuildMeta's persisted toggle
-// decision) and reconciles the background watcher: if the new state is
-// dev*, arm; otherwise disarm.
+// and reconciles the watcher membership.
 //
-// Seeding from DetectState directly — rather than from BuildMeta's
-// collapsed "dev" / "pin" value — prevents the watcher's first
-// post-build poll from "discovering" dev-mod or dev-dirty as a state
-// change and incorrectly clearing the just-set [cached] status. The
-// live state is what the SRC column should show anyway.
+// For pin units (per BuildMeta) we never look at the live working
+// tree: the build's autotools/make output is sprinkled in srcDir as
+// untracked files, and DetectState would (correctly per its rules)
+// report dev-dirty against it — but the toggle decision is pin, so
+// the SRC column should show pin. Only DevToUpstream / DevToPin can
+// flip the toggle decision; the build write itself can't.
+//
+// For dev units we DO need DetectState because the SRC column wants
+// to distinguish dev from dev-mod from dev-dirty — those refinements
+// aren't persisted in BuildMeta.
 func (m model) invalidateUnitState(name string) {
 	if m.unitSrcStates != nil {
 		delete(m.unitSrcStates, name)
@@ -611,9 +614,19 @@ func (m model) invalidateUnitState(name string) {
 	if _, ok := m.proj.Units[name]; !ok {
 		return
 	}
+	persisted := m.persistedUnitSourceState(name)
+	if !source.IsDev(persisted) {
+		// Pin (or empty) — trust BuildMeta, disarm the watcher.
+		if m.unitSrcStates != nil {
+			m.unitSrcStates[name] = persisted
+		}
+		if m.srcWatcher != nil {
+			m.srcWatcher.Disarm(targetUnit, name)
+		}
+		return
+	}
 	srcDir := m.unitSrcDir(name)
-	cached := m.persistedUnitSourceState(name)
-	live, _ := source.DetectState(srcDir, cached)
+	live, _ := source.DetectState(srcDir, persisted)
 	if m.unitSrcStates != nil {
 		m.unitSrcStates[name] = live
 	}
