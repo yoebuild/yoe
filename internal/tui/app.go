@@ -1018,8 +1018,17 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "e":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
-			path := findUnitFile(m.projectDir, name)
-			if path != "" {
+			// Use the resolved unit's DefinedIn (= the winning module's
+			// .star directory after prefer_modules + last-module-wins
+			// shadowing) so editing opens the file yoe actually uses,
+			// not just the first `<name>.star` the filesystem walk hits.
+			if path := unitStarPath(m.proj.Units[name]); path != "" {
+				return m, m.execEditor(path)
+			}
+			// Fallback for derived units (e.g., base-files-dev defined
+			// via a helper inside another .star): scan the project for
+			// any file mentioning the name.
+			if path := findUnitFile(m.projectDir, name); path != "" {
 				return m, m.execEditor(path)
 			}
 			m.message = fmt.Sprintf("Could not find .star file for %s", name)
@@ -4473,6 +4482,44 @@ func (m model) renderBuildProgress() string {
 	}
 	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	return bar.View() + labelStyle.Render(label)
+}
+
+// unitStarPath returns the .star file that defines the given resolved
+// unit, using its DefinedIn directory (the winning module's path after
+// priority resolution). Tries the conventional `<name>.star` first,
+// then falls back to scanning DefinedIn for any .star file whose body
+// names this unit — handles helpers that emit a unit with a different
+// filename from the function definition.
+//
+// Returns "" if the unit is nil, has no DefinedIn (unit constructed
+// programmatically), or no .star in DefinedIn references it.
+func unitStarPath(u *yoestar.Unit) string {
+	if u == nil || u.DefinedIn == "" {
+		return ""
+	}
+	candidate := filepath.Join(u.DefinedIn, u.Name+".star")
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	needle := []byte(`"` + u.Name + `"`)
+	entries, err := os.ReadDir(u.DefinedIn)
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".star") {
+			continue
+		}
+		path := filepath.Join(u.DefinedIn, e.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if bytes.Contains(data, needle) {
+			return path
+		}
+	}
+	return ""
 }
 
 func findUnitFile(projectDir, name string) string {
