@@ -383,6 +383,7 @@ regardless of whether a fresh build would produce identical bytes.
 
 ## 📚 Documentation
 
+- [FAQ](https://yoebuild.org/faq/) — answers to common questions about `[yoe]`
 - [AI Skills](docs/ai-skills.md) — AI-driven workflows for unit creation, build
   debugging, security auditing, and more
 - [The `yoe` Tool](docs/yoe-tool.md) — CLI reference for building, imaging, and
