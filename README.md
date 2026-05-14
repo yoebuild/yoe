@@ -260,6 +260,10 @@ machines act as architecture-specific runners. Orchestration, source edits,
 project state, the TUI, and the CLI stay on the workstation; only the per-unit
 build steps that benefit from native execution run elsewhere.
 
+If a remote builder isn't available — offline, on a plane, or the cloud
+runner is down — QEMU user-mode emulation is the fallback so builds can always
+continue locally. It's slower, but the workflow doesn't break.
+
 The result: developers stay in the environment they already have tuned, and
 `[yoe]` puts the right machine behind each build step.
 
