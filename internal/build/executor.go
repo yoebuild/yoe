@@ -297,14 +297,13 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		}
 		meta.InstalledBytes = DirSize(installedRoot)
 		// Persist live source state so the TUI can render pin/dev
-		// without re-running git on every paint. Detection happens
-		// after build so the src dir is in its final state. Empty
-		// (missing src dir) doesn't overwrite — preserves whatever the
-		// dev toggle set.
-		// Default an unbuilt unit's cached state to pin so finalize
-		// doesn't fall through DetectState's origin-heuristic and label
-		// a yoe-managed clone as dev. The toggle path is the only way a
-		// unit acquires dev state, and it writes BuildMeta first.
+		// Persist the toggle decision, not a live observation. The
+		// build itself runs configure/make/etc. which sprinkles
+		// untracked artifacts in the src tree — DetectState would see
+		// those as dev-dirty, but the user never toggled to dev, so
+		// the persisted state should stay pin. Only DevToUpstream and
+		// DevToPin change the toggle decision; the build write just
+		// records whichever was already in effect.
 		cachedState := source.State(meta.SourceState)
 		if cachedState == source.StateEmpty {
 			cachedState = source.StatePin
@@ -915,22 +914,28 @@ func SrcInputsFn(projectDir, arch, machine string) func(u *yoestar.Unit) string 
 	}
 }
 
-// finalizeSourceState observes the live state of a unit's src dir and
-// reduces it to the toggle decision (pin or dev) for BuildMeta. The
-// dev-mod / dev-dirty refinements collapse to plain `dev` since only
-// the toggle decision is persisted — the live refinement is observed
-// at TUI render time. `cached` is the previously-persisted SourceState
-// (or empty for a fresh build), used to disambiguate clean checkouts
-// where pin and dev share identical git state. Returns StateEmpty when
-// the src dir is missing, signalling the caller to preserve any
-// existing meta.SourceState.
+// finalizeSourceState returns the toggle decision to persist into
+// BuildMeta.SourceState after a successful build: pin or dev (never
+// dev-mod / dev-dirty — those are live refinements the watcher
+// computes from the working tree, not states yoe stores).
+//
+// Crucially, this does NOT call DetectState. A build runs configure,
+// make, and other tools that leave untracked artifacts in the src
+// tree; if we observed live state here, every pin build would flip to
+// dev-dirty because of those artifacts. The toggle decision lives in
+// the cached value — only DevToUpstream / DevToPin change it. We
+// just preserve and project that into BuildMeta after the build,
+// requiring only that the src dir still exists (build wasn't aborted
+// before Prepare ran).
 func finalizeSourceState(srcDir string, cached source.State) source.State {
-	live, err := source.DetectState(srcDir, cached)
-	if err != nil || live == source.StateEmpty {
+	if _, err := os.Stat(filepath.Join(srcDir, ".git")); err != nil {
 		return source.StateEmpty
 	}
-	if source.IsDev(live) {
+	if source.IsDev(cached) {
 		return source.StateDev
 	}
-	return live
+	if cached == source.StatePin {
+		return source.StatePin
+	}
+	return source.StateEmpty
 }

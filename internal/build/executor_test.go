@@ -198,67 +198,65 @@ func run(t *testing.T, dir, name string, args ...string) {
 	}
 }
 
-// TestFinalizeSourceState verifies the helper that maps live src dir
-// state into the persisted BuildMeta.SourceState. Fresh pin clones get
-// "pin"; any dev-mode state collapses to "dev"; missing src dirs return
-// empty so the caller preserves whatever the dev toggle set.
+// TestFinalizeSourceState verifies the helper projects the toggle
+// decision into BuildMeta.SourceState. The build itself doesn't
+// re-detect — it just persists whichever toggle decision was already
+// in effect, so untracked build artifacts (configure / make output)
+// can't flip a pin unit to dev.
 func TestFinalizeSourceState(t *testing.T) {
 	t.Run("missing src dir → empty", func(t *testing.T) {
-		got := finalizeSourceState(filepath.Join(t.TempDir(), "no-src"), "")
+		got := finalizeSourceState(filepath.Join(t.TempDir(), "no-src"), "pin")
 		if got != "" {
 			t.Errorf("got %q, want empty", got)
 		}
 	})
 
-	t.Run("pin clone → pin", func(t *testing.T) {
-		srcDir := setupPinClone(t)
-		got := finalizeSourceState(srcDir, "")
+	t.Run("cached pin → pin", func(t *testing.T) {
+		got := finalizeSourceState(setupPinClone(t), "pin")
 		if got != "pin" {
 			t.Errorf("got %q, want pin", got)
 		}
 	})
 
-	t.Run("dev with origin → dev", func(t *testing.T) {
+	t.Run("cached pin + dirty work tree still pin", func(t *testing.T) {
+		// Simulates a build that left untracked artifacts in the src
+		// dir — DetectState would call this dev-dirty, but the toggle
+		// decision is pin so finalize must persist pin.
 		srcDir := setupPinClone(t)
-		// Adding an origin remote flips DetectState to dev.
-		run(t, srcDir, "git", "remote", "add", "origin", "https://example.com/foo.git")
-		got := finalizeSourceState(srcDir, "")
+		os.WriteFile(filepath.Join(srcDir, "build-output.o"), []byte("\x00"), 0o644)
+		got := finalizeSourceState(srcDir, "pin")
+		if got != "pin" {
+			t.Errorf("untracked artifacts must not flip pin to dev, got %q", got)
+		}
+	})
+
+	t.Run("cached dev → dev", func(t *testing.T) {
+		got := finalizeSourceState(setupPinClone(t), "dev")
 		if got != "dev" {
 			t.Errorf("got %q, want dev", got)
 		}
 	})
 
-	t.Run("dev-mod collapses to dev", func(t *testing.T) {
-		srcDir := setupPinClone(t)
-		run(t, srcDir, "git", "remote", "add", "origin", "https://example.com/foo.git")
-		// One commit beyond upstream → DetectState returns dev-mod.
-		os.WriteFile(filepath.Join(srcDir, "patch.c"), []byte("// patch\n"), 0o644)
-		run(t, srcDir, "git", "add", "-A")
-		run(t, srcDir, "git", "commit", "-q", "-m", "local fix")
-		got := finalizeSourceState(srcDir, "")
+	t.Run("cached dev-mod collapses to dev", func(t *testing.T) {
+		got := finalizeSourceState(setupPinClone(t), "dev-mod")
 		if got != "dev" {
 			t.Errorf("dev-mod should collapse to dev, got %q", got)
 		}
 	})
 
-	t.Run("dev-dirty collapses to dev", func(t *testing.T) {
-		srcDir := setupPinClone(t)
-		run(t, srcDir, "git", "remote", "add", "origin", "https://example.com/foo.git")
-		os.WriteFile(filepath.Join(srcDir, "dirty.c"), []byte("// dirty\n"), 0o644)
-		got := finalizeSourceState(srcDir, "")
+	t.Run("cached dev-dirty collapses to dev", func(t *testing.T) {
+		got := finalizeSourceState(setupPinClone(t), "dev-dirty")
 		if got != "dev" {
 			t.Errorf("dev-dirty should collapse to dev, got %q", got)
 		}
 	})
 
-	t.Run("clean+origin+cached-pin → pin", func(t *testing.T) {
-		// New design: pin keeps origin configured. Cached state is
-		// authoritative for distinguishing pin from dev.
-		srcDir := setupPinClone(t)
-		run(t, srcDir, "git", "remote", "add", "origin", "https://example.com/foo.git")
-		got := finalizeSourceState(srcDir, "pin")
-		if got != "pin" {
-			t.Errorf("origin+cached-pin should stay pin, got %q", got)
+	t.Run("cached empty + valid src dir → empty (defer to caller default)", func(t *testing.T) {
+		// Caller (executor) defaults empty to pin before calling.
+		// finalizeSourceState itself returns empty for empty cached.
+		got := finalizeSourceState(setupPinClone(t), "")
+		if got != "" {
+			t.Errorf("got %q, want empty", got)
 		}
 	})
 }
