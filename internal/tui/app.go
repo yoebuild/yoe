@@ -676,6 +676,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.unitSrcStates != nil {
 				m.unitSrcStates[msg.name] = msg.state
 			}
+			// A state transition (dev → dev-mod, dev → dev-dirty,
+			// etc.) means the working tree no longer matches what
+			// the last build produced. Drop the cached build status
+			// so the row doesn't keep showing a stale green check.
+			// The hash itself already invalidates (SrcHashInputs
+			// folds HEAD sha + diff sha for dev-dirty), so the next
+			// build correctly cache-misses; this just makes the row
+			// reflect that immediately.
+			delete(m.statuses, msg.name)
 		case targetModule:
 			if m.moduleSrcStates != nil {
 				m.moduleSrcStates[msg.name] = msg.state
