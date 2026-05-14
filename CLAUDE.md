@@ -214,6 +214,14 @@ If a plugin's skill instructions reference its default directory anywhere
 `docs/specs/` and `docs/plans/` as well. The goal is one location per
 artifact kind; consumers should never have to check three places.
 
+`docs/SPEC_PLAN_INDEX.md` is the canonical index of every spec and plan
+with implementation status. When a new spec or plan lands in `docs/specs/`
+or `docs/plans/`, append a row to the index in the same commit. When
+implementation lands or status changes, flip the row's Status column.
+When a spec is superseded, mark it and link to the replacement. Before
+starting work on a topic, check the index for the prior spec/plan and
+its status — that's faster than scanning the directories.
+
 ## Working on This Codebase
 
 - **No shortcuts.** Build systems are fragile. Always implement the correct fix,
