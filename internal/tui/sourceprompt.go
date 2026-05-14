@@ -539,14 +539,26 @@ func (m model) viewSourceProgress() string {
 // helpers populate the underlying maps as a side effect, which is
 // what we want — the watcher and the SRC column should agree on
 // initial membership.
+//
+// Seeds both the SRC-column state cache and the watcher's "last"
+// observation from DetectState (the live working-tree state), not
+// from BuildMeta's collapsed toggle decision. Without this, the
+// watcher's first poll sees the live dev-dirty state, compares it to
+// the cached "dev" from BuildMeta, treats it as a fresh state change,
+// and clears the just-loaded [cached] indicator.
 func (m *model) armWatcherFromInitialStates() {
 	if m.srcWatcher == nil {
 		return
 	}
 	for name := range m.proj.Units {
-		state := m.unitSourceState(name)
-		if source.IsDev(state) {
-			m.srcWatcher.Arm(targetUnit, name, m.unitSrcDir(name), state)
+		srcDir := m.unitSrcDir(name)
+		cached := m.persistedUnitSourceState(name)
+		live, _ := source.DetectState(srcDir, cached)
+		if m.unitSrcStates != nil {
+			m.unitSrcStates[name] = live
+		}
+		if source.IsDev(live) {
+			m.srcWatcher.Arm(targetUnit, name, srcDir, live)
 		}
 	}
 	for _, rm := range m.proj.ResolvedModules {
