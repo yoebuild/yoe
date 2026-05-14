@@ -132,18 +132,17 @@ A decade ago, this combination wasn't realistic. Several things have changed:
 
 ## 🧭 Values
 
-1. **Be Pragmatic**. Leverage what already exists where it makes sense. We don't
-   have any religion that everything needs to be built from source, or that we
-   all need to build our own toolchains.
 1. **The product developer experience is the top priority**. Other solutions are
    often not optimized for developers building products. This includes
    application developers as well as system engineers. Clear and concise
-   communication is essential when things go wrong. Unintelligible stack traces
+   communication is essential when things go wrong. Unintelligible stacktraces
    are unacceptable.
+1. **Be Pragmatic**. Leverage what already exists where it makes sense. We don't
+   have any religion that everything needs to be built from source, or that we
+   all need to build our own toolchains.
 1. **Optimized for small teams**. `[yoe]` is a tool for small teams to do big
-   things. Large enterprises are welcome, but not our exclusive focus. There are
-   plenty of enterprise tools (Bazel, Buck2, Maven, etc.); we will use ideas
-   from these tools, but `[yoe]` aims to be something different.
+   things. There are plenty of enterprise tools (Bazel, Buck2, Maven, etc.); we
+   will use ideas from these tools, but `[yoe]` aims to be something different.
 1. **Scope is not limited to Embedded Linux**. Although Embedded Linux is our
    current focus, a tool like `[yoe]` could be used for any problem where you
    pull a lot of pieces together. At its heart, `[yoe]` is a tool for building
@@ -243,6 +242,27 @@ excellent cross-compilation support (useful for shipping the tool itself), and a
 strong standard library for file manipulation, process execution, and
 networking.
 
+### 🖥️ Workstation-Centric Development
+
+`[yoe]` is designed first for the developer's workstation. While `yoe` runs
+equally well on an embedded dev kit, an ARM cloud instance, or a CI runner, the
+development loop is centered on the machine where developers already have their
+editor, shell, browser, debugger, and Git workflow set up. You should not need
+to SSH into a Raspberry Pi to get real work done.
+
+When a build runs much faster on a different native architecture — for example,
+building ARM64 packages from an x86_64 workstation — those build steps can be
+dispatched to a native builder (a local ARM board on the network, an AWS
+Graviton instance, a Hetzner ARM box) without changing the developer's
+workflow. This is similar to how CI systems dispatch jobs to remote runners:
+the developer's workstation plays the role of the orchestrator, and remote
+machines act as architecture-specific runners. Orchestration, source edits,
+project state, the TUI, and the CLI stay on the workstation; only the per-unit
+build steps that benefit from native execution run elsewhere.
+
+The result: developers stay in the environment they already have tuned, and
+`[yoe]` puts the right machine behind each build step.
+
 ### 🚫 No Cross Compilation
 
 Instead of maintaining cross-toolchains, `[yoe]` targets native builds:
@@ -260,8 +280,13 @@ Instead of maintaining cross-toolchains, `[yoe]` targets native builds:
   with bubblewrap sandboxing. Architecture is determined per unit, not globally,
   and build dependencies don't pollute the host or leak between units.
 
-This eliminates an entire class of build issues (sysroot management, host
+This eliminates an entire class of build issues (cross-sysroot management, host
 contamination, cross-pkg-config, etc.).
+
+\* Note, we are not opposed to cross compilation where it makes sense. Go
+applications cross-compile very easily. The Linux kernel is generally easy to
+cross-compile, so we may do that. But, cross-compilation of C/C++ components is
+not required.
 
 ### 📦 Native Language Package Managers
 
