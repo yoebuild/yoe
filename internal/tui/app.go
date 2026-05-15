@@ -2281,8 +2281,26 @@ func (m model) renderHomeHeader() string {
 	var b strings.Builder
 	machine := m.proj.Defaults.Machine
 	image := m.proj.Defaults.Image
-	fmt.Fprintf(&b, "  %s  Machine: %s  Image: %s\n",
+
+	// Tab bar with diagnostics-count badge so the user notices when
+	// shadows or duplicate provides exist without leaving the Units tab.
+	var labels []string
+	for t := homeTab(0); t < numHomeTabs; t++ {
+		label := t.String()
+		if t == tabDiagnostics {
+			n := m.diagnosticsRowCount()
+			if n > 0 {
+				label = fmt.Sprintf("%s (%d)", label, n)
+			}
+		}
+		labels = append(labels, label)
+	}
+	fmt.Fprintf(&b, "  %s    %s    %s%s\n",
 		titleStyle.Render("[yoe]"),
+		renderTabBar(labels, int(m.activeTab)),
+		helpKeyStyle.Render("tab"),
+		helpStyle.Render(": switch"))
+	fmt.Fprintf(&b, "  Machine: %s  Image: %s\n",
 		headerStyle.Render(machine),
 		headerStyle.Render(image))
 
@@ -2300,24 +2318,6 @@ func (m model) renderHomeHeader() string {
 		feedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 		fmt.Fprintf(&b, "  %s\n", feedStyle.Render("feed: "+m.feedStatus))
 	}
-
-	// Tab bar with diagnostics-count badge so the user notices when
-	// shadows or duplicate provides exist without leaving the Units tab.
-	var labels []string
-	for t := homeTab(0); t < numHomeTabs; t++ {
-		label := t.String()
-		if t == tabDiagnostics {
-			n := m.diagnosticsRowCount()
-			if n > 0 {
-				label = fmt.Sprintf("%s (%d)", label, n)
-			}
-		}
-		labels = append(labels, label)
-	}
-	fmt.Fprintf(&b, "      %s    %s%s\n",
-		renderTabBar(labels, int(m.activeTab)),
-		helpKeyStyle.Render("tab"),
-		helpStyle.Render(": switch"))
 	return b.String()
 }
 

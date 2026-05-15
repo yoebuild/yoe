@@ -8,6 +8,9 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **The TUI tab bar now sits on the top line next to `[yoe]`.** The
+  Machine/Image line and the build progress bar moved down a row, so the
+  tabs are the first thing you see and the layout reads top-to-bottom.
 - **Image builds now resolve virtual packages the same way every run.**
   When several packages claimed the same virtual name (for example the
   providers of `ifupdown-any`), which one an image picked could change
