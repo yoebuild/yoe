@@ -8,6 +8,14 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Building a prebuilt package no longer fails on a fresh checkout.**
+  Building an Alpine prebuilt package (or any image that pulls one in) on a
+  clean tree, or after a toolchain version bump, failed with
+  `Unable to find image 'yoe/toolchain-musl:...'` / `pull access denied`
+  because nothing built the toolchain container first. yoe now builds the
+  container automatically before the units that run inside it, the same way
+  it already did for source-built packages.
+
 ## [0.10.9] - 2026-05-15
 
 - **The TUI home header is easier to scan.** Field names (Machine, Image, Query,
