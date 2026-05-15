@@ -432,11 +432,12 @@ type model struct {
 	detailFilesSortDesc bool
 
 	// Setup view
-	machines      []string // sorted machine names
-	setupCursor   int      // cursor within setup options
-	setupField    string   // "" = top-level, "machine" / "image" = picker active
-	machineCursor int      // cursor within machine list
-	imageCursor   int      // cursor within image list
+	machines       []string // sorted machine names
+	setupCursor    int      // cursor within setup options
+	setupField     string   // "" = top-level, "machine" / "image" = picker active
+	machineCursor  int      // cursor within machine list
+	imageCursor    int      // cursor within image list
+	parallelBuilds int      // effective `yoe build` concurrency (adjusted on the Setup page)
 
 	// Flash view
 	flashUnit       string
@@ -570,6 +571,11 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	// Read local.star once for both deploy-host prefill and query bootstrap.
 	ov, _ := yoestar.LoadLocalOverrides(projectDir)
 
+	parallelBuilds := yoestar.DefaultParallelBuilds
+	if ov.ParallelBuilds > 0 {
+		parallelBuilds = ov.ParallelBuilds
+	}
+
 	m := model{
 		proj:            proj,
 		projectDir:      projectDir,
@@ -588,6 +594,7 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 		buildProgress:   progress.New(progress.WithDefaultGradient(), progress.WithoutPercentage()),
 		buildPending:    make(map[string]bool),
 		deployHost:      ov.DeployHost,
+		parallelBuilds:  parallelBuilds,
 		loadOpts:        cfg.LoadOpts,
 		globalFlagArgs:  cfg.GlobalFlagArgs,
 	}
@@ -1811,7 +1818,7 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // Setup option names — add new options here.
-var setupOptions = []string{"Machine", "Image"}
+var setupOptions = []string{"Machine", "Image", "Parallel builds"}
 
 func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.setupField {
@@ -1835,6 +1842,26 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		if m.setupCursor < len(setupOptions)-1 {
 			m.setupCursor++
+		}
+		return m, nil
+
+	case "left", "h", "right", "l":
+		if setupOptions[m.setupCursor] != "Parallel builds" {
+			return m, nil
+		}
+		if msg.String() == "left" || msg.String() == "h" {
+			if m.parallelBuilds > 1 {
+				m.parallelBuilds--
+			}
+		} else {
+			m.parallelBuilds++
+		}
+		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+		ov.ParallelBuilds = m.parallelBuilds
+		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
+			m.message = fmt.Sprintf("Parallel builds set to %d (warning: failed to save local.star: %v)", m.parallelBuilds, err)
+		} else {
+			m.message = fmt.Sprintf("Parallel builds set to %d (saved to local.star)", m.parallelBuilds)
 		}
 		return m, nil
 
@@ -2691,11 +2718,12 @@ func (m model) helpSections() (string, []helpSection) {
 		}
 
 	case viewSetup:
-		return "Setup — machine and default image", []helpSection{
+		return "Setup — machine, default image, parallel builds", []helpSection{
 			{title: "Navigate", entries: []helpEntry{
-				{"↑  ·  k", "move up (Machine / Image)"},
+				{"↑  ·  k", "move up (Machine / Image / Parallel builds)"},
 				{"↓  ·  j", "move down"},
 				{"Enter", "open the picker for the selected option"},
+				{"←/→  ·  h/l", "adjust Parallel builds"},
 				{"Esc  ·  q", "back to the unit list"},
 			}},
 			{title: "In a picker", entries: []helpEntry{
@@ -3248,12 +3276,14 @@ func (m model) viewSetup() string {
 				value = headerStyle.Render(m.proj.Defaults.Machine)
 			case "Image":
 				value = headerStyle.Render(m.proj.Defaults.Image)
+			case "Parallel builds":
+				value = headerStyle.Render(fmt.Sprintf("%d", m.parallelBuilds))
 			}
 			b.WriteString(fmt.Sprintf("%s%s  %s\n", cursor, style.Render(opt), value))
 		}
 
 		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("  enter select  esc back  ? help  q quit"))
+		b.WriteString(helpStyle.Render("  enter select  ←/→ adjust  esc back  ? help  q quit"))
 		b.WriteString("\n")
 	}
 

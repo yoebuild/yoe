@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **The TUI Setup page can now adjust how many units build in parallel.**
+  A "Parallel builds" row sits below Machine and Image; press ←/→ (or h/l)
+  to raise or lower the count. The choice is saved per project and used by
+  the next build.
 - **`yoe build` now builds independent units in parallel.** Units whose
   dependencies are ready build concurrently instead of one at a time, so a
   full build finishes much faster. Up to 5 units build at once by default;

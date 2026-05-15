@@ -217,9 +217,12 @@ yoe config set parallel-builds 12     # set it without starting a build
 
 Either form writes `parallel_builds` to `local.star`, so the setting is
 per-developer and persists across builds (including builds started from the
-TUI). `yoe config show` prints the value currently in effect. `-j 1` forces a
-fully sequential build, which is handy when reading interleaved verbose
-output. Precedence is `-j` flag → `local.star` → the built-in default of 5.
+TUI). The TUI Setup page (`s`) also exposes it: select **Parallel builds**
+and press ←/→ (or h/l) to adjust the count, which writes the same
+`local.star` value. `yoe config show` prints the value currently in effect.
+`-j 1` forces a fully sequential build, which is handy when reading
+interleaved verbose output. Precedence is `-j` flag → `local.star` → the
+built-in default of 5.
 
 ### `yoe flash`
 
@@ -776,7 +779,7 @@ visible. Press `P` to capture the new HEAD as the new pin.
 | `l`         | Open unit's build log in `$EDITOR`                          |
 | `d`         | Launch `claude diagnose` for the unit                       |
 | `a`         | Launch `claude /new-unit`                                   |
-| `s`         | Open Setup (machine / default image picker)                 |
+| `s`         | Open Setup (machine / default image / parallel builds)      |
 | `/`         | Edit the active query (substring + `type:` `module:` `in:`) |
 | `\`         | Snap query back to the saved default in `local.star`        |
 | `S`         | Save the current query as the new default                   |
