@@ -78,13 +78,14 @@ var (
 	srcLocalStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Faint(true)
 
 	// Tab bar styling: zellij-style "ribbon" segments. The active tab is a
-	// solid lime block with black bold text; inactive tabs are dark-gray
-	// blocks with light text. Both ends of each ribbon are a powerline wedge
-	// rendered ON the bar background so the cell fills full-height and the
-	// arrow reads crisply (a foreground-only glyph on the terminal default
-	// renders as a small, top-aligned sliver on many powerline fonts).
+	// solid amber block (matching the [yoe] logo) with black bold text;
+	// inactive tabs are dark-gray blocks with light text. Both ends of each
+	// ribbon are a powerline wedge rendered ON the bar background so the cell
+	// fills full-height and the arrow reads crisply (a foreground-only glyph
+	// on the terminal default renders as a small, top-aligned sliver on many
+	// powerline fonts).
 	tabBarBg       = lipgloss.Color("235")
-	tabActiveBg    = lipgloss.Color("148")
+	tabActiveBg    = lipgloss.Color("#e8863a")
 	tabInactiveBg  = lipgloss.Color("238")
 	tabActiveSeg   = lipgloss.NewStyle().Foreground(lipgloss.Color("16")).Background(tabActiveBg).Bold(true)
 	tabInactiveSeg = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(tabInactiveBg)

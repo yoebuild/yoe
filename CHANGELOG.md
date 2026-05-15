@@ -10,7 +10,7 @@ and this project adheres to
 
 - **The TUI tab bar now uses zellij-style ribbon tabs.** Each tab is a
   rounded colored banner sitting on a dark bar, with the active one
-  highlighted in lime so the selected tab is obvious at a glance. Needs a
+  highlighted in amber so the selected tab is obvious at a glance. Needs a
   powerline-patched terminal font to render the rounded tab edges.
 - **`yoe deploy` now actually installs your dev-mode rebuilds.** Iterating in
   dev mode and deploying used to silently drop your edits when the version
