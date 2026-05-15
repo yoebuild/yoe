@@ -798,8 +798,11 @@ Modules and Diagnostics tabs, or a dev-mode prompt — to open a centered box
 listing every shortcut that page accepts, grouped by purpose (navigation,
 build, inspect, filter, …) with a plain-language description for each. The
 overlay is page-aware: it shows exactly the keys the current page handles.
-Press any key to close it. `?` is suppressed only while you're typing into the
-Deploy host field, where it would be a literal character.
+When the list is taller than the terminal it scrolls — `↑/↓` `j/k`,
+`PgUp/PgDn` `Ctrl+B/Ctrl+F`, and `g/G` for the ends — with the page title and
+footer pinned and a `lines a–b of N` position indicator. Any other key closes
+it. `?` is suppressed only while you're typing into the Deploy host field,
+where it would be a literal character.
 
 #### Search
 

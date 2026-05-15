@@ -389,6 +389,7 @@ type model struct {
 	cursor            int
 	view              viewKind
 	helpShowing       bool              // `?`-toggled keybinding overlay for the current page
+	helpScroll        int               // scroll offset within the help overlay when it overflows
 	activeTab         homeTab           // which tab is showing on the home screen
 	modulesCursor     int               // cursor row in the Modules tab
 	diagnosticsCursor int               // cursor row in the Diagnostics tab
@@ -894,16 +895,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSearch(msg)
 		}
 		// Help overlay: `?` opens a centered keybinding reference for the
-		// current page; while it's up, any key dismisses it. Text-entry
-		// modes that legitimately take a literal `?` (confirm, detail
-		// search, query bar) are already consumed above; the deploy host
-		// field is the only other one, so the toggle is suppressed there.
+		// current page. While it's up, scroll keys move the (possibly
+		// taller-than-terminal) list and any other key dismisses it.
+		// Text-entry modes that legitimately take a literal `?` (confirm,
+		// detail search, query bar) are already consumed above; the deploy
+		// host field is the only other one, so the toggle is suppressed
+		// there.
 		if m.helpShowing {
-			m.helpShowing = false
+			switch msg.String() {
+			case "up", "k":
+				m.helpScroll--
+			case "down", "j":
+				m.helpScroll++
+			case "pgup", "ctrl+b":
+				m.helpScroll -= 10
+			case "pgdown", "ctrl+f":
+				m.helpScroll += 10
+			case "g":
+				m.helpScroll = 0
+			case "G":
+				m.helpScroll = m.helpMaxScroll()
+			default:
+				m.helpShowing = false
+				return m, nil
+			}
+			if m.helpScroll < 0 {
+				m.helpScroll = 0
+			}
+			if max := m.helpMaxScroll(); m.helpScroll > max {
+				m.helpScroll = max
+			}
 			return m, nil
 		}
 		if msg.String() == "?" && !(m.view == viewDeploy && m.deployStage == deployHostInput) {
 			m.helpShowing = true
+			m.helpScroll = 0
 			return m, nil
 		}
 		m.message = ""
@@ -2759,11 +2785,12 @@ func (m model) helpSections() (string, []helpSection) {
 	}
 }
 
-// viewHelp renders the per-page keybinding reference as a rounded amber box
-// centered over the screen. Any key dismisses it (handled in Update).
-func (m model) viewHelp() string {
-	title, sections := m.helpSections()
-
+// helpBodyLines formats the sections (the scrollable region between the
+// pinned title and footer) into one display line per row, with the key
+// column padded to a common width. Used by both viewHelp and helpMaxScroll
+// so the rendered window and the scroll clamp agree on the line count.
+func (m model) helpBodyLines() []string {
+	_, sections := m.helpSections()
 	keyWidth := 0
 	for _, s := range sections {
 		for _, e := range s.entries {
@@ -2772,28 +2799,80 @@ func (m model) viewHelp() string {
 			}
 		}
 	}
-
-	var b strings.Builder
-	b.WriteString(titleStyle.Render(title))
-	b.WriteString("\n")
-	for _, s := range sections {
-		b.WriteString("\n")
-		b.WriteString(helpSectionStyle.Render(s.title))
-		b.WriteString("\n")
+	var lines []string
+	for i, s := range sections {
+		if i > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, helpSectionStyle.Render(s.title))
 		for _, e := range s.entries {
 			pad := strings.Repeat(" ", keyWidth-lipgloss.Width(e.keys))
-			b.WriteString("  ")
-			b.WriteString(helpKeyStyle.Render(e.keys))
-			b.WriteString(pad)
-			b.WriteString("   ")
-			b.WriteString(helpStyle.Render(e.desc))
-			b.WriteString("\n")
+			lines = append(lines, "  "+helpKeyStyle.Render(e.keys)+pad+"   "+helpStyle.Render(e.desc))
 		}
 	}
-	b.WriteString("\n")
-	b.WriteString(dimStyle.Render("press any key to close"))
+	return lines
+}
 
-	box := helpBoxStyle.Render(b.String())
+// helpViewportHeight is how many body lines fit between the pinned title
+// and footer inside the box, given the terminal height. 8 accounts for the
+// box border (2) + vertical padding (2) + title line + blank (2) + blank +
+// footer (2). Returns 0 when the size is unknown (render everything).
+func (m model) helpViewportHeight() int {
+	if m.height <= 0 {
+		return 0
+	}
+	vp := m.height - 8
+	if vp < 1 {
+		vp = 1
+	}
+	return vp
+}
+
+// helpMaxScroll is the largest valid scroll offset for the current page and
+// terminal size. Update clamps m.helpScroll to this so `up` after `G` still
+// moves and the window never scrolls past the last line.
+func (m model) helpMaxScroll() int {
+	vp := m.helpViewportHeight()
+	if vp == 0 {
+		return 0
+	}
+	body := m.helpBodyLines()
+	if len(body) <= vp {
+		return 0
+	}
+	return len(body) - vp
+}
+
+// viewHelp renders the per-page keybinding reference as a rounded amber box
+// centered over the screen, with a pinned title and footer and a scrollable
+// body when the list is taller than the terminal. Scroll keys are handled in
+// Update; any other key dismisses it.
+func (m model) viewHelp() string {
+	title, _ := m.helpSections()
+	body := m.helpBodyLines()
+	vp := m.helpViewportHeight()
+
+	scrollable := vp > 0 && len(body) > vp
+	window := body
+	footer := dimStyle.Render("press any key to close")
+	if scrollable {
+		scroll := m.helpScroll
+		if max := len(body) - vp; scroll > max {
+			scroll = max
+		}
+		if scroll < 0 {
+			scroll = 0
+		}
+		window = append([]string{}, body[scroll:scroll+vp]...)
+		footer = dimStyle.Render(fmt.Sprintf(
+			"↑/↓ scroll · g/G ends · any other key closes      lines %d–%d of %d",
+			scroll+1, scroll+vp, len(body)))
+	}
+
+	inner := titleStyle.Render(title) + "\n\n" +
+		strings.Join(window, "\n") + "\n\n" + footer
+
+	box := helpBoxStyle.Render(inner)
 	if m.width > 0 && m.height > 0 {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 	}

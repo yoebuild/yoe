@@ -11,7 +11,9 @@ and this project adheres to
 - **Press `?` on any TUI page for a keyboard cheat sheet.** A centered help
   box lists every shortcut for the page you're on — navigation, build,
   inspect, filter, and the page-specific actions — with plain-language
-  descriptions. Press any key to dismiss it.
+  descriptions. When the list is taller than your terminal it scrolls
+  (↑/↓, PgUp/PgDn, g/G) with the title and footer pinned; any other key
+  dismisses it.
 - **The TUI tab bar now uses zellij-style ribbon tabs.** Each tab is a
   rounded colored banner sitting on a dark bar, with the active one
   highlighted in amber so the selected tab is obvious at a glance. Needs a
