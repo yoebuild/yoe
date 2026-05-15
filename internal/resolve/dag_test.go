@@ -37,6 +37,109 @@ func TestBuildDAG(t *testing.T) {
 	}
 }
 
+func TestBuildDAG_ContainerIsImplicitDep(t *testing.T) {
+	// A unit whose tasks run inside a container *unit* must depend on
+	// that container unit, even when it declares no explicit deps.
+	// alpine_pkg units (e.g. musl) set deps=[] and container="toolchain-musl";
+	// without an implicit edge the container is never scheduled and the
+	// docker run fails on a missing image.
+	proj := makeProject(map[string]*yoestar.Unit{
+		"toolchain-musl": {Name: "toolchain-musl", Class: "container"},
+		"musl":           {Name: "musl", Deps: nil, Container: "toolchain-musl"},
+	})
+
+	dag, err := BuildDAG(proj)
+	if err != nil {
+		t.Fatalf("BuildDAG: %v", err)
+	}
+
+	deps, err := dag.DepsOf("musl")
+	if err != nil {
+		t.Fatalf("DepsOf: %v", err)
+	}
+	if len(deps) != 1 || deps[0] != "toolchain-musl" {
+		t.Errorf("DepsOf(musl) = %v, want [toolchain-musl]", deps)
+	}
+
+	order, err := dag.TopologicalSort()
+	if err != nil {
+		t.Fatalf("TopologicalSort: %v", err)
+	}
+	pos := make(map[string]int)
+	for i, n := range order {
+		pos[n] = i
+	}
+	if pos["toolchain-musl"] >= pos["musl"] {
+		t.Errorf("toolchain-musl (pos %d) must build before musl (pos %d): %v",
+			pos["toolchain-musl"], pos["musl"], order)
+	}
+}
+
+func TestBuildDAG_ExternalContainerImageNotADep(t *testing.T) {
+	// An external image reference (golang:1.24) is not a project unit and
+	// must not become a dependency edge — and must not error as a missing
+	// dep.
+	proj := makeProject(map[string]*yoestar.Unit{
+		"hello": {Name: "hello", Deps: nil, Container: "golang:1.24"},
+	})
+
+	dag, err := BuildDAG(proj)
+	if err != nil {
+		t.Fatalf("BuildDAG: %v", err)
+	}
+	deps, err := dag.DepsOf("hello")
+	if err != nil {
+		t.Fatalf("DepsOf: %v", err)
+	}
+	if len(deps) != 0 {
+		t.Errorf("DepsOf(hello) = %v, want []", deps)
+	}
+}
+
+func TestBuildDAG_ContainerDepDeduped(t *testing.T) {
+	// A unit that both lists the container in deps and sets container=
+	// must not get a duplicate edge (TopologicalSort in-degree bookkeeping
+	// would otherwise corrupt).
+	proj := makeProject(map[string]*yoestar.Unit{
+		"toolchain-musl": {Name: "toolchain-musl", Class: "container"},
+		"gcc":            {Name: "gcc", Deps: []string{"toolchain-musl"}, Container: "toolchain-musl"},
+	})
+
+	dag, err := BuildDAG(proj)
+	if err != nil {
+		t.Fatalf("BuildDAG: %v", err)
+	}
+	if got := dag.Nodes["gcc"].Deps; len(got) != 1 {
+		t.Errorf("gcc deps = %v, want exactly one toolchain-musl", got)
+	}
+	if _, err := dag.TopologicalSort(); err != nil {
+		t.Fatalf("TopologicalSort: %v", err)
+	}
+	rdeps, _ := dag.RdepsOf("toolchain-musl")
+	if len(rdeps) != 1 {
+		t.Errorf("RdepsOf(toolchain-musl) = %v, want exactly [gcc]", rdeps)
+	}
+}
+
+func TestBuildDAG_ContainerUnitNoSelfDep(t *testing.T) {
+	// A container unit must not depend on itself even if something odd
+	// sets its container field to its own name.
+	proj := makeProject(map[string]*yoestar.Unit{
+		"toolchain-musl": {Name: "toolchain-musl", Class: "container", Container: "toolchain-musl"},
+	})
+
+	dag, err := BuildDAG(proj)
+	if err != nil {
+		t.Fatalf("BuildDAG: %v", err)
+	}
+	if got := dag.Nodes["toolchain-musl"].Deps; len(got) != 0 {
+		t.Errorf("toolchain-musl deps = %v, want [] (no self-dep)", got)
+	}
+	if _, err := dag.TopologicalSort(); err != nil {
+		t.Fatalf("TopologicalSort (self-dep cycle?): %v", err)
+	}
+}
+
 func TestBuildDAG_MissingDep(t *testing.T) {
 	proj := makeProject(map[string]*yoestar.Unit{
 		"openssh": {Name: "openssh", Deps: []string{"nonexistent"}},

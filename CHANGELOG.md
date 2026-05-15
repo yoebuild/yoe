@@ -8,6 +8,16 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.10] - 2026-05-15
+
+- **Building a prebuilt package no longer fails on a fresh checkout.** Building
+  an Alpine prebuilt package (or any image that pulls one in) on a clean tree,
+  or after a toolchain version bump, failed with
+  `Unable to find image 'yoe/toolchain-musl:...'` / `pull access denied` because
+  nothing built the toolchain container first. yoe now builds the container
+  automatically before the units that run inside it, the same way it already did
+  for source-built packages.
+
 ## [0.10.9] - 2026-05-15
 
 - **The TUI home header is easier to scan.** Field names (Machine, Image, Query,
@@ -439,7 +449,7 @@ _Errata: due to an issue in the alpine module, you must currently run with:
   values. The TUI starts filtered to `in:<your-default-image>`, so a project
   with thousands of units shows just what your image needs. Press `S` to save
   the current query to `local.star` as the new default; press `\` to snap back
-  to it. The header shows `Query: …  Units: N/M` so you always know how many of
+  to it. The header shows `Query: … Units: N/M` so you always know how many of
   the project's units the current filter is showing.
 - **Use `apk-tools` from alpine layer for now.** It is built with docs.
 - **`yoe repo clean` drops stale `.apk` files.** Removes any `.apk` in the
