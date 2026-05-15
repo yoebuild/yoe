@@ -8,17 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
-## [0.10.8] - 2026-05-15
+## [0.10.9] - 2026-05-15
 
-- **Fix patch application when the cache path is relative.** `applyPatches`
-  built the patch path relative to the project root (e.g.
-  `cache/modules/.../*.patch`) but invoked `git am` with `cmd.Dir = srcDir`, so
-  git looked for the file inside the source tree and failed with
-  `could not open '...patch'`. The path is now resolved to absolute before exec.
-  The bug was masked in long-lived build dirs because `src/` already had the
-  patches committed and the prep step short-circuits via the "commits beyond
-  upstream" check; fresh builds (or any project with `YOE_CACHE` unset and
-  modules pulled from cache) hit it.
 - **The TUI home header is easier to scan.** Field names (Machine, Image, Query,
   Units, feed, Modules, Diagnostics) now render in plain white and their values
   in a bright accent color, so the data stands out from the labels at a glance.
@@ -74,15 +65,31 @@ and this project adheres to
 - **Toggling `dev → pin` no longer looks like data loss.** It resets the
   existing checkout to the pin in place and keeps the clone's full history
   instead of deleting the source tree and re-cloning on the next build.
-- **Patches now apply on fresh builds when the cache path is relative.** Fresh
-  builds (or projects pulling modules from the cache) previously failed with
-  `could not open '...patch'`; patched units now build correctly.
-- **Projects that don't use Python or Node.js stop paying for them.** The
-  language runtimes are no longer baked into the toolchain container — the same
-  Alpine package the device runs now also builds the unit, and bumping a runtime
-  version is a unit edit rather than a container rebuild. **Migration:** any
-  unit that calls `python3`, `node`, or `npm` in its build steps without using
-  the matching class now needs that runtime listed in its `deps`.
+
+## [0.10.8] - 2026-05-13
+
+- **Fix patch application when the cache path is relative.** `applyPatches`
+  built the patch path relative to the project root (e.g.
+  `cache/modules/.../*.patch`) but invoked `git am` with `cmd.Dir = srcDir`, so
+  git looked for the file inside the source tree and failed with
+  `could not open '...patch'`. The path is now resolved to absolute before exec.
+  The bug was masked in long-lived build dirs because `src/` already had the
+  patches committed and the prep step short-circuits via the "commits beyond
+  upstream" check; fresh builds (or any project with `YOE_CACHE` unset and
+  modules pulled from cache) hit it.
+
+- **Language runtimes move out of the toolchain container.** `nodejs`, `npm`,
+  `python3`, `py3-setuptools`, and `py3-pip` are no longer baked into
+  `toolchain-musl`'s Dockerfile. `nodejs_app` and `python_venv` now add the
+  matching apks to `deps`, so the same Alpine prebuilt the device runs is also
+  what builds the unit. Projects that don't use Python or Node.js stop paying
+  for them entirely; bumping a runtime version is now a unit edit rather than a
+  Dockerfile change. Matches the bun setup and CLAUDE.md's "no installing
+  packages in the container" rule. **Migration:** any unit that invokes
+  `python3`, `node`, or `npm` in its build steps without using the corresponding
+  class now needs the runtime in its `deps` (`meson` and `ca-certificates` are
+  updated in this release as examples). The `toolchain-musl` container version
+  bumps to 19 so the leaner image rebuilds on first use.
 
 ## [0.10.7] - 2026-05-12
 
