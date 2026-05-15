@@ -8,6 +8,12 @@
 
 ## Next
 
+- format tabs like zellij
+- help screens for every page triggered by ?
+- Beagle Play
+- Odroid C4
+- Use a generic container for alpine repackaing, so a container bump does not
+  cause all alpine packages to rebuild.
 - yoe unit that builds in place
 - Record tasks that succeed in build.json, and build starts with the first
   uncompleted task. This eliminates re-running configure steps when doing
@@ -56,6 +62,9 @@
   - add example to e2e
   - Support selecting and saving to local.star
 - Open to unit source on web.
+- yoe self build/install. Easily for anyone to modify yoe, build/install to
+  ~/bin
+- yoe chain commands
 
 ## Bugs / Improvements
 
