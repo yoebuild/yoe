@@ -217,12 +217,11 @@ yoe config set parallel-builds 12     # set it without starting a build
 
 Either form writes `parallel_builds` to `local.star`, so the setting is
 per-developer and persists across builds (including builds started from the
-TUI). The TUI Setup page (`s`) also exposes it: select **Parallel builds**
-and press ←/→ (or h/l) to adjust the count, which writes the same
-`local.star` value. `yoe config show` prints the value currently in effect.
-`-j 1` forces a fully sequential build, which is handy when reading
-interleaved verbose output. Precedence is `-j` flag → `local.star` → the
-built-in default of 5.
+TUI). The TUI Setup page (`s`) also exposes it: select **Parallel builds** and
+press ←/→ (or h/l) to adjust the count, which writes the same `local.star`
+value. `yoe config show` prints the value currently in effect. `-j 1` forces a
+fully sequential build, which is handy when reading interleaved verbose output.
+Precedence is `-j` flag → `local.star` → the built-in default of 5.
 
 ### `yoe flash`
 
@@ -599,8 +598,7 @@ Starlark.
 > **Status:** Not implemented. `yoe config set` currently accepts only
 > `parallel-builds <n>`; `defaults.machine` / `defaults.image` are edited in
 > `PROJECT.star` by hand, and `yoe config resolve` does not exist yet. Use
-> `yoe desc <unit> --config` to inspect resolved configuration in the
-> meantime.
+> `yoe desc <unit> --config` to inspect resolved configuration in the meantime.
 >
 > ```sh
 > yoe config set defaults.machine raspberrypi4              # planned
@@ -832,20 +830,20 @@ omitted. Empty until the unit has been built at least once.
 | `o` / `O`   | Cycle sort column / toggle direction _(Files tab)_ |
 | `j/k` `↑/↓` | Scroll the log / file list                         |
 | `g/G`       | Jump to top / bottom                               |
-| `?`         | Show the keyboard cheat sheet for this page         |
+| `?`         | Show the keyboard cheat sheet for this page        |
 
 #### Help overlay
 
 Press `?` on any page — the unit list, a detail tab, Setup, Flash, Deploy, the
 Modules and Diagnostics tabs, or a dev-mode prompt — to open a centered box
-listing every shortcut that page accepts, grouped by purpose (navigation,
-build, inspect, filter, …) with a plain-language description for each. The
-overlay is page-aware: it shows exactly the keys the current page handles.
-When the list is taller than the terminal it scrolls — `↑/↓` `j/k`,
-`PgUp/PgDn` `Ctrl+B/Ctrl+F`, and `g/G` for the ends — with the page title and
-footer pinned and a `lines a–b of N` position indicator. Any other key closes
-it. `?` is suppressed only while you're typing into the Deploy host field,
-where it would be a literal character.
+listing every shortcut that page accepts, grouped by purpose (navigation, build,
+inspect, filter, …) with a plain-language description for each. The overlay is
+page-aware: it shows exactly the keys the current page handles. When the list is
+taller than the terminal it scrolls — `↑/↓` `j/k`, `PgUp/PgDn` `Ctrl+B/Ctrl+F`,
+and `g/G` for the ends — with the page title and footer pinned and a
+`lines a–b of N` position indicator. Any other key closes it. `?` is suppressed
+only while you're typing into the Deploy host field, where it would be a literal
+character.
 
 #### Search
 
