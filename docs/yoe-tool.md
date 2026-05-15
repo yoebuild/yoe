@@ -637,7 +637,7 @@ yoe graph openssh
 yoe graph --stale
 ```
 
-### `yoe` (no args)
+### `yoe` TUI (no args)
 
 Running `yoe` with no arguments launches an interactive terminal UI showing all
 units with their build status. The home screen has three tabs (`tab` /
