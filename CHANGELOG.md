@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`yoe build` now builds independent units in parallel.** Units whose
+  dependencies are ready build concurrently instead of one at a time, so a
+  full build finishes much faster. Up to 5 units build at once by default;
+  change it with `yoe build -j N`, `yoe config set parallel-builds N`, or a
+  `parallel_builds` line in `local.star`. The value is remembered per
+  project, and `yoe config show` reports the one in effect.
 - **`u` on the unit list toggles a unit's source between pin and dev mode.**
   The same dev-mode prompt the detail view offers is now one keypress away
   from the list, acting on the unit under the cursor.

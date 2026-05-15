@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	yoe "github.com/yoebuild/yoe/internal"
@@ -19,6 +20,10 @@ import (
 	"go.starlark.net/starlark"
 )
 
+// DefaultParallel is the number of units BuildUnits builds concurrently
+// when Options.Parallel is unset (<= 0) and local.star declares nothing.
+const DefaultParallel = yoestar.DefaultParallelBuilds
+
 // Options controls build behavior.
 // BuildEvent is sent to Options.OnEvent during a build.
 type BuildEvent struct {
@@ -28,14 +33,14 @@ type BuildEvent struct {
 
 type Options struct {
 	Ctx        context.Context // optional; nil means background
-	Force      bool   // rebuild even if cached
-	Clean      bool   // delete build dir before rebuilding (implies Force)
-	NoCache    bool   // skip all caches
-	DryRun     bool   // show what would be built
-	Verbose    bool   // show build output in console (default: log only)
-	ProjectDir string // project root
-	Arch       string // target architecture
-	Machine    string // target machine name
+	Force      bool            // rebuild even if cached
+	Clean      bool            // delete build dir before rebuilding (implies Force)
+	NoCache    bool            // skip all caches
+	DryRun     bool            // show what would be built
+	Verbose    bool            // show build output in console (default: log only)
+	ProjectDir string          // project root
+	Arch       string          // target architecture
+	Machine    string          // target machine name
 	// ProjectCommit is the git rev-parse HEAD of ProjectDir, captured once
 	// per build so PKGINFO records build provenance. Empty means "not a git
 	// repo" or "couldn't determine" — the apk omits the `commit` field then.
@@ -43,8 +48,25 @@ type Options struct {
 	// Signer holds the project's RSA signing key, loaded once per build so
 	// each apk and the APKINDEX can be signed without per-call key I/O.
 	// Nil means "build unsigned apks" — apk add then needs --allow-untrusted.
-	Signer     *artifact.Signer
-	OnEvent    func(BuildEvent) // optional callback for build progress
+	Signer  *artifact.Signer
+	OnEvent func(BuildEvent) // optional callback for build progress
+	// Parallel caps how many units build concurrently. Values <= 0 fall
+	// back to DefaultParallel; 1 forces fully sequential builds.
+	Parallel int
+}
+
+// syncWriter serializes concurrent writes from parallel unit builds so
+// orchestration lines (and verbose subprocess output) stay intact rather
+// than interleaving mid-line on the shared destination (stdout / a log).
+type syncWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (s *syncWriter) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w.Write(p)
 }
 
 // ScopeDir returns the build subdirectory for a unit based on its scope.
@@ -191,29 +213,63 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		ctx = context.Background()
 	}
 
-	// Track which units we rebuilt in this run, so we can invalidate
-	// downstream caches: if a dep is rebuilt, its dependents must rebuild
-	// too — the cache marker alone won't catch this because input hashes
-	// don't change just because an apk got reproduced.
-	rebuilt := map[string]bool{}
+	parallel := opts.Parallel
+	if parallel <= 0 {
+		parallel = DefaultParallel
+	}
 
-	// Build in order
+	// Serialize the shared destination so parallel workers don't interleave
+	// mid-line. buildOne layers its own per-unit executor.log on top of this.
+	sw := &syncWriter{w: w}
+
+	// orderSet bounds dependency accounting to units actually in this build
+	// (a filtered build only includes a unit and its transitive deps).
+	orderSet := make(map[string]bool, len(order))
 	for _, name := range order {
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("build cancelled")
+		orderSet[name] = true
+	}
+
+	// indeg[name] = number of not-yet-finished deps that are part of this
+	// build. A unit becomes schedulable when it reaches zero — that is the
+	// parallel analogue of the old topological for-loop.
+	indeg := make(map[string]int, len(order))
+	for _, name := range order {
+		c := 0
+		for _, d := range dag.Nodes[name].Deps {
+			if orderSet[d] {
+				c++
+			}
 		}
+		indeg[name] = c
+	}
 
-		unit := proj.Units[name]
-		hash := hashes[name]
-		sd := ScopeDir(unit, opts.Arch, opts.Machine)
+	var (
+		mu sync.Mutex
+		// rebuilt: units actually rebuilt this run, so dependents invalidate
+		// their cache even when input hashes are unchanged. Read/written by
+		// workers, so guarded by mu.
+		rebuilt  = map[string]bool{}
+		started  = map[string]bool{}
+		firstErr error
+		stop     bool // set on first failure or ctx cancel; no new work scheduled
+	)
 
-		// --force/--clean only apply to explicitly requested units;
-		// dependencies still use the cache.
-		forceThis := (opts.Force || opts.Clean) && (len(requested) == 0 || requested[name])
+	sem := make(chan struct{}, parallel)
+	var wg sync.WaitGroup
+	var launchReady func() // declared first; recurses via worker completion
 
-		// Direct deps are sufficient: topological order guarantees that
-		// any rebuilt transitive dep already invalidated the intermediate
-		// dep, which is therefore in `rebuilt`.
+	worker := func(name string) {
+		defer wg.Done()
+		// Bound concurrent *work* here, not goroutine creation, so the
+		// scheduler never blocks holding mu (which would deadlock).
+		sem <- struct{}{}
+		defer func() { <-sem }()
+
+		mu.Lock()
+		if stop {
+			mu.Unlock()
+			return
+		}
 		depRebuilt := false
 		for _, d := range dag.Nodes[name].Deps {
 			if rebuilt[d] {
@@ -221,38 +277,98 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 				break
 			}
 		}
+		mu.Unlock()
 
-		if !forceThis && !opts.NoCache && !depRebuilt {
-			if cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hash) {
-				fmt.Fprintf(w, "%-20s [cached] %s\n", name, hash[:12])
-				continue
+		unit := proj.Units[name]
+		hash := hashes[name]
+		sd := ScopeDir(unit, opts.Arch, opts.Machine)
+
+		if err := ctx.Err(); err != nil {
+			mu.Lock()
+			if firstErr == nil {
+				firstErr = fmt.Errorf("build cancelled")
 			}
+			stop = true
+			mu.Unlock()
+			return
 		}
 
-		fmt.Fprintf(w, "%-20s [building]\n", name)
-		notify(name, "building")
+		// --force/--clean only apply to explicitly requested units;
+		// dependencies still use the cache.
+		forceThis := (opts.Force || opts.Clean) && (len(requested) == 0 || requested[name])
 
-		if err := buildOne(ctx, proj, dag, unit, hash, opts, w); err != nil {
-			notify(name, "failed")
-			fmt.Fprintf(w, "%-20s [failed] %v\n", name, err)
-			// Show which remaining units are blocked by this failure
-			blocked := blockedUnits(dag, name, order)
-			if len(blocked) > 0 {
-				fmt.Fprintf(w, "  the following units depend on %s and cannot be built:\n", name)
-				for _, b := range blocked {
-					fmt.Fprintf(w, "    - %s\n", b)
+		built := false
+		if !forceThis && !opts.NoCache && !depRebuilt &&
+			cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hash) {
+			fmt.Fprintf(sw, "%-20s [cached] %s\n", name, hash[:12])
+		} else {
+			fmt.Fprintf(sw, "%-20s [building]\n", name)
+			notify(name, "building")
+			if err := buildOne(ctx, proj, dag, unit, hash, opts, sw); err != nil {
+				notify(name, "failed")
+				fmt.Fprintf(sw, "%-20s [failed] %v\n", name, err)
+				blocked := blockedUnits(dag, name, order)
+				if len(blocked) > 0 {
+					fmt.Fprintf(sw, "  the following units depend on %s and cannot be built:\n", name)
+					for _, b := range blocked {
+						fmt.Fprintf(sw, "    - %s\n", b)
+					}
 				}
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("building %s: %w", name, err)
+				}
+				stop = true
+				mu.Unlock()
+				return
 			}
-			return fmt.Errorf("building %s: %w", name, err)
+			writeCacheMarker(opts.ProjectDir, sd, name, hash)
+			fmt.Fprintf(sw, "%-20s [done] %s\n", name, hash[:12])
+			notify(name, "done")
+			built = true
 		}
 
-		// Write cache marker
-		writeCacheMarker(opts.ProjectDir, sd, name, hash)
-		rebuilt[name] = true
-		fmt.Fprintf(w, "%-20s [done] %s\n", name, hash[:12])
-		notify(name, "done")
+		// Mark finished, release dependents, and schedule whatever that
+		// unblocked. Done under mu so indeg/rebuilt stay consistent.
+		mu.Lock()
+		if built {
+			rebuilt[name] = true
+		}
+		for _, rd := range dag.Nodes[name].Rdeps {
+			if orderSet[rd] {
+				indeg[rd]--
+			}
+		}
+		launchReady()
+		mu.Unlock()
 	}
 
+	// launchReady starts every not-yet-started unit whose deps are all
+	// finished. Caller must hold mu. Goroutines are cheap; the semaphore in
+	// worker() is what actually bounds concurrency.
+	launchReady = func() {
+		if stop {
+			return
+		}
+		for _, name := range order {
+			if !started[name] && indeg[name] == 0 {
+				started[name] = true
+				wg.Add(1)
+				go worker(name)
+			}
+		}
+	}
+
+	mu.Lock()
+	launchReady()
+	mu.Unlock()
+	wg.Wait()
+
+	if firstErr != nil {
+		// The failing unit and its blocked dependents were already
+		// reported to the writer by the worker that hit the error.
+		return firstErr
+	}
 	return nil
 }
 
@@ -850,7 +966,6 @@ func writeCacheMarker(projectDir, arch, name, hash string) {
 	EnsureDir(filepath.Dir(path))
 	os.WriteFile(path, []byte(hash), 0644)
 }
-
 
 // readProjectCommit returns the trimmed output of `git rev-parse HEAD` run
 // in projectDir. Returns "" if the directory isn't a git repo, git isn't

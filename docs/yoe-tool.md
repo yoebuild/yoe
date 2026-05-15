@@ -120,6 +120,9 @@ yoe build --all --class image             # planned: --class filter
 # Build a unit and all its dependencies
 yoe build --with-deps myapp               # planned: --with-deps flag
 
+# Build up to 8 units in parallel (saved to local.star for next time)
+yoe build -j 8 --all
+
 # Rebuild even if the cache is fresh
 yoe build --force openssh
 
@@ -200,6 +203,23 @@ yoe build base-image --format sdcard    # raw disk image with partitions
 yoe build base-image --format rootfs    # tar.gz of the rootfs only
 yoe build base-image --format squashfs  # squashfs for read-only roots
 ```
+
+**Parallel builds:** `yoe build` walks the dependency DAG and builds units
+concurrently — as soon as a unit's dependencies are all built (or cached), it
+can start, so independent branches of the graph build at the same time. The
+concurrency limit defaults to **5** units at once. Set it however suits your
+machine:
+
+```sh
+yoe build -j 12 --all                 # this run, and remembered afterward
+yoe config set parallel-builds 12     # set it without starting a build
+```
+
+Either form writes `parallel_builds` to `local.star`, so the setting is
+per-developer and persists across builds (including builds started from the
+TUI). `yoe config show` prints the value currently in effect. `-j 1` forces a
+fully sequential build, which is handy when reading interleaved verbose
+output. Precedence is `-j` flag → `local.star` → the built-in default of 5.
 
 ### `yoe flash`
 
@@ -550,21 +570,40 @@ git sources, bare clones are cached and updated incrementally.
 
 ### `yoe config`
 
-View and edit project configuration.
+View project configuration and set the per-developer settings stored in
+`local.star`.
 
 ```sh
-# Show current configuration
+# Show current configuration (includes the effective parallel-builds value)
 yoe config show
 
-# Set the default machine
-yoe config set defaults.machine raspberrypi4
-
-# Set the default image
-yoe config set defaults.image dev
-
-# Show resolved configuration for a build
-yoe config resolve --machine beaglebone-black --image base
+# Set how many units build in parallel (written to local.star)
+yoe config set parallel-builds 12
 ```
+
+`yoe config show` reads `PROJECT.star` and reports the project name, default
+machine and image, cache path, and the parallel-build concurrency in effect
+(annotated `default` or `local.star`).
+
+`yoe config set` only writes settings that live in the yoe-generated
+`local.star`; today that is `parallel-builds`. Project configuration
+(`defaults.machine`, `defaults.image`, etc.) lives in hand-authored
+`PROJECT.star` and is edited there directly — `config set` does not patch
+Starlark.
+
+#### `yoe config set defaults.*` / `yoe config resolve` (planned)
+
+> **Status:** Not implemented. `yoe config set` currently accepts only
+> `parallel-builds <n>`; `defaults.machine` / `defaults.image` are edited in
+> `PROJECT.star` by hand, and `yoe config resolve` does not exist yet. Use
+> `yoe desc <unit> --config` to inspect resolved configuration in the
+> meantime.
+>
+> ```sh
+> yoe config set defaults.machine raspberrypi4              # planned
+> yoe config set defaults.image dev                         # planned
+> yoe config resolve --machine beaglebone-black --image base # planned
+> ```
 
 ### `yoe desc`
 

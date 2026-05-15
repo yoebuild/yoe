@@ -189,6 +189,99 @@ func TestBuildUnits_WithDeps(t *testing.T) {
 	}
 }
 
+// TestBuildUnits_ParallelRespectsDAG builds a small graph with the
+// scheduler set to a low concurrency cap and asserts that every
+// dependency reaches [done] before its dependent reaches [building].
+// The syncWriter serializes those lines, so their relative order in the
+// captured output is a faithful witness of the scheduling decision.
+func TestBuildUnits_ParallelRespectsDAG(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		t.Skip("requires --privileged container with user namespace support")
+	}
+	runtime := "docker"
+	if _, err := exec.LookPath("docker"); err != nil {
+		if _, err := exec.LookPath("podman"); err != nil {
+			t.Skip("docker/podman not available")
+		}
+		runtime = "podman"
+	}
+	containerImage := "yoe/toolchain-musl:15-x86_64"
+	if err := exec.Command(runtime, "image", "inspect", containerImage).Run(); err != nil {
+		t.Skipf("container image %s not available", containerImage)
+	}
+
+	projectDir := t.TempDir()
+	// leaf <- midA, leaf <- midB, top <- midA, top <- midB.
+	names := []string{"leaf", "mida", "midb", "top"}
+	deps := map[string][]string{
+		"mida": {"leaf"},
+		"midb": {"leaf"},
+		"top":  {"mida", "midb"},
+	}
+	units := map[string]*yoestar.Unit{}
+	for _, n := range names {
+		units[n] = &yoestar.Unit{
+			Name:          n,
+			Version:       "1.0",
+			Class:         "package",
+			Container:     containerImage,
+			ContainerArch: "target",
+			Deps:          deps[n],
+			Tasks:         []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "echo built > built.txt"}}}},
+		}
+		srcDir := filepath.Join(projectDir, "build", n+".x86_64", "src")
+		os.MkdirAll(srcDir, 0755)
+		os.WriteFile(filepath.Join(srcDir, "Makefile"), []byte("all:\n\techo "+n+"\n"), 0644)
+		run(t, srcDir, "git", "init")
+		run(t, srcDir, "git", "config", "user.email", "test@test.com")
+		run(t, srcDir, "git", "config", "user.name", "Test")
+		run(t, srcDir, "git", "add", "-A")
+		run(t, srcDir, "git", "commit", "-m", "upstream")
+		run(t, srcDir, "git", "tag", "yoe/pin")
+	}
+	proj := &yoestar.Project{Name: "test", Units: units}
+
+	var buf bytes.Buffer
+	opts := Options{ProjectDir: projectDir, Arch: "x86_64", Parallel: 3}
+	if err := BuildUnits(proj, nil, opts, &buf); err != nil {
+		t.Fatalf("BuildUnits: %v", err)
+	}
+
+	out := buf.String()
+	building := func(n string) int {
+		// first "<name> ... [building]" occurrence
+		for _, line := range strings.Split(out, "\n") {
+			if strings.HasPrefix(line, n+" ") && strings.Contains(line, "[building]") {
+				return strings.Index(out, line)
+			}
+		}
+		return -1
+	}
+	doneAt := func(n string) int {
+		for _, line := range strings.Split(out, "\n") {
+			if strings.HasPrefix(line, n+" ") && strings.Contains(line, "[done]") {
+				return strings.Index(out, line)
+			}
+		}
+		return -1
+	}
+	for dependent, ds := range deps {
+		db := building(dependent)
+		if db < 0 {
+			t.Fatalf("%s never built; output:\n%s", dependent, out)
+		}
+		for _, d := range ds {
+			dd := doneAt(d)
+			if dd < 0 {
+				t.Fatalf("dependency %s never completed; output:\n%s", d, out)
+			}
+			if dd > db {
+				t.Errorf("%s started building before its dependency %s finished:\n%s", dependent, d, out)
+			}
+		}
+	}
+}
+
 func run(t *testing.T, dir, name string, args ...string) {
 	t.Helper()
 	cmd := exec.Command(name, args...)

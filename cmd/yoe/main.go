@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	yoe "github.com/yoebuild/yoe/internal"
@@ -245,7 +246,9 @@ func cmdBuild(args []string) {
 	verbose := fs.Bool("verbose", false, "verbose output")
 	machineName := fs.String("machine", "", "target machine")
 	all := fs.Bool("all", false, "build all units")
+	jobs := fs.Int("jobs", 0, "max units to build in parallel (saved to local.star; default 5)")
 	fs.BoolVar(verbose, "v", false, "verbose output (shorthand)")
+	fs.IntVar(jobs, "j", 0, "max units to build in parallel (shorthand)")
 	fs.Parse(args)
 
 	_ = all // build all when no positional args — handled by empty units slice
@@ -264,6 +267,7 @@ func cmdBuild(args []string) {
 	if resolvedMachine == "" {
 		resolvedMachine = proj.Defaults.Machine
 	}
+	pdir := projectDir()
 	opts := build.Options{
 		Ctx:        ctx,
 		Force:      *force,
@@ -271,9 +275,28 @@ func cmdBuild(args []string) {
 		NoCache:    *noCache,
 		DryRun:     *dryRun,
 		Verbose:    *verbose,
-		ProjectDir: projectDir(),
+		ProjectDir: pdir,
 		Arch:       targetArch,
 		Machine:    resolvedMachine,
+	}
+
+	// Parallelism precedence: -j flag > local.star parallel_builds >
+	// build.DefaultParallel. A -j value is also persisted so subsequent
+	// builds (and the TUI) reuse it without re-passing the flag.
+	if root, err := findProjectRootForLocal(pdir); err == nil {
+		ov, _ := yoestar.LoadLocalOverrides(root)
+		opts.Parallel = ov.ParallelBuilds
+		if *jobs > 0 {
+			opts.Parallel = *jobs
+			if ov.ParallelBuilds != *jobs {
+				ov.ParallelBuilds = *jobs
+				if werr := yoestar.WriteLocalOverrides(root, ov); werr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not save parallel_builds to local.star: %v\n", werr)
+				}
+			}
+		}
+	} else if *jobs > 0 {
+		opts.Parallel = *jobs
 	}
 
 	if err := build.BuildUnits(proj, units, opts, os.Stdout); err != nil {
@@ -421,7 +444,30 @@ func cmdConfig(args []string) {
 			os.Exit(1)
 		}
 	case "set":
-		fmt.Fprintf(os.Stderr, "config set: edit PROJECT.star directly (Starlark files are not patchable via CLI)\n")
+		// local.star is yoe-generated and safe to rewrite, so the
+		// per-developer settings that live there are settable from the
+		// CLI. PROJECT.star is hand-authored Starlark and is not.
+		if len(args) == 3 && args[1] == "parallel-builds" {
+			n, err := strconv.Atoi(args[2])
+			if err != nil || n < 1 {
+				fmt.Fprintf(os.Stderr, "config set parallel-builds: value must be an integer >= 1\n")
+				os.Exit(1)
+			}
+			root, err := findProjectRootForLocal(projectDir())
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			ov, _ := yoestar.LoadLocalOverrides(root)
+			ov.ParallelBuilds = n
+			if err := yoestar.WriteLocalOverrides(root, ov); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("parallel-builds = %d (saved to local.star)\n", n)
+			return
+		}
+		fmt.Fprintf(os.Stderr, "config set: only 'parallel-builds <n>' is supported; edit PROJECT.star directly for project config\n")
 		os.Exit(1)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown config subcommand: %s\n", args[0])
@@ -820,8 +866,8 @@ func cmdUpdate() {
 func cmdTUI(_ []string) {
 	proj := loadProject()
 	cfg := tui.Config{
-		LoadOpts:        projectLoadOpts(),
-		GlobalFlagArgs:  globalFlagArgs(),
+		LoadOpts:       projectLoadOpts(),
+		GlobalFlagArgs: globalFlagArgs(),
 	}
 	if err := tui.Run(proj, projectDir(), cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
