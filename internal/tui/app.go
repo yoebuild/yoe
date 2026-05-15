@@ -51,6 +51,13 @@ var (
 	helpKeyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#e8863a")).Bold(true)
 	waitingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // yellow
 
+	// Home-header field block: labels render plain white (the look of the
+	// existing "Machine:" label), values in a bright accent so the eye
+	// lands on the data, not the field name. The Query line keeps its own
+	// queryActive/queryDim/queryError styling for the search expression.
+	fieldLabelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("255"))
+	fieldValueStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("213")) // bright magenta — distinct from all status colors
+
 	// Query-related styles
 	queryDimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	queryActiveStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
@@ -2300,9 +2307,9 @@ func (m model) renderHomeHeader() string {
 		renderTabBar(labels, int(m.activeTab)),
 		helpKeyStyle.Render("tab"),
 		helpStyle.Render(": switch"))
-	fmt.Fprintf(&b, "  Machine: %s  Image: %s\n",
-		headerStyle.Render(machine),
-		headerStyle.Render(image))
+	fmt.Fprintf(&b, "  %s%s  %s%s\n",
+		fieldLabelStyle.Render("Machine: "), fieldValueStyle.Render(machine),
+		fieldLabelStyle.Render("Image: "), fieldValueStyle.Render(image))
 
 	if m.warning != "" {
 		warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Bold(true)
@@ -2315,8 +2322,8 @@ func (m model) renderHomeHeader() string {
 	if m.buildSessionActive() {
 		fmt.Fprintf(&b, "  %s\n", m.renderBuildProgress())
 	} else if m.feedStatus != "" {
-		feedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-		fmt.Fprintf(&b, "  %s\n", feedStyle.Render("feed: "+m.feedStatus))
+		fmt.Fprintf(&b, "  %s%s\n",
+			fieldLabelStyle.Render("feed: "), fieldValueStyle.Render(m.feedStatus))
 	}
 	return b.String()
 }
@@ -2365,7 +2372,8 @@ func (m model) viewUnitsTab() string {
 	// Query header — when the user presses `/`, the input editor replaces
 	// the query body in place rather than opening a separate input row at
 	// the bottom of the screen, so the eye stays on one Query: ... line.
-	counter := fmt.Sprintf("Units: %d/%d", len(m.visible), len(m.units))
+	counter := fieldLabelStyle.Render("Units: ") +
+		fieldValueStyle.Render(fmt.Sprintf("%d/%d", len(m.visible), len(m.units)))
 	if m.queryEditing {
 		var body string
 		if m.queryError != "" {
@@ -2376,9 +2384,9 @@ func (m model) viewUnitsTab() string {
 			body = fmt.Sprintf("/%s▌", m.queryInput)
 		}
 		b.WriteString(fmt.Sprintf("  %s%s    %s\n",
-			queryDimStyle.Render("Query: "),
+			fieldLabelStyle.Render("Query: "),
 			body,
-			queryDimStyle.Render(counter)))
+			counter))
 		// Tab-completion candidates: when the input can't be advanced
 		// further (multiple equally-good matches), drop the list right
 		// under the bar — closer to the eye than the bottom help row.
@@ -2396,9 +2404,9 @@ func (m model) viewUnitsTab() string {
 			style = queryActiveStyle
 		}
 		b.WriteString(fmt.Sprintf("  %s%s    %s\n",
-			queryDimStyle.Render("Query: "),
+			fieldLabelStyle.Render("Query: "),
 			style.Render(qBody),
-			queryDimStyle.Render(counter)))
+			counter))
 	}
 
 	// Column header — pad widths match the rows below; clicking a label
@@ -2936,8 +2944,8 @@ func (m model) viewModulesTab() string {
 
 	mods := m.proj.ResolvedModules
 	fmt.Fprintf(&b, "  %s%s\n",
-		queryDimStyle.Render("Modules: "),
-		queryDimStyle.Render(fmt.Sprintf("%d declared", len(mods))))
+		fieldLabelStyle.Render("Modules: "),
+		fieldValueStyle.Render(fmt.Sprintf("%d declared", len(mods))))
 	fmt.Fprintf(&b, "  %s\n", headerStyle.Render(fmt.Sprintf("%-22s %-10s %-9s %-32s %s",
 		"NAME", "REF", "SRC", "PATH", "STATUS")))
 
@@ -3067,8 +3075,8 @@ func (m model) viewDiagnosticsTab() string {
 
 	diag := m.proj.Diagnostics
 	fmt.Fprintf(&b, "  %s%s\n",
-		queryDimStyle.Render("Diagnostics: "),
-		queryDimStyle.Render(fmt.Sprintf("%d shadowed, %d duplicate provides",
+		fieldLabelStyle.Render("Diagnostics: "),
+		fieldValueStyle.Render(fmt.Sprintf("%d shadowed, %d duplicate provides",
 			len(diag.Shadows), len(diag.DuplicateProvides))))
 
 	viewH := m.diagnosticsViewportHeight()

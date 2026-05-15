@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **The TUI home header is easier to scan.** Field names (Machine, Image,
+  Query, Units, feed, Modules, Diagnostics) now render in plain white and
+  their values in a bright accent color, so the data stands out from the
+  labels at a glance. The search expression keeps its own coloring.
 - **The TUI tab bar now sits on the top line next to `[yoe]`.** The
   Machine/Image line and the build progress bar moved down a row, so the
   tabs are the first thing you see and the layout reads top-to-bottom.
