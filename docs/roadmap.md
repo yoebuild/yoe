@@ -8,24 +8,24 @@
 
 ## Next
 
-- format tabs like zellij
-- help screens for every page triggered by ?
+- Lock all writes to build.json files, local.star, etc
+- create patches for src trees
 - Beagle Play
 - Odroid C4
 - Use a generic container for alpine repackaing, so a container bump does not
   cause all alpine packages to rebuild.
-- yoe unit that builds in place
+- Yoe unit that builds in place
 - Record tasks that succeed in build.json, and build starts with the first
   uncompleted task. This eliminates re-running configure steps when doing
   incremental development.
-- on unit detail, list tasks and allow restarting the build at a certain task.
+- On unit detail, list tasks and allow restarting the build at a certain task.
   Useful for incremental development.
 - Allow running yoe build/deploy in a unit build src dir. We walk up the
   directory to learn what unit it is, and load the project.
 - why do modules not show pin on startup?
 - module dev status should update
 - video on src modifications
-- block diagram on src modifications (needs some work)
+- Block diagram on src modifications (needs some work)
 - mDNS on rPI does not work
 - Units output multiple packages. Seems like this will be required for
   compatibility with Alpine and other distros.
@@ -45,9 +45,9 @@
 - Can we watch the unit state files and automatically update the TUI if
   something changes? The idea is you could be building in two different TUIs and
   both TUIs would show current status of the other.
-- alpine should have unit deps, not just runtime deps
-- alpine packages like gvim provides vim. This could be a source of pain.
-- document BSP and package moat
+- Alpine should have unit deps, not just runtime deps
+- Alpine packages like gvim provides vim. This could be a source of pain.
+- Document BSP and package moat
 - mDNS on target (we have a mdns component, why is it not working?)
 - base-files is modified by machine
   - machine package feed?
@@ -56,7 +56,6 @@
 - Data partition for rPI targets
   - Fill/format data partition
 - rPI updater
-- Parallel build
 - Flash progress bar rewinds before display if there has been a previous flash
 - Multiple projects
   - add example to e2e
