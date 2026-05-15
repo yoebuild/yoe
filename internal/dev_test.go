@@ -231,6 +231,13 @@ func setupPinnedSrc(t *testing.T, projectDir, unitName string) (srcDir, upstream
 	run(t, srcDir, "git", "config", "user.email", "test@test.com")
 	run(t, srcDir, "git", "config", "user.name", "Test")
 	run(t, srcDir, "git", "tag", "yoe/pin")
+	// A real yoe pin clone checks out a tag (detached HEAD), it does
+	// not leave a local branch named after the upstream default
+	// branch. Detach and drop `main` so the test fixture matches —
+	// otherwise DevToUpstream's "reuse existing local branch" path
+	// would (correctly) reuse this stale clone-default branch.
+	run(t, srcDir, "git", "checkout", "-q", "--detach", "HEAD")
+	run(t, srcDir, "git", "branch", "-D", "main")
 	run(t, srcDir, "git", "remote", "remove", "origin")
 
 	return srcDir, "file://" + upstream
@@ -671,6 +678,51 @@ func TestDevToUpstream_BranchDeclared_ChecksOutBranchHead(t *testing.T) {
 	branch := strings.TrimSpace(runOut(t, srcDir, "git", "rev-parse", "--abbrev-ref", "HEAD"))
 	if branch != "main" {
 		t.Errorf("HEAD is on %q, want local branch main (not detached)", branch)
+	}
+}
+
+// TestDevToUpstream_PreservesExistingLocalBranch verifies that when a
+// local branch with the declared name already exists (e.g., the user
+// committed work on it in a prior dev session, then toggled away and
+// back), DevToUpstream checks it out as-is instead of force-resetting
+// it to origin/<branch>. Local commits must survive the round trip.
+func TestDevToUpstream_PreservesExistingLocalBranch(t *testing.T) {
+	dir := t.TempDir()
+	srcDir, upstreamURL, _ := setupPinnedSrcWithBranch(t, dir, "openssh", "main")
+
+	// Simulate a prior dev session: a local `main` branch with a
+	// commit that does NOT exist upstream.
+	run(t, srcDir, "git", "checkout", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(srcDir, "local-work.c"), []byte("// my WIP\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(t, srcDir, "git", "add", "-A")
+	run(t, srcDir, "git", "commit", "-q", "-m", "local WIP — must not be squashed")
+	localTip := strings.TrimSpace(runOut(t, srcDir, "git", "rev-parse", "HEAD"))
+	// Detach so the toggle has to re-select the branch.
+	run(t, srcDir, "git", "checkout", "-q", "--detach", "HEAD")
+
+	unit := &yoestar.Unit{
+		Name:   "openssh",
+		Source: upstreamURL,
+		Tag:    "yoe/pin",
+		Branch: "main",
+	}
+	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
+		t.Fatalf("DevToUpstream: %v", err)
+	}
+
+	// HEAD must be the user's local commit, not origin/main.
+	head := strings.TrimSpace(runOut(t, srcDir, "git", "rev-parse", "HEAD"))
+	if head != localTip {
+		t.Errorf("HEAD = %s, want preserved local tip %s (must not reset to origin/main)", head, localTip)
+	}
+	if _, err := os.Stat(filepath.Join(srcDir, "local-work.c")); err != nil {
+		t.Errorf("local WIP file was squashed away: %v", err)
+	}
+	branch := strings.TrimSpace(runOut(t, srcDir, "git", "rev-parse", "--abbrev-ref", "HEAD"))
+	if branch != "main" {
+		t.Errorf("HEAD is on %q, want local branch main", branch)
 	}
 }
 

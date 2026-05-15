@@ -330,11 +330,13 @@ These are pointers, not the design — planning doc owns specifics.
   with `DevToPin(unit)` / `DevToUpstream(unit, ssh bool)` /
   `DevDetectState(unit)` / `DevPinToCurrent(unit)` and reuse the same git-cmd
   scaffolding.
-- `DevToUpstream` reads the unit's declared `branch` field (if any) and checks
-  out a local branch named `<branch>` at `origin/<branch>` HEAD after fetching.
-  With no branch declared the working tree stays at the pinned commit. The local
-  `yoe/pin` git tag is always anchored at the pinned commit so dev-mod counts
-  commits past the pin — a branch-tracked unit toggled into dev with branch HEAD
+- `DevToUpstream` reads the unit's declared `branch` field (if any). After
+  fetching, if a local branch named `<branch>` already exists it is checked out
+  as-is — preserving any local commits the user made in a prior dev session —
+  and only created from `origin/<branch>` HEAD when missing. With no branch
+  declared the working tree stays at the pinned commit. The local `yoe/pin` git
+  tag is always anchored at the pinned commit so dev-mod counts commits past the
+  pin — a freshly-created branch-tracked unit toggled into dev with branch HEAD
   ahead of pin lands in dev-mod immediately.
 - `DevPinToCurrent` writes HEAD into the unit's `tag` field (tag name when HEAD
   has one, otherwise 40-char SHA) and moves the local `yoe/pin` tag to HEAD.

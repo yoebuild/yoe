@@ -115,6 +115,22 @@ than scanning the directories.
 - **Silent failures are bugs.** If something can fail, it should fail loudly
   with a clear error. Never swallow errors or degrade silently in ways that make
   debugging harder later.
+- **Preserve and reuse source trees and local work, especially in dev mode.**
+  yoe's job in dev mode is to set up connectivity (origin, branch tracking,
+  unshallow) and get out of the way; it is never to forcibly normalize the
+  user's working tree. Concretely:
+  - Don't `git checkout -B <branch> <ref>` if `refs/heads/<branch>` already
+    exists — `-B` resets the branch and discards any local commits the user has
+    made. Check first; if the local branch exists, plain `git checkout <branch>`
+    it. Only use `-B` to create a missing branch.
+  - Don't `git clean -fdx` after a checkout. Untracked files (build output,
+    editor state, exploratory edits) often represent in-progress work.
+  - Don't `os.RemoveAll(srcDir)` and re-clone when an in-place reset is
+    possible. The existing clone has full history, the configured remote, and
+    any local branches the user created — re-cloning throws all of that away.
+  - Where a transition is destructive by design (e.g., `dev → pin` discards
+    commits past the pin), require an explicit `force=true` from the caller and
+    surface a confirmation in the TUI prompt.
 - **Mark unimplemented docs as (planned).** Any design, feature, command, class,
   builtin, kwarg, or subcommand described in `docs/` that does not yet exist in
   the code must be marked `(planned)` in its section heading and carry a

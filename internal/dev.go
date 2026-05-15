@@ -271,9 +271,10 @@ func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, opts DevUpst
 	// `refs/remotes/origin/<branch>` may not exist and the repo may
 	// still be shallow at the pin's neighborhood. Force a deep fetch
 	// of the branch (`--depth=2147483647` deepens to the full history
-	// available, ignoring any prior shallow constraint), then create
-	// or reset a local branch at FETCH_HEAD and configure it to track
-	// origin/<branch>.
+	// available, ignoring any prior shallow constraint). Then reuse an
+	// existing local <branch> if there is one (preserving local
+	// commits), or create it from FETCH_HEAD if missing. Either way,
+	// configure it to track origin/<branch>.
 	if unit.Branch != "" {
 		if _, err := gitCmd(srcDir, "fetch", "--depth=2147483647", "origin", unit.Branch); err != nil {
 			return fmt.Errorf("DevToUpstream: fetching origin %s: %w", unit.Branch, err)
@@ -282,12 +283,20 @@ func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, opts DevUpst
 		// works from $-shell without re-fetching, and the local-branch
 		// upstream setup below has something to point at.
 		_, _ = gitCmd(srcDir, "update-ref", "refs/remotes/origin/"+unit.Branch, "FETCH_HEAD")
-		// -B creates or resets the local branch to FETCH_HEAD. On the
-		// first toggle this creates <branch>; on subsequent toggles it
-		// resets — fine because pin → dev is always a fresh start,
-		// and DevToPin already required force=true for dev-mod to
-		// discard prior local work.
-		if _, err := gitCmd(srcDir, "checkout", "-B", unit.Branch, "FETCH_HEAD"); err != nil {
+		// If a local branch with this name already exists, just check
+		// it out — the user may have local commits on it from a prior
+		// dev session that we must NOT squash. Only create (from
+		// FETCH_HEAD) when the branch is missing. `git checkout
+		// <branch>` (no -B, no -f) preserves the branch's existing tip
+		// and refuses if uncommitted edits would be clobbered, which
+		// is the safe behavior here — pin → dev starts from a clean
+		// pin tree so it won't trip, and a dirty tree means the user
+		// has work to deal with first.
+		if _, err := gitCmd(srcDir, "rev-parse", "--verify", "refs/heads/"+unit.Branch); err == nil {
+			if _, err := gitCmd(srcDir, "checkout", unit.Branch); err != nil {
+				return fmt.Errorf("DevToUpstream: checking out existing local branch %s (commit/stash local edits first?): %w", unit.Branch, err)
+			}
+		} else if _, err := gitCmd(srcDir, "checkout", "-B", unit.Branch, "FETCH_HEAD"); err != nil {
 			return fmt.Errorf("DevToUpstream: creating local branch %s: %w", unit.Branch, err)
 		}
 		// Set the local branch's upstream so plain `git pull` /

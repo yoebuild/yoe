@@ -30,7 +30,7 @@ func TestDeployScriptInstallsUnit(t *testing.T) {
 		"# >>> yoe-dev",
 		"http://laptop.local:8765/myproj",
 		"# <<< yoe-dev",
-		"apk --no-cache update",
+		"apk update",
 		"apk del --no-scripts myapp",
 		"apk add myapp",
 	} {
