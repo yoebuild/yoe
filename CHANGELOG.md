@@ -8,6 +8,9 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`g` / `G` jump to the top / bottom of the unit list.** The keys were
+  documented and worked on the Modules and Diagnostics tabs but were a no-op
+  on the Units list itself; they now move the cursor there too.
 - **Press `?` on any TUI page for a keyboard cheat sheet.** A centered help
   box lists every shortcut for the page you're on — navigation, build,
   inspect, filter, and the page-specific actions — with plain-language

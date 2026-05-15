@@ -1043,6 +1043,20 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.adjustListOffset()
 		return m, nil
 
+	case "g":
+		if vis := m.visibleIndices(); len(vis) > 0 {
+			m.cursor = vis[0]
+			m.adjustListOffset()
+		}
+		return m, nil
+
+	case "G":
+		if vis := m.visibleIndices(); len(vis) > 0 {
+			m.cursor = vis[len(vis)-1]
+			m.adjustListOffset()
+		}
+		return m, nil
+
 	case "enter":
 		if m.cursor < len(m.units) {
 			m.detailUnit = m.units[m.cursor]
