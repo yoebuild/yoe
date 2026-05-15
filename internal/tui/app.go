@@ -1094,6 +1094,12 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case "u":
+		if m.cursor < len(m.units) {
+			return m.openSourcePromptForUnit(m.units[m.cursor])
+		}
+		return m, nil
+
 	case "B":
 		var cmds []tea.Cmd
 		for _, name := range m.units {
@@ -2779,6 +2785,7 @@ func (m model) helpSections() (string, []helpSection) {
 				{title: "Inspect", entries: []helpEntry{
 					{"e", "edit the unit's .star file in $EDITOR"},
 					{"$", "open a shell in the unit's source dir"},
+					{"u", "toggle source between pin and dev mode"},
 					{"l", "open the unit's build log"},
 					{"d", "launch claude /diagnose on the build log"},
 					{"a", "launch claude /new-unit"},

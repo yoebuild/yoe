@@ -8,6 +8,9 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`u` on the unit list toggles a unit's source between pin and dev mode.**
+  The same dev-mode prompt the detail view offers is now one keypress away
+  from the list, acting on the unit under the cursor.
 - **`g` / `G` jump to the top / bottom of the unit list.** The keys were
   documented and worked on the Modules and Diagnostics tabs but were a no-op
   on the Units list itself; they now move the cursor there too.
