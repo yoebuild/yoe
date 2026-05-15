@@ -8,68 +8,36 @@ and this project adheres to
 
 ## [Unreleased]
 
-- **`yoe deploy` actually installs dev-mode rebuilds.** Deploy now runs
-  `apk del --no-scripts <unit>` followed by `apk add <unit>` on the target. Dev
-  iteration rebuilds the apk content without bumping the `pkgver-r<rel>`
-  version, so `apk add --upgrade` saw same-version and skipped the install —
-  silently dropping the user's edits. The del+add sequence works across all
-  apk-tools versions yoe ships against and avoids the apk-tools 2.x quirks with
-  `--force-reinstall` (3.x only) and `apk fix --reinstall` (which can silently
-  no-op with "APK unavailable, skipped"). `--no-scripts` skips the pre-uninstall
-  hook so OpenRC keeps the service enabled; restart the service from `$` to pick
-  up the new binary.
-
+- **The TUI tab bar now uses zellij-style ribbon tabs.** Each tab is a
+  rounded colored banner sitting on a dark bar, with the active one
+  highlighted in lime so the selected tab is obvious at a glance. Needs a
+  powerline-patched terminal font to render the rounded tab edges.
+- **`yoe deploy` now actually installs your dev-mode rebuilds.** Iterating in
+  dev mode and deploying used to silently drop your edits when the version
+  number hadn't changed; deploy now reliably installs the rebuilt package.
+  Restart the service from `$` to pick up the new binary.
 - **Dev mode can track an upstream branch automatically.** A unit that declares
-  both `tag` and `branch` now flips to `origin/<branch>` HEAD on a local branch
-  named `<branch>` when toggled into dev mode — `git pull`, `git push`, and
-  `git log @{u}..` all work without explicit refspecs. The SRC column shows
-  `dev-mod` when the branch is past the pin (so "build would differ from pin" is
-  visible at a glance), and the detail-page SOURCE line surfaces
-  `tracking origin/<branch> (N commits past <tag>)`. Units with only `tag` keep
-  the bit-identical pin↔dev behavior.
-
-- **`P` pins the current HEAD with no picker.** The tag/hash/branch popup is
-  gone. `P` now writes HEAD's tag name when one exists, otherwise the 40-char
-  SHA, into the unit's `tag` field. The `branch` field is never touched — branch
-  tracking is declared by the unit author, not derived from the checkout. `P` is
-  enabled in `dev` and `dev-mod`; `dev-dirty` surfaces "commit or stash first"
-  instead.
-
-- **`pin` shows in the SRC column.** Built units explicitly record their source
-  state in `build.json`, so the TUI's SRC column renders `pin` in cyan for
-  yoe-managed checkouts instead of leaving the cell blank. Unbuilt units (or
-  image/container units with no source dir) still render blank.
-
-- **`dev → pin` resets the existing clone instead of deleting it.** Toggling
-  back to pin used to remove the src dir and wait for the next `yoe build` to
-  re-clone, which looked like data loss. It now resets the working tree to the
-  pin tag in place, re-applies patches, and keeps the clone's full history — no
-  cache lookup, no re-fetch. The origin remote stays configured so a future
-  toggle back to dev is immediate, and the pin/dev distinction lives entirely in
-  the persisted toggle decision rather than whether origin is set.
-
-- **Fix patch application when the cache path is relative.** `applyPatches`
-  built the patch path relative to the project root (e.g.
-  `cache/modules/.../*.patch`) but invoked `git am` with `cmd.Dir = srcDir`, so
-  git looked for the file inside the source tree and failed with
-  `could not open '...patch'`. The path is now resolved to absolute before exec.
-  The bug was masked in long-lived build dirs because `src/` already had the
-  patches committed and the prep step short-circuits via the "commits beyond
-  upstream" check; fresh builds (or any project with `YOE_CACHE` unset and
-  modules pulled from cache) hit it.
-
-- **Language runtimes move out of the toolchain container.** `nodejs`, `npm`,
-  `python3`, `py3-setuptools`, and `py3-pip` are no longer baked into
-  `toolchain-musl`'s Dockerfile. `nodejs_app` and `python_venv` now add the
-  matching apks to `deps`, so the same Alpine prebuilt the device runs is also
-  what builds the unit. Projects that don't use Python or Node.js stop paying
-  for them entirely; bumping a runtime version is now a unit edit rather than a
-  Dockerfile change. Matches the bun setup and CLAUDE.md's "no installing
-  packages in the container" rule. **Migration:** any unit that invokes
-  `python3`, `node`, or `npm` in its build steps without using the corresponding
-  class now needs the runtime in its `deps` (`meson` and `ca-certificates` are
-  updated in this release as examples). The `toolchain-musl` container version
-  bumps to 19 so the leaner image rebuilds on first use.
+  both a tag and a branch flips to tracking that upstream branch when toggled
+  into dev mode, so `git pull`, `git push`, and `git log @{u}..` just work. The
+  SRC column shows `dev-mod` when your checkout is past the pin, and the detail
+  page shows how many commits ahead you are.
+- **`P` pins the current HEAD with no picker.** Pressing `P` records the
+  checked-out tag (or commit SHA) as the unit's pin — no popup. Available in
+  `dev` and `dev-mod`; a dirty tree prompts you to commit or stash first.
+- **The SRC column shows `pin` for yoe-managed checkouts** instead of leaving
+  the cell blank, so you can tell at a glance which units are pinned.
+- **Toggling `dev → pin` no longer looks like data loss.** It resets the
+  existing checkout to the pin in place and keeps the clone's full history
+  instead of deleting the source tree and re-cloning on the next build.
+- **Patches now apply on fresh builds when the cache path is relative.**
+  Fresh builds (or projects pulling modules from the cache) previously failed
+  with `could not open '...patch'`; patched units now build correctly.
+- **Projects that don't use Python or Node.js stop paying for them.** The
+  language runtimes are no longer baked into the toolchain container — the same
+  Alpine package the device runs now also builds the unit, and bumping a runtime
+  version is a unit edit rather than a container rebuild. **Migration:** any
+  unit that calls `python3`, `node`, or `npm` in its build steps without using
+  the matching class now needs that runtime listed in its `deps`.
 
 ## [0.10.7] - 2026-05-12
 

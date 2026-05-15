@@ -40,16 +40,16 @@ var (
 	// line above the bottom row — same green so the eye links it to the
 	// highlighted row, but dimmed and not bold so it doesn't compete.
 	cursorNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#5fff5f")).Faint(true)
-	dimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	cachedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("12")) // blue
-	failedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	buildingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	dimStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	cachedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("12")) // blue
+	failedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+	buildingStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	helpStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	// Amber, matching the [yoe] logo, for the keyboard shortcut letter
 	// in each help-bar item — the description stays helpStyle gray so
 	// the eye can scan keys at a glance.
 	helpKeyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#e8863a")).Bold(true)
-	waitingStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // yellow
+	waitingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // yellow
 
 	// Query-related styles
 	queryDimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
@@ -57,9 +57,9 @@ var (
 	queryErrorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 
 	// Subtle per-class colors for unselected units
-	classUnitStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))   // muted blue
-	classImageStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("13"))  // muted magenta
-	classContainerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))   // muted cyan
+	classUnitStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))  // muted blue
+	classImageStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("13")) // muted magenta
+	classContainerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))  // muted cyan
 
 	// matchHighlightStyle draws the matched substring on top of whatever
 	// the row's existing color is.
@@ -77,11 +77,50 @@ var (
 	srcDevDirtyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))  // red
 	srcLocalStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Faint(true)
 
-	// Tab bar styling: active tab in amber-bold to match the [yoe] logo,
-	// inactive tabs faded so the eye is drawn to the current selection.
-	tabActiveStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#e8863a")).Bold(true)
-	tabInactiveStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	// Tab bar styling: zellij-style "ribbon" segments. The active tab is a
+	// solid lime block with black bold text; inactive tabs are dark-gray
+	// blocks with light text. Both ends of each ribbon are a powerline wedge
+	// rendered ON the bar background so the cell fills full-height and the
+	// arrow reads crisply (a foreground-only glyph on the terminal default
+	// renders as a small, top-aligned sliver on many powerline fonts).
+	tabBarBg       = lipgloss.Color("235")
+	tabActiveBg    = lipgloss.Color("148")
+	tabInactiveBg  = lipgloss.Color("238")
+	tabActiveSeg   = lipgloss.NewStyle().Foreground(lipgloss.Color("16")).Background(tabActiveBg).Bold(true)
+	tabInactiveSeg = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(tabInactiveBg)
+	tabBarGap      = lipgloss.NewStyle().Background(tabBarBg).Render(" ")
 )
+
+// tabCapL / tabCapR are the powerline wedges forming the left and right
+// edges of a ribbon. U+E0B6 points left (the ribbon's left tip), U+E0B4
+// points right (its right tip); together they make a rounded banner.
+// Requires a powerline-patched font.
+const (
+	tabCapL = ""
+	tabCapR = ""
+)
+
+// renderTabBar draws a zellij-style powerline ribbon strip. Each label is a
+// space-padded colored block bracketed by a left and right wedge in the
+// block's color, all painted on the bar background so every cell is full
+// height. Ribbons are separated by a single bar-colored space.
+func renderTabBar(labels []string, active int) string {
+	var b strings.Builder
+	for i, label := range labels {
+		seg := tabInactiveSeg
+		bg := tabInactiveBg
+		if i == active {
+			seg = tabActiveSeg
+			bg = tabActiveBg
+		}
+		if i > 0 {
+			b.WriteString(tabBarGap)
+		}
+		cap := lipgloss.NewStyle().Foreground(bg).Background(tabBarBg)
+		b.WriteString(cap.Render(tabCapL) + seg.Render(" "+label+" ") + cap.Render(tabCapR))
+	}
+	return b.String()
+}
 
 // Package-level program reference for sending messages from goroutines.
 var tuiProgram *tea.Program
@@ -337,43 +376,43 @@ type deployDoneMsg struct {
 
 // model is the Bubble Tea model for the yoe TUI.
 type model struct {
-	proj       *yoestar.Project
-	projectDir string
-	arch       string
-	warning      string // persistent warning banner (e.g., binfmt missing)
-	notification string // transient global notification (e.g., container rebuild)
-	dag        *resolve.DAG
-	units      []string
-	hashes     map[string]string
-	statuses   map[string]unitStatus
-	cursor     int
-	view       viewKind
-	activeTab  homeTab // which tab is showing on the home screen
-	modulesCursor    int // cursor row in the Modules tab
-	diagnosticsCursor int // cursor row in the Diagnostics tab
-	moduleStatus map[string]string // module name -> "clean" / "dirty (N)" / "missing" / err; populated lazily
-	detailUnit   string
-	outputLines  []string // executor output (executor.log)
-	logLines     []string // build log (build.log)
-	detailScroll int      // scroll offset from top in detail view
-	autoFollow   bool     // auto-scroll to bottom during builds
-	listOffset   int      // first visible row in unit list
-	tick       bool // toggles for flashing indicator
-	width      int
-	height     int
-	message    string
-	building   map[string]bool
-	cancels    map[string]context.CancelFunc // cancel funcs for active builds
-	confirm      string // non-empty = waiting for y/n confirmation
-	queryEditing     bool     // true while the user is typing in the query bar
-	queryInput       string   // text in the query bar; live-parsed every keystroke
-	queryError       string   // last parse error; rendered next to the query bar
-	queryCompletions []string // tab-completion candidates, rendered under the bar
-	inSet         map[string]bool // pre-computed in:X closure for the active query, nil if no in: filter
-	visible       []int           // indexes into m.units after applying m.query
-	query         query.Query     // active query, applied to m.units to produce visible
-	queryRevertTo query.Query     // snapshot taken when the user opens `/`
-	savedQuery    string          // canonical form of the last user-saved query (or bootstrap)
+	proj              *yoestar.Project
+	projectDir        string
+	arch              string
+	warning           string // persistent warning banner (e.g., binfmt missing)
+	notification      string // transient global notification (e.g., container rebuild)
+	dag               *resolve.DAG
+	units             []string
+	hashes            map[string]string
+	statuses          map[string]unitStatus
+	cursor            int
+	view              viewKind
+	activeTab         homeTab           // which tab is showing on the home screen
+	modulesCursor     int               // cursor row in the Modules tab
+	diagnosticsCursor int               // cursor row in the Diagnostics tab
+	moduleStatus      map[string]string // module name -> "clean" / "dirty (N)" / "missing" / err; populated lazily
+	detailUnit        string
+	outputLines       []string // executor output (executor.log)
+	logLines          []string // build log (build.log)
+	detailScroll      int      // scroll offset from top in detail view
+	autoFollow        bool     // auto-scroll to bottom during builds
+	listOffset        int      // first visible row in unit list
+	tick              bool     // toggles for flashing indicator
+	width             int
+	height            int
+	message           string
+	building          map[string]bool
+	cancels           map[string]context.CancelFunc // cancel funcs for active builds
+	confirm           string                        // non-empty = waiting for y/n confirmation
+	queryEditing      bool                          // true while the user is typing in the query bar
+	queryInput        string                        // text in the query bar; live-parsed every keystroke
+	queryError        string                        // last parse error; rendered next to the query bar
+	queryCompletions  []string                      // tab-completion candidates, rendered under the bar
+	inSet             map[string]bool               // pre-computed in:X closure for the active query, nil if no in: filter
+	visible           []int                         // indexes into m.units after applying m.query
+	query             query.Query                   // active query, applied to m.units to produce visible
+	queryRevertTo     query.Query                   // snapshot taken when the user opens `/`
+	savedQuery        string                        // canonical form of the last user-saved query (or bootstrap)
 
 	// Detail log search
 	detailSearching  bool   // true = detail search input active
@@ -390,11 +429,11 @@ type model struct {
 	detailFilesSortDesc bool
 
 	// Setup view
-	machines    []string // sorted machine names
-	setupCursor int      // cursor within setup options
-	setupField  string   // "" = top-level, "machine" / "image" = picker active
-	machineCursor int    // cursor within machine list
-	imageCursor   int    // cursor within image list
+	machines      []string // sorted machine names
+	setupCursor   int      // cursor within setup options
+	setupField    string   // "" = top-level, "machine" / "image" = picker active
+	machineCursor int      // cursor within machine list
+	imageCursor   int      // cursor within image list
 
 	// Flash view
 	flashUnit       string
@@ -529,25 +568,25 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	ov, _ := yoestar.LoadLocalOverrides(projectDir)
 
 	m := model{
-		proj:           proj,
-		projectDir:     projectDir,
-		arch:           arch,
-		dag:            dag,
-		units:          units,
-		hashes:         hashes,
-		statuses:       statuses,
+		proj:            proj,
+		projectDir:      projectDir,
+		arch:            arch,
+		dag:             dag,
+		units:           units,
+		hashes:          hashes,
+		statuses:        statuses,
 		building:        make(map[string]bool),
 		cancels:         make(map[string]context.CancelFunc),
 		unitSrcStates:   make(map[string]source.State),
 		moduleSrcStates: make(map[string]source.State),
 		srcWatcher:      newSourceWatcher(),
-		machines:       machines,
-		flashProgress:  progress.New(progress.WithDefaultGradient()),
-		buildProgress:  progress.New(progress.WithDefaultGradient(), progress.WithoutPercentage()),
-		buildPending:   make(map[string]bool),
-		deployHost:     ov.DeployHost,
-		loadOpts:       cfg.LoadOpts,
-		globalFlagArgs: cfg.GlobalFlagArgs,
+		machines:        machines,
+		flashProgress:   progress.New(progress.WithDefaultGradient()),
+		buildProgress:   progress.New(progress.WithDefaultGradient(), progress.WithoutPercentage()),
+		buildPending:    make(map[string]bool),
+		deployHost:      ov.DeployHost,
+		loadOpts:        cfg.LoadOpts,
+		globalFlagArgs:  cfg.GlobalFlagArgs,
 	}
 
 	// Bootstrap query: prefer local.star, fall back to in:<defaults.image>.
@@ -2173,9 +2212,7 @@ func (m model) renderHomeHeader() string {
 
 	// Tab bar with diagnostics-count badge so the user notices when
 	// shadows or duplicate provides exist without leaving the Units tab.
-	// Active tab is wrapped in `[ ... ]` and styled bold/amber so it
-	// reads as selected even on terminals that don't render underline.
-	var tabs []string
+	var labels []string
 	for t := homeTab(0); t < numHomeTabs; t++ {
 		label := t.String()
 		if t == tabDiagnostics {
@@ -2184,14 +2221,10 @@ func (m model) renderHomeHeader() string {
 				label = fmt.Sprintf("%s (%d)", label, n)
 			}
 		}
-		if t == m.activeTab {
-			tabs = append(tabs, tabActiveStyle.Render("[ "+label+" ]"))
-		} else {
-			tabs = append(tabs, tabInactiveStyle.Render("  "+label+"  "))
-		}
+		labels = append(labels, label)
 	}
-	fmt.Fprintf(&b, "  %s    %s%s\n",
-		strings.Join(tabs, " "),
+	fmt.Fprintf(&b, "      %s    %s%s\n",
+		renderTabBar(labels, int(m.activeTab)),
 		helpKeyStyle.Render("tab"),
 		helpStyle.Render(": switch"))
 	return b.String()
@@ -2869,7 +2902,7 @@ func (m model) viewSetup() string {
 
 	if m.message != "" {
 		b.WriteString("\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  "+m.message))
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
 		b.WriteString("\n")
 	}
 
@@ -2919,9 +2952,9 @@ func (m model) detailAllLines() []string {
 //   - The unit itself is in the explicit list: "└── <image> (explicit)"
 //   - It's pulled in transitively: list each explicit pick with the
 //     runtime-dep chain that bridges them, e.g.
-//       └── dev-image (image)
-//             ├── x11 → libx11 → cairo
-//             └── yazi → libpango → cairo
+//     └── dev-image (image)
+//     ├── x11 → libx11 → cairo
+//     └── yazi → libpango → cairo
 //   - Nothing in the explicit list reaches it: "(not in <image>)"
 func (m model) upstreamLines() []string {
 	imgName := m.proj.Defaults.Image
@@ -3185,17 +3218,12 @@ func (m model) viewDetail() string {
 
 	// Tab bar (Info / Files), styled like the home tab bar so the two
 	// strips read as the same UI element.
-	var tabs []string
+	var labels []string
 	for t := detailTab(0); t < numDetailTabs; t++ {
-		label := t.String()
-		if t == m.detailTab {
-			tabs = append(tabs, tabActiveStyle.Render("[ "+label+" ]"))
-		} else {
-			tabs = append(tabs, tabInactiveStyle.Render("  "+label+"  "))
-		}
+		labels = append(labels, t.String())
 	}
-	b.WriteString(fmt.Sprintf("  %s    %s%s\n",
-		strings.Join(tabs, " "),
+	b.WriteString(fmt.Sprintf("      %s    %s%s\n",
+		renderTabBar(labels, int(m.detailTab)),
 		helpKeyStyle.Render("tab"),
 		helpStyle.Render(": switch")))
 
@@ -3230,7 +3258,7 @@ func (m model) viewDetail() string {
 		end = len(allLines)
 	}
 
-	matchHighlight := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))       // yellow
+	matchHighlight := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))              // yellow
 	currentHighlight := lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true) // bold yellow
 
 	for lineIdx := start; lineIdx < end; lineIdx++ {
