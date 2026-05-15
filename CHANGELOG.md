@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Image builds now resolve virtual packages the same way every run.**
+  When several packages claimed the same virtual name (for example the
+  providers of `ifupdown-any`), which one an image picked could change
+  from one build to the next — so a package would drift in and out of the
+  image, never staying cached and sometimes silently dropping out
+  entirely. Resolution is now stable, so the same project always produces
+  the same image and the cache holds.
 - **The TUI Setup page can now adjust how many units build in parallel.**
   A "Parallel builds" row sits below Machine and Image; press ←/→ (or h/l)
   to raise or lower the count. The choice is saved per project and used by
