@@ -388,6 +388,7 @@ type model struct {
 	statuses          map[string]unitStatus
 	cursor            int
 	view              viewKind
+	helpShowing       bool              // `?`-toggled keybinding overlay for the current page
 	activeTab         homeTab           // which tab is showing on the home screen
 	modulesCursor     int               // cursor row in the Modules tab
 	diagnosticsCursor int               // cursor row in the Diagnostics tab
@@ -891,6 +892,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.queryEditing {
 			return m.updateSearch(msg)
+		}
+		// Help overlay: `?` opens a centered keybinding reference for the
+		// current page; while it's up, any key dismisses it. Text-entry
+		// modes that legitimately take a literal `?` (confirm, detail
+		// search, query bar) are already consumed above; the deploy host
+		// field is the only other one, so the toggle is suppressed there.
+		if m.helpShowing {
+			m.helpShowing = false
+			return m, nil
+		}
+		if msg.String() == "?" && !(m.view == viewDeploy && m.deployStage == deployHostInput) {
+			m.helpShowing = true
+			return m, nil
 		}
 		m.message = ""
 		switch m.view {
@@ -2166,6 +2180,9 @@ func (m *model) scrollToDetailMatch() {
 // ----- View -----
 
 func (m model) View() string {
+	if m.helpShowing {
+		return m.viewHelp()
+	}
 	switch m.view {
 	case viewDetail:
 		return m.viewDetail()
@@ -2496,17 +2513,17 @@ var (
 	defaultHelpItems = []helpItem{
 		{"b", "build"}, {"D", "deploy"}, {"x", "cancel"}, {"e", "edit"},
 		{"$", "shell"}, {"l", "log"}, {"s", "setup"}, {"/", "search"},
-		{`\`, "home"}, {"S", "save"}, {"o", "sort"}, {"q", "quit"},
+		{`\`, "home"}, {"S", "save"}, {"o", "sort"}, {"?", "help"}, {"q", "quit"},
 	}
 	imageHelpItems = []helpItem{
 		{"b", "build"}, {"x", "cancel"}, {"r", "run"}, {"e", "edit"},
 		{"$", "shell"}, {"l", "log"}, {"s", "setup"}, {"/", "search"},
-		{`\`, "home"}, {"S", "save"}, {"q", "quit"},
+		{`\`, "home"}, {"S", "save"}, {"?", "help"}, {"q", "quit"},
 	}
 	imageCachedHelpItems = []helpItem{
 		{"b", "build"}, {"x", "cancel"}, {"r", "run"}, {"f", "flash"},
 		{"e", "edit"}, {"$", "shell"}, {"l", "log"}, {"s", "setup"},
-		{"/", "search"}, {`\`, "home"}, {"S", "save"}, {"q", "quit"},
+		{"/", "search"}, {`\`, "home"}, {"S", "save"}, {"?", "help"}, {"q", "quit"},
 	}
 	// Shown while the query input is focused — these are the only keys
 	// updateSearch actually handles; navigation/build shortcuts are
@@ -2518,16 +2535,16 @@ var (
 	detailHelpItems = []helpItem{
 		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
 		{"/", "search"}, {"b", "build"}, {"$", "shell"}, {"u", "src"},
-		{"P", "pin"}, {"d", "diagnose"}, {"l", "log"},
+		{"P", "pin"}, {"d", "diagnose"}, {"l", "log"}, {"?", "help"},
 	}
 	detailImageHelpItems = []helpItem{
 		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
 		{"/", "search"}, {"b", "build"}, {"r", "run"}, {"$", "shell"},
-		{"d", "diagnose"}, {"l", "log"},
+		{"d", "diagnose"}, {"l", "log"}, {"?", "help"},
 	}
 	detailFilesHelpItems = []helpItem{
 		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
-		{"o", "sort"}, {"O", "reverse"},
+		{"o", "sort"}, {"O", "reverse"}, {"?", "help"},
 	}
 )
 
@@ -2542,6 +2559,245 @@ func renderHelp(items []helpItem) string {
 		b.WriteString(helpStyle.Render(it.label))
 	}
 	return b.String()
+}
+
+// helpEntry is one row in the `?` overlay: a key (or key group) and what it
+// does. helpSection groups related entries under a heading.
+type helpEntry struct{ keys, desc string }
+type helpSection struct {
+	title   string
+	entries []helpEntry
+}
+
+var (
+	helpBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#e8863a")).
+			Padding(1, 3)
+	helpSectionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Bold(true)
+)
+
+// helpGeneral is appended to every page so the dismiss/quit keys are always
+// documented in the same place.
+func helpGeneral(quit bool) helpSection {
+	s := helpSection{title: "General", entries: []helpEntry{
+		{"?", "open / close this help"},
+	}}
+	if quit {
+		s.entries = append(s.entries, helpEntry{"q  ·  Ctrl+C", "quit yoe"})
+	}
+	return s
+}
+
+// helpSections returns the page title and keybinding sections for whatever
+// page is currently active. It mirrors the dispatch in Update so the overlay
+// always documents exactly the keys that page handles.
+func (m model) helpSections() (string, []helpSection) {
+	nav := helpSection{title: "Navigation", entries: []helpEntry{
+		{"↑  ·  k", "move up"},
+		{"↓  ·  j", "move down"},
+		{"PgUp  ·  Ctrl+B", "page up"},
+		{"PgDn  ·  Ctrl+F", "page down"},
+		{"g  ·  G", "jump to top / bottom"},
+	}}
+
+	switch m.view {
+	case viewDetail:
+		scroll := helpSection{title: "Scroll", entries: []helpEntry{
+			{"↑  ·  k", "scroll up one line"},
+			{"↓  ·  j", "scroll down one line"},
+			{"PgUp  ·  Ctrl+B", "scroll page up"},
+			{"PgDn  ·  Ctrl+F", "scroll page down"},
+			{"g  ·  G", "jump to top / bottom"},
+		}}
+		tabs := helpSection{title: "Tabs", entries: []helpEntry{
+			{"Tab  ·  Shift+Tab", "switch Info / Files tab"},
+			{"Esc", "back to the unit list"},
+		}}
+		if m.detailTab == detailTabFiles {
+			return "Detail · Files — installed files in the unit's .apk", []helpSection{
+				tabs, scroll,
+				{title: "Sort", entries: []helpEntry{
+					{"o", "cycle sort column (name / size)"},
+					{"O", "reverse sort direction"},
+				}},
+				helpGeneral(true),
+			}
+		}
+		return "Detail · Info — dependency graph and build streams", []helpSection{
+			tabs, scroll,
+			{title: "Search", entries: []helpEntry{
+				{"/", "search the build log"},
+				{"n  ·  N", "next / previous match"},
+				{"Esc", "clear search (first press), then back"},
+			}},
+			{title: "Actions", entries: []helpEntry{
+				{"b", "build this unit"},
+				{"r", "run the image in QEMU (image units)"},
+				{"D", "deploy to a host over SSH (non-image)"},
+				{"$", "open a shell in the source dir"},
+				{"u", "toggle source between pin and dev mode"},
+				{"P", "pin the current HEAD into the .star tag"},
+				{"d", "launch claude /diagnose on the build log"},
+				{"l", "open the build log in $EDITOR"},
+			}},
+			helpGeneral(true),
+		}
+
+	case viewSetup:
+		return "Setup — machine and default image", []helpSection{
+			{title: "Navigate", entries: []helpEntry{
+				{"↑  ·  k", "move up (Machine / Image)"},
+				{"↓  ·  j", "move down"},
+				{"Enter", "open the picker for the selected option"},
+				{"Esc  ·  q", "back to the unit list"},
+			}},
+			{title: "In a picker", entries: []helpEntry{
+				{"↑  ·  ↓", "choose a machine / image"},
+				{"Enter", "select and save to local.star"},
+				{"Esc", "close the picker without changing"},
+			}},
+			helpGeneral(false),
+		}
+
+	case viewFlash:
+		return "Flash — write a built image to a device", []helpSection{
+			{title: "Select device", entries: []helpEntry{
+				{"↑  ·  ↓", "choose a removable device"},
+				{"Enter", "continue to the confirm step"},
+				{"Esc  ·  q", "back to the unit list"},
+			}},
+			{title: "Confirm / permissions", entries: []helpEntry{
+				{"y", "write the image (or run sudo chown)"},
+				{"n  ·  Esc", "cancel and go back"},
+			}},
+			{title: "When finished", entries: []helpEntry{
+				{"Esc  ·  Enter  ·  q", "return to the unit list"},
+			}},
+			helpGeneral(false),
+		}
+
+	case viewDeploy:
+		return "Deploy — build and push a unit to a host over SSH", []helpSection{
+			{title: "Enter host", entries: []helpEntry{
+				{"type", "edit the target host (user@host)"},
+				{"Enter", "start the build + deploy"},
+				{"Ctrl+U", "clear the host field"},
+				{"Esc", "cancel and go back"},
+			}},
+			{title: "When finished", entries: []helpEntry{
+				{"Esc  ·  Enter  ·  q", "return to the unit list"},
+			}},
+			{title: "Note", entries: []helpEntry{
+				{"?", "available except while typing the host"},
+			}},
+			helpGeneral(false),
+		}
+
+	case viewSourcePrompt:
+		return "Source mode — pin ↔ dev for this unit / module", []helpSection{
+			{title: "Choose", entries: []helpEntry{
+				{"↑  ·  k", "move up (skips disabled options)"},
+				{"↓  ·  j", "move down"},
+				{"Enter", "apply the selected option"},
+				{"Esc  ·  q", "cancel, keep the current mode"},
+			}},
+			helpGeneral(false),
+		}
+
+	default: // viewUnits — Units / Modules / Diagnostics tabs
+		switch m.activeTab {
+		case tabModules:
+			return "Modules — external git modules and dev mode", []helpSection{
+				{title: "Navigation", entries: append(nav.entries,
+					helpEntry{"Tab  ·  Shift+Tab", "switch Units / Modules / Diagnostics"})},
+				{title: "Actions", entries: []helpEntry{
+					{"$", "open a shell in the module's clone dir"},
+					{"u", "toggle source between pin and dev mode"},
+					{"r", "refresh the module's git status"},
+				}},
+				helpGeneral(true),
+			}
+		case tabDiagnostics:
+			return "Diagnostics — shadowed units and duplicate provides", []helpSection{
+				{title: "Navigation", entries: append(nav.entries,
+					helpEntry{"Tab  ·  Shift+Tab", "switch Units / Modules / Diagnostics"})},
+				helpGeneral(true),
+			}
+		default:
+			return "Units — the build target list", []helpSection{
+				{title: "Navigation", entries: append(nav.entries,
+					helpEntry{"Tab  ·  Shift+Tab", "switch Units / Modules / Diagnostics"},
+					helpEntry{"Enter", "open the unit detail view"})},
+				{title: "Build", entries: []helpEntry{
+					{"b", "build the selected unit"},
+					{"B", "build all visible units"},
+					{"x", "cancel the selected unit's build"},
+					{"c", "clean the selected unit's artifacts"},
+					{"C", "clean all build artifacts"},
+				}},
+				{title: "Inspect", entries: []helpEntry{
+					{"e", "edit the unit's .star file in $EDITOR"},
+					{"$", "open a shell in the unit's source dir"},
+					{"l", "open the unit's build log"},
+					{"d", "launch claude /diagnose on the build log"},
+					{"a", "launch claude /new-unit"},
+					{"r", "run an image unit in QEMU"},
+					{"f", "flash a built image to a device"},
+					{"D", "deploy a non-image unit to a host"},
+				}},
+				{title: "Filter & sort", entries: []helpEntry{
+					{"/", "edit the filter query"},
+					{`\`, "reset the query to the saved default"},
+					{"S", "save the current query as the default"},
+					{"o  ·  O", "cycle sort column / reverse direction"},
+					{"s", "open Setup (machine / image)"},
+				}},
+				helpGeneral(true),
+			}
+		}
+	}
+}
+
+// viewHelp renders the per-page keybinding reference as a rounded amber box
+// centered over the screen. Any key dismisses it (handled in Update).
+func (m model) viewHelp() string {
+	title, sections := m.helpSections()
+
+	keyWidth := 0
+	for _, s := range sections {
+		for _, e := range s.entries {
+			if w := lipgloss.Width(e.keys); w > keyWidth {
+				keyWidth = w
+			}
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString(titleStyle.Render(title))
+	b.WriteString("\n")
+	for _, s := range sections {
+		b.WriteString("\n")
+		b.WriteString(helpSectionStyle.Render(s.title))
+		b.WriteString("\n")
+		for _, e := range s.entries {
+			pad := strings.Repeat(" ", keyWidth-lipgloss.Width(e.keys))
+			b.WriteString("  ")
+			b.WriteString(helpKeyStyle.Render(e.keys))
+			b.WriteString(pad)
+			b.WriteString("   ")
+			b.WriteString(helpStyle.Render(e.desc))
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString("\n")
+	b.WriteString(dimStyle.Render("press any key to close"))
+
+	box := helpBoxStyle.Render(b.String())
+	if m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+	}
+	return box
 }
 
 // viewModulesTab renders the Modules tab — one row per resolved module
@@ -2667,7 +2923,7 @@ func (m model) viewModulesTab() string {
 	} else {
 		b.WriteString(renderHelp([]helpItem{
 			{"tab", "next tab"}, {"j/k", "move"}, {"g/G", "top/bottom"},
-			{"$", "shell"}, {"u", "src"}, {"r", "refresh"}, {"q", "quit"},
+			{"$", "shell"}, {"u", "src"}, {"r", "refresh"}, {"?", "help"}, {"q", "quit"},
 		}))
 	}
 	return b.String()
@@ -2799,7 +3055,7 @@ func (m model) viewDiagnosticsTab() string {
 		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
 	} else {
 		b.WriteString(renderHelp([]helpItem{
-			{"tab", "next tab"}, {"j/k", "move"}, {"g/G", "top/bottom"}, {"q", "quit"},
+			{"tab", "next tab"}, {"j/k", "move"}, {"g/G", "top/bottom"}, {"?", "help"}, {"q", "quit"},
 		}))
 	}
 	return b.String()
@@ -2847,7 +3103,7 @@ func (m model) viewSetup() string {
 		}
 
 		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("  enter select  esc back"))
+		b.WriteString(helpStyle.Render("  enter select  esc back  ? help"))
 		b.WriteString("\n")
 
 	case "image":
@@ -2874,7 +3130,7 @@ func (m model) viewSetup() string {
 		}
 
 		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("  enter select  esc back"))
+		b.WriteString(helpStyle.Render("  enter select  esc back  ? help"))
 		b.WriteString("\n")
 
 	default:
@@ -2897,7 +3153,7 @@ func (m model) viewSetup() string {
 		}
 
 		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("  enter select  esc back  q quit"))
+		b.WriteString(helpStyle.Render("  enter select  esc back  ? help  q quit"))
 		b.WriteString("\n")
 	}
 
@@ -4782,14 +5038,14 @@ func (m model) viewFlash() string {
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("↑/↓ select • enter confirm • esc back"))
+		b.WriteString(helpStyle.Render("↑/↓ select • enter confirm • esc back • ? help"))
 	case flashConfirm:
 		c := m.flashCandidates[m.flashCursor]
 		b.WriteString(fmt.Sprintf("Flash %s → %s (%s, %s %s)?\n",
 			m.flashUnit, c.Path, device.FormatSize(c.Size), c.Vendor, c.Model))
 		b.WriteString(failedStyle.Render(fmt.Sprintf("This will erase all data on %s.", c.Path)))
 		b.WriteString("\n\n")
-		b.WriteString(helpStyle.Render("y to confirm • n/esc to cancel"))
+		b.WriteString(helpStyle.Render("y to confirm • n/esc to cancel • ? help"))
 	case flashWriting:
 		c := m.flashCandidates[m.flashCursor]
 		b.WriteString(fmt.Sprintf("Writing %s → %s\n\n", filepath.Base(m.flashImagePath), c.Path))
@@ -4807,7 +5063,7 @@ func (m model) viewFlash() string {
 		b.WriteString("\n\n")
 		b.WriteString(fmt.Sprintf("Run sudo chown %s %s?", username, cand.Path))
 		b.WriteString("\n\n")
-		b.WriteString(helpStyle.Render("y to run sudo chown • n/esc to cancel"))
+		b.WriteString(helpStyle.Render("y to run sudo chown • n/esc to cancel • ? help"))
 	case flashDone:
 		b.WriteString(buildingStyle.Render("Flash complete."))
 		b.WriteString("\n\n")

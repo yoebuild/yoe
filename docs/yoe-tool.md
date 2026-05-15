@@ -745,6 +745,7 @@ visible. Press `P` to capture the new HEAD as the new pin.
 | `Enter`     | Open detail view for the selected unit                      |
 | `j/k` `↑/↓` | Navigate up/down                                            |
 | `g/G`       | Jump to top / bottom                                        |
+| `?`         | Show the keyboard cheat sheet for this page                 |
 | `q`         | Quit                                                        |
 
 The cursor auto-follows whatever unit is actively building, but only when you've
@@ -788,6 +789,17 @@ omitted. Empty until the unit has been built at least once.
 | `o` / `O`   | Cycle sort column / toggle direction _(Files tab)_ |
 | `j/k` `↑/↓` | Scroll the log / file list                         |
 | `g/G`       | Jump to top / bottom                               |
+| `?`         | Show the keyboard cheat sheet for this page         |
+
+#### Help overlay
+
+Press `?` on any page — the unit list, a detail tab, Setup, Flash, Deploy, the
+Modules and Diagnostics tabs, or a dev-mode prompt — to open a centered box
+listing every shortcut that page accepts, grouped by purpose (navigation,
+build, inspect, filter, …) with a plain-language description for each. The
+overlay is page-aware: it shows exactly the keys the current page handles.
+Press any key to close it. `?` is suppressed only while you're typing into the
+Deploy host field, where it would be a literal character.
 
 #### Search
 

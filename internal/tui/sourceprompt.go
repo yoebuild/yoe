@@ -760,8 +760,7 @@ func (m model) viewSourcePrompt() string {
 	}
 	b.WriteString("\n")
 	b.WriteString(renderHelp([]helpItem{
-		{"j/k", "move"}, {"enter", "apply"}, {"esc", "cancel"},
+		{"j/k", "move"}, {"enter", "apply"}, {"esc", "cancel"}, {"?", "help"},
 	}))
 	return b.String()
 }
-
