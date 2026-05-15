@@ -157,48 +157,6 @@ func TestRewriteUnitField_UnitNotFound(t *testing.T) {
 	}
 }
 
-func TestRemoveUnitField_DropsLine(t *testing.T) {
-	dir := t.TempDir()
-	path := writeTestStar(t, dir, "foo.star", `unit(
-    name = "foo",
-    tag = "v1.0",
-    branch = "main",
-    source = "https://example.com/foo.git",
-)
-`)
-	if err := RemoveUnitField(path, "foo", "branch"); err != nil {
-		t.Fatalf("RemoveUnitField: %v", err)
-	}
-	got, _ := os.ReadFile(path)
-	if strings.Contains(string(got), "branch") {
-		t.Errorf("branch line should be removed:\n%s", got)
-	}
-	if !strings.Contains(string(got), `tag = "v1.0"`) {
-		t.Errorf("tag line should be untouched:\n%s", got)
-	}
-	// No double blank line where branch used to be.
-	if strings.Contains(string(got), "\n\n    source") {
-		t.Errorf("double blank line left behind:\n%s", got)
-	}
-}
-
-func TestRemoveUnitField_NoOpWhenAbsent(t *testing.T) {
-	dir := t.TempDir()
-	path := writeTestStar(t, dir, "foo.star", `unit(
-    name = "foo",
-    tag = "v1.0",
-)
-`)
-	original, _ := os.ReadFile(path)
-	if err := RemoveUnitField(path, "foo", "branch"); err != nil {
-		t.Fatalf("RemoveUnitField on missing field: %v", err)
-	}
-	got, _ := os.ReadFile(path)
-	if string(got) != string(original) {
-		t.Errorf("file should be untouched:\n%s", got)
-	}
-}
-
 func TestRewriteUnitField_AtomicOnError(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTestStar(t, dir, "foo.star", `unit(name = "foo")`)

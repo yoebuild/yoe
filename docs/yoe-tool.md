@@ -120,6 +120,9 @@ yoe build --all --class image             # planned: --class filter
 # Build a unit and all its dependencies
 yoe build --with-deps myapp               # planned: --with-deps flag
 
+# Build up to 8 units in parallel (saved to local.star for next time)
+yoe build -j 8 --all
+
 # Rebuild even if the cache is fresh
 yoe build --force openssh
 
@@ -200,6 +203,25 @@ yoe build base-image --format sdcard    # raw disk image with partitions
 yoe build base-image --format rootfs    # tar.gz of the rootfs only
 yoe build base-image --format squashfs  # squashfs for read-only roots
 ```
+
+**Parallel builds:** `yoe build` walks the dependency DAG and builds units
+concurrently — as soon as a unit's dependencies are all built (or cached), it
+can start, so independent branches of the graph build at the same time. The
+concurrency limit defaults to **5** units at once. Set it however suits your
+machine:
+
+```sh
+yoe build -j 12 --all                 # this run, and remembered afterward
+yoe config set parallel-builds 12     # set it without starting a build
+```
+
+Either form writes `parallel_builds` to `local.star`, so the setting is
+per-developer and persists across builds (including builds started from the
+TUI). The TUI Setup page (`s`) also exposes it: select **Parallel builds** and
+press ←/→ (or h/l) to adjust the count, which writes the same `local.star`
+value. `yoe config show` prints the value currently in effect. `-j 1` forces a
+fully sequential build, which is handy when reading interleaved verbose output.
+Precedence is `-j` flag → `local.star` → the built-in default of 5.
 
 ### `yoe flash`
 
@@ -550,21 +572,39 @@ git sources, bare clones are cached and updated incrementally.
 
 ### `yoe config`
 
-View and edit project configuration.
+View project configuration and set the per-developer settings stored in
+`local.star`.
 
 ```sh
-# Show current configuration
+# Show current configuration (includes the effective parallel-builds value)
 yoe config show
 
-# Set the default machine
-yoe config set defaults.machine raspberrypi4
-
-# Set the default image
-yoe config set defaults.image dev
-
-# Show resolved configuration for a build
-yoe config resolve --machine beaglebone-black --image base
+# Set how many units build in parallel (written to local.star)
+yoe config set parallel-builds 12
 ```
+
+`yoe config show` reads `PROJECT.star` and reports the project name, default
+machine and image, cache path, and the parallel-build concurrency in effect
+(annotated `default` or `local.star`).
+
+`yoe config set` only writes settings that live in the yoe-generated
+`local.star`; today that is `parallel-builds`. Project configuration
+(`defaults.machine`, `defaults.image`, etc.) lives in hand-authored
+`PROJECT.star` and is edited there directly — `config set` does not patch
+Starlark.
+
+#### `yoe config set defaults.*` / `yoe config resolve` (planned)
+
+> **Status:** Not implemented. `yoe config set` currently accepts only
+> `parallel-builds <n>`; `defaults.machine` / `defaults.image` are edited in
+> `PROJECT.star` by hand, and `yoe config resolve` does not exist yet. Use
+> `yoe desc <unit> --config` to inspect resolved configuration in the meantime.
+>
+> ```sh
+> yoe config set defaults.machine raspberrypi4              # planned
+> yoe config set defaults.image dev                         # planned
+> yoe config resolve --machine beaglebone-black --image base # planned
+> ```
 
 ### `yoe desc`
 
@@ -637,7 +677,7 @@ yoe graph openssh
 yoe graph --stale
 ```
 
-### `yoe` (no args)
+### `yoe` TUI (no args)
 
 Running `yoe` with no arguments launches an interactive terminal UI showing all
 units with their build status. The home screen has three tabs (`tab` /
@@ -683,20 +723,43 @@ both units (`build/<unit>/src/`) and modules (`<cache>/modules/<name>/`).
 | ----------- | ------ | --------------------------------------------------------- |
 | (blank)     | —      | Never built / no source dir / image or container unit     |
 | `pin`       | blue   | Yoe-managed clone at the `.star`'s declared ref           |
-| `dev`       | green  | Tracking upstream, work tree clean, at the upstream tag   |
-| `dev-mod`   | yellow | Tracking upstream + commits beyond `upstream` tag (clean) |
+| `dev`       | green  | Tracking upstream, work tree clean, at the dev anchor     |
+| `dev-mod`   | yellow | Tracking upstream + commits beyond the dev anchor (clean) |
 | `dev-dirty` | red    | Tracking upstream + uncommitted edits in the work tree    |
 | `local`     | dim    | Module overridden via `module(local = "...")`             |
 
 Toggle a unit's source between `pin` and `dev` with `u` on its detail page (or
-on the cursor row in the modules tab). When a `dev-mod` unit is ready to ship
-its commits, `P` rewrites the unit's `.star` `tag`/`branch` field to capture the
-current HEAD; the SRC column flips back to `dev` the next time the row renders.
+on the cursor row in the modules tab). When a `dev` or `dev-mod` checkout is
+ready to ship, `P` rewrites the unit's `.star` `tag` field — to HEAD's tag name
+when one exists, otherwise to the 40-char SHA. `P` never writes the `branch`
+field; branch tracking is declared by the unit author. The SRC column flips back
+to `dev` the next time the row renders.
 
 While a unit is in any `dev*` state, `yoe build` reuses your working tree
 without re-fetching, re-extracting, or re-applying patches. A warning is logged
 so you know `.star` source/tag/patches edits won't apply until you toggle the
 unit back to `pin`.
+
+##### Tracking an upstream branch in dev mode
+
+Units can opt into automatic branch tracking by declaring a `branch` field
+alongside `tag`:
+
+```python
+unit(
+    name = "busybox",
+    source = "https://git.busybox.net/busybox",
+    tag = "1_36_1",      # the pin — what `pin` mode builds
+    branch = "master",    # dev-mode tracking ref
+)
+```
+
+`tag` and `branch` are orthogonal. Without `branch`, pin and dev build the same
+commit (today's behavior). With `branch` set, toggling `pin → dev` fetches
+upstream and checks out `origin/<branch>` HEAD — the working tree advances to
+whatever branch HEAD has accumulated past the pinned tag. The detail-page SOURCE
+line shows `tracking origin/<branch> (N commits past <tag>)` so the move is
+visible. Press `P` to capture the new HEAD as the new pin.
 
 #### Key bindings (unit list)
 
@@ -710,10 +773,11 @@ unit back to `pin`.
 | `D`         | Deploy a non-image unit to a host over SSH                  |
 | `e`         | Open unit's `.star` file in `$EDITOR`                       |
 | `$`         | Open `$SHELL` in the unit's checked-out source dir          |
+| `u`         | Toggle the unit's source between pin and dev mode           |
 | `l`         | Open unit's build log in `$EDITOR`                          |
 | `d`         | Launch `claude diagnose` for the unit                       |
 | `a`         | Launch `claude /new-unit`                                   |
-| `s`         | Open Setup (machine / default image picker)                 |
+| `s`         | Open Setup (machine / default image / parallel builds)      |
 | `/`         | Edit the active query (substring + `type:` `module:` `in:`) |
 | `\`         | Snap query back to the saved default in `local.star`        |
 | `S`         | Save the current query as the new default                   |
@@ -722,6 +786,7 @@ unit back to `pin`.
 | `Enter`     | Open detail view for the selected unit                      |
 | `j/k` `↑/↓` | Navigate up/down                                            |
 | `g/G`       | Jump to top / bottom                                        |
+| `?`         | Show the keyboard cheat sheet for this page                 |
 | `q`         | Quit                                                        |
 
 The cursor auto-follows whatever unit is actively building, but only when you've
@@ -758,13 +823,27 @@ omitted. Empty until the unit has been built at least once.
 | `r`         | Run (image units) — boot in QEMU _(Info tab)_      |
 | `$`         | Open `$SHELL` in the unit's checked-out source     |
 | `u`         | Toggle source between pin and dev mode             |
-| `P`         | Promote a `dev-mod` HEAD into the `.star` pin      |
+| `P`         | Pin current HEAD into the unit's `.star` `tag`     |
 | `d`         | Launch `claude diagnose` _(Info tab)_              |
 | `l`         | Open build log in `$EDITOR` _(Info tab)_           |
 | `/`         | Search the build log _(Info tab)_                  |
 | `o` / `O`   | Cycle sort column / toggle direction _(Files tab)_ |
 | `j/k` `↑/↓` | Scroll the log / file list                         |
 | `g/G`       | Jump to top / bottom                               |
+| `?`         | Show the keyboard cheat sheet for this page        |
+
+#### Help overlay
+
+Press `?` on any page — the unit list, a detail tab, Setup, Flash, Deploy, the
+Modules and Diagnostics tabs, or a dev-mode prompt — to open a centered box
+listing every shortcut that page accepts, grouped by purpose (navigation, build,
+inspect, filter, …) with a plain-language description for each. The overlay is
+page-aware: it shows exactly the keys the current page handles. When the list is
+taller than the terminal it scrolls — `↑/↓` `j/k`, `PgUp/PgDn` `Ctrl+B/Ctrl+F`,
+and `g/G` for the ends — with the page title and footer pinned and a
+`lines a–b of N` position indicator. Any other key closes it. `?` is suppressed
+only while you're typing into the Deploy host field, where it would be a literal
+character.
 
 #### Search
 

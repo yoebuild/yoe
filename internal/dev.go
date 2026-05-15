@@ -36,7 +36,7 @@ func DevExtract(projectDir, arch, unitName string, w io.Writer) error {
 	}
 
 	// Check if there are commits beyond upstream
-	out, err := gitCmd(srcDir, "rev-list", "upstream..HEAD")
+	out, err := gitCmd(srcDir, "rev-list", source.PinTag+"..HEAD")
 	if err != nil {
 		return fmt.Errorf("no 'upstream' tag in %s — was this source fetched by yoe?", srcDir)
 	}
@@ -65,7 +65,7 @@ func DevExtract(projectDir, arch, unitName string, w io.Writer) error {
 	}
 
 	// Extract patches with git format-patch
-	_, err = gitCmd(srcDir, "format-patch", "--output-directory", patchDir, "upstream..HEAD")
+	_, err = gitCmd(srcDir, "format-patch", "--output-directory", patchDir, source.PinTag+"..HEAD")
 	if err != nil {
 		return fmt.Errorf("git format-patch: %w", err)
 	}
@@ -112,7 +112,7 @@ func DevDiff(projectDir, arch, unitName string, w io.Writer) error {
 		return fmt.Errorf("%s is not a git repo — build the recipe first", srcDir)
 	}
 
-	out, err := gitCmd(srcDir, "log", "--oneline", "upstream..HEAD")
+	out, err := gitCmd(srcDir, "log", "--oneline", source.PinTag+"..HEAD")
 	if err != nil {
 		return fmt.Errorf("no 'upstream' tag in %s", srcDir)
 	}
@@ -154,7 +154,7 @@ func DevStatus(projectDir, arch string, w io.Writer) error {
 			continue
 		}
 
-		out, err := gitCmd(srcDir, "rev-list", "--count", "upstream..HEAD")
+		out, err := gitCmd(srcDir, "rev-list", "--count", source.PinTag+"..HEAD")
 		if err != nil {
 			continue
 		}
@@ -220,9 +220,17 @@ type DevUpstreamOpts struct {
 // (github.com, gitlab.com, generic SSH-on-:22 servers). Hosts that don't
 // fit that pattern fall through to HTTPS regardless of the SSH flag.
 //
-// The unit's working tree is not moved — pin and dev mode for the same
-// commit produce bit-identical builds. The transition adds connectivity
-// and history; it doesn't change source content.
+// Working-tree commit depends on whether the unit declares branch:
+//
+//   - Tag only: the working tree stays at the pinned commit. Pin and dev
+//     build the same source; the transition only adds connectivity.
+//   - Tag + Branch: after the fetch, the working tree is checked out
+//     (detached HEAD) at origin/<branch>, and the local `upstream` git
+//     tag is re-pointed to origin/<branch> so dev-mod counts commits past
+//     branch HEAD rather than past the pin tag.
+//
+// Branch-only (Branch set, Tag empty) is malformed: tag is the pin, branch
+// only tracks dev. Returns an error before touching git.
 func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, opts DevUpstreamOpts) error {
 	srcDir := devSrcDir(projectDir, scopeDir, unit.Name)
 	if _, err := os.Stat(filepath.Join(srcDir, ".git")); err != nil {
@@ -230,6 +238,9 @@ func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, opts DevUpst
 	}
 	if !devIsGitURL(unit.Source) {
 		return fmt.Errorf("DevToUpstream: %s has a non-git source (%s); only git-based units support dev mode", unit.Name, unit.Source)
+	}
+	if unit.Branch != "" && unit.Tag == "" {
+		return fmt.Errorf("DevToUpstream: %s declares branch=%q but no tag — tag is the pin, branch only tracks dev", unit.Name, unit.Branch)
 	}
 
 	target := unit.Source
@@ -249,6 +260,57 @@ func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, opts DevUpst
 
 	if err := devFetchOrigin(srcDir, opts, devPinnedRef(unit)); err != nil {
 		return fmt.Errorf("DevToUpstream: %w", err)
+	}
+
+	// Branch-tracking: check out a local branch named after the
+	// declared branch, tracking origin/<branch>, so the user gets a
+	// natural dev workflow — `git pull`, `git push`, and `git log @{u}..`
+	// all work without thinking about detached HEAD.
+	//
+	// The initial pin clone was single-branch at the pinned tag, so
+	// `refs/remotes/origin/<branch>` may not exist and the repo may
+	// still be shallow at the pin's neighborhood. Force a deep fetch
+	// of the branch (`--depth=2147483647` deepens to the full history
+	// available, ignoring any prior shallow constraint). Then reuse an
+	// existing local <branch> if there is one (preserving local
+	// commits), or create it from FETCH_HEAD if missing. Either way,
+	// configure it to track origin/<branch>.
+	if unit.Branch != "" {
+		if _, err := gitCmd(srcDir, "fetch", "--depth=2147483647", "origin", unit.Branch); err != nil {
+			return fmt.Errorf("DevToUpstream: fetching origin %s: %w", unit.Branch, err)
+		}
+		// Update the remote-tracking ref so `git log origin/<branch>`
+		// works from $-shell without re-fetching, and the local-branch
+		// upstream setup below has something to point at.
+		_, _ = gitCmd(srcDir, "update-ref", "refs/remotes/origin/"+unit.Branch, "FETCH_HEAD")
+		// If a local branch with this name already exists, just check
+		// it out — the user may have local commits on it from a prior
+		// dev session that we must NOT squash. Only create (from
+		// FETCH_HEAD) when the branch is missing. `git checkout
+		// <branch>` (no -B, no -f) preserves the branch's existing tip
+		// and refuses if uncommitted edits would be clobbered, which
+		// is the safe behavior here — pin → dev starts from a clean
+		// pin tree so it won't trip, and a dirty tree means the user
+		// has work to deal with first.
+		if _, err := gitCmd(srcDir, "rev-parse", "--verify", "refs/heads/"+unit.Branch); err == nil {
+			if _, err := gitCmd(srcDir, "checkout", unit.Branch); err != nil {
+				return fmt.Errorf("DevToUpstream: checking out existing local branch %s (commit/stash local edits first?): %w", unit.Branch, err)
+			}
+		} else if _, err := gitCmd(srcDir, "checkout", "-B", unit.Branch, "FETCH_HEAD"); err != nil {
+			return fmt.Errorf("DevToUpstream: creating local branch %s: %w", unit.Branch, err)
+		}
+		// Set the local branch's upstream so plain `git pull` /
+		// `git push` work. Best-effort — the checkout above is the
+		// load-bearing step.
+		_, _ = gitCmd(srcDir, "branch", "--set-upstream-to=origin/"+unit.Branch, unit.Branch)
+		// Anchor the local `upstream` git tag at the pin commit, not
+		// at branch HEAD. dev-mod then counts commits past the pin —
+		// answering "would a build here produce different output than
+		// pin mode?" at a glance. A branch that's advanced past the
+		// pin tag flips the unit to dev-mod immediately on toggle.
+		if _, err := gitCmd(srcDir, "tag", "-f", source.PinTag, unit.Tag); err != nil {
+			return fmt.Errorf("DevToUpstream: anchoring upstream tag at %s: %w", unit.Tag, err)
+		}
 	}
 
 	if err := writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StateDev); err != nil {
@@ -317,18 +379,27 @@ func devPinnedRef(unit *yoestar.Unit) string {
 	return ""
 }
 
-// DevToPin throws away the dev-mode checkout and re-runs source.Prepare
-// on the next build. Without `force=true`, refuses to proceed when there
-// are commits beyond `upstream` or uncommitted edits in the work tree —
-// the caller (TUI or CLI) is responsible for surfacing a confirmation
-// to the user when local work is at stake.
+// DevToPin resets the existing dev-mode checkout back to its pinned ref
+// in place, without re-cloning from the source cache. The clone already
+// has the pin commit in its local history (DevToUpstream's unshallow
+// fetch pulled everything), so we just move HEAD, clean any orphaned
+// state, re-apply patches, and drop the origin remote.
 //
-// Implementation is dead simple: remove the src dir and clear the
-// cached state. The next build's source.Prepare re-clones at the
-// pinned ref.
+// Without `force=true`, refuses to proceed when there are commits
+// beyond `upstream` or uncommitted edits in the work tree — the caller
+// (TUI or CLI) is responsible for surfacing a confirmation to the user
+// when local work is at stake.
 func DevToPin(projectDir, scopeDir string, unit *yoestar.Unit, force bool) error {
 	srcDir := devSrcDir(projectDir, scopeDir, unit.Name)
-	state, _ := source.DetectState(srcDir)
+	// Refuse to touch anything if srcDir isn't a self-contained git
+	// repo. Without this guard, git commands run with cmd.Dir=srcDir
+	// silently walk up to a parent .git (the user's project repo) and
+	// destructively operate on the WRONG tree — git clean -fdx wiping
+	// the project's build/, cache/, etc.
+	if _, err := os.Stat(filepath.Join(srcDir, ".git")); err != nil {
+		return fmt.Errorf("DevToPin: %s is not a git repo (missing .git) — build the unit first", srcDir)
+	}
+	state, _ := source.DetectState(srcDir, readUnitSourceState(projectDir, scopeDir, unit.Name))
 	if !force {
 		switch state {
 		case source.StateDevDirty:
@@ -337,11 +408,40 @@ func DevToPin(projectDir, scopeDir string, unit *yoestar.Unit, force bool) error
 			return fmt.Errorf("DevToPin: %s has commits beyond upstream; switch back will discard them — pass force=true to confirm", unit.Name)
 		}
 	}
-	if err := os.RemoveAll(srcDir); err != nil {
-		return fmt.Errorf("DevToPin: removing %s: %w", srcDir, err)
+	if unit.Tag == "" {
+		return fmt.Errorf("DevToPin: %s has no tag — nothing to pin to", unit.Name)
 	}
-	if err := writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StateEmpty); err != nil {
-		return fmt.Errorf("DevToPin: clearing state: %w", err)
+
+	// Move the working tree to the pin tag. --force discards any
+	// dev-dirty edits; dev-mod commits become orphaned (still in the
+	// git database but unreachable from HEAD). We deliberately do NOT
+	// follow this with `git clean -fdx` — that command operates on the
+	// whole working tree and, if git's view of the work tree is wrong
+	// for any reason, can destructively touch directories outside the
+	// unit's src dir. Untracked files that survive the checkout (build
+	// output, editor swap files) are tolerable as a pin-mode soft
+	// edge; correctness trumps tidiness.
+	if _, err := gitCmd(srcDir, "checkout", "--detach", "--force", unit.Tag); err != nil {
+		return fmt.Errorf("DevToPin: checking out %s: %w", unit.Tag, err)
+	}
+	// Re-apply patches on top of the pin tag. They were committed in the
+	// original Prepare run but the dev-mode branch checkout orphaned
+	// them, so we replay from the unit's patches list.
+	if err := source.ApplyPatches(projectDir, srcDir, unit); err != nil {
+		return fmt.Errorf("DevToPin: re-applying patches: %w", err)
+	}
+	// Origin remote stays configured — keeping the user's full history
+	// and saving a re-fetch if they toggle back to dev later. The
+	// pin/dev distinction is the persisted toggle decision, not whether
+	// origin is set.
+	// Reset the local `upstream` git tag back to the pin commit (the
+	// commit pre-patches), matching what source.Prepare leaves behind
+	// for a fresh pin clone.
+	if _, err := gitCmd(srcDir, "tag", "-f", source.PinTag, unit.Tag); err != nil {
+		return fmt.Errorf("DevToPin: resetting upstream tag: %w", err)
+	}
+	if err := writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StatePin); err != nil {
+		return fmt.Errorf("DevToPin: persisting pin state: %w", err)
 	}
 	return nil
 }
@@ -364,6 +464,25 @@ func httpsToSSH(httpsURL string) (string, bool) {
 		return httpsURL, false
 	}
 	return "git@" + u.Host + ":" + path, true
+}
+
+// readUnitSourceState reads the cached BuildMeta.SourceState for a
+// unit. Returns StateEmpty when the meta file is missing or
+// unreadable — the caller passes that to DetectState, which falls
+// back to the origin-remote heuristic.
+func readUnitSourceState(projectDir, scopeDir, unitName string) source.State {
+	buildDir := filepath.Join(projectDir, "build", unitName+"."+scopeDir)
+	data, err := os.ReadFile(filepath.Join(buildDir, "build.json"))
+	if err != nil {
+		return source.StateEmpty
+	}
+	var meta struct {
+		SourceState string `json:"source_state,omitempty"`
+	}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return source.StateEmpty
+	}
+	return source.State(meta.SourceState)
 }
 
 // writeUnitSourceState updates BuildMeta.SourceState in the unit's
@@ -404,45 +523,36 @@ func writeUnitSourceState(projectDir, scopeDir, unitName string, state source.St
 	return os.WriteFile(metaPath, out, 0o644)
 }
 
-// PinKind selects which form of pin to write when promoting a dev-mod
-// unit's HEAD into the .star.
-type PinKind string
-
-const (
-	// PinKindTag pins to the git tag at HEAD. Errors if HEAD has no
-	// tag — the caller should disable this option in the UI prompt.
-	PinKindTag PinKind = "tag"
-	// PinKindHash pins to the 40-char sha at HEAD. Always available;
-	// most reproducible.
-	PinKindHash PinKind = "hash"
-	// PinKindBranch pins to the current branch name. Mutable —
-	// breaks build reproducibility — surface a warning in the UI.
-	PinKindBranch PinKind = "branch"
-)
-
 // DevPromoteToPin captures the dev-mode checkout's current HEAD into
-// the unit's .star definition. State must be StateDevMod (commits
-// beyond upstream, work tree clean); other states return an error so
-// the caller can render an appropriate UI hint instead of silently
-// no-oping.
+// the unit's .star `tag` field. Prefers a real upstream tag name when
+// HEAD has one (e.g., `v0.18.5`) — those are human-readable and
+// survive a clean re-pin. yoe-internal markers (`yoe/pin` and any
+// future `yoe/*` tags) are skipped. When HEAD has no real upstream
+// tag, falls back to the 40-char SHA, which is always unambiguous.
 //
-// On success: rewrites the unit's `tag` (PinKindTag/Hash) or `branch`
-// (PinKindBranch) field, removes the now-stale alternate field, and
-// advances the local `upstream` git tag to HEAD so
-// `git rev-list upstream..HEAD` returns 0 — the unit transitions from
-// `dev-mod` to plain `dev` as the visible acknowledgement that
-// pinned == checked-out.
+// Never writes the `branch` field — branch tracking is declared by the
+// unit author, the pin command only updates the pin.
 //
-// The unit's working tree commit is unchanged. A subsequent
-// pin-mode rebuild will re-clone shallow at the new ref; the user's
-// branch and any uncommitted state-dirty work would survive in dev
-// mode (uncommitted edits aren't possible in StateDevMod by
-// definition).
-func DevPromoteToPin(projectDir, scopeDir string, unit *yoestar.Unit, kind PinKind) error {
+// Allowed in StateDev and StateDevMod. StateDevDirty returns an error
+// (commit or stash first so the captured state is reproducible). Other
+// states (pin, empty) are no-ops with an informative error.
+//
+// On success: rewrites the unit's `tag` field, advances the local
+// `upstream` git tag to HEAD so `git rev-list upstream..HEAD` returns 0,
+// and persists pin state to BuildMeta — the working tree, the .star,
+// and the source-state column now agree on the new pin. The working
+// tree commit is unchanged; the user can toggle `u` to go back to dev
+// mode if they want to keep iterating from this point.
+func DevPromoteToPin(projectDir, scopeDir string, unit *yoestar.Unit) error {
 	srcDir := devSrcDir(projectDir, scopeDir, unit.Name)
-	state, _ := source.DetectState(srcDir)
-	if state != source.StateDevMod {
-		return fmt.Errorf("DevPromoteToPin: unit %q is in state %q; promote requires dev-mod (commit dirty edits or there's nothing to promote)",
+	state, _ := source.DetectState(srcDir, readUnitSourceState(projectDir, scopeDir, unit.Name))
+	switch state {
+	case source.StateDev, source.StateDevMod:
+		// proceed
+	case source.StateDevDirty:
+		return fmt.Errorf("DevPromoteToPin: %s has uncommitted edits; commit or stash first to pin current state", unit.Name)
+	default:
+		return fmt.Errorf("DevPromoteToPin: unit %q is in state %q; pin requires dev or dev-mod",
 			unit.Name, state)
 	}
 
@@ -451,58 +561,45 @@ func DevPromoteToPin(projectDir, scopeDir string, unit *yoestar.Unit, kind PinKi
 		return fmt.Errorf("DevPromoteToPin: %w", err)
 	}
 
-	var newField, newValue, removeField string
-	switch kind {
-	case PinKindTag:
-		// Pick a git tag pointing at HEAD. If there are several, pick
-		// the first sorted lexicographically — deterministic without
-		// requiring annotated tags.
-		out, err := gitCmd(srcDir, "tag", "--points-at", "HEAD")
-		if err != nil {
-			return fmt.Errorf("DevPromoteToPin: %w", err)
+	// Pick the first upstream tag pointing at HEAD that isn't in the
+	// yoe-internal namespace. yoe/pin (and any future yoe/* markers)
+	// must be filtered out — they're our own bookkeeping, not upstream
+	// references. If HEAD has no real tag, fall back to the 40-char
+	// SHA, which is always unambiguous.
+	var value string
+	if out, err := gitCmd(srcDir, "tag", "--points-at", "HEAD"); err == nil {
+		for _, t := range strings.Fields(out) {
+			if strings.HasPrefix(t, "yoe/") {
+				continue
+			}
+			value = t
+			break
 		}
-		tags := strings.Fields(out)
-		if len(tags) == 0 {
-			return fmt.Errorf("DevPromoteToPin: HEAD has no tag — pick PinKindHash or PinKindBranch instead")
-		}
-		newField, newValue = "tag", tags[0]
-		removeField = "branch"
-	case PinKindHash:
+	}
+	if value == "" {
 		out, err := gitCmd(srcDir, "rev-parse", "HEAD")
 		if err != nil {
 			return fmt.Errorf("DevPromoteToPin: %w", err)
 		}
-		newField, newValue = "tag", strings.TrimSpace(out)
-		removeField = "branch"
-	case PinKindBranch:
-		out, err := gitCmd(srcDir, "rev-parse", "--abbrev-ref", "HEAD")
-		if err != nil {
-			return fmt.Errorf("DevPromoteToPin: %w", err)
-		}
-		branch := strings.TrimSpace(out)
-		if branch == "HEAD" {
-			return fmt.Errorf("DevPromoteToPin: detached HEAD has no branch — pick PinKindTag or PinKindHash")
-		}
-		newField, newValue = "branch", branch
-		removeField = "tag"
-	default:
-		return fmt.Errorf("DevPromoteToPin: unknown PinKind %q", kind)
+		value = strings.TrimSpace(out)
 	}
 
-	if err := yoestar.RewriteUnitField(starPath, unit.Name, newField, newValue); err != nil {
-		return fmt.Errorf("DevPromoteToPin: rewriting %s: %w", newField, err)
-	}
-	if err := yoestar.RemoveUnitField(starPath, unit.Name, removeField); err != nil {
-		return fmt.Errorf("DevPromoteToPin: removing stale %s: %w", removeField, err)
+	if err := yoestar.RewriteUnitField(starPath, unit.Name, "tag", value); err != nil {
+		return fmt.Errorf("DevPromoteToPin: rewriting tag: %w", err)
 	}
 
-	// Move upstream tag forward so the state transitions from dev-mod
-	// to dev. -f overwrites the existing upstream tag.
-	if _, err := gitCmd(srcDir, "tag", "-f", "upstream", "HEAD"); err != nil {
-		return fmt.Errorf("DevPromoteToPin: advancing upstream tag: %w", err)
+	// Move upstream tag forward so rev-list upstream..HEAD returns 0
+	// and DetectState reports pin (matching the new .star). -f
+	// overwrites the existing upstream tag.
+	if _, err := gitCmd(srcDir, "tag", "-f", source.PinTag, "HEAD"); err != nil {
+		return fmt.Errorf("DevPromoteToPin: advancing %s tag: %w", source.PinTag, err)
 	}
 
-	return writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StateDev)
+	// Persist pin state. The action is called "pin to current" — the
+	// .star and the working tree now agree on the new pin, and the
+	// SRC column should reflect that. If the user wants to keep
+	// iterating in dev mode after pinning, they can toggle `u` again.
+	return writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StatePin)
 }
 
 // findUnitStarFile locates the .star file that registers a unit with

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -379,6 +380,100 @@ func TestDetailSourceLine_DevModSurfacesDescribe(t *testing.T) {
 	}
 	if !strings.Contains(got, "v3.4.1-3-gabc1234") {
 		t.Errorf("missing source_describe: %q", got)
+	}
+}
+
+func TestDetailSourceLine_BranchTrackingHint(t *testing.T) {
+	projDir := t.TempDir()
+	buildDir := filepath.Join(projDir, "build", "foo.x86_64")
+	srcDir := filepath.Join(buildDir, "src")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Set up a git repo with a pin tag and two commits past it on main.
+	gitRun := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = srcDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	gitRun("init", "-q", "-b", "main")
+	gitRun("config", "user.email", "test@test.com")
+	gitRun("config", "user.name", "Test")
+	os.WriteFile(filepath.Join(srcDir, "a.c"), []byte("a\n"), 0o644)
+	gitRun("add", "-A")
+	gitRun("commit", "-q", "-m", "v1")
+	gitRun("tag", "v1.36.1")
+	os.WriteFile(filepath.Join(srcDir, "b.c"), []byte("b\n"), 0o644)
+	gitRun("add", "-A")
+	gitRun("commit", "-q", "-m", "advance 1")
+	os.WriteFile(filepath.Join(srcDir, "c.c"), []byte("c\n"), 0o644)
+	gitRun("add", "-A")
+	gitRun("commit", "-q", "-m", "advance 2")
+
+	writeMetaWithSourceState(t, buildDir, "dev", "")
+	m := model{
+		projectDir: projDir,
+		arch:       "x86_64",
+		detailUnit: "foo",
+		proj: &yoestar.Project{
+			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
+			Units: map[string]*yoestar.Unit{
+				"foo": {Name: "foo", Class: "unit", Source: "https://example.com/foo.git", Tag: "v1.36.1", Branch: "main"},
+			},
+		},
+		unitSrcStates: map[string]source.State{},
+	}
+	got := m.detailSourceLine()
+	if !strings.Contains(got, "tracking origin/main") {
+		t.Errorf("missing branch tracking hint: %q", got)
+	}
+	if !strings.Contains(got, "2 commits past v1.36.1") {
+		t.Errorf("missing commits-past-pin hint: %q", got)
+	}
+}
+
+func TestDetailSourceLine_PinShowsTag(t *testing.T) {
+	projDir := t.TempDir()
+	buildDir := filepath.Join(projDir, "build", "foo.x86_64")
+	writeMetaWithSourceState(t, buildDir, "pin", "")
+	m := model{
+		projectDir: projDir,
+		arch:       "x86_64",
+		detailUnit: "foo",
+		proj: &yoestar.Project{
+			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
+			Units: map[string]*yoestar.Unit{
+				"foo": {Name: "foo", Class: "unit", Source: "https://example.com/foo.git", Tag: "v1.36.1"},
+			},
+		},
+		unitSrcStates: map[string]source.State{},
+	}
+	got := m.detailSourceLine()
+	if !strings.Contains(got, "pin") {
+		t.Errorf("missing pin token: %q", got)
+	}
+	if !strings.Contains(got, "pinned at v1.36.1") {
+		t.Errorf("missing pin tag hint: %q", got)
+	}
+}
+
+func TestRenderSrcCell_Pin_RendersPin(t *testing.T) {
+	m := newModelWithUnit(t, t.TempDir(), "foo", source.StatePin)
+	cell := m.renderSrcCell("foo")
+	if !strings.Contains(cell, "pin") {
+		t.Errorf("pin unit should render 'pin' in SRC column, got %q", cell)
+	}
+}
+
+func TestRenderSrcCell_Empty_RendersBlank(t *testing.T) {
+	m := newModelWithUnit(t, t.TempDir(), "foo", source.StateEmpty)
+	cell := m.renderSrcCell("foo")
+	// Blank cell is padded to width 9 of spaces; "pin" should not appear.
+	if strings.Contains(cell, "pin") {
+		t.Errorf("unbuilt unit should render blank, got %q", cell)
 	}
 }
 

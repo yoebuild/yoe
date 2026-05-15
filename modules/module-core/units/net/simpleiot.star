@@ -5,6 +5,7 @@ go_binary(
     version = "0.18.5",
     source = "https://github.com/simpleiot/simpleiot.git",
     tag = "v0.18.5",
+    branch = "master",
     go_package = "./cmd/siot",
     binary = "siot",
     license = "Apache-2.0",

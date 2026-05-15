@@ -8,7 +8,7 @@ and this project adheres to
 
 ## [Unreleased]
 
-## [0.10.8] - 2026-05-13
+## [0.10.8] - 2026-05-15
 
 - **Fix patch application when the cache path is relative.** `applyPatches`
   built the patch path relative to the project root (e.g.
@@ -19,19 +19,70 @@ and this project adheres to
   patches committed and the prep step short-circuits via the "commits beyond
   upstream" check; fresh builds (or any project with `YOE_CACHE` unset and
   modules pulled from cache) hit it.
-
-- **Language runtimes move out of the toolchain container.** `nodejs`, `npm`,
-  `python3`, `py3-setuptools`, and `py3-pip` are no longer baked into
-  `toolchain-musl`'s Dockerfile. `nodejs_app` and `python_venv` now add the
-  matching apks to `deps`, so the same Alpine prebuilt the device runs is also
-  what builds the unit. Projects that don't use Python or Node.js stop paying
-  for them entirely; bumping a runtime version is now a unit edit rather than a
-  Dockerfile change. Matches the bun setup and CLAUDE.md's "no installing
-  packages in the container" rule. **Migration:** any unit that invokes
-  `python3`, `node`, or `npm` in its build steps without using the corresponding
-  class now needs the runtime in its `deps` (`meson` and `ca-certificates` are
-  updated in this release as examples). The `toolchain-musl` container version
-  bumps to 19 so the leaner image rebuilds on first use.
+- **The TUI home header is easier to scan.** Field names (Machine, Image, Query,
+  Units, feed, Modules, Diagnostics) now render in plain white and their values
+  in a bright accent color, so the data stands out from the labels at a glance.
+  The search expression keeps its own coloring.
+- **The TUI tab bar now sits on the top line next to `[yoe]`.** The
+  Machine/Image line and the build progress bar moved down a row, so the tabs
+  are the first thing you see and the layout reads top-to-bottom.
+- **Image builds now resolve virtual packages the same way every run.** When
+  several packages claimed the same virtual name (for example the providers of
+  `ifupdown-any`), which one an image picked could change from one build to the
+  next — so a package would drift in and out of the image, never staying cached
+  and sometimes silently dropping out entirely. Resolution is now stable, so the
+  same project always produces the same image and the cache holds.
+- **The TUI Setup page can now adjust how many units build in parallel.** A
+  "Parallel builds" row sits below Machine and Image; press ←/→ (or h/l) to
+  raise or lower the count. The choice is saved per project and used by the next
+  build.
+- **`yoe build` now builds independent units in parallel.** Units whose
+  dependencies are ready build concurrently instead of one at a time, so a full
+  build finishes much faster. Up to 5 units build at once by default; change it
+  with `yoe build -j N`, `yoe config set parallel-builds N`, or a
+  `parallel_builds` line in `local.star`. The value is remembered per project,
+  and `yoe config show` reports the one in effect.
+- **`u` on the unit list toggles a unit's source between pin and dev mode.** The
+  same dev-mode prompt the detail view offers is now one keypress away from the
+  list, acting on the unit under the cursor.
+- **`g` / `G` jump to the top / bottom of the unit list.** The keys were
+  documented and worked on the Modules and Diagnostics tabs but were a no-op on
+  the Units list itself; they now move the cursor there too.
+- **Press `?` on any TUI page for a keyboard cheat sheet.** A centered help box
+  lists every shortcut for the page you're on — navigation, build, inspect,
+  filter, and the page-specific actions — with plain-language descriptions. When
+  the list is taller than your terminal it scrolls (↑/↓, PgUp/PgDn, g/G) with
+  the title and footer pinned; any other key dismisses it.
+- **The TUI tab bar now uses zellij-style ribbon tabs.** Each tab is a rounded
+  colored banner sitting on a dark bar, with the active one highlighted in amber
+  so the selected tab is obvious at a glance. Needs a powerline-patched terminal
+  font to render the rounded tab edges.
+- **`yoe deploy` now actually installs your dev-mode rebuilds.** Iterating in
+  dev mode and deploying used to silently drop your edits when the version
+  number hadn't changed; deploy now reliably installs the rebuilt package.
+  Restart the service from `$` to pick up the new binary.
+- **Dev mode can track an upstream branch automatically.** A unit that declares
+  both a tag and a branch flips to tracking that upstream branch when toggled
+  into dev mode, so `git pull`, `git push`, and `git log @{u}..` just work. The
+  SRC column shows `dev-mod` when your checkout is past the pin, and the detail
+  page shows how many commits ahead you are.
+- **`P` pins the current HEAD with no picker.** Pressing `P` records the
+  checked-out tag (or commit SHA) as the unit's pin — no popup. Available in
+  `dev` and `dev-mod`; a dirty tree prompts you to commit or stash first.
+- **The SRC column shows `pin` for yoe-managed checkouts** instead of leaving
+  the cell blank, so you can tell at a glance which units are pinned.
+- **Toggling `dev → pin` no longer looks like data loss.** It resets the
+  existing checkout to the pin in place and keeps the clone's full history
+  instead of deleting the source tree and re-cloning on the next build.
+- **Patches now apply on fresh builds when the cache path is relative.** Fresh
+  builds (or projects pulling modules from the cache) previously failed with
+  `could not open '...patch'`; patched units now build correctly.
+- **Projects that don't use Python or Node.js stop paying for them.** The
+  language runtimes are no longer baked into the toolchain container — the same
+  Alpine package the device runs now also builds the unit, and bumping a runtime
+  version is a unit edit rather than a container rebuild. **Migration:** any
+  unit that calls `python3`, `node`, or `npm` in its build steps without using
+  the matching class now needs that runtime listed in its `deps`.
 
 ## [0.10.7] - 2026-05-12
 

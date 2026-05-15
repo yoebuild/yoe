@@ -17,6 +17,15 @@ func ShowConfig(dir string, w io.Writer) error {
 	fmt.Fprintf(w, "Machine:    %s (default)\n", proj.Defaults.Machine)
 	fmt.Fprintf(w, "Image:      %s (default)\n", proj.Defaults.Image)
 	fmt.Fprintf(w, "Cache:      %s\n", proj.Cache.Path)
+
+	parallel := yoestar.DefaultParallelBuilds
+	parallelNote := "default"
+	if ov, err := yoestar.LoadLocalOverrides(dir); err == nil && ov.ParallelBuilds > 0 {
+		parallel = ov.ParallelBuilds
+		parallelNote = "local.star"
+	}
+	fmt.Fprintf(w, "Parallel:   %d (%s)\n", parallel, parallelNote)
+
 	fmt.Fprintf(w, "Machines:   %d defined\n", len(proj.Machines))
 	fmt.Fprintf(w, "Units:    %d defined\n", len(proj.Units))
 

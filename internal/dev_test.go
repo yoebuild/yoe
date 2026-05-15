@@ -29,7 +29,7 @@ func TestDevExtract(t *testing.T) {
 	os.WriteFile(filepath.Join(srcDir, "main.c"), []byte("int main() { return 0; }\n"), 0644)
 	run(t, srcDir, "git", "add", "-A")
 	run(t, srcDir, "git", "commit", "-m", "upstream source")
-	run(t, srcDir, "git", "tag", "upstream")
+	run(t, srcDir, "git", "tag", "yoe/pin")
 
 	// Make a local change (simulating developer edits)
 	os.WriteFile(filepath.Join(srcDir, "main.c"), []byte("int main() { return 42; }\n"), 0644)
@@ -76,7 +76,7 @@ func TestDevExtract_NoCommits(t *testing.T) {
 	os.WriteFile(filepath.Join(srcDir, "main.c"), []byte("int main() {}\n"), 0644)
 	run(t, srcDir, "git", "add", "-A")
 	run(t, srcDir, "git", "commit", "-m", "upstream")
-	run(t, srcDir, "git", "tag", "upstream")
+	run(t, srcDir, "git", "tag", "yoe/pin")
 
 	var buf bytes.Buffer
 	if err := DevExtract(dir, "x86_64", "openssh", &buf); err != nil {
@@ -101,7 +101,7 @@ func TestDevDiff(t *testing.T) {
 	os.WriteFile(filepath.Join(srcDir, "main.c"), []byte("int main() {}\n"), 0644)
 	run(t, srcDir, "git", "add", "-A")
 	run(t, srcDir, "git", "commit", "-m", "upstream")
-	run(t, srcDir, "git", "tag", "upstream")
+	run(t, srcDir, "git", "tag", "yoe/pin")
 
 	os.WriteFile(filepath.Join(srcDir, "main.c"), []byte("int main() { return 1; }\n"), 0644)
 	run(t, srcDir, "git", "add", "-A")
@@ -130,7 +130,7 @@ func TestDevStatus(t *testing.T) {
 	os.WriteFile(filepath.Join(srcDir, "main.c"), []byte("orig\n"), 0644)
 	run(t, srcDir, "git", "add", "-A")
 	run(t, srcDir, "git", "commit", "-m", "upstream")
-	run(t, srcDir, "git", "tag", "upstream")
+	run(t, srcDir, "git", "tag", "yoe/pin")
 	os.WriteFile(filepath.Join(srcDir, "main.c"), []byte("changed\n"), 0644)
 	run(t, srcDir, "git", "add", "-A")
 	run(t, srcDir, "git", "commit", "-m", "local fix")
@@ -230,7 +230,14 @@ func setupPinnedSrc(t *testing.T, projectDir, unitName string) (srcDir, upstream
 	run(t, projectDir, "git", "clone", "-q", "--depth=1", "file://"+upstream, srcDir)
 	run(t, srcDir, "git", "config", "user.email", "test@test.com")
 	run(t, srcDir, "git", "config", "user.name", "Test")
-	run(t, srcDir, "git", "tag", "upstream")
+	run(t, srcDir, "git", "tag", "yoe/pin")
+	// A real yoe pin clone checks out a tag (detached HEAD), it does
+	// not leave a local branch named after the upstream default
+	// branch. Detach and drop `main` so the test fixture matches —
+	// otherwise DevToUpstream's "reuse existing local branch" path
+	// would (correctly) reuse this stale clone-default branch.
+	run(t, srcDir, "git", "checkout", "-q", "--detach", "HEAD")
+	run(t, srcDir, "git", "branch", "-D", "main")
 	run(t, srcDir, "git", "remote", "remove", "origin")
 
 	return srcDir, "file://" + upstream
@@ -291,18 +298,23 @@ func TestDevToUpstream_Idempotent(t *testing.T) {
 func TestDevToPin_CleanDev(t *testing.T) {
 	dir := t.TempDir()
 	srcDir, upstreamURL := setupPinnedSrc(t, dir, "openssh")
-	unit := &yoestar.Unit{Name: "openssh", Source: upstreamURL}
+	unit := &yoestar.Unit{Name: "openssh", Source: upstreamURL, Tag: "yoe/pin"}
 	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
 	if err := DevToPin(dir, "x86_64", unit, false); err != nil {
 		t.Fatalf("DevToPin: %v", err)
 	}
-	if _, err := os.Stat(srcDir); !os.IsNotExist(err) {
-		t.Errorf("src dir should be removed after DevToPin, got err=%v", err)
+	// Src dir should exist and be a fresh pin clone (re-cloned by Prepare).
+	if _, err := os.Stat(filepath.Join(srcDir, ".git")); err != nil {
+		t.Errorf("src dir should be re-cloned after DevToPin, got err=%v", err)
 	}
-	if state := readUnitState(t, dir, "openssh"); state != "" {
-		t.Errorf("source_state = %q, want empty", state)
+	gotState, _ := source.DetectState(srcDir, source.StatePin)
+	if gotState != source.StatePin {
+		t.Errorf("DetectState after DevToPin = %q, want pin", gotState)
+	}
+	if state := readUnitState(t, dir, "openssh"); state != "pin" {
+		t.Errorf("persisted source_state = %q, want pin", state)
 	}
 }
 
@@ -332,7 +344,7 @@ func TestDevToPin_RefusesDevModWithoutForce(t *testing.T) {
 func TestDevToPin_ForceDiscardsDevMod(t *testing.T) {
 	dir := t.TempDir()
 	srcDir, upstreamURL := setupPinnedSrc(t, dir, "openssh")
-	unit := &yoestar.Unit{Name: "openssh", Source: upstreamURL}
+	unit := &yoestar.Unit{Name: "openssh", Source: upstreamURL, Tag: "yoe/pin"}
 	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
@@ -345,8 +357,12 @@ func TestDevToPin_ForceDiscardsDevMod(t *testing.T) {
 	if err := DevToPin(dir, "x86_64", unit, true); err != nil {
 		t.Fatalf("DevToPin force=true: %v", err)
 	}
-	if _, err := os.Stat(srcDir); !os.IsNotExist(err) {
-		t.Errorf("src dir should be removed after force pin, got err=%v", err)
+	// Src dir re-clones at the pinned ref; the local commit is gone.
+	if _, err := os.Stat(filepath.Join(srcDir, ".git")); err != nil {
+		t.Errorf("src dir should be re-cloned after force pin, got err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(srcDir, "extra.c")); !os.IsNotExist(err) {
+		t.Errorf("local commit's file should be gone after force pin, got err=%v", err)
 	}
 }
 
@@ -404,7 +420,7 @@ func setupDevModUnit(t *testing.T, dir, unitName, starBody string) (srcDir, star
 	return
 }
 
-func TestDevPromoteToPin_Hash(t *testing.T) {
+func TestDevPromoteToPin_HEADWithoutTag_WritesSHA(t *testing.T) {
 	dir := t.TempDir()
 	starBody := `unit(
     name = "openssh",
@@ -414,7 +430,7 @@ func TestDevPromoteToPin_Hash(t *testing.T) {
 )
 `
 	srcDir, starPath, unit := setupDevModUnit(t, dir, "openssh", starBody)
-	if err := DevPromoteToPin(dir, "x86_64", unit, PinKindHash); err != nil {
+	if err := DevPromoteToPin(dir, "x86_64", unit); err != nil {
 		t.Fatalf("DevPromoteToPin: %v", err)
 	}
 	headSha, _ := gitCmd(srcDir, "rev-parse", "HEAD")
@@ -423,14 +439,14 @@ func TestDevPromoteToPin_Hash(t *testing.T) {
 	if !strings.Contains(string(got), `tag = "`+wantSha+`"`) {
 		t.Errorf(".star tag should be HEAD sha %q, got:\n%s", wantSha, got)
 	}
-	// State should be dev (upstream tag advanced to HEAD).
-	state, _ := source.DetectState(srcDir)
-	if state != source.StateDev {
-		t.Errorf("post-promote state = %q, want %q", state, source.StateDev)
+	// State should be pin (working tree now matches the new pin in .star).
+	state, _ := source.DetectState(srcDir, source.StatePin)
+	if state != source.StatePin {
+		t.Errorf("post-pin state = %q, want %q", state, source.StatePin)
 	}
 }
 
-func TestDevPromoteToPin_Tag(t *testing.T) {
+func TestDevPromoteToPin_HEADWithTag_WritesTagName(t *testing.T) {
 	dir := t.TempDir()
 	starBody := `unit(
     name = "foo",
@@ -439,37 +455,20 @@ func TestDevPromoteToPin_Tag(t *testing.T) {
 )
 `
 	srcDir, starPath, unit := setupDevModUnit(t, dir, "foo", starBody)
-	// Add a tag on the local commit so PinKindTag has something to find.
+	// HEAD has a real upstream-style tag at it — P should pick the
+	// tag name (more readable than a SHA).
 	run(t, srcDir, "git", "tag", "v1.1.0")
 
-	if err := DevPromoteToPin(dir, "x86_64", unit, PinKindTag); err != nil {
+	if err := DevPromoteToPin(dir, "x86_64", unit); err != nil {
 		t.Fatalf("DevPromoteToPin: %v", err)
 	}
 	got, _ := os.ReadFile(starPath)
 	if !strings.Contains(string(got), `tag = "v1.1.0"`) {
-		t.Errorf(".star tag should be v1.1.0, got:\n%s", got)
+		t.Errorf(".star tag should be v1.1.0 (real upstream tag), got:\n%s", got)
 	}
 }
 
-func TestDevPromoteToPin_TagButHEADHasNoTag(t *testing.T) {
-	dir := t.TempDir()
-	starBody := `unit(
-    name = "foo",
-    tag = "v1.0",
-    source = "https://example.com/foo.git",
-)
-`
-	_, _, unit := setupDevModUnit(t, dir, "foo", starBody)
-	err := DevPromoteToPin(dir, "x86_64", unit, PinKindTag)
-	if err == nil {
-		t.Fatal("expected error when HEAD has no tag")
-	}
-	if !strings.Contains(err.Error(), "no tag") {
-		t.Errorf("error should mention missing tag: %v", err)
-	}
-}
-
-func TestDevPromoteToPin_Branch(t *testing.T) {
+func TestDevPromoteToPin_SkipsYoePinMarker(t *testing.T) {
 	dir := t.TempDir()
 	starBody := `unit(
     name = "foo",
@@ -478,23 +477,50 @@ func TestDevPromoteToPin_Branch(t *testing.T) {
 )
 `
 	srcDir, starPath, unit := setupDevModUnit(t, dir, "foo", starBody)
-	// Make sure we're on a named branch.
-	run(t, srcDir, "git", "checkout", "-q", "-B", "feature-x")
+	// HEAD has yoe/pin (the internal marker) and a real tag pointing
+	// at it. P should skip yoe/pin and pick the real tag.
+	run(t, srcDir, "git", "tag", "-f", "yoe/pin")
+	run(t, srcDir, "git", "tag", "v1.1.0")
 
-	if err := DevPromoteToPin(dir, "x86_64", unit, PinKindBranch); err != nil {
+	if err := DevPromoteToPin(dir, "x86_64", unit); err != nil {
 		t.Fatalf("DevPromoteToPin: %v", err)
 	}
 	got, _ := os.ReadFile(starPath)
-	if !strings.Contains(string(got), `branch = "feature-x"`) {
-		t.Errorf(".star should have branch = feature-x, got:\n%s", got)
+	if !strings.Contains(string(got), `tag = "v1.1.0"`) {
+		t.Errorf(".star tag should be v1.1.0, not yoe/pin:\n%s", got)
 	}
-	// tag line should be removed (mutually exclusive with branch).
-	if strings.Contains(string(got), "tag = ") {
-		t.Errorf("tag line should be removed when promoting to branch:\n%s", got)
+	if strings.Contains(string(got), `tag = "yoe/pin"`) {
+		t.Errorf(".star tag must not be the yoe-internal marker:\n%s", got)
 	}
 }
 
-func TestDevPromoteToPin_RefusesNonDevMod(t *testing.T) {
+func TestDevPromoteToPin_PreservesBranchField(t *testing.T) {
+	dir := t.TempDir()
+	starBody := `unit(
+    name = "foo",
+    tag = "v1.0",
+    branch = "main",
+    source = "https://example.com/foo.git",
+)
+`
+	srcDir, starPath, unit := setupDevModUnit(t, dir, "foo", starBody)
+	headSha, _ := gitCmd(srcDir, "rev-parse", "HEAD")
+	wantSha := strings.TrimSpace(headSha)
+
+	if err := DevPromoteToPin(dir, "x86_64", unit); err != nil {
+		t.Fatalf("DevPromoteToPin: %v", err)
+	}
+	got, _ := os.ReadFile(starPath)
+	if !strings.Contains(string(got), `tag = "`+wantSha+`"`) {
+		t.Errorf(".star tag should be HEAD sha %q, got:\n%s", wantSha, got)
+	}
+	// branch line must be left untouched — pin command never writes branch.
+	if !strings.Contains(string(got), `branch = "main"`) {
+		t.Errorf("branch field should be preserved, got:\n%s", got)
+	}
+}
+
+func TestDevPromoteToPin_RefusesNonDev(t *testing.T) {
 	dir := t.TempDir()
 	srcDir, upstreamURL := setupPinnedSrc(t, dir, "foo")
 	defDir := filepath.Join(dir, "_units")
@@ -503,12 +529,12 @@ func TestDevPromoteToPin_RefusesNonDevMod(t *testing.T) {
 	unit := &yoestar.Unit{Name: "foo", Source: upstreamURL, DefinedIn: defDir}
 	// Stay in pin state — DevToUpstream not called.
 
-	err := DevPromoteToPin(dir, "x86_64", unit, PinKindHash)
+	err := DevPromoteToPin(dir, "x86_64", unit)
 	if err == nil {
-		t.Fatal("expected error promoting from pin state")
+		t.Fatal("expected error pinning from pin state")
 	}
-	if !strings.Contains(err.Error(), "dev-mod") {
-		t.Errorf("error should mention dev-mod requirement: %v", err)
+	if !strings.Contains(err.Error(), "dev") {
+		t.Errorf("error should mention dev requirement: %v", err)
 	}
 	// Also test from dev-dirty (uncommitted edits).
 	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
@@ -517,9 +543,12 @@ func TestDevPromoteToPin_RefusesNonDevMod(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(srcDir, "dirty.c"), []byte("// dirty\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err = DevPromoteToPin(dir, "x86_64", unit, PinKindHash)
+	err = DevPromoteToPin(dir, "x86_64", unit)
 	if err == nil {
-		t.Fatal("expected error promoting from dev-dirty")
+		t.Fatal("expected error pinning from dev-dirty")
+	}
+	if !strings.Contains(err.Error(), "uncommitted") {
+		t.Errorf("dev-dirty error should mention uncommitted edits: %v", err)
 	}
 }
 
@@ -551,5 +580,188 @@ def helper():
 	}
 	if filepath.Base(got) != "bar.star" {
 		t.Errorf("fallback scan should find bar.star, got %s", got)
+	}
+}
+
+// --- Branch-aware dev mode ---------------------------------------------
+//
+// Tests that DevToUpstream advances the working tree to origin/<branch>
+// when the unit declares a branch, and re-points the local `upstream`
+// tag accordingly.
+
+// runOut runs a command and returns its trimmed stdout, fataling on
+// failure. Same shape as `run` but for cases that need the output.
+func runOut(t *testing.T, dir, name string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s %s: %v\n%s", name, strings.Join(args, " "), err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// setupPinnedSrcWithBranch is setupPinnedSrc plus two more commits on
+// the upstream's branch beyond the pin. The pin clone still sits at
+// the first commit (tagged `upstream`); origin/<branch> in the
+// upstream repo is two commits ahead.
+func setupPinnedSrcWithBranch(t *testing.T, projectDir, unitName, branch string) (srcDir, upstreamURL, branchHead string) {
+	t.Helper()
+	srcDir, upstreamURL = setupPinnedSrc(t, projectDir, unitName)
+
+	// The upstream repo was initialized with main; if the test wants a
+	// different branch, create it here. Either way, add two commits.
+	upstream := filepath.Join(projectDir, "_upstream", unitName+".git")
+	if branch != "main" {
+		run(t, upstream, "git", "checkout", "-q", "-b", branch)
+	}
+	if err := os.WriteFile(filepath.Join(upstream, "feat.c"), []byte("/* new */\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(t, upstream, "git", "add", "-A")
+	run(t, upstream, "git", "commit", "-q", "-m", "branch commit 1")
+	if err := os.WriteFile(filepath.Join(upstream, "feat2.c"), []byte("/* more */\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(t, upstream, "git", "add", "-A")
+	run(t, upstream, "git", "commit", "-q", "-m", "branch commit 2")
+
+	out, err := gitCmd(upstream, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return srcDir, upstreamURL, strings.TrimSpace(out)
+}
+
+func TestDevToUpstream_BranchDeclared_ChecksOutBranchHead(t *testing.T) {
+	dir := t.TempDir()
+	srcDir, upstreamURL, branchHead := setupPinnedSrcWithBranch(t, dir, "openssh", "main")
+	// Capture the pin commit before the toggle so we can verify the
+	// `upstream` tag stays anchored at it.
+	pinCommit, err := gitCmd(srcDir, "rev-parse", "yoe/pin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinCommit = strings.TrimSpace(pinCommit)
+
+	unit := &yoestar.Unit{
+		Name:   "openssh",
+		Source: upstreamURL,
+		Tag:    "yoe/pin", // the local yoe-pin marker stands in for the pin tag
+		Branch: "main",
+	}
+	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
+		t.Fatalf("DevToUpstream: %v", err)
+	}
+
+	// Working tree should be at branch HEAD (two commits past the pin).
+	head := strings.TrimSpace(runOut(t, srcDir, "git", "rev-parse", "HEAD"))
+	if head != branchHead {
+		t.Errorf("HEAD = %s, want branch HEAD %s", head, branchHead)
+	}
+	// yoe/pin tag should stay at the pin commit so dev-mod counts
+	// commits past pin — surfacing "build would differ from pin" at a
+	// glance.
+	upstreamSha := strings.TrimSpace(runOut(t, srcDir, "git", "rev-parse", "yoe/pin"))
+	if upstreamSha != pinCommit {
+		t.Errorf("yoe/pin tag = %s, want pin commit %s (must stay at pin, not move to branch HEAD)", upstreamSha, pinCommit)
+	}
+	// rev-list yoe/pin..HEAD should now be 2 (two commits past pin)
+	// → DetectState returns dev-mod, signalling divergence from pin.
+	count := strings.TrimSpace(runOut(t, srcDir, "git", "rev-list", "--count", "yoe/pin..HEAD"))
+	if count != "2" {
+		t.Errorf("rev-list yoe/pin..HEAD = %s, want 2 (branch is 2 commits past pin)", count)
+	}
+	// User should land on a local branch named `main`, not detached HEAD,
+	// so `git pull`/`git push` work in the $-shell.
+	branch := strings.TrimSpace(runOut(t, srcDir, "git", "rev-parse", "--abbrev-ref", "HEAD"))
+	if branch != "main" {
+		t.Errorf("HEAD is on %q, want local branch main (not detached)", branch)
+	}
+}
+
+// TestDevToUpstream_PreservesExistingLocalBranch verifies that when a
+// local branch with the declared name already exists (e.g., the user
+// committed work on it in a prior dev session, then toggled away and
+// back), DevToUpstream checks it out as-is instead of force-resetting
+// it to origin/<branch>. Local commits must survive the round trip.
+func TestDevToUpstream_PreservesExistingLocalBranch(t *testing.T) {
+	dir := t.TempDir()
+	srcDir, upstreamURL, _ := setupPinnedSrcWithBranch(t, dir, "openssh", "main")
+
+	// Simulate a prior dev session: a local `main` branch with a
+	// commit that does NOT exist upstream.
+	run(t, srcDir, "git", "checkout", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(srcDir, "local-work.c"), []byte("// my WIP\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(t, srcDir, "git", "add", "-A")
+	run(t, srcDir, "git", "commit", "-q", "-m", "local WIP — must not be squashed")
+	localTip := strings.TrimSpace(runOut(t, srcDir, "git", "rev-parse", "HEAD"))
+	// Detach so the toggle has to re-select the branch.
+	run(t, srcDir, "git", "checkout", "-q", "--detach", "HEAD")
+
+	unit := &yoestar.Unit{
+		Name:   "openssh",
+		Source: upstreamURL,
+		Tag:    "yoe/pin",
+		Branch: "main",
+	}
+	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
+		t.Fatalf("DevToUpstream: %v", err)
+	}
+
+	// HEAD must be the user's local commit, not origin/main.
+	head := strings.TrimSpace(runOut(t, srcDir, "git", "rev-parse", "HEAD"))
+	if head != localTip {
+		t.Errorf("HEAD = %s, want preserved local tip %s (must not reset to origin/main)", head, localTip)
+	}
+	if _, err := os.Stat(filepath.Join(srcDir, "local-work.c")); err != nil {
+		t.Errorf("local WIP file was squashed away: %v", err)
+	}
+	branch := strings.TrimSpace(runOut(t, srcDir, "git", "rev-parse", "--abbrev-ref", "HEAD"))
+	if branch != "main" {
+		t.Errorf("HEAD is on %q, want local branch main", branch)
+	}
+}
+
+func TestDevToUpstream_TagOnly_LeavesWorkingTreeAtPin(t *testing.T) {
+	dir := t.TempDir()
+	srcDir, upstreamURL, _ := setupPinnedSrcWithBranch(t, dir, "openssh", "main")
+	pinHead := strings.TrimSpace(runOut(t, srcDir, "git", "rev-parse", "HEAD"))
+
+	unit := &yoestar.Unit{
+		Name:   "openssh",
+		Source: upstreamURL,
+		Tag:    "upstream",
+		// No Branch — today's behavior preserved.
+	}
+	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
+		t.Fatalf("DevToUpstream: %v", err)
+	}
+
+	head := strings.TrimSpace(runOut(t, srcDir, "git", "rev-parse", "HEAD"))
+	if head != pinHead {
+		t.Errorf("HEAD = %s, want pinned commit %s (unchanged)", head, pinHead)
+	}
+}
+
+func TestDevToUpstream_BranchWithoutTag_Rejects(t *testing.T) {
+	dir := t.TempDir()
+	_, upstreamURL := setupPinnedSrc(t, dir, "openssh")
+
+	unit := &yoestar.Unit{
+		Name:   "openssh",
+		Source: upstreamURL,
+		Branch: "main",
+		// No Tag — malformed.
+	}
+	err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{})
+	if err == nil {
+		t.Fatal("expected DevToUpstream to refuse a branch-only unit")
+	}
+	if !strings.Contains(err.Error(), "branch") || !strings.Contains(err.Error(), "tag") {
+		t.Errorf("error %v should mention branch and tag", err)
 	}
 }
