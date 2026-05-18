@@ -920,6 +920,11 @@ devices install.
 | Rule implementation    | Java core + Starlark rules       | Starlark units/classes              |
 | Phase model            | Analysis then execution (phased) | Resolve then build (phased)         |
 | Build execution        | Sandboxed action graph           | `yoe` orchestrates unit builds      |
+| Cache granularity      | Per action (compiler/link step)  | Per unit (one `.apk`)               |
+| What is cached         | Intermediate artifacts in a CAS  | Final distributable `.apk`          |
+| Cache == package feed  | No — separate from any artifact repo | Yes — same S3-compatible store   |
+| Remote cache infra     | REAPI server (bazel-remote, etc.)| Plain object bucket (URL only)      |
+| Remote execution       | Yes (action offload to a cluster)| No — always local container worker  |
 
 Bazel is not an alternative to `[yoe]` — it builds artifacts, `[yoe]` builds a
 distribution and bootable images. But Starlark, resolve-then-build, and an
