@@ -210,20 +210,21 @@ The base provides:
 - **The "given" packages.** Things the base distribution already ships, that yoe
   consumes rather than rebuilds (CUDA on Jetson, busybox on Alpine).
 - **The upstream feed format.** apt/deb for Ubuntu/L4T bases, apk for Alpine
-  bases. Yoe converts whatever the upstream uses into apks during fetch (see
-  [Package format stays apk regardless of base](#package-format-stays-apk-regardless-of-base-planned)
-  below). dpkg and apt never run on the target.
+  bases. yoe is pragmatic about what it serves on the target: it matches the
+  base's native format rather than forcing a single one everywhere (see
+  [Package format follows the base](#package-format-follows-the-base-planned)
+  below).
 
-What yoe **continues to own regardless of base**:
+What yoe **continues to own across every base**:
 
 - Image assembly: partition layout, bootloader install, signing, OTA.
 - The DAG and content-addressed cache.
 - The dev loop: `yoe build`, `yoe dev`, `yoe deploy`, `yoe run`, `yoe flash`.
 - The unit format and the override/composition model.
-- The signed apk feed. Every package on every target is a yoe-signed apk,
-  regardless of where the bits originally came from.
-- The on-target installer (apk-tools, glibc-built or musl-built depending on
-  base).
+- A single project-signed feed and a single project trust root on the target —
+  whatever the package format underneath.
+- The on-target installer appropriate to the base (apk-tools on musl/Alpine,
+  dpkg/apt on glibc/Debian).
 - The TUI and the project orchestration commands.
 
 The bits that vary with the base:
@@ -233,99 +234,56 @@ The bits that vary with the base:
 - The init system integration (OpenRC scripts vs systemd unit files).
 - The `network-config`-style yoe-defining units (would have a systemd-flavored
   variant for systemd bases).
-- The conversion class invoked when consuming upstream packages (`alpine_pkg`,
-  `deb_pkg`, …).
+- The on-target package format and the class that consumes upstream packages
+  (`alpine_pkg` on Alpine; on Debian, either deb→apk conversion or native deb —
+  see [debian-ubuntu.md](debian-ubuntu.md)).
 
-## Package format stays apk regardless of base (planned)
+## Package format follows the base (planned)
 
-> **Status:** Forward design. Today only `alpine_pkg` exists, and it consumes
-> packages that are already apks — no format conversion is performed. The
-> `deb_pkg` class described below is unimplemented; this section captures the
-> design that the rootfs-base abstraction is expected to follow when
-> Debian-derived bases land.
+> **Status:** Forward design. Today only `alpine_pkg` exists, on the Alpine/musl
+> base, and it consumes packages that are already apks. No Debian base, `.deb`
+> writer, or apt-feed generation exists yet. This section states the principle;
+> [debian-ubuntu.md](debian-ubuntu.md) works through the Debian-base design in
+> detail.
 
-A core invariant of the rootfs-base abstraction: **the on-target package format
-is apk, always.** When yoe consumes packages from an upstream feed that uses a
-different format (apt/deb, RPM, …), the conversion happens at fetch time and
-produces a yoe-signed apk. The target image runs apk-tools, not dpkg or rpm.
+yoe is pragmatic about the on-target package format: **apk-everywhere is a
+default, not a hard requirement.** An earlier version of this doc stated "apk
+always, convert everything at fetch time" as an invariant. That is the right
+call on the Alpine/musl base. On a Debian/glibc base it is one of two reasonable
+options, and probably not the better one — because a project picks exactly one
+base, the musl and glibc worlds never share an image, so a cross-base single
+format buys a uniformity little actually consumes while costing a conversion
+layer and dpkg-userland emulation. But that argument makes conversion _less
+attractive_, not forbidden; the choice stays open and can be per-project.
 
-The wins:
+The two options, weighed in full in [debian-ubuntu.md](debian-ubuntu.md):
 
-- The dev loop, override model, signed feed, DAG, and cache are identical across
-  bases. A developer working on an Alpine gateway and a developer working on a
-  Jetson box write the same kind of unit, deploy with the same `yoe deploy`, and
-  get the same dev experience.
-- Yoe's signing key is the only key the target trusts. Upstream signing keys
-  (NVIDIA's apt key, Ubuntu's keyring) never need to be installed on the target.
-- A single installer toolchain on the target — apk-tools — instead of carrying
-  dpkg + apt + their dependencies.
+- **Alpine / musl base** → apk + apk-tools, as today. Upstream apks are consumed
+  via `alpine_pkg`, re-signed with the project key.
+- **Debian / glibc base** → either convert upstream `.deb`s to project-signed
+  apk (Alpine-identical tooling, at the cost of the dpkg-userland concerns), or
+  native deb end to end (yoe builds `.deb`s and serves a signed apt repo,
+  upstream `.deb`s mirrored verbatim, no conversion). Native deb is the likely
+  better fit for this base; neither is mandated here.
 
-For Debian-derived bases, this implies a `deb_pkg` class symmetric to
-`alpine_pkg`. Mechanically: `ar x` the .deb, extract `data.tar.{gz,xz,zst}`,
-re-pack the file tree as an apk, translate metadata (`Depends:` → `D:`,
-`Provides:` → `p:`, `Replaces:` → `r:`), sign with the project key.
+What stays constant across bases is the part that matters: one project-signed
+feed, one trust root on the target, the same DAG/cache, the same dev loop, and
+the same `yoe deploy`. Upstream signing keys (NVIDIA's apt key, Ubuntu's
+keyring) are used only at fetch/mirror time to verify what yoe pulls in; they
+never reach the target.
 
 Glibc binaries on a glibc base, systemd unit files on a systemd base, multiarch
-paths on a Debian-conventions base — all of this is handled by **the base**, not
-by the format conversion. Once libc + init + conventions match what the upstream
-package was built for, the binaries inside the package run unchanged regardless
-of whether they're delivered as a deb or a yoe-converted apk.
-
-### Residual dpkg-userland concerns
-
-The conversion is mechanically straightforward. The non-trivial part is that
-many Debian packages ship maintainer scripts that call dpkg-specific userland
-tools — `update-alternatives`, `dpkg-divert`, `debconf` — which exist on
-Debian/Ubuntu but not on a yoe target. Each has a bounded mitigation:
-
-1. **`update-alternatives`.** Many Ubuntu packages register `/usr/bin/python` →
-   `python3.10`, `/usr/bin/editor` → `vim.basic`, etc. Three viable strategies,
-   in order of preference:
-   - **Bake at conversion time.** Resolve alternatives statically during deb→apk
-     repackaging — pick the priority-winning symlink, embed it as a real symlink
-     in the apk's data tree. Stateless, deterministic, works for the common case
-     where embedded products don't switch alternatives at runtime.
-   - **Ship a tiny `update-alternatives` stub.** A few hundred lines of shell
-     that mimics the file format and CLI surface. Required if any package will
-     be installed/upgraded post-deploy via `apk add` and its postinst calls
-     update-alternatives.
-   - **Translate calls during script conversion.** Postinst calls like
-     `update-alternatives --install ...` get rewritten to direct `ln -sf` during
-     conversion.
-
-2. **`dpkg-divert`.** Used to relocate a file shipped by package A so package B
-   can put its own version there. Rare in practice; effectively absent from the
-   L4T set. Defer until a package actually needs it.
-
-3. **Triggers.** Debian's file-trigger mechanism (`/etc/ld.so.conf.d/` triggers
-   `ldconfig`, `/usr/share/man/` triggers `mandb`, etc.). apk has no equivalent.
-   Run `ldconfig` once at end-of-rootfs-assembly; skip mandb / desktop-database
-   / icon-cache for embedded images, or run them as a post-image step. None
-   affect runtime behaviour.
-
-4. **`debconf` interactive prompts.** Conversion has to pre-answer them.
-   NVIDIA's debs are mostly non-interactive; the few that aren't get a
-   per-package preseed declared in the unit.
-
-5. **`/var/lib/dpkg/` probes.** Some scripts test for the dpkg database. If it
-   matters for a specific package, ship a stub dpkg database (an empty directory
-   tree with a `status` file marking everything "installed"). Tiny, one-time
-   work in the rootfs base.
-
-6. **License redistribution.** CUDA / cuDNN / TensorRT / DeepStream EULAs allow
-   inclusion in shipped product images but generally not public mirroring. Yoe's
-   converted apks are fine for a customer's private product feed; they should
-   not be hosted on a public mirror. `alpine_pkg` has this concern in principle
-   but Alpine is FOSS-dominant; NVIDIA's stack is where it actually bites.
-
-7. **APT mirror semantics.** Apt's repo format (signed `Release` files,
-   `Packages.gz`, version constraints with epochs and tildes) is more complex
-   than Alpine's flat `APKINDEX`. The conversion class needs to read it
-   correctly. Several mature Go libraries handle this; not novel work.
+paths on a Debian-conventions base — all handled by **the base**. Once libc +
+init + conventions match what an upstream package was built for, its binaries
+run unchanged, delivered in the base's native format with no repackaging.
 
 The kernel-module problem (NVIDIA's out-of-tree drivers built against L4T's
 specific kernel ABI) is orthogonal to package format — it's a Jetson-target
-problem, not a deb-vs-apk problem.
+problem, tracked separately.
+
+See [debian-ubuntu.md](debian-ubuntu.md) for the Debian-base design: how the
+base rootfs is obtained, the signed apt-feed work, the verbatim upstream-mirror
+model, and the systemd image-assembly integration.
 
 ## Base bootstrap
 
@@ -371,21 +329,21 @@ signed feed** (provides the apks to install).
 
 ### Two source models for foundation packages
 
-**Option A: From-apks (purist, fully reproducible).** Every package, including
-the essentials, comes from a yoe-built or conversion-class-wrapped apk in the
-project's feed. The starting rootfs is empty; yoe owns the entire chain. For a
-glibc/systemd base, this means wrapping `libc6`, `libstdc++6`, `systemd`,
-`bash`, etc. as `deb_pkg` units. More setup work, total reproducibility.
+**Option A: From-source (purist, fully reproducible).** Every package, including
+the essentials, is built from source by yoe and published in the project's feed
+in the base's native format. The starting rootfs is empty; yoe owns the entire
+chain. For a glibc/systemd base, that means building `libc6`, `libstdc++6`,
+`systemd`, `bash`, etc. as `.deb`s. More setup work, total reproducibility.
 
 **Option B: From-tarball (pragmatic, vendor-blessed).** The project's `base()`
 declaration points at a vendor-supplied rootfs tarball — NVIDIA's official L4T
 sample rootfs for Jetson, `ubuntu-base-<version>.tar.gz` for generic Ubuntu, or
-`alpine-minirootfs-<version>.tar.gz` for an Alpine shortcut. Yoe extracts the
-tarball as the starting rootfs, then runs `apk add --root` to overlay
-yoe-installed apks on top. apk-tools installs into a non-empty rootfs without
-conflict — it owns its own DB and ignores files it didn't put there, except
-where its package contents collide. Faster to set up because the wrapping work
-for "every essential package" is replaced by trusting the tarball. Less
+`alpine-minirootfs-<version>.tar.gz` for an Alpine shortcut. yoe extracts the
+tarball as the starting rootfs, then overlays yoe-built packages on top using
+the base's native installer (`apk add --root` on Alpine, `apt`/`dpkg --root` on
+Debian). The installer owns its own DB and ignores files it didn't put there,
+except where its package contents collide. Faster to set up because the wrapping
+work for "every essential package" is replaced by trusting the tarball. Less
 reproducible because the tarball is a black box.
 
 For Jetson, most projects will pick Option B — NVIDIA tests the sample rootfs
@@ -398,23 +356,24 @@ same provenance story across bases.
 A common confusion: if running glibc binaries requires glibc to be present, how
 does an empty rootfs get glibc onto itself?
 
-apk-tools at install time is a **file extractor**, not an executor. It reads
-each apk's data tar and writes the files to the target rootfs; nothing ever
-calls into the binaries it's installing. The apk-tools process doing the work
-runs in the toolchain container, where its own libc is whatever the container
-provides — musl today, glibc on a glibc-based toolchain container later. When
-apk-tools extracts the `libc6` package's data tar into the target rootfs, it
-places `/lib/aarch64-linux-gnu/libc.so.6` on disk; nothing tries to dlopen it
-until the rootfs actually boots.
+The installer at assembly time (apk-tools on Alpine, `dpkg`/`apt` on Debian) is
+a **file extractor**, not an executor. It reads each package's data archive and
+writes the files to the target rootfs; nothing ever calls into the binaries it's
+installing. The installer process doing the work runs in the toolchain
+container, where its own libc is whatever the container provides — musl today,
+glibc on a glibc-based toolchain container later. When it extracts the `libc6`
+package's data archive into the target rootfs, it places
+`/lib/aarch64-linux-gnu/libc.so.6` on disk; nothing tries to dlopen it until the
+rootfs actually boots.
 
 So the toolchain container's libc and the target rootfs's libc are independent.
 A Jetson target rootfs (glibc) can be assembled from a toolchain container
-that's still musl-based, and a yoe-built `apk-tools-glibc` unit can land on the
-target as just another package alongside `libc6`, ready to run on first boot.
+that's still musl-based, and a glibc-built `dpkg`/`apt` can land on the target
+as just another package alongside `libc6`, ready to run on first boot.
 
-The same principle is why on-target `apk add` after deployment works identically
-across bases: by then the rootfs has its own `apk-tools` binary linked against
-its own libc, and the install loop is just "extract files, update DB."
+The same principle is why on-target package installs after deployment work
+across bases: by then the rootfs has its own installer binary linked against its
+own libc, and the loop is just "extract files, update DB."
 
 ## What changes for yoe-defining units
 
@@ -449,25 +408,25 @@ Either pattern works. The decision is local to each unit.
    `replaces`, the toolchain container's musl-only Dockerfile. Make these
    pluggable but defer the rewrite.
 
-3. **`deb_pkg` class.** Symmetric to `alpine_pkg`: fetch a `.deb`, extract
-   `data.tar.{gz,xz,zst}`, repack as a yoe apk with translated metadata, sign
-   with the project key. Resolve `update-alternatives` calls statically at
-   conversion time. Treat the rest of the dpkg-userland concerns
-   ([Residual dpkg-userland concerns](#residual-dpkg-userland-concerns)) as they
-   come up, per-package, in priority order.
+3. **Debian package path.** Either a deb→apk conversion class (Alpine-identical
+   tooling) or a native `.deb` writer + signed apt-repo generator — the two
+   options weighed, with effort breakdowns and the dpkg-userland concerns, in
+   [debian-ubuntu.md](debian-ubuntu.md). Native deb is the likely choice for
+   this base; the decision is deliberately left open and is not a hard
+   requirement either way.
 
 4. **First Jetson prototype.** Pick a single Jetson SKU (Orin Nano dev kit is
    cheapest), get a yoe-assembled image booting with CUDA working end-to-end.
    Treat it as a learning project — the goal is to discover what abstraction
    breaks, not to ship Jetson support. Likely outputs: a `toolchain-glibc-arm64`
-   container, a `ubuntu_l4t` rootfs base implementation that uses `deb_pkg` to
-   consume NVIDIA's apt feed, a systemd-flavored `network-config`, glibc
-   apk-tools on the target.
+   container, a `ubuntu_l4t` rootfs base, the chosen Debian package path, a
+   systemd-flavored `network-config`, the glibc on-device installer.
 
 5. **Promote the abstraction.** With one working Jetson example, generalize the
    project base configuration so the same yoe codebase serves both Alpine and
-   Jetson cleanly. The `deb_pkg` class earns its keep by being reused across
-   Ubuntu generic, Debian, L4T, and any future Debian-derived base.
+   Jetson cleanly. Whichever Debian package path is chosen earns its keep by
+   being reused across Ubuntu generic, Debian, L4T, and any future
+   Debian-derived base.
 
 6. **Second base, third base.** Once the abstraction is proven on two distinct
    bases, additional bases (Ubuntu generic, Adelie's glibc/musl mix, Yocto
