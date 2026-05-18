@@ -665,6 +665,80 @@ reproducibility guarantees, are building for desktop/server/CI, and are willing
 to invest in learning the Nix ecosystem. NixOS is unmatched for declarative
 system management on general-purpose hardware.
 
+## vs. distri
+
+[distri](https://distr1.org/) is Michael Stapelberg's research Linux
+distribution, [announced in August 2019](https://michael.stapelberg.ch/posts/2019-08-17-introducing-distri/).
+Stapelberg was a Debian Developer for roughly seven years (and is widely known
+for the i3 window manager); distri is his vehicle for asking whether
+architectural changes could make package management _drastically_ faster and
+whether mainstream distro complexity is avoidable. It is explicitly a
+proof-of-concept — the project describes itself as "the simplest Linux
+distribution that is still useful" and states it is **not recommended for any
+use except research**. It is included here not as an alternative but because its
+results validate several instincts `[yoe]` shares.
+
+**What `[yoe]` shares in spirit with distri:**
+
+- **The diagnosis** — mainstream package managers are needlessly slow and
+  complex, largely because of per-file extraction and serialized maintainer
+  hooks/triggers. distri's headline result (package operations in
+  milliseconds, parallel installs, no hooks) is the same conclusion that drives
+  `[yoe]`'s adoption of Alpine's near-empty-install-script culture and fast apk
+  operations.
+- **Read-only OS, atomic updates** — distri's images are immutable and activated
+  atomically with no per-file extraction. That is the same direction `[yoe]`
+  draws from Ubuntu Core and NixOS: ship the OS read-only, update atomically.
+- **Hermetic builds with explicit dependency views** — distri builds see only
+  declared dependencies through a filtered package store; `[yoe]` builds inside
+  a container worker with declared inputs and content-addressed outputs.
+
+**What `[yoe]` leaves behind / where they differ:**
+
+- **The `/ro` FUSE-mounted squashfs-per-package model.** distri mounts each
+  package as a read-only SquashFS image at `/ro/<name-arch-version>` via a FUSE
+  daemon, with "exchange directories" union-merging the locations where multiple
+  packages must contribute files (headers, shared data). `[yoe]` installs apks
+  into a shared FHS root — the same contrast drawn against Ubuntu Core's
+  snap-per-app loopback model.
+- **Store addressing.** distri's store is _versioned-name-addressed_ — image
+  names carry a monotonic distri revision, not a content hash. This is **not**
+  Nix-style content addressing. `[yoe]`'s cache is input/content-addressed (a
+  hash of a unit's inputs selects its `.apk`). The two are different mechanisms
+  for "don't rebuild what hasn't changed."
+- **Build definitions.** distri's package definitions are Go code under `pkgs/`,
+  compiled into the `distri` tool — programmatic, not a declarative DSL.
+  `[yoe]` uses Starlark units loaded at runtime, with the build engine in Go and
+  the package definitions outside it.
+- **Hermeticity mechanism.** distri pins ELF `--dynamic-linker`/rpath to
+  versioned package paths and uses `execve` wrappers for environment, rather
+  than mount/namespace sandboxing. `[yoe]` relies on the container worker.
+- **Scope and maturity.** distri targets x86_64 desktop/server (QEMU, GCE, a
+  Dell XPS 13) with no cross, ARM/RISC-V, or embedded story, and has been
+  effectively dormant for feature work since its 2020 "supersilverhaze"
+  snapshot — an intentionally frozen research artifact, not a build system you
+  adopt. `[yoe]` is embedded-first, multi-arch, and under active development.
+
+**Key differences:**
+
+|                   | distri                              | `[yoe]`                            |
+| ----------------- | ----------------------------------- | ---------------------------------- |
+| Nature            | Research proof-of-concept           | Embedded distro build system       |
+| Package model     | Per-package SquashFS, FUSE-mounted  | apk into shared FHS root           |
+| Store addressing  | Versioned-name (distri revision)    | Input/content-addressed `.apk`     |
+| Build definitions | Go code compiled into the tool      | Starlark units loaded at runtime   |
+| Build isolation   | Path-pinning + `execve` wrappers    | Container build worker             |
+| Target            | x86_64 desktop/server (research)    | Embedded, multi-arch, custom BSP   |
+| Status            | Dormant since ~2020; research-only  | Pre-1.0, active                    |
+
+**When to use distri instead:** for production or embedded work, you wouldn't —
+that is not what it is for. Read distri for its ideas: fast, hook-free,
+parallel package operations and a concrete demonstration that the slowness of
+mainstream package managers is an architectural choice, not a law of nature.
+For the shipping equivalents of its immutability and atomic-update properties,
+NixOS and Ubuntu Core are the general-purpose options; for embedded hardware,
+that is the gap `[yoe]` aims to fill.
+
 ## vs. Google GN
 
 GN is not a Linux distribution — it's a meta-build system used by Chromium and
@@ -737,6 +811,49 @@ model.
 - The Java core and the large set of natively implemented rules.
 - Modeling every build step in the build system. `[yoe]` delegates intra-unit
   builds to native toolchains (`go build`, `cargo`, `make`).
+
+**Bazel fetches modules, but is not a distribution builder.** A natural question
+is whether Bazel — given how much it is associated with large monorepos — has
+anything like Yocto's or `[yoe]`'s ability to pull in many modules and assemble a
+distribution. It has the first half, not the second.
+
+Bazel has real external-fetch machinery: **Bzlmod** (`MODULE.bazel` plus the
+[Bazel Central Registry](https://registry.bazel.build/), with Minimal Version
+Selection) is the modern dependency system that replaced the legacy `WORKSPACE`,
+and **repository rules** (`http_archive`, `git_repository`, and ecosystem
+fetchers like `rules_go` + gazelle, `rules_rust` crate_universe, `rules_python`
+pip, `rules_jvm_external`) wire external source and dependencies into the build
+graph. This is genuine multi-module resolution — the closest Bazel analogue to
+"pull in many external modules."
+
+But that is **dependency acquisition for a build**, not a _distribution_. Bazel
+has no notion of a curated package collection, a machine/BSP abstraction, a
+kernel/bootloader/device-tree story, a rootfs assembler, a package feed, or OTA.
+It produces artifacts and has no opinion about composing them into a bootable
+embedded Linux image. Teams get partway there by bolting on add-on rules —
+`rules_pkg` (emit `.tar`/`.deb`/`.rpm`), `rules_oci` (assemble OCI/container
+images), and `rules_distroless` / `bazeldnf` (build minimal apt-/rpm-based root
+filesystems, as KubeVirt does) — but these are container/appliance-image tools
+that assume _prebuilt_ distro packages or a base image. None build a
+distribution from source with a curated unit/recipe collection, layered BSP
+customization, kernel configuration, and a device-update workflow. That whole
+layer — the part that makes Yocto "Yocto" and `[yoe]` "`[yoe]`" — is simply not
+a Bazel concern.
+
+| Capability                          | Yocto / `[yoe]`        | Bazel                          |
+| ----------------------------------- | ---------------------- | ------------------------------ |
+| Fetch many external modules/deps    | Yes (layers / units)   | Yes (Bzlmod, repo rules)       |
+| Curated package/recipe collection   | Yes (oe-core, units)   | No — you bring your own        |
+| Machine/BSP, kernel, bootloader, DT | Yes                    | No                             |
+| Rootfs/image assembly               | Yes                    | Only via add-on rules, from prebuilt pkgs |
+| Package feed + OTA/rollback         | Yes                    | No                             |
+
+The closest "research a radically different distribution model with a custom
+tool" prior art is Michael Stapelberg's [distri](https://distr1.org/) — but that
+is a research distro with its own tool, not Bazel, and its kinship with `[yoe]`
+is on fast, hook-free package management and immutable atomic updates, not on
+content-addressed caching (distri's store is versioned-name-addressed) or any
+BSP/image story. See the [distri section](#vs-distri) above.
 
 **Phase model.** Classical Bazel runs **loading → analysis → execution** as
 strict global phases: analysis of the requested graph completes, and
