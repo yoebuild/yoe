@@ -710,6 +710,165 @@ GN is not an alternative to `[yoe]` — they solve different problems. But GN's
 approach to graph resolution, config propagation, and introspection are
 well-proven patterns that `[yoe]` applies to the embedded Linux domain.
 
+## vs. Bazel
+
+Bazel is Google's general-purpose build system. Like GN it is not a Linux
+distribution builder, but it shaped two of `[yoe]`'s foundational choices:
+Starlark as the configuration language, and resolve-then-build as the execution
+model.
+
+**What `[yoe]` adopts from Bazel:**
+
+- **Starlark as the configuration language** — adopted directly. Bazel
+  popularized Starlark as a safe, deterministic Python subset for build
+  definitions; `[yoe]` uses the same language for units, machines, and images.
+- **Hermetic, explicit-input builds** — builds depend on declared inputs, not
+  ambient host state.
+- **Two-phase resolve-then-build** — analysis (construct and validate the graph)
+  before execution (run the work). `yoe build` resolves the full unit DAG and
+  reports graph errors up front, exactly as in the GN section above.
+- **Input-keyed shared cache** — build outputs reused across machines when
+  inputs match.
+
+**What `[yoe]` leaves behind:**
+
+- Action-graph granularity at the compiler-invocation level. `[yoe]`'s graph is
+  unit-grained — one package per node — not one node per compiler call.
+- The Java core and the large set of natively implemented rules.
+- Modeling every build step in the build system. `[yoe]` delegates intra-unit
+  builds to native toolchains (`go build`, `cargo`, `make`).
+
+**Phase model.** Classical Bazel runs **loading → analysis → execution** as
+strict global phases: analysis of the requested graph completes, and
+analysis-time Starlark cannot do I/O, before any action runs. Bazel 7+
+("Skymeld") relaxes this by pipelining execution per target as each target's
+analysis finishes, but the two conceptual phases remain. `[yoe]` is deliberately
+in the classical camp — resolve the whole unit DAG, validate, then build —
+because at unit granularity a global resolve phase costs almost nothing and buys
+"all graph errors reported before anything is built."
+
+**Key differences:**
+
+|                        | Bazel                            | `[yoe]`                             |
+| ---------------------- | -------------------------------- | ----------------------------------- |
+| Purpose                | General-purpose build system     | Embedded Linux distribution builder |
+| Output                 | Arbitrary build artifacts        | `.apk` packages and disk images     |
+| Config language        | Starlark                         | Starlark                            |
+| Dependency granularity | Action / target                  | Unit (package)                      |
+| Rule implementation    | Java core + Starlark rules       | Starlark units/classes              |
+| Phase model            | Analysis then execution (phased) | Resolve then build (phased)         |
+| Build execution        | Sandboxed action graph           | `yoe` orchestrates unit builds      |
+
+Bazel is not an alternative to `[yoe]` — it builds artifacts, `[yoe]` builds a
+distribution and bootable images. But Starlark, resolve-then-build, and an
+input-keyed shared cache are battle-tested Bazel patterns that `[yoe]` carries
+into the embedded Linux domain.
+
+## vs. Buck2
+
+[Buck2](https://buck2.build/) is Meta's Rust rewrite of Buck, open-sourced in
+2023. Like Bazel and GN it is a general meta-build system, not a distribution
+builder. Its relevance here is a sharp architectural contrast with Bazel that
+sharpens a choice `[yoe]` also has to make.
+
+**Single graph vs. two phases.** This is the core Buck2-vs-Bazel distinction,
+and the framing holds up — with one nuance:
+
+- **Bazel** has a hard analysis/execution split. It builds and validates the
+  action graph, then executes it; analysis-time Starlark cannot do I/O, so a
+  rule cannot read a generated file to decide what to build next, which makes
+  dynamic dependencies awkward. Bazel 7+ Skymeld pipelines this per target, but
+  the two conceptual phases remain.
+- **Buck2** has no phases. Loading, configuration, analysis, and execution are
+  all nodes in one incremental computation graph (its **DICE** engine).
+  Different targets' analysis and execution interleave and are recomputed
+  incrementally together, and a rule can produce an artifact, read it, then
+  declare further actions (`dynamic_actions` / dynamic outputs) — natural in a
+  unified graph, hard across Bazel's split. Buck2 also pushes **all** rules
+  (even C++/Java) into a Starlark "prelude"; the binary carries zero built-in
+  language knowledge, whereas Bazel still implements core rules in Java.
+
+**Where `[yoe]` sits: closer to Bazel/GN than to Buck2.** `[yoe]` deliberately
+runs a global resolve phase and then builds. That is the right trade at unit
+granularity: a few hundred coarse package nodes resolve in well under a second,
+so the whole-graph-analysis cost that Buck2's unified graph exists to eliminate
+barely registers, while the strict resolve phase buys clean "errors first, no
+half-finished builds" behavior. Buck2's single-graph model earns its complexity
+at Meta-monorepo scale with millions of fine-grained action nodes; `[yoe]` does
+not operate there, and adopting that model would be complexity without payoff.
+
+**What `[yoe]` adopts from Buck2:**
+
+- **Validation that Starlark-everywhere is viable** — Buck2 demonstrates a
+  serious build system can keep zero language knowledge in the core and put all
+  rules in Starlark. That is precisely `[yoe]`'s unit/class model.
+- **Precise incremental recomputation** — `[yoe]`'s per-unit content-addressed
+  cache rebuilds only what changed, the same instinct as DICE's change
+  tracking, at coarser grain.
+
+**What `[yoe]` leaves behind:**
+
+- The single unified incremental graph (DICE). `[yoe]`'s two-stage
+  resolve-then-build is intentional at unit grain.
+- Action-level granularity, dynamic action graphs, and the remote-execution
+  worker model.
+
+**Key differences:**
+
+|                        | Bazel                  | Buck2                       | `[yoe]`                   |
+| ---------------------- | ---------------------- | --------------------------- | ------------------------- |
+| Core language          | Java                   | Rust                        | Go                        |
+| Graph model            | Phased (analysis/exec) | Single incremental graph    | Phased (resolve/build)    |
+| Dynamic dependencies   | Awkward (phase split)  | First-class (`dynamic_*`)   | N/A — unit grain          |
+| Rule implementation    | Java core + Starlark   | All Starlark (prelude)      | Starlark units/classes    |
+| Dependency granularity | Action / target        | Action / target             | Unit (package)            |
+| Scale target           | Large monorepos        | Meta-scale monorepos        | Embedded distro graphs    |
+
+Buck2 is not an alternative to `[yoe]` — it solves a different problem at a
+different scale. It is included because the single-graph-vs-two-phase contrast
+clarifies why `[yoe]`'s phased resolve-then-build is a deliberate fit for
+unit-grained embedded builds, not an unconsidered default.
+
+## vs. Pigweed
+
+[Pigweed](https://pigweed.dev/) is Google's collection of embedded libraries
+("modules") and developer tooling for microcontroller, bare-metal, and RTOS
+firmware — embedded C++ and, increasingly, Rust on parts like Cortex-M, RP2350,
+and STM32. It is not a Linux distribution or rootfs builder. It operates one
+layer below where `[yoe]` lives — the MCU firmware on a board, not the Linux
+application SoC — so it is a complement, not a competitor. A single product can
+run `[yoe]`-built Linux on the application processor and Pigweed-built firmware
+on a companion microcontroller.
+
+**What `[yoe]` shares in spirit with Pigweed:**
+
+- **Per-module consumption** — Pigweed is explicitly designed so you take only
+  the modules you need into an existing project rather than adopting a
+  monolith. `[yoe]`'s unit and module composition shares this instinct.
+- **Ergonomic single front-door CLI** — the `pw` command aggregates per-module
+  subcommands as plugins, and `pw_env_setup` builds a hermetic toolchain
+  environment without mutating the host. `[yoe]`'s single `yoe` CLI plus
+  container-as-build-worker chase the same goal: one tool to drive everything,
+  no changes to the developer's machine.
+
+**What's different:**
+
+- **Target layer** — Pigweed produces bare-metal/RTOS firmware libraries;
+  `[yoe]` produces a full Linux userspace with BSP, image, and update tooling.
+  Their outputs do not overlap.
+- **Build system** — Pigweed historically used GN, with
+  [Bazel now the strategic direction](https://pigweed.dev/seed/0111.html) and
+  the recommendation for new projects and the Pigweed SDK; GN remains the
+  primary build system for upstream Pigweed development as of 2025. `[yoe]` is
+  its own Go engine plus Starlark. Pigweed *consumes* GN/Bazel; `[yoe]`
+  *replaces* that layer for its own domain.
+
+**When to use Pigweed instead — or alongside:** if the target is an MCU running
+bare-metal or an RTOS, Pigweed is the right toolbox and `[yoe]` simply does not
+apply. On a mixed design (Linux SoC plus companion MCU), use both: `[yoe]` for
+the Linux side, Pigweed for the firmware side. They meet at the board, not in
+the build.
+
 ## Value Proposition and Strategic Positioning
 
 ### The Core Thesis
@@ -921,8 +1080,8 @@ root; individual builders drop privileges. Image assembly for NixOS system
 closures happens inside the daemon's controlled environment with proper root, so
 the ownership problem doesn't surface the same way.
 
-**Google GN / Bazel** — out of scope; neither builds Linux rootfs images as a
-first-class concern.
+**Google GN / Bazel / Buck2 / Pigweed** — out of scope; none build Linux rootfs
+images as a first-class concern.
 
 ### How `[yoe]` applies these
 
