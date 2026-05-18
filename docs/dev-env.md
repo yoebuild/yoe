@@ -287,3 +287,6 @@ container still runs `yoe build` and `yoe shell` against the project checkout.
 - [Unit & Configuration Format](metadata-format.md#tasks-and-per-task-containers-planned)
   — how per-unit and per-task container selection determines what `yoe shell`
   drops you into.
+- [YPS 2024.12 — Rob Woolley — Workflows for App Development](https://youtu.be/bgeuyWbyI_M)
+  — a Yocto Project Summit talk on app-development workflows; useful background
+  on the SDK-centric model `[yoe]` aims to simplify.
