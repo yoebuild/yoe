@@ -4,6 +4,60 @@ How `[yoe]` relates to existing embedded Linux build systems and distributions.
 For each, we identify what `[yoe]` adopts, what it leaves behind, and where it
 differs.
 
+## In Short: What Makes `[yoe]` Different
+
+The detailed sections below compare `[yoe]` against one system at a time, but
+the same handful of choices recur. In general terms, `[yoe]` differs from
+existing solutions along these axes:
+
+- **One language, end to end.** Units, machines, and images are all Starlark; the
+  engine is Go. There is no second metadata format, no BitBake/Kconfig/Make
+  layer underneath, and nothing requiring you to learn a bespoke expression
+  language (contrast: Yocto's BitBake, Nix's expression language, Buildroot's
+  Kconfig, Gaia's TS+Xonsh+Shell mix). This is also what makes units tractable
+  for AI to generate.
+- **Native builds, no cross-compilation.** Foreign architectures are handled by
+  running native toolchains inside foreign-arch containers under QEMU, never by
+  a cross-compile toolchain. Yocto, Buildroot, and Avocado all center on cross
+  toolchains; `[yoe]` deliberately does not.
+- **The build cache _is_ the package feed.** A unit's content-addressed `.apk`
+  lives in a plain S3-compatible bucket — the same bytes CI builds, the cache
+  serves, and a device installs. There is no separate sstate, REAPI server, or
+  artifact registry to stand up; the cache is a bucket URL. Caching is
+  per-unit/per-package, not per-task (Yocto) or per-action (Bazel/Buck2).
+- **apk into a shared FHS root.** Packages install into a normal filesystem,
+  not snap/sysext/SquashFS loopback mounts (contrast: Ubuntu Core, Avocado,
+  distri) and not a `/nix/store` closure model. This keeps the base in the
+  single-digit-MB class and the runtime conventional.
+- **Embedded and BSP are first-class.** Machine definitions, per-board kernel
+  config and device trees, bootloader handling, and image/partition assembly are
+  built in — the layer general-purpose distros (Alpine, Arch, Debian, NixOS) and
+  meta-build systems (GN, Bazel, Buck2) simply do not have.
+- **Resolve-then-build, at unit grain.** The whole unit DAG is resolved and
+  validated before anything builds, so graph errors surface up front. This is
+  the GN/Bazel discipline, applied at a coarse granularity where it costs almost
+  nothing.
+- **Pre-1.0, open, no commercial gate.** The repository, signing, and update
+  tooling are part of the open project — no brand store, no paid OTA SaaS,
+  self-hostable end to end.
+- **Sized for small teams, not platform organizations.** Most systems above
+  assume an enterprise shape: a dedicated build/platform team to operate sstate
+  mirrors or a Remote Execution cluster, a vendor support contract for BSPs, or
+  a commercial OTA service. `[yoe]` targets the opposite end — teams of one to a
+  handful where the application is the product and nobody can be spared to
+  babysit the build system. Every choice above trades enterprise-scale
+  flexibility for an operational surface a small team can hold in their heads.
+
+`[yoe]` is honest about where it does not yet compete: vendor BSP breadth,
+from-source package coverage (dozens of source-built units vs. thousands of
+Yocto recipes — though the prebuilt-distro module makes thousands of packages
+directly consumable, Alpine today with other distros planned, so raw
+availability is closer to a full distro's), configuration UX, legal-compliance
+tooling, and a production track record. The
+[Value Proposition](#value-proposition-and-strategic-positioning) section sets
+out where `[yoe]` can win despite those gaps; the per-system sections below give
+the specifics.
+
 ## vs. Yocto / OpenEmbedded
 
 Yocto is the industry standard for custom embedded Linux. It is extremely
@@ -164,6 +218,22 @@ where package install becomes imperative system mutation that's hard to
 reproduce, hard to sandbox, and hard to roll back. If Alpine doesn't need a
 postinst for it, `[yoe]` shouldn't either.
 
+**Alpine's prebuilt apks are also directly consumable.** Beyond using APKBUILDs
+as a from-source reference, `[yoe]` can wrap Alpine's _published binary_ `.apk`s
+as units via the `alpine_pkg` class: the upstream apk is fetched verbatim,
+Alpine's signature is stripped and the control stream re-signed with the
+project's key, and the package is exposed as an ordinary unit (pinned to one
+Alpine release, ABI- and keyring-coupled to the build toolchain's Alpine base).
+Thousands of Alpine main/community packages are usable this way with no porting;
+a hand-written from-source unit is only needed when a package must be built
+under your control or with non-Alpine options. This two-tier model — source
+where it matters, prebuilt Alpine for the long tail — is what makes the
+package-count gap discussed in the
+[Value Proposition](#value-proposition-and-strategic-positioning) much narrower
+than the source-built unit count implies. The `*_pkg` wrapper is deliberately
+distro-agnostic; Alpine is the only prebuilt source today, with other distros
+(see the Debian section) a planned extension of the same shape.
+
 **What `[yoe]` leaves behind:**
 
 - **musl** — planning to use glibc instead for maximum compatibility with
@@ -188,6 +258,7 @@ whatever busybox init + plain scripts give you.
 | BSP support       | Generic x86/ARM images            | Per-board machine definitions                        |
 | Image assembly    | `alpine-make-rootfs`              | `yoe build <image>` with machine + partition support |
 | Build system      | `abuild` + APKBUILD shell scripts | `yoe build` + Starlark units                         |
+| Prebuilt packages | builds its own (`abuild`)         | reuses Alpine's via `alpine_pkg` + source units      |
 | Kernel management | Generic kernels                   | Per-machine kernel config, device trees              |
 | OTA updates       | Standard apk upgrade              | apk + full image update + rollback                   |
 
@@ -269,6 +340,19 @@ before hitting its limits on custom hardware.
   of tools are present. `[yoe]` starts near zero and adds only what's declared.
 - **In-place `dist-upgrade`** — `[yoe]` prefers atomic image updates with
   rollback over mutating a running root filesystem.
+
+**Consuming Debian/Ubuntu prebuilt packages (planned).** `[yoe]` already wraps
+Alpine's published binary apks as units via the `alpine_pkg` class (see the
+Alpine section). The wrapper pattern is intentionally distro-agnostic — fetch an
+upstream package, re-sign its metadata with the project key, expose it as an
+ordinary unit — so the same shape is the natural way to make Debian/Ubuntu
+`.deb`s directly consumable: a `deb_pkg`-style class pulling from a pinned
+Debian/Ubuntu suite. This is **not implemented today** — only Alpine is wired
+up — but it is the expected path for teams that need a specific Debian/Ubuntu
+binary (a vendor-provided `.deb`, a package absent from Alpine) without porting
+it. The `.deb` maintainer-script tradition (preinst/postinst/debconf) makes
+verbatim Debian consumption more invasive than Alpine's near-empty install
+scripts, so this tier is most useful for leaf packages, not base-system pieces.
 
 **Key differences:**
 
@@ -1061,6 +1145,40 @@ dependency_. Content-addressed caching hashes the output — if inputs haven't
 changed, the output is the same. You get reproducibility without micromanaging
 the build.
 
+### Enterprise vs. Small Teams
+
+The sharpest dividing line between `[yoe]` and the established systems is not a
+technical capability — it is the organizational shape each one assumes.
+
+Yocto, Bazel/Buck2, Ubuntu Core, and Avocado are calibrated for **enterprises**.
+They assume there is headcount to operate complexity (a platform team running
+sstate mirrors and hash-equivalence servers, or a Remote Execution cluster), a
+vendor relationship to lean on (a silicon vendor's supported BSP layer, a
+Canonical brand store, a Peridio OTA contract), and a multi-year support
+horizon. In return they offer breadth, fine-grained control, and a deep
+ecosystem. At that scale the operational weight is a worthwhile trade — the org
+already has the people, and the flexibility pays for itself across hundreds of
+products and engineers.
+
+`[yoe]` inverts the calibration. It optimizes for the **team of one to ten**
+building a product where the application is the differentiator and the base OS
+is plumbing — a team that cannot spare an engineer to become the in-house Yocto
+or Bazel expert and cannot justify standing up build infrastructure. For that
+team the right system is one that is near-zero-maintenance (a cache that is a
+bucket URL), learnable in an afternoon (one language, no metadata stack
+underneath), and self-hostable with no commercial gate. The cost of that
+calibration is real and acknowledged below: fewer packages, no vendor BSP moat,
+less tooling maturity.
+
+This is deliberately **not** "`[yoe]` is a smaller Yocto." A team that already
+has a platform group, a Yocto BSP from its silicon vendor, and products shipping
+on that stack should keep it — `[yoe]` is not trying to win that team, and
+porting away from a working enterprise build system is rarely worth it. The
+opportunity is the large population of small embedded-product teams for whom the
+enterprise systems are overkill and Buildroot is too limited — the same way
+Alpine never displaced Debian but became the obvious default for containers (see
+[The Alpine Linux Precedent](#the-alpine-linux-precedent) below).
+
 ### Where `[yoe]` Cannot Compete (Yet)
 
 Be honest about the gaps:
@@ -1071,10 +1189,25 @@ This is not a technology problem — it's an ecosystem problem that Linux
 Foundation backing solves. No amount of technical superiority overcomes "the
 silicon vendor gives us a Yocto BSP and supports it."
 
-**Package count.** Yocto has ~5,000 recipes across oe-core + meta-openembedded,
-Buildroot has ~2,800 packages, Alpine has ~36,000, Debian has ~35,000, and
-Nixpkgs has ~142,000. `[yoe]` has dozens. Need curl, dbus, python3, or ffmpeg?
-You have to write the unit.
+**Source-built package count.** Yocto has ~5,000 recipes across oe-core +
+meta-openembedded, Buildroot has ~2,800 packages, Alpine has ~36,000, Debian
+has ~35,000, and Nixpkgs has ~142,000. `[yoe]` builds dozens from source. The
+raw-availability gap is smaller than that number suggests: the Alpine module
+(`alpine_pkg`) wraps Alpine's prebuilt `.apk`s as units — thousands of
+main/community packages, fetched verbatim, re-signed with the project key, and
+pinned to a single Alpine release — so most of "I just need `dbus`/`python3`/
+`ffmpeg` on the device" is a one-line dependency, not a porting task. The
+honest gap is narrower and more specific: a package only Alpine ships as a
+binary is _consumed_, not _built from source under your control_, and anything
+Alpine does not carry (or carries with the wrong build options) still needs a
+written unit. The prebuilt-wrapper pattern is deliberately distro-agnostic — a
+`*_pkg` class fetches an upstream package, re-signs it, and exposes it as a
+unit; Alpine is the only prebuilt source today, and the same shape is intended
+to extend to other distros (Debian/Ubuntu binary packages, for example) so the
+binary-availability tier is not tied to a single upstream. Yocto's value is that
+everything is from source by default; `[yoe]`'s bet is that prebuilt-distro
+packages plus source-where-it-matters covers most real products with far less
+work.
 
 **Configuration UX.** Buildroot's `make menuconfig` is a killer feature —
 visual, discoverable, searchable. You can explore what's available without
@@ -1121,10 +1254,11 @@ content-addressed `.apk` cache in S3-compatible storage is conceptually simpler:
 push packages to a bucket, pull them on other machines. CI builds once,
 developers reuse the output.
 
-**AI-assisted unit generation.** If an AI can generate a working Starlark unit
-from a project URL faster than porting a Yocto unit, the small package count
-stops mattering. Starlark is far more tractable for AI than BitBake's metadata
-format.
+**AI-assisted unit generation.** With prebuilt distro packages already
+consumable via `alpine_pkg` (Alpine today, other distros planned), the gap is
+from-source coverage. If an AI can generate a working Starlark unit from a
+project URL faster than porting a Yocto unit, even that gap stops mattering.
+Starlark is far more tractable for AI than BitBake's metadata format.
 
 ### The Alpine Linux Precedent
 
@@ -1164,12 +1298,18 @@ Buildroot is too limited.
    well-integrated shippable story, not to any specific mechanism. For any team
    shipping a product, this is table stakes.
 
-6. **AI unit generation + Alpine aports conversion.** Lean into the AI-native
-   angle: generating a new unit from a project URL should be a conversation, not
-   a manual porting exercise. _Also_ ship a mechanical APKBUILD → Starlark
-   converter — Alpine has ~36,000 ready-to-port APKBUILDs, and a reliable
-   converter closes the package-count gap faster and more predictably than pure
-   AI generation. AI for novel cases, mechanical conversion for the long tail.
+6. **Prebuilt-distro consumption + AI unit generation + aports conversion.** The
+   `alpine_pkg` module already closes most of the _binary-availability_ gap —
+   thousands of Alpine packages consumable as prebuilt `.apk`s with no porting —
+   and the same `*_pkg` pattern is meant to extend to other distros so that tier
+   is not Alpine-bound. The remaining work is the _from-source_ tier: packages
+   that must be built under your control or with non-distro options. Lean into
+   the AI-native angle there — generating a from-source unit from a project URL
+   should be a conversation, not a manual porting exercise — and _also_ ship a
+   mechanical APKBUILD → Starlark converter, since Alpine's ~36,000 APKBUILDs are
+   the most predictable path to broad from-source coverage. AI for novel cases,
+   mechanical conversion for the long tail, prebuilt-distro `*_pkg` for
+   everything that just needs to be present.
 
 7. **Board support** — start with popular, accessible boards (Raspberry Pi,
    BeagleBone, common QEMU targets). Every board that works out of the box is a
@@ -1294,7 +1434,7 @@ the host.
 | Hermetic builds         | Partial  | No        | No       | No       | No       | Partial   | Yes       | **Yes**     |
 | Fast package ops        | N/A      | N/A       | Yes      | Moderate | Moderate | Slow      | Slow      | **Yes**     |
 | Min base image size     | ~15 MB   | ~5 MB     | ~5 MB    | ~500 MB  | ~150 MB  | ~2,500 MB | ~1,500 MB | **~5 MB**   |
-| Packages available      | ~5,000   | ~2,800    | ~36,000  | ~15,000  | ~35,000  | ~10,000   | ~142,000  | **Dozens**  |
+| Packages available      | ~5,000   | ~2,800    | ~36,000  | ~15,000  | ~35,000  | ~10,000   | ~142,000  | **Dozens from source + ~Alpine prebuilt** |
 
 _UC = Ubuntu Core. "Min base image size" is the approximate on-disk footprint of
 the smallest practical bootable/usable root filesystem (core-image-minimal for
@@ -1304,5 +1444,11 @@ with architecture, kernel, and configuration. "Packages available" is the rough
 count of ready-to-use packages/recipes in the standard/common repositories;
 Yocto counts typical oe-core + meta-openembedded, Arch excludes the ~90,000 AUR
 packages, UC counts snaps in the public store — a different delivery model that
-is not directly comparable. Sources: project documentation,
+is not directly comparable. `[yoe]`'s entry is two-tier: dozens of packages
+built from source in `module-core`, plus thousands of distro packages consumed
+as prebuilt binaries via a `*_pkg` module (Alpine today via `alpine_pkg` —
+pinned to one Alpine release, re-signed with the project key; other distros a
+planned extension of the same pattern) — so the practical availability ceiling
+is close to the upstream distro's, while the from-source set is intentionally
+small. Sources: project documentation,
 [repology.org](https://repology.org/repositories/packages)._
