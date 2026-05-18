@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Filtering the Units tab to no matches no longer scrolls the tabs off the
+  screen.** When a query matched nothing, the "no units match" notice used to
+  push the layout down and hide the tab bar off the top. It now shows on the
+  bottom row and the rest of the screen stays put.
+
 ## [0.10.10] - 2026-05-15
 
 - **Building a prebuilt package no longer fails on a fresh checkout.** Building

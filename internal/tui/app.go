@@ -2540,10 +2540,6 @@ func (m model) viewUnitsTab() string {
 	}
 	b.WriteString("\n")
 
-	if len(m.visible) == 0 {
-		b.WriteString(dimStyle.Render("  no units match\n"))
-	}
-
 	// Spare line above the bottom row — always shows the full name of
 	// the cursor's unit in a faded version of the cursor green. Useful
 	// when the name is longer than the NAME column, and a quiet
@@ -2554,6 +2550,12 @@ func (m model) viewUnitsTab() string {
 	b.WriteString("\n")
 	if m.message != "" {
 		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
+	} else if len(m.visible) == 0 {
+		// No units match the current filter. Show it on the bottom row
+		// in place of the key help — adding it as an extra list line
+		// would overflow the chrome budget and scroll the tabs off the
+		// top of the screen.
+		b.WriteString(dimStyle.Render("  no units match"))
 	} else {
 		// While the query input is focused, only the keys updateSearch
 		// actually handles are reachable — printable chars, tab to
