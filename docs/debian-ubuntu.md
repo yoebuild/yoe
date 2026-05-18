@@ -53,16 +53,16 @@ the target** and skip deb→apk conversion entirely?
 Be honest about what conversion actually buys, and separate it from what yoe
 genuinely differentiates on:
 
-| Concern | Lives at which layer | Needs apk-on-target? |
-| --- | --- | --- |
-| Build DAG, content-addressed cache, dev loop | **Build time** | No — independent of on-target PM |
-| Image assembly (partitions, bootloader, signing) | **Image time** | No |
-| Atomic image update + rollback (A/B) | **Image time** | No |
-| Unified *incremental on-device* package updates | **Runtime** | Yes |
-| One signed feed, one trust root on device | **Runtime** | Yes |
+| Concern                                          | Lives at which layer | Needs apk-on-target?             |
+| ------------------------------------------------ | -------------------- | -------------------------------- |
+| Build DAG, content-addressed cache, dev loop     | **Build time**       | No — independent of on-target PM |
+| Image assembly (partitions, bootloader, signing) | **Image time**       | No                               |
+| Atomic image update + rollback (A/B)             | **Image time**       | No                               |
+| Unified _incremental on-device_ package updates  | **Runtime**          | Yes                              |
+| One signed feed, one trust root on device        | **Runtime**          | Yes                              |
 
 yoe's strongest, most differentiated guarantees — the build/DAG/cache, image
-assembly, and **atomic image update with rollback** — all live *above* the
+assembly, and **atomic image update with rollback** — all live _above_ the
 on-target package manager. They are preserved whether the image internally
 contains apks or debs. What conversion actually preserves that native dpkg would
 break is the **runtime row**: a single incremental on-device update story and a
@@ -91,7 +91,7 @@ enough?**
   ([Comparisons → vs. Debian](comparisons.md)). Re-introducing native apt here
   would fork yoe's deployment model in two.
 
-There is also a **hybrid** worth naming: keep `.deb`/dpkg *inside* the image for
+There is also a **hybrid** worth naming: keep `.deb`/dpkg _inside_ the image for
 build/assembly-time package resolution and full vendor compatibility, but make
 the **only** sanctioned update path the atomic whole-image swap — dpkg is
 present for inspection and occasional manual post-deploy installs, never the OTA
@@ -153,7 +153,7 @@ needed for the base system at all. It is needed only for:
 
 That is a far smaller, far safer surface than "convert all of Debian." The hard
 parts of deb conversion (base-system maintainer scripts, alternatives churn,
-debconf) largely live in the base packages we are now choosing *not* to convert.
+debconf) largely live in the base packages we are now choosing _not_ to convert.
 
 ## Reusing upstream binary packages
 
@@ -175,8 +175,8 @@ is in its native habitat.
 2. Extract `data.tar.{gz,xz,zst}` — this is the file tree, used verbatim.
 3. Read `control` for metadata. Translate the dependency fields onto apk's
    model: `Depends:` → `D:`, `Provides:` → `p:`, `Replaces:` → `r:`,
-   `Conflicts:`/`Breaks:` → conflict entries. Version constraints
-   (`>=`, epochs, `~` pre-release ordering) need a correct comparator.
+   `Conflicts:`/`Breaks:` → conflict entries. Version constraints (`>=`, epochs,
+   `~` pre-release ordering) need a correct comparator.
 4. Repack the file tree + translated `.PKGINFO` as an apk.
 5. **Re-sign with the project key.**
 
@@ -191,7 +191,7 @@ dpkg-specific userland (`update-alternatives`, `dpkg-divert`, `debconf`,
 `dpkg-trigger`) which do not exist on a yoe target. The full enumeration and
 per-tool mitigation lives in
 [libc-and-init.md → Residual dpkg-userland concerns](libc-and-init.md#residual-dpkg-userland-concerns)
-and is not duplicated here. The practical stance for *this* base, given Option B
+and is not duplicated here. The practical stance for _this_ base, given Option B
 and the value-add-only `deb_pkg` scope:
 
 - The base tarball already ran its own maintainer scripts when the vendor built
@@ -227,7 +227,7 @@ mechanic, but it belongs in any `deb_pkg` unit's documentation.
 Conversion and glibc are well understood; **systemd-as-PID1 is the larger
 unknown** and is currently only sketched in libc-and-init.md. With Option B the
 base tarball already ships a working systemd, so the spike does not have to
-*build* systemd — but yoe's image assembly still has to integrate with it where
+_build_ systemd — but yoe's image assembly still has to integrate with it where
 it currently assumes OpenRC:
 
 - The CLAUDE.md rule "installed packages run their services" maps to systemd's
@@ -247,8 +247,8 @@ prototype."
 
 First, branch on the deciding axis from
 [Alternative: keep deb/dpkg on the target](#alternative-keep-debdpkg-on-the-target-no-conversion):
-**does the product need incremental on-device package updates, or is
-whole-image atomic update with rollback enough?**
+**does the product need incremental on-device package updates, or is whole-image
+atomic update with rollback enough?**
 
 Common to both branches:
 
