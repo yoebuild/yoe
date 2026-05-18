@@ -864,6 +864,51 @@ in the classical camp — resolve the whole unit DAG, validate, then build —
 because at unit granularity a global resolve phase costs almost nothing and buys
 "all graph errors reported before anything is built."
 
+**Caching: action-grained CAS vs. unit-grained package cache.** Both Bazel and
+`[yoe]` cache build outputs keyed by a hash of their inputs, and both can share
+that cache across developers and CI. The difference is everything else.
+
+- **Granularity.** Bazel caches at the _action_ level — one compiler
+  invocation, one link step, one codegen run. Its remote cache is a
+  content-addressable store (CAS) of blobs plus an action cache mapping each
+  action key (command line + input content hashes + environment + platform) to
+  its result. Change one source file and Bazel reuses every cached action except
+  the handful that transitively depend on it. `[yoe]` caches at the _unit_
+  level: one unit produces one `.apk`, and its cache key is a hash of the
+  unit's declared inputs (`internal/resolve/hash.go`). Change anything a unit
+  hashes and the whole unit rebuilds from source — intra-unit incrementality is
+  delegated to the native toolchain underneath (`go build`, `cargo`, `make`
+  doing their own object-level caching inside the unit build).
+- **What is cached.** Bazel caches _intermediate_ artifacts — object files,
+  generated headers, partial trees — in the CAS. `[yoe]` caches the _final
+  distributable_ artifact: the same `.apk` bytes that ship to and install on
+  the device. The build cache and the package feed are the same S3-compatible
+  store, so "what CI built," "what the cache serves," and "what a device pulls"
+  are one thing, not three.
+- **Correctness model.** Bazel's cache correctness depends on every action
+  declaring its inputs completely; an under-declared input silently poisons the
+  cache, which is why Bazel leans on sandboxing to enforce hermeticity at action
+  granularity. `[yoe]` hashes a unit's declared inputs too, but the blast radius
+  of a hashing mistake is one package, the container worker bounds ambient
+  inputs, and the project rule that every hash-participating field be added
+  deliberately (and stay cache-neutral when unset) keeps the input set auditable
+  by reading one unit rather than reasoning about an action graph.
+- **Operational cost.** A Bazel remote cache means running and securing a Remote
+  Execution API server (bazel-remote, Buildbarn, BuildBuddy), usually paired
+  with remote _execution_ so actions run on a cluster. `[yoe]` needs only a
+  bucket URL; there is no remote execution — builds always run in the local
+  container worker, and the cache only ever serves or stores whole `.apk`s. This
+  is the same simplicity argument the Yocto section makes against sstate, applied
+  to Bazel's REAPI stack.
+
+The trade is deliberate. Bazel's fine grain extracts maximum reuse from a
+million-node action graph but pays for it in input-declaration discipline and
+cache infrastructure. `[yoe]`'s coarse grain rebuilds a whole package when any
+of its inputs change, which is cheap because packages are the unit of
+distribution anyway and the language toolchains cache within — and in exchange
+the cache is a plain object bucket whose contents are exactly the artifacts
+devices install.
+
 **Key differences:**
 
 |                        | Bazel                            | `[yoe]`                             |
