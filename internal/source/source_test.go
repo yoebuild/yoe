@@ -102,15 +102,15 @@ func TestPrepare(t *testing.T) {
 		t.Fatal("source dir is not a git repo")
 	}
 
-	// Should have upstream tag
-	cmd := exec.Command("git", "tag", "-l", "upstream")
+	// Should have yoe/pin tag (yoe's internal pin marker)
+	cmd := exec.Command("git", "tag", "-l", "yoe/pin")
 	cmd.Dir = srcDir
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("git tag: %v", err)
 	}
-	if !strings.Contains(string(out), "upstream") {
-		t.Error("upstream tag not found")
+	if !strings.Contains(string(out), "yoe/pin") {
+		t.Error("yoe/pin tag not found")
 	}
 
 	// Should have the test file
@@ -162,15 +162,15 @@ func TestPrepare_WithPatches(t *testing.T) {
 		t.Errorf("patch not applied: content = %q", string(data))
 	}
 
-	// Verify patch is a git commit beyond upstream
-	cmd := exec.Command("git", "rev-list", "--count", "upstream..HEAD")
+	// Verify patch is a git commit beyond the pin marker
+	cmd := exec.Command("git", "rev-list", "--count", "yoe/pin..HEAD")
 	cmd.Dir = srcDir
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("git rev-list: %v", err)
 	}
 	if strings.TrimSpace(string(out)) != "1" {
-		t.Errorf("expected 1 commit beyond upstream, got %s", strings.TrimSpace(string(out)))
+		t.Errorf("expected 1 commit beyond yoe/pin, got %s", strings.TrimSpace(string(out)))
 	}
 }
 
@@ -236,7 +236,7 @@ func TestPrepare_DevMode(t *testing.T) {
 	os.WriteFile(filepath.Join(srcDir, "main.c"), []byte("int main() {}\n"), 0644)
 	run(t, srcDir, "git", "add", "-A")
 	run(t, srcDir, "git", "commit", "-m", "upstream")
-	run(t, srcDir, "git", "tag", "upstream")
+	run(t, srcDir, "git", "tag", "yoe/pin")
 	os.WriteFile(filepath.Join(srcDir, "main.c"), []byte("int main() { return 1; }\n"), 0644)
 	run(t, srcDir, "git", "add", "-A")
 	run(t, srcDir, "git", "commit", "-m", "local change")
@@ -284,7 +284,7 @@ func TestPrepare_CachedDevSkipsFetch(t *testing.T) {
 	os.WriteFile(filepath.Join(srcDir, "main.c"), []byte("int main() {}\n"), 0o644)
 	run(t, srcDir, "git", "add", "-A")
 	run(t, srcDir, "git", "commit", "-m", "upstream")
-	run(t, srcDir, "git", "tag", "upstream")
+	run(t, srcDir, "git", "tag", "yoe/pin")
 	run(t, srcDir, "git", "remote", "add", "origin", "https://example.com/foo.git")
 
 	unit := &yoestar.Unit{

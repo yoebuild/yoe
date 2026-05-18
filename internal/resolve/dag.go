@@ -27,11 +27,22 @@ func BuildDAG(proj *yoestar.Project) (*DAG, error) {
 	// Add all units as nodes.
 	// For image units, Artifacts are also dependencies (they must be built
 	// before the image can be assembled).
+	//
+	// A unit's build/task container, when it names a container *unit*
+	// (not an external image like "golang:1.24"), is also a build-time
+	// dependency: the container image must exist before any task runs
+	// inside it. Classes that compile (module-core) declare this in deps
+	// explicitly, but prebuilt classes like alpine_pkg set deps=[] and
+	// only container="toolchain-musl" — without this implicit edge the
+	// container is never scheduled and `docker run` fails on a missing
+	// image. (The old EnsureImage() was removed when containers became
+	// DAG-participating units.)
 	for name, unit := range proj.Units {
-		deps := unit.Deps
+		deps := append([]string{}, unit.Deps...)
 		if unit.Class == "image" {
-			deps = append(append([]string{}, deps...), unit.Artifacts...)
+			deps = append(deps, unit.Artifacts...)
 		}
+		deps = appendContainerDeps(deps, proj, unit)
 		dag.Nodes[name] = &Node{
 			Unit: unit,
 			Deps:   deps,
@@ -55,6 +66,40 @@ func BuildDAG(proj *yoestar.Project) (*DAG, error) {
 	}
 
 	return dag, nil
+}
+
+// appendContainerDeps adds the unit's container (and any per-task container
+// overrides) to deps when the container names a container *unit* in the
+// project. External image references (containing ":" or "/", e.g.
+// "golang:1.24") and self-references are ignored, and existing entries are
+// not duplicated — TopologicalSort's in-degree bookkeeping counts
+// len(node.Deps), so a duplicate edge would corrupt ordering.
+func appendContainerDeps(deps []string, proj *yoestar.Project, unit *yoestar.Unit) []string {
+	seen := make(map[string]bool, len(deps))
+	for _, d := range deps {
+		seen[d] = true
+	}
+	add := func(container string) {
+		if container == "" || container == unit.Name {
+			return
+		}
+		if strings.Contains(container, ":") || strings.Contains(container, "/") {
+			return // external image reference, not a project unit
+		}
+		if _, ok := proj.Units[container]; !ok {
+			return // not a known unit; leave dep validation untouched
+		}
+		if seen[container] {
+			return
+		}
+		seen[container] = true
+		deps = append(deps, container)
+	}
+	add(unit.Container)
+	for _, t := range unit.Tasks {
+		add(t.Container)
+	}
+	return deps
 }
 
 // TopologicalSort returns units in build order (dependencies before dependents).

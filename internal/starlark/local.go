@@ -11,6 +11,12 @@ import (
 
 const localStarFile = "local.star"
 
+// DefaultParallelBuilds is the unit-build concurrency used when neither the
+// `-j` flag nor local.star's parallel_builds sets one. Lives here (rather
+// than internal/build) so configcmd can reference it without an import
+// cycle — internal/build already imports the root internal package.
+const DefaultParallelBuilds = 5
+
 // LocalOverrides holds values loaded from <project-dir>/local.star.
 // Empty fields mean the file did not specify that value (or did not exist).
 type LocalOverrides struct {
@@ -19,6 +25,9 @@ type LocalOverrides struct {
 	DeployHost  string // last-used target for `yoe deploy` from the TUI
 	FlashDevice string // last-used flash target (e.g. /dev/sdb) for the TUI flash view
 	Query       string // last-saved TUI search query (in:base-image, etc.)
+	// ParallelBuilds caps how many units `yoe build` builds concurrently.
+	// Zero means "not set" — the build picks its own default.
+	ParallelBuilds int
 }
 
 // LoadLocalOverrides reads <projectDir>/local.star if it exists and
@@ -37,6 +46,18 @@ func LoadLocalOverrides(projectDir string) (LocalOverrides, error) {
 		for _, kv := range kwargs {
 			key, ok := kv[0].(starlark.String)
 			if !ok {
+				continue
+			}
+			if string(key) == "parallel_builds" {
+				n, ok := kv[1].(starlark.Int)
+				if !ok {
+					return nil, fmt.Errorf("local: parallel_builds must be an int")
+				}
+				i, _ := n.Int64()
+				if i < 1 {
+					return nil, fmt.Errorf("local: parallel_builds must be >= 1")
+				}
+				captured.ParallelBuilds = int(i)
 				continue
 			}
 			v, ok := kv[1].(starlark.String)
@@ -92,6 +113,9 @@ func WriteLocalOverrides(projectDir string, ov LocalOverrides) error {
 	}
 	if ov.Query != "" {
 		fmt.Fprintf(&b, "    query = %q,\n", ov.Query)
+	}
+	if ov.ParallelBuilds > 0 {
+		fmt.Fprintf(&b, "    parallel_builds = %d,\n", ov.ParallelBuilds)
 	}
 	b.WriteString(")\n")
 	return os.WriteFile(path, []byte(b.String()), 0o644)

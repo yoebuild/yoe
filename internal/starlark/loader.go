@@ -314,7 +314,23 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	// ctx struct already holds a reference to it). A unit may declare
 	// multiple virtual names (apk-style); each is registered independently
 	// with the same module-priority conflict rules.
-	for _, u := range eng.Units() {
+	//
+	// Iterate units in a stable, name-sorted order. eng.Units() is a map,
+	// and the conflict rule below is "first registered wins" among
+	// same-module claimants of a virtual. Ranging the map directly made
+	// that winner depend on Go's randomized map iteration, so a virtual
+	// like `ifupdown-any` (claimed by ifupdown-ng, busybox-ifupdown, and
+	// openrc in the same module) resolved to a different unit run-to-run,
+	// silently changing every image's runtime closure and churning the
+	// build cache. Sorting makes the resolution reproducible.
+	unitsByName := eng.Units()
+	sortedUnitNames := make([]string, 0, len(unitsByName))
+	for name := range unitsByName {
+		sortedUnitNames = append(sortedUnitNames, name)
+	}
+	sort.Strings(sortedUnitNames)
+	for _, uname := range sortedUnitNames {
+		u := unitsByName[uname]
 		for _, virt := range u.Provides {
 			if virt == "" {
 				continue

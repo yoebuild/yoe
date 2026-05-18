@@ -1,10 +1,17 @@
 ---
 title: "feat: Source dev-mode toggle for units and modules"
 type: feat
-status: active
+status: superseded
 date: 2026-05-08
 origin: docs/brainstorms/2026-05-08-source-dev-mode-requirements.md
+superseded_by: docs/plans/2026-05-13-001-feat-dev-mode-branch-tracking-plan.md
 ---
+
+> **Status:** Superseded. The original promote-to-pin (`P`) design was replaced
+> by declarative branch tracking — see
+> `docs/plans/2026-05-13-001-feat-dev-mode-branch-tracking-plan.md` for the
+> delta. Most of this plan shipped in main before the design pivoted; treat it
+> as the implementation record for what's currently in the codebase.
 
 # feat: Source dev-mode toggle for units and modules
 

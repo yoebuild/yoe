@@ -11,6 +11,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,16 +40,23 @@ var (
 	// line above the bottom row — same green so the eye links it to the
 	// highlighted row, but dimmed and not bold so it doesn't compete.
 	cursorNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#5fff5f")).Faint(true)
-	dimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	cachedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("12")) // blue
-	failedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	buildingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	dimStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	cachedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("12")) // blue
+	failedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+	buildingStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	helpStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	// Amber, matching the [yoe] logo, for the keyboard shortcut letter
 	// in each help-bar item — the description stays helpStyle gray so
 	// the eye can scan keys at a glance.
 	helpKeyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#e8863a")).Bold(true)
-	waitingStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // yellow
+	waitingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // yellow
+
+	// Home-header field block: labels render plain white (the look of the
+	// existing "Machine:" label), values in a bright accent so the eye
+	// lands on the data, not the field name. The Query line keeps its own
+	// queryActive/queryDim/queryError styling for the search expression.
+	fieldLabelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("255"))
+	fieldValueStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("213")) // bright magenta — distinct from all status colors
 
 	// Query-related styles
 	queryDimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
@@ -56,9 +64,9 @@ var (
 	queryErrorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 
 	// Subtle per-class colors for unselected units
-	classUnitStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))   // muted blue
-	classImageStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("13"))  // muted magenta
-	classContainerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))   // muted cyan
+	classUnitStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))  // muted blue
+	classImageStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("13")) // muted magenta
+	classContainerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))  // muted cyan
 
 	// matchHighlightStyle draws the matched substring on top of whatever
 	// the row's existing color is.
@@ -76,11 +84,51 @@ var (
 	srcDevDirtyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))  // red
 	srcLocalStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Faint(true)
 
-	// Tab bar styling: active tab in amber-bold to match the [yoe] logo,
-	// inactive tabs faded so the eye is drawn to the current selection.
-	tabActiveStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#e8863a")).Bold(true)
-	tabInactiveStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	// Tab bar styling: zellij-style "ribbon" segments. The active tab is a
+	// solid amber block (matching the [yoe] logo) with black bold text;
+	// inactive tabs are dark-gray blocks with light text. Both ends of each
+	// ribbon are a powerline wedge rendered ON the bar background so the cell
+	// fills full-height and the arrow reads crisply (a foreground-only glyph
+	// on the terminal default renders as a small, top-aligned sliver on many
+	// powerline fonts).
+	tabBarBg       = lipgloss.Color("235")
+	tabActiveBg    = lipgloss.Color("#e8863a")
+	tabInactiveBg  = lipgloss.Color("238")
+	tabActiveSeg   = lipgloss.NewStyle().Foreground(lipgloss.Color("16")).Background(tabActiveBg).Bold(true)
+	tabInactiveSeg = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(tabInactiveBg)
+	tabBarGap      = lipgloss.NewStyle().Background(tabBarBg).Render(" ")
 )
+
+// tabCapL / tabCapR are the powerline wedges forming the left and right
+// edges of a ribbon. U+E0B6 points left (the ribbon's left tip), U+E0B4
+// points right (its right tip); together they make a rounded banner.
+// Requires a powerline-patched font.
+const (
+	tabCapL = ""
+	tabCapR = ""
+)
+
+// renderTabBar draws a zellij-style powerline ribbon strip. Each label is a
+// space-padded colored block bracketed by a left and right wedge in the
+// block's color, all painted on the bar background so every cell is full
+// height. Ribbons are separated by a single bar-colored space.
+func renderTabBar(labels []string, active int) string {
+	var b strings.Builder
+	for i, label := range labels {
+		seg := tabInactiveSeg
+		bg := tabInactiveBg
+		if i == active {
+			seg = tabActiveSeg
+			bg = tabActiveBg
+		}
+		if i > 0 {
+			b.WriteString(tabBarGap)
+		}
+		cap := lipgloss.NewStyle().Foreground(bg).Background(tabBarBg)
+		b.WriteString(cap.Render(tabCapL) + seg.Render(" "+label+" ") + cap.Render(tabCapR))
+	}
+	return b.String()
+}
 
 // Package-level program reference for sending messages from goroutines.
 var tuiProgram *tea.Program
@@ -127,7 +175,6 @@ type sourcePromptKind int
 const (
 	promptSSHHTTPS     sourcePromptKind = iota // pin → dev, stage 1: pick remote scheme
 	promptHistoryDepth                         // pin → dev, stage 2: pick fetch depth
-	promptPinKind                              // dev-mod → dev: pick tag / hash / branch to write into .star
 	promptDiscardDev                           // dev-mod / dev-dirty → pin: confirm discard
 )
 
@@ -337,43 +384,45 @@ type deployDoneMsg struct {
 
 // model is the Bubble Tea model for the yoe TUI.
 type model struct {
-	proj       *yoestar.Project
-	projectDir string
-	arch       string
-	warning      string // persistent warning banner (e.g., binfmt missing)
-	notification string // transient global notification (e.g., container rebuild)
-	dag        *resolve.DAG
-	units      []string
-	hashes     map[string]string
-	statuses   map[string]unitStatus
-	cursor     int
-	view       viewKind
-	activeTab  homeTab // which tab is showing on the home screen
-	modulesCursor    int // cursor row in the Modules tab
-	diagnosticsCursor int // cursor row in the Diagnostics tab
-	moduleStatus map[string]string // module name -> "clean" / "dirty (N)" / "missing" / err; populated lazily
-	detailUnit   string
-	outputLines  []string // executor output (executor.log)
-	logLines     []string // build log (build.log)
-	detailScroll int      // scroll offset from top in detail view
-	autoFollow   bool     // auto-scroll to bottom during builds
-	listOffset   int      // first visible row in unit list
-	tick       bool // toggles for flashing indicator
-	width      int
-	height     int
-	message    string
-	building   map[string]bool
-	cancels    map[string]context.CancelFunc // cancel funcs for active builds
-	confirm      string // non-empty = waiting for y/n confirmation
-	queryEditing     bool     // true while the user is typing in the query bar
-	queryInput       string   // text in the query bar; live-parsed every keystroke
-	queryError       string   // last parse error; rendered next to the query bar
-	queryCompletions []string // tab-completion candidates, rendered under the bar
-	inSet         map[string]bool // pre-computed in:X closure for the active query, nil if no in: filter
-	visible       []int           // indexes into m.units after applying m.query
-	query         query.Query     // active query, applied to m.units to produce visible
-	queryRevertTo query.Query     // snapshot taken when the user opens `/`
-	savedQuery    string          // canonical form of the last user-saved query (or bootstrap)
+	proj              *yoestar.Project
+	projectDir        string
+	arch              string
+	warning           string // persistent warning banner (e.g., binfmt missing)
+	notification      string // transient global notification (e.g., container rebuild)
+	dag               *resolve.DAG
+	units             []string
+	hashes            map[string]string
+	statuses          map[string]unitStatus
+	cursor            int
+	view              viewKind
+	helpShowing       bool              // `?`-toggled keybinding overlay for the current page
+	helpScroll        int               // scroll offset within the help overlay when it overflows
+	activeTab         homeTab           // which tab is showing on the home screen
+	modulesCursor     int               // cursor row in the Modules tab
+	diagnosticsCursor int               // cursor row in the Diagnostics tab
+	moduleStatus      map[string]string // module name -> "clean" / "dirty (N)" / "missing" / err; populated lazily
+	detailUnit        string
+	outputLines       []string // executor output (executor.log)
+	logLines          []string // build log (build.log)
+	detailScroll      int      // scroll offset from top in detail view
+	autoFollow        bool     // auto-scroll to bottom during builds
+	listOffset        int      // first visible row in unit list
+	tick              bool     // toggles for flashing indicator
+	width             int
+	height            int
+	message           string
+	building          map[string]bool
+	cancels           map[string]context.CancelFunc // cancel funcs for active builds
+	confirm           string                        // non-empty = waiting for y/n confirmation
+	queryEditing      bool                          // true while the user is typing in the query bar
+	queryInput        string                        // text in the query bar; live-parsed every keystroke
+	queryError        string                        // last parse error; rendered next to the query bar
+	queryCompletions  []string                      // tab-completion candidates, rendered under the bar
+	inSet             map[string]bool               // pre-computed in:X closure for the active query, nil if no in: filter
+	visible           []int                         // indexes into m.units after applying m.query
+	query             query.Query                   // active query, applied to m.units to produce visible
+	queryRevertTo     query.Query                   // snapshot taken when the user opens `/`
+	savedQuery        string                        // canonical form of the last user-saved query (or bootstrap)
 
 	// Detail log search
 	detailSearching  bool   // true = detail search input active
@@ -390,11 +439,12 @@ type model struct {
 	detailFilesSortDesc bool
 
 	// Setup view
-	machines    []string // sorted machine names
-	setupCursor int      // cursor within setup options
-	setupField  string   // "" = top-level, "machine" / "image" = picker active
-	machineCursor int    // cursor within machine list
-	imageCursor   int    // cursor within image list
+	machines       []string // sorted machine names
+	setupCursor    int      // cursor within setup options
+	setupField     string   // "" = top-level, "machine" / "image" = picker active
+	machineCursor  int      // cursor within machine list
+	imageCursor    int      // cursor within image list
+	parallelBuilds int      // effective `yoe build` concurrency (adjusted on the Setup page)
 
 	// Flash view
 	flashUnit       string
@@ -501,7 +551,7 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	if m, ok := proj.Machines[proj.Defaults.Machine]; ok {
 		arch = m.Arch
 	}
-	hashes, err := resolve.ComputeAllHashes(dag, arch, proj.Defaults.Machine, nil)
+	hashes, err := resolve.ComputeAllHashes(dag, arch, proj.Defaults.Machine, build.SrcInputsFn(projectDir, arch, proj.Defaults.Machine))
 	if err != nil {
 		return fmt.Errorf("computing hashes: %w", err)
 	}
@@ -528,26 +578,32 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	// Read local.star once for both deploy-host prefill and query bootstrap.
 	ov, _ := yoestar.LoadLocalOverrides(projectDir)
 
+	parallelBuilds := yoestar.DefaultParallelBuilds
+	if ov.ParallelBuilds > 0 {
+		parallelBuilds = ov.ParallelBuilds
+	}
+
 	m := model{
-		proj:           proj,
-		projectDir:     projectDir,
-		arch:           arch,
-		dag:            dag,
-		units:          units,
-		hashes:         hashes,
-		statuses:       statuses,
+		proj:            proj,
+		projectDir:      projectDir,
+		arch:            arch,
+		dag:             dag,
+		units:           units,
+		hashes:          hashes,
+		statuses:        statuses,
 		building:        make(map[string]bool),
 		cancels:         make(map[string]context.CancelFunc),
 		unitSrcStates:   make(map[string]source.State),
 		moduleSrcStates: make(map[string]source.State),
 		srcWatcher:      newSourceWatcher(),
-		machines:       machines,
-		flashProgress:  progress.New(progress.WithDefaultGradient()),
-		buildProgress:  progress.New(progress.WithDefaultGradient(), progress.WithoutPercentage()),
-		buildPending:   make(map[string]bool),
-		deployHost:     ov.DeployHost,
-		loadOpts:       cfg.LoadOpts,
-		globalFlagArgs: cfg.GlobalFlagArgs,
+		machines:        machines,
+		flashProgress:   progress.New(progress.WithDefaultGradient()),
+		buildProgress:   progress.New(progress.WithDefaultGradient(), progress.WithoutPercentage()),
+		buildPending:    make(map[string]bool),
+		deployHost:      ov.DeployHost,
+		parallelBuilds:  parallelBuilds,
+		loadOpts:        cfg.LoadOpts,
+		globalFlagArgs:  cfg.GlobalFlagArgs,
 	}
 
 	// Bootstrap query: prefer local.star, fall back to in:<defaults.image>.
@@ -656,6 +712,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.target {
 		case targetUnit:
 			m.invalidateUnitState(msg.name)
+			// The previous build status reflected a different source
+			// state; toggling pin↔dev (or P-pinning) invalidates that
+			// — clear the cached/built status so the row doesn't
+			// misleadingly show a green check for the old build.
+			delete(m.statuses, msg.name)
 		case targetModule:
 			m.invalidateModuleState(msg.name)
 		}
@@ -671,6 +732,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.unitSrcStates != nil {
 				m.unitSrcStates[msg.name] = msg.state
 			}
+			// A state transition (dev → dev-mod, dev → dev-dirty,
+			// etc.) means the working tree no longer matches what
+			// the last build produced. Drop the cached build status
+			// so the row doesn't keep showing a stale green check.
+			// The hash itself already invalidates (SrcHashInputs
+			// folds HEAD sha + diff sha for dev-dirty), so the next
+			// build correctly cache-misses; this just makes the row
+			// reflect that immediately.
+			delete(m.statuses, msg.name)
 		case targetModule:
 			if m.moduleSrcStates != nil {
 				m.moduleSrcStates[msg.name] = msg.state
@@ -690,6 +760,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// recomputeMetrics — otherwise sizes for transitive deps stay
 			// blank for the entire duration of a multi-unit image build.
 			m.refreshUnitSize(msg.unit)
+			// Drop any cached source state — the build just wrote a
+			// fresh SourceState (pin or dev) to BuildMeta, and the
+			// renderer's lazy cache might have a stale empty value from
+			// a mid-build render. The next paint re-reads BuildMeta.
+			m.invalidateUnitState(msg.unit)
 			cmd := m.markBuildUnitFinished(msg.unit)
 			return m, cmd
 		case "waiting":
@@ -833,6 +908,44 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.queryEditing {
 			return m.updateSearch(msg)
 		}
+		// Help overlay: `?` opens a centered keybinding reference for the
+		// current page. While it's up, scroll keys move the (possibly
+		// taller-than-terminal) list and any other key dismisses it.
+		// Text-entry modes that legitimately take a literal `?` (confirm,
+		// detail search, query bar) are already consumed above; the deploy
+		// host field is the only other one, so the toggle is suppressed
+		// there.
+		if m.helpShowing {
+			switch msg.String() {
+			case "up", "k":
+				m.helpScroll--
+			case "down", "j":
+				m.helpScroll++
+			case "pgup", "ctrl+b":
+				m.helpScroll -= 10
+			case "pgdown", "ctrl+f":
+				m.helpScroll += 10
+			case "g":
+				m.helpScroll = 0
+			case "G":
+				m.helpScroll = m.helpMaxScroll()
+			default:
+				m.helpShowing = false
+				return m, nil
+			}
+			if m.helpScroll < 0 {
+				m.helpScroll = 0
+			}
+			if max := m.helpMaxScroll(); m.helpScroll > max {
+				m.helpScroll = max
+			}
+			return m, nil
+		}
+		if msg.String() == "?" && !(m.view == viewDeploy && m.deployStage == deployHostInput) {
+			m.helpShowing = true
+			m.helpScroll = 0
+			return m, nil
+		}
 		m.message = ""
 		switch m.view {
 		case viewUnits:
@@ -944,6 +1057,20 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.adjustListOffset()
 		return m, nil
 
+	case "g":
+		if vis := m.visibleIndices(); len(vis) > 0 {
+			m.cursor = vis[0]
+			m.adjustListOffset()
+		}
+		return m, nil
+
+	case "G":
+		if vis := m.visibleIndices(); len(vis) > 0 {
+			m.cursor = vis[len(vis)-1]
+			m.adjustListOffset()
+		}
+		return m, nil
+
 	case "enter":
 		if m.cursor < len(m.units) {
 			m.detailUnit = m.units[m.cursor]
@@ -981,6 +1108,12 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case "u":
+		if m.cursor < len(m.units) {
+			return m.openSourcePromptForUnit(m.units[m.cursor])
+		}
+		return m, nil
+
 	case "B":
 		var cmds []tea.Cmd
 		for _, name := range m.units {
@@ -999,8 +1132,17 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "e":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
-			path := findUnitFile(m.projectDir, name)
-			if path != "" {
+			// Use the resolved unit's DefinedIn (= the winning module's
+			// .star directory after prefer_modules + last-module-wins
+			// shadowing) so editing opens the file yoe actually uses,
+			// not just the first `<name>.star` the filesystem walk hits.
+			if path := unitStarPath(m.proj.Units[name]); path != "" {
+				return m, m.execEditor(path)
+			}
+			// Fallback for derived units (e.g., base-files-dev defined
+			// via a helper inside another .star): scan the project for
+			// any file mentioning the name.
+			if path := findUnitFile(m.projectDir, name); path != "" {
 				return m, m.execEditor(path)
 			}
 			m.message = fmt.Sprintf("Could not find .star file for %s", name)
@@ -1652,6 +1794,10 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.message = fmt.Sprintf("Clean failed: %v", err)
 			} else {
 				m.statuses[name] = statusNone
+				// Drop the cached source state and disarm the watcher
+				// — BuildMeta.SourceState is gone, the next render
+				// shows the SRC column as blank (empty state).
+				m.invalidateUnitState(name)
 				m.message = fmt.Sprintf("Cleaned %s", name)
 			}
 		} else if action == "quit" {
@@ -1667,6 +1813,7 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				for _, name := range m.units {
 					m.statuses[name] = statusNone
+					m.invalidateUnitState(name)
 				}
 				m.message = "Cleaned all build artifacts"
 			}
@@ -1678,7 +1825,7 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // Setup option names — add new options here.
-var setupOptions = []string{"Machine", "Image"}
+var setupOptions = []string{"Machine", "Image", "Parallel builds"}
 
 func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.setupField {
@@ -1702,6 +1849,26 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		if m.setupCursor < len(setupOptions)-1 {
 			m.setupCursor++
+		}
+		return m, nil
+
+	case "left", "h", "right", "l":
+		if setupOptions[m.setupCursor] != "Parallel builds" {
+			return m, nil
+		}
+		if msg.String() == "left" || msg.String() == "h" {
+			if m.parallelBuilds > 1 {
+				m.parallelBuilds--
+			}
+		} else {
+			m.parallelBuilds++
+		}
+		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+		ov.ParallelBuilds = m.parallelBuilds
+		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
+			m.message = fmt.Sprintf("Parallel builds set to %d (warning: failed to save local.star: %v)", m.parallelBuilds, err)
+		} else {
+			m.message = fmt.Sprintf("Parallel builds set to %d (saved to local.star)", m.parallelBuilds)
 		}
 		return m, nil
 
@@ -2093,6 +2260,9 @@ func (m *model) scrollToDetailMatch() {
 // ----- View -----
 
 func (m model) View() string {
+	if m.helpShowing {
+		return m.viewHelp()
+	}
 	switch m.view {
 	case viewDetail:
 		return m.viewDetail()
@@ -2118,10 +2288,28 @@ func (m model) renderHomeHeader() string {
 	var b strings.Builder
 	machine := m.proj.Defaults.Machine
 	image := m.proj.Defaults.Image
-	fmt.Fprintf(&b, "  %s  Machine: %s  Image: %s\n",
+
+	// Tab bar with diagnostics-count badge so the user notices when
+	// shadows or duplicate provides exist without leaving the Units tab.
+	var labels []string
+	for t := homeTab(0); t < numHomeTabs; t++ {
+		label := t.String()
+		if t == tabDiagnostics {
+			n := m.diagnosticsRowCount()
+			if n > 0 {
+				label = fmt.Sprintf("%s (%d)", label, n)
+			}
+		}
+		labels = append(labels, label)
+	}
+	fmt.Fprintf(&b, "  %s    %s    %s%s\n",
 		titleStyle.Render("[yoe]"),
-		headerStyle.Render(machine),
-		headerStyle.Render(image))
+		renderTabBar(labels, int(m.activeTab)),
+		helpKeyStyle.Render("tab"),
+		helpStyle.Render(": switch"))
+	fmt.Fprintf(&b, "  %s%s  %s%s\n",
+		fieldLabelStyle.Render("Machine: "), fieldValueStyle.Render(machine),
+		fieldLabelStyle.Render("Image: "), fieldValueStyle.Render(image))
 
 	if m.warning != "" {
 		warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Bold(true)
@@ -2134,33 +2322,9 @@ func (m model) renderHomeHeader() string {
 	if m.buildSessionActive() {
 		fmt.Fprintf(&b, "  %s\n", m.renderBuildProgress())
 	} else if m.feedStatus != "" {
-		feedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-		fmt.Fprintf(&b, "  %s\n", feedStyle.Render("feed: "+m.feedStatus))
+		fmt.Fprintf(&b, "  %s%s\n",
+			fieldLabelStyle.Render("feed: "), fieldValueStyle.Render(m.feedStatus))
 	}
-
-	// Tab bar with diagnostics-count badge so the user notices when
-	// shadows or duplicate provides exist without leaving the Units tab.
-	// Active tab is wrapped in `[ ... ]` and styled bold/amber so it
-	// reads as selected even on terminals that don't render underline.
-	var tabs []string
-	for t := homeTab(0); t < numHomeTabs; t++ {
-		label := t.String()
-		if t == tabDiagnostics {
-			n := m.diagnosticsRowCount()
-			if n > 0 {
-				label = fmt.Sprintf("%s (%d)", label, n)
-			}
-		}
-		if t == m.activeTab {
-			tabs = append(tabs, tabActiveStyle.Render("[ "+label+" ]"))
-		} else {
-			tabs = append(tabs, tabInactiveStyle.Render("  "+label+"  "))
-		}
-	}
-	fmt.Fprintf(&b, "  %s    %s%s\n",
-		strings.Join(tabs, " "),
-		helpKeyStyle.Render("tab"),
-		helpStyle.Render(": switch"))
 	return b.String()
 }
 
@@ -2208,7 +2372,8 @@ func (m model) viewUnitsTab() string {
 	// Query header — when the user presses `/`, the input editor replaces
 	// the query body in place rather than opening a separate input row at
 	// the bottom of the screen, so the eye stays on one Query: ... line.
-	counter := fmt.Sprintf("Units: %d/%d", len(m.visible), len(m.units))
+	counter := fieldLabelStyle.Render("Units: ") +
+		fieldValueStyle.Render(fmt.Sprintf("%d/%d", len(m.visible), len(m.units)))
 	if m.queryEditing {
 		var body string
 		if m.queryError != "" {
@@ -2219,9 +2384,9 @@ func (m model) viewUnitsTab() string {
 			body = fmt.Sprintf("/%s▌", m.queryInput)
 		}
 		b.WriteString(fmt.Sprintf("  %s%s    %s\n",
-			queryDimStyle.Render("Query: "),
+			fieldLabelStyle.Render("Query: "),
 			body,
-			queryDimStyle.Render(counter)))
+			counter))
 		// Tab-completion candidates: when the input can't be advanced
 		// further (multiple equally-good matches), drop the list right
 		// under the bar — closer to the eye than the bottom help row.
@@ -2239,9 +2404,9 @@ func (m model) viewUnitsTab() string {
 			style = queryActiveStyle
 		}
 		b.WriteString(fmt.Sprintf("  %s%s    %s\n",
-			queryDimStyle.Render("Query: "),
+			fieldLabelStyle.Render("Query: "),
 			style.Render(qBody),
-			queryDimStyle.Render(counter)))
+			counter))
 	}
 
 	// Column header — pad widths match the rows below; clicking a label
@@ -2429,17 +2594,17 @@ var (
 	defaultHelpItems = []helpItem{
 		{"b", "build"}, {"D", "deploy"}, {"x", "cancel"}, {"e", "edit"},
 		{"$", "shell"}, {"l", "log"}, {"s", "setup"}, {"/", "search"},
-		{`\`, "home"}, {"S", "save"}, {"o", "sort"}, {"q", "quit"},
+		{`\`, "home"}, {"S", "save"}, {"o", "sort"}, {"?", "help"}, {"q", "quit"},
 	}
 	imageHelpItems = []helpItem{
 		{"b", "build"}, {"x", "cancel"}, {"r", "run"}, {"e", "edit"},
 		{"$", "shell"}, {"l", "log"}, {"s", "setup"}, {"/", "search"},
-		{`\`, "home"}, {"S", "save"}, {"q", "quit"},
+		{`\`, "home"}, {"S", "save"}, {"?", "help"}, {"q", "quit"},
 	}
 	imageCachedHelpItems = []helpItem{
 		{"b", "build"}, {"x", "cancel"}, {"r", "run"}, {"f", "flash"},
 		{"e", "edit"}, {"$", "shell"}, {"l", "log"}, {"s", "setup"},
-		{"/", "search"}, {`\`, "home"}, {"S", "save"}, {"q", "quit"},
+		{"/", "search"}, {`\`, "home"}, {"S", "save"}, {"?", "help"}, {"q", "quit"},
 	}
 	// Shown while the query input is focused — these are the only keys
 	// updateSearch actually handles; navigation/build shortcuts are
@@ -2451,16 +2616,16 @@ var (
 	detailHelpItems = []helpItem{
 		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
 		{"/", "search"}, {"b", "build"}, {"$", "shell"}, {"u", "src"},
-		{"P", "promote"}, {"d", "diagnose"}, {"l", "log"},
+		{"P", "pin"}, {"d", "diagnose"}, {"l", "log"}, {"?", "help"},
 	}
 	detailImageHelpItems = []helpItem{
 		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
 		{"/", "search"}, {"b", "build"}, {"r", "run"}, {"$", "shell"},
-		{"d", "diagnose"}, {"l", "log"},
+		{"d", "diagnose"}, {"l", "log"}, {"?", "help"},
 	}
 	detailFilesHelpItems = []helpItem{
 		{"esc", "back"}, {"j/k", "scroll"}, {"g", "top"}, {"G", "bottom"},
-		{"o", "sort"}, {"O", "reverse"},
+		{"o", "sort"}, {"O", "reverse"}, {"?", "help"},
 	}
 )
 
@@ -2477,6 +2642,300 @@ func renderHelp(items []helpItem) string {
 	return b.String()
 }
 
+// helpEntry is one row in the `?` overlay: a key (or key group) and what it
+// does. helpSection groups related entries under a heading.
+type helpEntry struct{ keys, desc string }
+type helpSection struct {
+	title   string
+	entries []helpEntry
+}
+
+var (
+	helpBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#e8863a")).
+			Padding(1, 3)
+	helpSectionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Bold(true)
+)
+
+// helpGeneral is appended to every page so the dismiss/quit keys are always
+// documented in the same place.
+func helpGeneral(quit bool) helpSection {
+	s := helpSection{title: "General", entries: []helpEntry{
+		{"?", "open / close this help"},
+	}}
+	if quit {
+		s.entries = append(s.entries, helpEntry{"q  ·  Ctrl+C", "quit yoe"})
+	}
+	return s
+}
+
+// helpSections returns the page title and keybinding sections for whatever
+// page is currently active. It mirrors the dispatch in Update so the overlay
+// always documents exactly the keys that page handles.
+func (m model) helpSections() (string, []helpSection) {
+	nav := helpSection{title: "Navigation", entries: []helpEntry{
+		{"↑  ·  k", "move up"},
+		{"↓  ·  j", "move down"},
+		{"PgUp  ·  Ctrl+B", "page up"},
+		{"PgDn  ·  Ctrl+F", "page down"},
+		{"g  ·  G", "jump to top / bottom"},
+	}}
+
+	switch m.view {
+	case viewDetail:
+		scroll := helpSection{title: "Scroll", entries: []helpEntry{
+			{"↑  ·  k", "scroll up one line"},
+			{"↓  ·  j", "scroll down one line"},
+			{"PgUp  ·  Ctrl+B", "scroll page up"},
+			{"PgDn  ·  Ctrl+F", "scroll page down"},
+			{"g  ·  G", "jump to top / bottom"},
+		}}
+		tabs := helpSection{title: "Tabs", entries: []helpEntry{
+			{"Tab  ·  Shift+Tab", "switch Info / Files tab"},
+			{"Esc", "back to the unit list"},
+		}}
+		if m.detailTab == detailTabFiles {
+			return "Detail · Files — installed files in the unit's .apk", []helpSection{
+				tabs, scroll,
+				{title: "Sort", entries: []helpEntry{
+					{"o", "cycle sort column (name / size)"},
+					{"O", "reverse sort direction"},
+				}},
+				helpGeneral(true),
+			}
+		}
+		return "Detail · Info — dependency graph and build streams", []helpSection{
+			tabs, scroll,
+			{title: "Search", entries: []helpEntry{
+				{"/", "search the build log"},
+				{"n  ·  N", "next / previous match"},
+				{"Esc", "clear search (first press), then back"},
+			}},
+			{title: "Actions", entries: []helpEntry{
+				{"b", "build this unit"},
+				{"r", "run the image in QEMU (image units)"},
+				{"D", "deploy to a host over SSH (non-image)"},
+				{"$", "open a shell in the source dir"},
+				{"u", "toggle source between pin and dev mode"},
+				{"P", "pin the current HEAD into the .star tag"},
+				{"d", "launch claude /diagnose on the build log"},
+				{"l", "open the build log in $EDITOR"},
+			}},
+			helpGeneral(true),
+		}
+
+	case viewSetup:
+		return "Setup — machine, default image, parallel builds", []helpSection{
+			{title: "Navigate", entries: []helpEntry{
+				{"↑  ·  k", "move up (Machine / Image / Parallel builds)"},
+				{"↓  ·  j", "move down"},
+				{"Enter", "open the picker for the selected option"},
+				{"←/→  ·  h/l", "adjust Parallel builds"},
+				{"Esc  ·  q", "back to the unit list"},
+			}},
+			{title: "In a picker", entries: []helpEntry{
+				{"↑  ·  ↓", "choose a machine / image"},
+				{"Enter", "select and save to local.star"},
+				{"Esc", "close the picker without changing"},
+			}},
+			helpGeneral(false),
+		}
+
+	case viewFlash:
+		return "Flash — write a built image to a device", []helpSection{
+			{title: "Select device", entries: []helpEntry{
+				{"↑  ·  ↓", "choose a removable device"},
+				{"Enter", "continue to the confirm step"},
+				{"Esc  ·  q", "back to the unit list"},
+			}},
+			{title: "Confirm / permissions", entries: []helpEntry{
+				{"y", "write the image (or run sudo chown)"},
+				{"n  ·  Esc", "cancel and go back"},
+			}},
+			{title: "When finished", entries: []helpEntry{
+				{"Esc  ·  Enter  ·  q", "return to the unit list"},
+			}},
+			helpGeneral(false),
+		}
+
+	case viewDeploy:
+		return "Deploy — build and push a unit to a host over SSH", []helpSection{
+			{title: "Enter host", entries: []helpEntry{
+				{"type", "edit the target host (user@host)"},
+				{"Enter", "start the build + deploy"},
+				{"Ctrl+U", "clear the host field"},
+				{"Esc", "cancel and go back"},
+			}},
+			{title: "When finished", entries: []helpEntry{
+				{"Esc  ·  Enter  ·  q", "return to the unit list"},
+			}},
+			{title: "Note", entries: []helpEntry{
+				{"?", "available except while typing the host"},
+			}},
+			helpGeneral(false),
+		}
+
+	case viewSourcePrompt:
+		return "Source mode — pin ↔ dev for this unit / module", []helpSection{
+			{title: "Choose", entries: []helpEntry{
+				{"↑  ·  k", "move up (skips disabled options)"},
+				{"↓  ·  j", "move down"},
+				{"Enter", "apply the selected option"},
+				{"Esc  ·  q", "cancel, keep the current mode"},
+			}},
+			helpGeneral(false),
+		}
+
+	default: // viewUnits — Units / Modules / Diagnostics tabs
+		switch m.activeTab {
+		case tabModules:
+			return "Modules — external git modules and dev mode", []helpSection{
+				{title: "Navigation", entries: append(nav.entries,
+					helpEntry{"Tab  ·  Shift+Tab", "switch Units / Modules / Diagnostics"})},
+				{title: "Actions", entries: []helpEntry{
+					{"$", "open a shell in the module's clone dir"},
+					{"u", "toggle source between pin and dev mode"},
+					{"r", "refresh the module's git status"},
+				}},
+				helpGeneral(true),
+			}
+		case tabDiagnostics:
+			return "Diagnostics — shadowed units and duplicate provides", []helpSection{
+				{title: "Navigation", entries: append(nav.entries,
+					helpEntry{"Tab  ·  Shift+Tab", "switch Units / Modules / Diagnostics"})},
+				helpGeneral(true),
+			}
+		default:
+			return "Units — the build target list", []helpSection{
+				{title: "Navigation", entries: append(nav.entries,
+					helpEntry{"Tab  ·  Shift+Tab", "switch Units / Modules / Diagnostics"},
+					helpEntry{"Enter", "open the unit detail view"})},
+				{title: "Build", entries: []helpEntry{
+					{"b", "build the selected unit"},
+					{"B", "build all visible units"},
+					{"x", "cancel the selected unit's build"},
+					{"c", "clean the selected unit's artifacts"},
+					{"C", "clean all build artifacts"},
+				}},
+				{title: "Inspect", entries: []helpEntry{
+					{"e", "edit the unit's .star file in $EDITOR"},
+					{"$", "open a shell in the unit's source dir"},
+					{"u", "toggle source between pin and dev mode"},
+					{"l", "open the unit's build log"},
+					{"d", "launch claude /diagnose on the build log"},
+					{"a", "launch claude /new-unit"},
+					{"r", "run an image unit in QEMU"},
+					{"f", "flash a built image to a device"},
+					{"D", "deploy a non-image unit to a host"},
+				}},
+				{title: "Filter & sort", entries: []helpEntry{
+					{"/", "edit the filter query"},
+					{`\`, "reset the query to the saved default"},
+					{"S", "save the current query as the default"},
+					{"o  ·  O", "cycle sort column / reverse direction"},
+					{"s", "open Setup (machine / image)"},
+				}},
+				helpGeneral(true),
+			}
+		}
+	}
+}
+
+// helpBodyLines formats the sections (the scrollable region between the
+// pinned title and footer) into one display line per row, with the key
+// column padded to a common width. Used by both viewHelp and helpMaxScroll
+// so the rendered window and the scroll clamp agree on the line count.
+func (m model) helpBodyLines() []string {
+	_, sections := m.helpSections()
+	keyWidth := 0
+	for _, s := range sections {
+		for _, e := range s.entries {
+			if w := lipgloss.Width(e.keys); w > keyWidth {
+				keyWidth = w
+			}
+		}
+	}
+	var lines []string
+	for i, s := range sections {
+		if i > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, helpSectionStyle.Render(s.title))
+		for _, e := range s.entries {
+			pad := strings.Repeat(" ", keyWidth-lipgloss.Width(e.keys))
+			lines = append(lines, "  "+helpKeyStyle.Render(e.keys)+pad+"   "+helpStyle.Render(e.desc))
+		}
+	}
+	return lines
+}
+
+// helpViewportHeight is how many body lines fit between the pinned title
+// and footer inside the box, given the terminal height. 8 accounts for the
+// box border (2) + vertical padding (2) + title line + blank (2) + blank +
+// footer (2). Returns 0 when the size is unknown (render everything).
+func (m model) helpViewportHeight() int {
+	if m.height <= 0 {
+		return 0
+	}
+	vp := m.height - 8
+	if vp < 1 {
+		vp = 1
+	}
+	return vp
+}
+
+// helpMaxScroll is the largest valid scroll offset for the current page and
+// terminal size. Update clamps m.helpScroll to this so `up` after `G` still
+// moves and the window never scrolls past the last line.
+func (m model) helpMaxScroll() int {
+	vp := m.helpViewportHeight()
+	if vp == 0 {
+		return 0
+	}
+	body := m.helpBodyLines()
+	if len(body) <= vp {
+		return 0
+	}
+	return len(body) - vp
+}
+
+// viewHelp renders the per-page keybinding reference as a rounded amber box
+// centered over the screen, with a pinned title and footer and a scrollable
+// body when the list is taller than the terminal. Scroll keys are handled in
+// Update; any other key dismisses it.
+func (m model) viewHelp() string {
+	title, _ := m.helpSections()
+	body := m.helpBodyLines()
+	vp := m.helpViewportHeight()
+
+	scrollable := vp > 0 && len(body) > vp
+	window := body
+	footer := dimStyle.Render("press any key to close")
+	if scrollable {
+		scroll := m.helpScroll
+		if max := len(body) - vp; scroll > max {
+			scroll = max
+		}
+		if scroll < 0 {
+			scroll = 0
+		}
+		window = append([]string{}, body[scroll:scroll+vp]...)
+		footer = dimStyle.Render(fmt.Sprintf(
+			"↑/↓ scroll · g/G ends · any other key closes      lines %d–%d of %d",
+			scroll+1, scroll+vp, len(body)))
+	}
+
+	inner := titleStyle.Render(title) + "\n\n" +
+		strings.Join(window, "\n") + "\n\n" + footer
+
+	box := helpBoxStyle.Render(inner)
+	if m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+	}
+	return box
+}
+
 // viewModulesTab renders the Modules tab — one row per resolved module
 // with declared metadata and live git status.
 func (m model) viewModulesTab() string {
@@ -2485,8 +2944,8 @@ func (m model) viewModulesTab() string {
 
 	mods := m.proj.ResolvedModules
 	fmt.Fprintf(&b, "  %s%s\n",
-		queryDimStyle.Render("Modules: "),
-		queryDimStyle.Render(fmt.Sprintf("%d declared", len(mods))))
+		fieldLabelStyle.Render("Modules: "),
+		fieldValueStyle.Render(fmt.Sprintf("%d declared", len(mods))))
 	fmt.Fprintf(&b, "  %s\n", headerStyle.Render(fmt.Sprintf("%-22s %-10s %-9s %-32s %s",
 		"NAME", "REF", "SRC", "PATH", "STATUS")))
 
@@ -2600,7 +3059,7 @@ func (m model) viewModulesTab() string {
 	} else {
 		b.WriteString(renderHelp([]helpItem{
 			{"tab", "next tab"}, {"j/k", "move"}, {"g/G", "top/bottom"},
-			{"$", "shell"}, {"u", "src"}, {"r", "refresh"}, {"q", "quit"},
+			{"$", "shell"}, {"u", "src"}, {"r", "refresh"}, {"?", "help"}, {"q", "quit"},
 		}))
 	}
 	return b.String()
@@ -2616,8 +3075,8 @@ func (m model) viewDiagnosticsTab() string {
 
 	diag := m.proj.Diagnostics
 	fmt.Fprintf(&b, "  %s%s\n",
-		queryDimStyle.Render("Diagnostics: "),
-		queryDimStyle.Render(fmt.Sprintf("%d shadowed, %d duplicate provides",
+		fieldLabelStyle.Render("Diagnostics: "),
+		fieldValueStyle.Render(fmt.Sprintf("%d shadowed, %d duplicate provides",
 			len(diag.Shadows), len(diag.DuplicateProvides))))
 
 	viewH := m.diagnosticsViewportHeight()
@@ -2732,7 +3191,7 @@ func (m model) viewDiagnosticsTab() string {
 		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
 	} else {
 		b.WriteString(renderHelp([]helpItem{
-			{"tab", "next tab"}, {"j/k", "move"}, {"g/G", "top/bottom"}, {"q", "quit"},
+			{"tab", "next tab"}, {"j/k", "move"}, {"g/G", "top/bottom"}, {"?", "help"}, {"q", "quit"},
 		}))
 	}
 	return b.String()
@@ -2780,7 +3239,7 @@ func (m model) viewSetup() string {
 		}
 
 		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("  enter select  esc back"))
+		b.WriteString(helpStyle.Render("  enter select  esc back  ? help"))
 		b.WriteString("\n")
 
 	case "image":
@@ -2807,7 +3266,7 @@ func (m model) viewSetup() string {
 		}
 
 		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("  enter select  esc back"))
+		b.WriteString(helpStyle.Render("  enter select  esc back  ? help"))
 		b.WriteString("\n")
 
 	default:
@@ -2825,18 +3284,20 @@ func (m model) viewSetup() string {
 				value = headerStyle.Render(m.proj.Defaults.Machine)
 			case "Image":
 				value = headerStyle.Render(m.proj.Defaults.Image)
+			case "Parallel builds":
+				value = headerStyle.Render(fmt.Sprintf("%d", m.parallelBuilds))
 			}
 			b.WriteString(fmt.Sprintf("%s%s  %s\n", cursor, style.Render(opt), value))
 		}
 
 		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("  enter select  esc back  q quit"))
+		b.WriteString(helpStyle.Render("  enter select  ←/→ adjust  esc back  ? help  q quit"))
 		b.WriteString("\n")
 	}
 
 	if m.message != "" {
 		b.WriteString("\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  "+m.message))
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
 		b.WriteString("\n")
 	}
 
@@ -2886,9 +3347,9 @@ func (m model) detailAllLines() []string {
 //   - The unit itself is in the explicit list: "└── <image> (explicit)"
 //   - It's pulled in transitively: list each explicit pick with the
 //     runtime-dep chain that bridges them, e.g.
-//       └── dev-image (image)
-//             ├── x11 → libx11 → cairo
-//             └── yazi → libpango → cairo
+//     └── dev-image (image)
+//     ├── x11 → libx11 → cairo
+//     └── yazi → libpango → cairo
 //   - Nothing in the explicit list reaches it: "(not in <image>)"
 func (m model) upstreamLines() []string {
 	imgName := m.proj.Defaults.Image
@@ -3152,17 +3613,12 @@ func (m model) viewDetail() string {
 
 	// Tab bar (Info / Files), styled like the home tab bar so the two
 	// strips read as the same UI element.
-	var tabs []string
+	var labels []string
 	for t := detailTab(0); t < numDetailTabs; t++ {
-		label := t.String()
-		if t == m.detailTab {
-			tabs = append(tabs, tabActiveStyle.Render("[ "+label+" ]"))
-		} else {
-			tabs = append(tabs, tabInactiveStyle.Render("  "+label+"  "))
-		}
+		labels = append(labels, t.String())
 	}
-	b.WriteString(fmt.Sprintf("  %s    %s%s\n",
-		strings.Join(tabs, " "),
+	b.WriteString(fmt.Sprintf("      %s    %s%s\n",
+		renderTabBar(labels, int(m.detailTab)),
 		helpKeyStyle.Render("tab"),
 		helpStyle.Render(": switch")))
 
@@ -3197,7 +3653,7 @@ func (m model) viewDetail() string {
 		end = len(allLines)
 	}
 
-	matchHighlight := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))       // yellow
+	matchHighlight := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))              // yellow
 	currentHighlight := lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true) // bold yellow
 
 	for lineIdx := start; lineIdx < end; lineIdx++ {
@@ -4096,10 +4552,49 @@ func (m model) detailSourceLine() string {
 	if url != "" {
 		parts = append(parts, dimStyle.Render(url))
 	}
+	// Pin: surface the declared tag so the line reads e.g. "SOURCE pin
+	// <url> (pinned at v1.36.1)". Dev: rely on the live SourceDescribe
+	// below (e.g. v3.4.1-3-gabc1234-dirty) — it's more informative than
+	// the static .star pin once the user is hacking on the source.
+	if state == source.StatePin && u.Tag != "" {
+		parts = append(parts, dimStyle.Render("(pinned at "+u.Tag+")"))
+	}
+	// Branch-tracking dev unit: surface "tracking origin/<branch>" plus,
+	// when the working tree has moved past the pin tag, "(N commits past
+	// <tag>)". The count comes from `git rev-list <tag>..HEAD` — a one-off
+	// invocation per detail-page render, fast enough not to warrant
+	// caching alongside the state cache.
+	if source.IsDev(state) && u.Branch != "" {
+		hint := "tracking origin/" + u.Branch
+		if u.Tag != "" {
+			if n := commitsPast(srcDir, u.Tag); n > 0 {
+				hint += fmt.Sprintf(" (%d commits past %s)", n, u.Tag)
+			}
+		}
+		parts = append(parts, dimStyle.Render(hint))
+	}
 	if meta := build.ReadMeta(buildDir); meta != nil && meta.SourceDescribe != "" {
 		parts = append(parts, dimStyle.Render(meta.SourceDescribe))
 	}
 	return strings.Join(parts, "  ")
+}
+
+// commitsPast returns how many commits HEAD is past the given ref in
+// srcDir. Returns 0 on any error (ref unknown, not a git dir, etc.) —
+// the hint is purely informational, so silently dropping it is the
+// right failure mode.
+func commitsPast(srcDir, ref string) int {
+	cmd := exec.Command("git", "rev-list", "--count", ref+"..HEAD")
+	cmd.Dir = srcDir
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // remoteOriginURL returns `git remote get-url origin` for srcDir, or
@@ -4285,7 +4780,7 @@ func (m *model) recomputeStatuses() {
 	// m.visible would carry stale indices into the old slice.
 	m.applyQuery()
 
-	hashes, err := resolve.ComputeAllHashes(m.dag, m.arch, m.proj.Defaults.Machine, nil)
+	hashes, err := resolve.ComputeAllHashes(m.dag, m.arch, m.proj.Defaults.Machine, build.SrcInputsFn(m.projectDir, m.arch, m.proj.Defaults.Machine))
 	if err != nil {
 		return
 	}
@@ -4410,6 +4905,44 @@ func (m model) renderBuildProgress() string {
 	}
 	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	return bar.View() + labelStyle.Render(label)
+}
+
+// unitStarPath returns the .star file that defines the given resolved
+// unit, using its DefinedIn directory (the winning module's path after
+// priority resolution). Tries the conventional `<name>.star` first,
+// then falls back to scanning DefinedIn for any .star file whose body
+// names this unit — handles helpers that emit a unit with a different
+// filename from the function definition.
+//
+// Returns "" if the unit is nil, has no DefinedIn (unit constructed
+// programmatically), or no .star in DefinedIn references it.
+func unitStarPath(u *yoestar.Unit) string {
+	if u == nil || u.DefinedIn == "" {
+		return ""
+	}
+	candidate := filepath.Join(u.DefinedIn, u.Name+".star")
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	needle := []byte(`"` + u.Name + `"`)
+	entries, err := os.ReadDir(u.DefinedIn)
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".star") {
+			continue
+		}
+		path := filepath.Join(u.DefinedIn, e.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if bytes.Contains(data, needle) {
+			return path
+		}
+	}
+	return ""
 }
 
 func findUnitFile(projectDir, name string) string {
@@ -4643,14 +5176,14 @@ func (m model) viewFlash() string {
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("↑/↓ select • enter confirm • esc back"))
+		b.WriteString(helpStyle.Render("↑/↓ select • enter confirm • esc back • ? help"))
 	case flashConfirm:
 		c := m.flashCandidates[m.flashCursor]
 		b.WriteString(fmt.Sprintf("Flash %s → %s (%s, %s %s)?\n",
 			m.flashUnit, c.Path, device.FormatSize(c.Size), c.Vendor, c.Model))
 		b.WriteString(failedStyle.Render(fmt.Sprintf("This will erase all data on %s.", c.Path)))
 		b.WriteString("\n\n")
-		b.WriteString(helpStyle.Render("y to confirm • n/esc to cancel"))
+		b.WriteString(helpStyle.Render("y to confirm • n/esc to cancel • ? help"))
 	case flashWriting:
 		c := m.flashCandidates[m.flashCursor]
 		b.WriteString(fmt.Sprintf("Writing %s → %s\n\n", filepath.Base(m.flashImagePath), c.Path))
@@ -4668,7 +5201,7 @@ func (m model) viewFlash() string {
 		b.WriteString("\n\n")
 		b.WriteString(fmt.Sprintf("Run sudo chown %s %s?", username, cand.Path))
 		b.WriteString("\n\n")
-		b.WriteString(helpStyle.Render("y to run sudo chown • n/esc to cancel"))
+		b.WriteString(helpStyle.Render("y to run sudo chown • n/esc to cancel • ? help"))
 	case flashDone:
 		b.WriteString(buildingStyle.Render("Flash complete."))
 		b.WriteString("\n\n")

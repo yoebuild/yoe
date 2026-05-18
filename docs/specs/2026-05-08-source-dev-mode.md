@@ -35,10 +35,24 @@ This brainstorm captures requirements for adding all four to the TUI.
 
 ## What `dev` actually does
 
-Dev mode is **the same build as pinned**, plus connectivity. Concretely, when
-you switch from `pin` to `dev`, the working tree stays at the exact same commit
-(branch / tag / sha — whatever the unit's source declared); the build output is
-bit-identical. What changes:
+Dev mode is **pinned source + connectivity**, with the working-tree commit
+determined by the unit's source declaration. Two shapes:
+
+- **Unit declares `tag` only** (e.g., `tag = "v1.36.1"`): pin and dev build the
+  same commit. Switching pin → dev keeps the working tree at the pinned ref;
+  only connectivity changes (remote becomes real, history gets unshallowed). The
+  build is bit-identical between modes.
+- **Unit declares both `tag` and `branch`** (e.g.,
+  `tag = "v1.36.1", branch = "master"`): pin builds the tagged commit; switching
+  pin → dev checks out `origin/<branch>` HEAD, which may be ahead of the tag.
+  The build moves to branch HEAD; dev builds are inherently per-machine
+  (dependent on fetch time).
+
+The `tag` field accepts either a tag name or a 40-char SHA — the source layer
+treats both as opaque refs. Use a SHA when there is no upstream tag to pin
+against.
+
+What changes on every pin → dev transition (regardless of which shape):
 
 - **Remote URL becomes real.** Pinned clones are bare-bones (often shallow,
   often without an `origin` pointing anywhere usable). Dev mode rewrites
@@ -46,21 +60,28 @@ bit-identical. What changes:
   `git push`, `git log origin/main`, etc. all work.
 - **History gets populated.** A `git fetch --unshallow` runs so the user can
   browse log, blame, and diff against earlier upstream commits.
+- **The local `yoe/pin` git tag always stays at the pinned commit.** That way
+  `git rev-list yoe/pin..HEAD` counts commits past the pin regardless of whether
+  the unit declares a `branch`. The dev-mod signal then answers "would a build
+  here produce different output than pin mode?" at a glance — a unit with
+  `branch` declared that just toggled to dev sits on `origin/<branch>` HEAD,
+  which is typically past the pin, so it goes straight to dev-mod.
 - **The TUI stops rewriting the source on rebuild.** Once a unit is in dev mode,
   yoe will never `git clean -fdx` or re-clone the source dir, even if the unit's
   `source` URL or `tag` changes in the .star. Pin → dev is the user's commitment
   to manage the checkout themselves; rebuild just warns and proceeds with
   whatever's there.
 
-The user moves between branches, commits, or remote tags inside dev mode by hand
+The user moves between branches or off-branch commits inside dev mode by hand
 (the detail page's `$` shortcut drops them into a shell). The toggle doesn't
-pick branches; it sets up the remote and history once.
+prompt for a branch — the unit declaration is the policy.
 
 ## Goals
 
 - One TUI keystroke flips a unit (or module) between **pin** and **dev** mode.
-  Pin = fresh shallow clone at the declared ref, no remote. Dev = same commit
-  checked out, real remote (HTTPS or SSH), full history.
+  Pin = fresh shallow clone at the declared ref, no remote. Dev = real remote
+  (HTTPS or SSH), full history, working tree at the unit's declared `branch`
+  HEAD if one is set, otherwise at the pinned commit.
 - The active source state is visible at a glance on the units tab, the modules
   tab, and each detail page — including whether the work tree has uncommitted
   changes or commits beyond upstream.
@@ -79,8 +100,9 @@ pick branches; it sets up the remote and history once.
   ephemeral state is a real pain point.
 - **Multi-remote / fork management.** No "set my fork as origin, upstream as
   upstream" workflow; that's a fancier dev story for later.
-- **Branch picker.** Initial dev-mode checkout stays on the same commit pinned
-  mode produced. Switching branches = git checkout by hand from `$`.
+- **Interactive branch picker.** Dev mode's branch is declared in the unit
+  (`branch = "..."`), not chosen interactively at toggle time. Switching to a
+  different branch inside dev mode = git checkout by hand from `$`.
 - **Auto-fetch on view.** State display reflects the local working tree only; it
   does not run `git fetch` to compare against remote HEAD.
 - **Touching the unit's `source` URL in the .star.** The toggle only rewrites
@@ -90,7 +112,7 @@ pick branches; it sets up the remote and history once.
 
 Four states per unit/module, each a distinct color in the TUI. Detection is
 local — no network — and runs from `git status` plus
-`git rev-list upstream..HEAD`.
+`git rev-list yoe/pin..HEAD`.
 
 | State       | Meaning                                                    | Color |
 | ----------- | ---------------------------------------------------------- | ----- |
@@ -104,8 +126,13 @@ a unit's source, switch it to dev first.** Pin is for the build pipeline to
 manage; dev is for humans. A pin-mode src dir with edits is a misuse of pin
 mode, not a state worth modelling — yoe is allowed to overwrite it.
 
-`dev-mod` is the "I have work to extract" state. `yoe dev extract` is the
-intended next action; the detail page should hint at it.
+`dev-mod` is the "build would differ from pin" state. `upstream` always anchors
+at the pinned commit, so `dev-mod` means "commits past the pin" regardless of
+whether the unit declares a `branch`. A branch-tracking unit that just toggled
+to dev typically lands in `dev-mod` immediately because `origin/<branch>` HEAD
+is past the pin tag — that's the visible signal that yoe is now building
+something different from the pinned reference. `yoe dev extract` is still the
+natural next action when the diff represents work to extract as patches.
 
 `dev-dirty` is the "I have unsaved edits" state — most warnings fire here.
 
@@ -179,7 +206,9 @@ A new "Source" line near the top of the metadata block:
 A new keybinding `u` ("upstream toggle") on the detail page. Pressing it:
 
 - From `pin`: prompts SSH vs HTTPS, then runs the pin → dev transition (rewrite
-  remote, fetch unshallow, persist `dev` state).
+  remote, fetch unshallow, persist `dev` state). When the unit declares a
+  `branch`, the transition also checks out `origin/<branch>` HEAD; otherwise the
+  working tree stays at the pinned commit.
 - From `dev` / `dev-mod` / `dev-dirty`: prompts to confirm the dev → pin
   transition (which discards any commits beyond upstream and dirty edits).
   Single-keystroke confirm if the state is plain `dev` (nothing at risk).
@@ -190,49 +219,35 @@ Same `u` binding from the module's expanded view. Same prompts. The "discard
 local commits" warning matters more for modules since losing pushed-elsewhere
 work is more common than for unit checkouts.
 
-### Promote current dev state to the .star pin
+### Pin to current — `P` keybinding
 
-A second keybinding on the detail page (suggested: `P` for "pin to current"),
-available **only when the unit is in `dev-mod` state**. The other three states
-don't need it: `pin` and `dev` already match the unit's declared ref, so
-"promote to current" is a no-op; `dev-dirty` has uncommitted work that should be
-committed or stashed before pinning so the captured state is reproducible. The
-action captures the checkout's current HEAD back into the unit's `.star`
-definition, so the next pinned-mode build picks up whatever the user has settled
-on (typically: bumped to a newer upstream tag, or stabilised on a specific
-commit they cherry-picked from upstream).
+A second keybinding on the detail page (`P` for "pin to current") captures the
+working tree's current HEAD into the unit's `tag` field. The action is
+deliberately simple — no popup, no tag/hash/branch picker:
 
-The detail page surfaces a hint when the action isn't available:
-`P pin: commit or stash first` in `dev-dirty`, or simply omits the help row
-entry in `pin`/`dev` (nothing to promote).
+- Always writes the 40-char SHA: `tag = "abc123def..."`. Tag names can be
+  mutated by upstream (rebase, delete, force-push); the SHA is unambiguous and
+  reproducible. The user can hand-edit the `.star` to swap in a tag name when
+  they want a more readable pin.
+- The `branch` field is never written by `P`. Branch tracking is declared by the
+  unit author; the pin command only updates the pin.
 
-When invoked, yoe inspects the current HEAD and offers a popup asking which form
-of pin to write:
+After the rewrite, yoe re-points the local `yoe/pin` git tag to HEAD so
+`git rev-list yoe/pin..HEAD` returns zero, and persists pin state in
+`BuildMeta`. The working tree, the `.star` declaration, and the SRC column now
+all agree on the new pin. The user can toggle `u` again if they want to go back
+to dev mode and keep iterating from this point.
 
-- **Tag** — only offered if HEAD has an annotated or lightweight tag pointing at
-  it. Writes `tag = "<tagname>"` in the unit's .star. Most common for "I bumped
-  busybox to v1.38.0".
-- **Hash** — always offered. Writes `tag = "<full-40-char-sha>"` (yoe's source
-  layer accepts a sha in the `tag` field). Most reproducible; best when HEAD is
-  on a commit with no tag.
-- **Branch** — offered with a warning that branches are mutable and break build
-  reproducibility. Writes `branch = "<branchname>"` and removes any existing
-  `tag` field. Use sparingly.
+`P` is available in `dev` and `dev-mod`. In `dev-dirty` it's disabled with a
+hint (`P pin: commit or stash first`) so the captured state is reproducible. In
+`pin` mode the unit's source dir isn't a working checkout, so the action isn't
+offered.
 
-Whichever form the user picks, the .star edit is a single-field rewrite
-(regex-based to preserve comments and surrounding whitespace). The existing
-`tag` / `branch` fields are updated in place; if the unit had a `branch` and the
-user picks tag/hash, the `branch` line is removed.
-
-After the pin lands, yoe also re-points the local `upstream` tag at the current
-HEAD (`git tag -f upstream HEAD`). With the tag moved,
-`git rev-list upstream..HEAD` returns zero commits and the unit transitions from
-`dev-mod` back to plain `dev` — the visible acknowledgement that "what I'm
-building is now what's pinned."
-
-The underlying checkout doesn't move: the user's branch and working tree stay
-where they were, just the upstream marker catches up. A later toggle back to pin
-re-clones shallow at the new ref; the work tree stays consistent.
+The convenience over hand-editing: one keystroke replaces "find the right line
+in the `.star`, get the tag name from git, paste, save, switch back to pin." The
+picker variants from the original design (separate tag/hash/branch popup) are
+intentionally collapsed — a single `tag =` rewrite covers the common workflows,
+and the user can hand-edit when they want something exotic.
 
 ### Build-time warning, not overwrite
 
@@ -259,17 +274,19 @@ behave as before: source is freely re-fetched/re-cloned each rebuild.
                                 │ │
    press `u` → SSH/HTTPS prompt │ │ press `u` → confirm if dev-mod
    → fetch --unshallow          │ │ or dev-dirty (loses work)
-                                ▼ │ → re-clone shallow
+   → checkout origin/<branch>   │ │ → re-clone shallow
+     if `branch` declared       │ │
+                                ▼ │
                        ┌──────────────────┐
                   ┌───►│       dev        │◄────────────────┐
                   │    └──┬───────────┬───┘                 │
                   │       │           │                     │
         git stash │       │ edit      │ git commit          │ press `P`
-        / reset   │       │ files     │                     │ → tag/hash/branch
-                  │       ▼           ▼                     │   prompt
-                  │  ┌──────────┐ ┌──────────┐              │ → rewrite .star
-                  └──┤dev-dirty │ │ dev-mod  ├──────────────┘ → move upstream
-                     │uncommit'd│ │ N commits│                  tag to HEAD
+        / reset   │       │ files     │                     │ → rewrite
+                  │       ▼           ▼                     │   tag = HEAD
+                  │  ┌──────────┐ ┌──────────┐              │ → move upstream
+                  └──┤dev-dirty │ │ dev-mod  ├──────────────┘   tag to HEAD
+                     │uncommit'd│ │ N commits│
                      │  edits   │ │  ahead   │
                      └────┬─────┘ └─────┬────┘
                           │ git commit  │
@@ -280,16 +297,18 @@ behave as before: source is freely re-fetched/re-cloned each rebuild.
 Transitions:
 
 - **pin → dev** (`u`): SSH/HTTPS prompt; rewrite remote,
-  `git fetch --unshallow`, persist `dev` state to build.json. Working tree
-  commit unchanged.
+  `git fetch --unshallow`. If the unit declares a `branch`, check out
+  `origin/<branch>` HEAD; otherwise the working tree stays at the pinned commit.
+  Persist `dev` state to build.json.
 - **dev → pin** (`u`): if `dev-mod` or `dev-dirty`, prompt with warning about
   losing local work. On confirm: re-clone via the existing `source.Prepare`
   path.
-- **dev-mod → dev** (`P`): promote current HEAD to the unit's pinned ref —
-  rewrite the .star's `tag`/`branch` field and move the local `upstream` tag to
-  HEAD. Disabled when state is `dev-dirty` (commit or stash first).
+- **dev / dev-mod → dev** (`P`): rewrite the unit's `tag` field to HEAD (tag
+  name if HEAD has one, otherwise 40-char SHA); move the local `yoe/pin` tag to
+  HEAD so `dev-mod` collapses back to `dev`. Disabled in `dev-dirty` (commit or
+  stash first) and in `pin`.
 - **dev ↔ dev-mod ↔ dev-dirty**: auto-detected from `git status` +
-  `git rev-list upstream..HEAD`. No user action required.
+  `git rev-list yoe/pin..HEAD`. No user action required.
 
 ## Persistence
 
@@ -309,11 +328,23 @@ These are pointers, not the design — planning doc owns specifics.
 
 - `internal/dev.go` already has `DevDiff` / `DevExtract` / `DevStatus` — extend
   with `DevToPin(unit)` / `DevToUpstream(unit, ssh bool)` /
-  `DevDetectState(unit)` / `DevPromoteToPin(unit, kind)` (where `kind` is one of
-  `tag`/`hash`/`branch`) and reuse the same git-cmd scaffolding.
-- The .star rewriter for the promote action is regex-based — find the unit's
-  `tag = "..."` / `branch = "..."` / `sha256 = "..."` line and splice.
-  Round-tripping through a Starlark printer would lose comments.
+  `DevDetectState(unit)` / `DevPinToCurrent(unit)` and reuse the same git-cmd
+  scaffolding.
+- `DevToUpstream` reads the unit's declared `branch` field (if any). After
+  fetching, if a local branch named `<branch>` already exists it is checked out
+  as-is — preserving any local commits the user made in a prior dev session —
+  and only created from `origin/<branch>` HEAD when missing. With no branch
+  declared the working tree stays at the pinned commit. The local `yoe/pin` git
+  tag is always anchored at the pinned commit so dev-mod counts commits past the
+  pin — a freshly-created branch-tracked unit toggled into dev with branch HEAD
+  ahead of pin lands in dev-mod immediately.
+- `DevPinToCurrent` writes HEAD into the unit's `tag` field (tag name when HEAD
+  has one, otherwise 40-char SHA) and moves the local `yoe/pin` tag to HEAD.
+  Only writes to `tag` — `branch` is never touched. A regex-based `.star` field
+  rewriter (`internal/starlark/edit.go`) preserves surrounding comments and
+  whitespace.
+- The unit's source declaration allows `tag` and `branch` to coexist: `tag` is
+  the pin (a tag name or a SHA), `branch` is the optional dev-mode tracking ref.
 - `BuildMeta.SourceState` string field; ReadMeta/WriteMeta unchanged.
 - `internal/source/Prepare` already short-circuits when the src dir has local
   commits — extend the gate to "any unit in dev state" once the state file is
@@ -338,10 +369,17 @@ These are pointers, not the design — planning doc owns specifics.
 - **`git fetch --unshallow` on huge upstream histories.** Linux kernel, llvm,
   etc. take meaningful time and disk to unshallow. Show the command running with
   a progress indicator; let the user cancel.
-- **Default branch detection.** When the user wants to check out upstream's
-  default branch (a follow-on we're not solving in v1), `git remote show origin`
-  is one network round trip. v1 doesn't need this because dev keeps the working
-  commit unchanged.
+- **Default branch detection when the unit doesn't declare one.** A unit with no
+  `branch =` field keeps the working commit at the pin on toggle. For units that
+  should track upstream but don't yet declare a branch, the dev edits the .star
+  to add `branch = "..."`. There is no auto-discovery of the upstream's default
+  branch via `git remote show origin` in v1; a follow-on could add
+  detection-on-toggle.
+- **Branch HEAD is past the pin tag.** When a declared `branch` has moved ahead
+  of the pinned `tag` between pin builds and the dev's first toggle to dev, the
+  pin → dev transition silently advances the working tree to branch HEAD. The
+  TUI should surface "moved N commits to origin/<branch>" in the SOURCE detail
+  line so the change isn't invisible.
 
 ## Success criteria
 
@@ -354,9 +392,13 @@ These are pointers, not the design — planning doc owns specifics.
   work tree.
 - A `dev-mod` unit being switched back to pin shows the user the commit list and
   asks for confirmation before discarding.
-- A `dev-mod` unit can be promoted to pin (`P`) by picking tag/hash/branch in a
-  popup; the .star rewrites in place, the local `upstream` tag advances to HEAD,
-  and the unit transitions to plain `dev`. The action is disabled (with a hint)
-  for `dev-dirty`.
+- A unit declaring `branch = "..."` is auto-checked-out to `origin/<branch>`
+  HEAD on pin → dev toggle; a unit with no branch declaration keeps the working
+  tree at the pinned commit. The `dev-mod` count reflects commits beyond the
+  tracked anchor (branch HEAD when declared, the pin otherwise).
+- The `P` keystroke on the detail page rewrites the unit's `tag` field to HEAD's
+  tag (when one exists) or its 40-char SHA, advances the local `yoe/pin` tag to
+  HEAD, and leaves the unit in `dev` state. Disabled in `dev-dirty` and `pin`.
+  Never writes the `branch` field.
 - The displayed state updates within seconds of an external edit (shell via `$`,
   an editor in another window) — no TUI restart required.

@@ -130,54 +130,28 @@ func (m model) openSourcePromptForModule(rmName string) (tea.Model, tea.Cmd) {
 }
 
 // openPromotePrompt handles the `P` keypress on a unit's detail page.
-// Promote is only meaningful in dev-mod (HEAD has commits beyond the
-// declared upstream and the work tree is clean); other states surface
-// a hint instead of a no-op.
+// Pin-to-current is meaningful in dev and dev-mod (HEAD is on a valid
+// commit, work tree is clean). Dev-dirty surfaces a hint to commit
+// first; pin and empty are no-ops. No modal — the action writes HEAD's
+// tag name (when one exists) or 40-char SHA directly to the unit's .star
+// `tag` field.
 func (m model) openPromotePrompt(unitName string) (tea.Model, tea.Cmd) {
 	u, ok := m.proj.Units[unitName]
 	if !ok || u.Class == "image" || u.Class == "container" {
-		m.message = fmt.Sprintf("%s has no source dir to promote", unitName)
+		m.message = fmt.Sprintf("%s has no source dir to pin", unitName)
 		return m, nil
 	}
 	state := m.unitSourceState(unitName)
-	if state != source.StateDevMod {
-		m.message = fmt.Sprintf("%s is %s — promote requires dev-mod (commit your work first)", unitName, srcStateToken(state))
+	switch state {
+	case source.StateDev, source.StateDevMod:
+		return m.runDevPromote(unitName)
+	case source.StateDevDirty:
+		m.message = fmt.Sprintf("%s has uncommitted edits — commit or stash first to pin current state", unitName)
+		return m, nil
+	default:
+		m.message = fmt.Sprintf("%s is %s — pin requires dev or dev-mod", unitName, srcStateToken(state))
 		return m, nil
 	}
-	srcDir := m.unitSrcDir(unitName)
-	hasTag := headHasTag(srcDir)
-	branch := headBranch(srcDir)
-	branchOpt := sourcePromptOption{
-		label: "branch", desc: "pin to current branch (mutable)", value: "branch",
-	}
-	if branch == "HEAD" || branch == "" {
-		branchOpt.disabled = true
-		branchOpt.desc = "(detached HEAD — no branch to pin)"
-	} else {
-		branchOpt.desc = fmt.Sprintf("pin to branch '%s' (mutable)", branch)
-	}
-	tagOpt := sourcePromptOption{
-		label: "tag", desc: "pin to git tag at HEAD", value: "tag",
-	}
-	if !hasTag {
-		tagOpt.disabled = true
-		tagOpt.desc = "(HEAD has no tag — pick hash or branch)"
-	}
-	m.sourcePrompt = &sourcePrompt{
-		kind:       promptPinKind,
-		target:     "unit",
-		targetName: unitName,
-		header:     fmt.Sprintf("Promote %s's HEAD to its .star pin", unitName),
-		options: []sourcePromptOption{
-			tagOpt,
-			{label: "hash", desc: "pin to the 40-char SHA at HEAD (most reproducible)", value: "hash"},
-			branchOpt,
-			{label: "cancel", desc: "leave the unit in dev-mod", value: "cancel"},
-		},
-		prevView: m.view,
-	}
-	m.view = viewSourcePrompt
-	return m, nil
 }
 
 // updateSourcePrompt handles keyboard input while a dev-mode modal is
@@ -284,11 +258,6 @@ func (m model) applySourcePromptChoice(value string) (tea.Model, tea.Cmd) {
 		}
 		return m.runModuleToPin(name, true)
 
-	case promptPinKind:
-		prevView := m.sourcePrompt.prevView
-		m.sourcePrompt = nil
-		m.view = prevView
-		return m.runDevPromote(name, value)
 	}
 	return m, nil
 }
@@ -448,36 +417,24 @@ func (m model) runDevToPin(unitName string, force bool) (tea.Model, tea.Cmd) {
 // runDevPromote rewrites the .star pin from HEAD. Local-only, fast,
 // but routed through the same background path so the user always sees
 // a "working…" hint instead of a frozen screen.
-func (m model) runDevPromote(unitName, kindValue string) (tea.Model, tea.Cmd) {
+func (m model) runDevPromote(unitName string) (tea.Model, tea.Cmd) {
 	u, ok := m.proj.Units[unitName]
 	if !ok {
 		m.message = fmt.Sprintf("unit %s not found", unitName)
-		return m, nil
-	}
-	var kind yoe.PinKind
-	switch kindValue {
-	case "tag":
-		kind = yoe.PinKindTag
-	case "hash":
-		kind = yoe.PinKindHash
-	case "branch":
-		kind = yoe.PinKindBranch
-	default:
-		m.message = fmt.Sprintf("unknown promote kind %q", kindValue)
 		return m, nil
 	}
 	scope := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
 	prevView := m.view
 	m.view = viewSourceProgress
 	m.sourceOp = newSourceOp(targetUnit, unitName,
-		fmt.Sprintf("Capturing %s HEAD as %s pin", unitName, kindValue), prevView)
+		fmt.Sprintf("Pinning %s to current HEAD", unitName), prevView)
 	cmd := func() tea.Msg {
-		err := yoe.DevPromoteToPin(m.projectDir, scope, u, kind)
+		err := yoe.DevPromoteToPin(m.projectDir, scope, u)
 		return sourceOpDoneMsg{
 			target:     targetUnit,
 			name:       unitName,
-			err:        wrapDevErr(err, "promote"),
-			successMsg: fmt.Sprintf("%s promoted to %s pin", unitName, kindValue),
+			err:        wrapDevErr(err, "pin"),
+			successMsg: fmt.Sprintf("%s pinned to current HEAD", unitName),
 		}
 	}
 	return m, tea.Batch(m.sourceOp.spinner.Tick, cmd)
@@ -582,15 +539,36 @@ func (m model) viewSourceProgress() string {
 // helpers populate the underlying maps as a side effect, which is
 // what we want — the watcher and the SRC column should agree on
 // initial membership.
+//
+// Only runs DetectState for units whose BuildMeta says they're in dev
+// mode. Pin units get their state from BuildMeta directly:
+//
+//   - DetectState involves git invocations and a status scan, which
+//     for a large project (many units, each with a full upstream src
+//     tree) takes seconds to minutes if run on every startup.
+//   - `git status --porcelain` flags any untracked build artifacts as
+//     dirty. For pin units yoe owns the dir, so untracked files
+//     shouldn't drive the SRC column to dev-dirty — the brainstorm's
+//     "no pin-dirty" discipline says pin is whatever yoe last built,
+//     edits there are misuse, not a state worth modelling.
+//
+// So pin units skip DetectState entirely; the BuildMeta value drives
+// the SRC column for them.
 func (m *model) armWatcherFromInitialStates() {
 	if m.srcWatcher == nil {
 		return
 	}
 	for name := range m.proj.Units {
-		state := m.unitSourceState(name)
-		if source.IsDev(state) {
-			m.srcWatcher.Arm(targetUnit, name, m.unitSrcDir(name), state)
+		persisted := m.persistedUnitSourceState(name)
+		if !source.IsDev(persisted) {
+			continue // pin/empty — BuildMeta is the truth, no scan needed
 		}
+		srcDir := m.unitSrcDir(name)
+		live, _ := source.DetectState(srcDir, persisted)
+		if m.unitSrcStates != nil {
+			m.unitSrcStates[name] = live
+		}
+		m.srcWatcher.Arm(targetUnit, name, srcDir, live)
 	}
 	for _, rm := range m.proj.ResolvedModules {
 		state := m.moduleSourceState(rm)
@@ -610,22 +588,73 @@ func (m model) findModule(name string) (yoestar.ResolvedModule, bool) {
 	return yoestar.ResolvedModule{}, false
 }
 
-// invalidateUnitState drops the cached source state for a unit so the
-// next render re-reads BuildMeta.SourceState. Also reconciles the
-// background watcher: if the new state is dev*, arm; otherwise disarm.
+// invalidateUnitState refreshes the cached source state for a unit
+// and reconciles the watcher membership.
+//
+// For pin units (per BuildMeta) we never look at the live working
+// tree: the build's autotools/make output is sprinkled in srcDir as
+// untracked files, and DetectState would (correctly per its rules)
+// report dev-dirty against it — but the toggle decision is pin, so
+// the SRC column should show pin. Only DevToUpstream / DevToPin can
+// flip the toggle decision; the build write itself can't.
+//
+// For dev units we DO need DetectState because the SRC column wants
+// to distinguish dev from dev-mod from dev-dirty — those refinements
+// aren't persisted in BuildMeta.
 func (m model) invalidateUnitState(name string) {
 	if m.unitSrcStates != nil {
 		delete(m.unitSrcStates, name)
 	}
+	// Tests construct models directly without populating proj — bail
+	// out early in that case rather than dereferencing nil through
+	// unitSrcDir.
+	if m.proj == nil {
+		return
+	}
+	if _, ok := m.proj.Units[name]; !ok {
+		return
+	}
+	persisted := m.persistedUnitSourceState(name)
+	if !source.IsDev(persisted) {
+		// Pin (or empty) — trust BuildMeta, disarm the watcher.
+		if m.unitSrcStates != nil {
+			m.unitSrcStates[name] = persisted
+		}
+		if m.srcWatcher != nil {
+			m.srcWatcher.Disarm(targetUnit, name)
+		}
+		return
+	}
+	srcDir := m.unitSrcDir(name)
+	live, _ := source.DetectState(srcDir, persisted)
+	if m.unitSrcStates != nil {
+		m.unitSrcStates[name] = live
+	}
 	if m.srcWatcher == nil {
 		return
 	}
-	state := m.unitSourceState(name)
-	if source.IsDev(state) {
-		m.srcWatcher.Arm(targetUnit, name, m.unitSrcDir(name), state)
+	if source.IsDev(live) {
+		m.srcWatcher.Arm(targetUnit, name, srcDir, live)
 	} else {
 		m.srcWatcher.Disarm(targetUnit, name)
 	}
+}
+
+// persistedUnitSourceState reads the BuildMeta-persisted toggle
+// decision for a unit ("pin" / "dev" / empty). Used as the `cached`
+// argument to DetectState so a clean checkout is disambiguated
+// correctly.
+func (m model) persistedUnitSourceState(name string) source.State {
+	u, ok := m.proj.Units[name]
+	if !ok {
+		return source.StateEmpty
+	}
+	sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
+	buildDir := build.UnitBuildDir(m.projectDir, sd, name)
+	if meta := build.ReadMeta(buildDir); meta != nil {
+		return source.State(meta.SourceState)
+	}
+	return source.StateEmpty
 }
 
 // invalidateModuleState drops the cached source state for a module
@@ -677,32 +706,6 @@ func (m model) modifiedCount(unitName string) int {
 		return n
 	}
 	return 0
-}
-
-// headHasTag reports whether HEAD has at least one tag pointing at it.
-// Used to gray out the "tag" option in the promote prompt.
-func headHasTag(srcDir string) bool {
-	if srcDir == "" {
-		return false
-	}
-	out, err := runGit(srcDir, "tag", "--points-at", "HEAD")
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(out) != ""
-}
-
-// headBranch returns the current branch name in srcDir, or "HEAD"
-// when detached. Empty string on git error.
-func headBranch(srcDir string) string {
-	if srcDir == "" {
-		return ""
-	}
-	out, err := runGit(srcDir, "rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(out)
 }
 
 // runGit runs git in dir and returns combined output. Mirrors
@@ -757,8 +760,7 @@ func (m model) viewSourcePrompt() string {
 	}
 	b.WriteString("\n")
 	b.WriteString(renderHelp([]helpItem{
-		{"j/k", "move"}, {"enter", "apply"}, {"esc", "cancel"},
+		{"j/k", "move"}, {"enter", "apply"}, {"esc", "cancel"}, {"?", "help"},
 	}))
 	return b.String()
 }
-

@@ -17,7 +17,8 @@ import (
 
 // Prepare sets up the build source directory for a unit:
 // 1. Fetches source (from cache or network)
-// 2. Extracts into build/<unit>/src/ as a git repo with "upstream" tag
+// 2. Extracts into build/<unit>/src/ as a git repo with yoe/pin tag
+//    marking the pinned commit
 // 3. Applies patches from the unit as git commits
 //
 // cachedSourceState is the unit's BuildMeta.SourceState from the previous
@@ -42,6 +43,28 @@ func Prepare(projectDir, scopeDir string, unit *yoestar.Unit, cachedSourceState 
 		// fresh prep so the build can proceed instead of erroring.
 	}
 
+	// If the cached state says pin and the existing src dir is a valid
+	// clone whose `upstream` git tag points at the unit's declared pin,
+	// trust it. DevToPin produces exactly this state in place; without
+	// this short-circuit, a cache-miss build (apk deleted, hash drift)
+	// would tear down a freshly-reset dev → pin checkout via the
+	// RemoveAll+clone path below — wasted work, and brittle when the
+	// dir contains files RemoveAll can't handle.
+	//
+	// A .star tag bump invalidates the unit's hash so we wouldn't be
+	// here at all on a cache hit; the check `upstream == unit.Tag`
+	// also catches the cache-miss-with-stale-tag case (user bumped
+	// tag, srcDir is still at the old commit) — that falls through to
+	// clean+clone correctly.
+	if cachedSourceState == string(StatePin) && unit.Tag != "" {
+		if _, err := os.Stat(filepath.Join(srcDir, ".git")); err == nil {
+			if upstreamMatchesTag(srcDir, unit.Tag) {
+				fmt.Fprintf(w, "Using existing pin checkout for %s (upstream at %s)\n", unit.Name, unit.Tag)
+				return srcDir, nil
+			}
+		}
+	}
+
 	// Legacy fallback: a src dir with commits beyond upstream pre-dates
 	// the BuildMeta.SourceState mechanism. Treat it the same as a
 	// dev-mod state so existing yoe-dev workflows keep working.
@@ -60,8 +83,16 @@ func Prepare(projectDir, scopeDir string, unit *yoestar.Unit, cachedSourceState 
 		return "", err
 	}
 
-	// Remove old source dir and recreate
-	os.RemoveAll(srcDir)
+	// Remove old source dir and recreate. The chmod walk handles
+	// read-only files Go's module cache leaves behind (mode 0400 on
+	// every fetched module). Without it RemoveAll silently fails on
+	// those entries, MkdirAll succeeds (dir already exists), and the
+	// later git clone errors with "destination already exists and is
+	// not an empty directory" — masking the real failure.
+	makeRemovable(srcDir)
+	if err := os.RemoveAll(srcDir); err != nil {
+		return "", fmt.Errorf("removing existing %s: %w (file may be owned by a different user — try `sudo rm -rf %s`)", srcDir, err, srcDir)
+	}
 	if err := os.MkdirAll(srcDir, 0755); err != nil {
 		return "", err
 	}
@@ -71,7 +102,8 @@ func Prepare(projectDir, scopeDir string, unit *yoestar.Unit, cachedSourceState 
 		if err := checkoutGit(cachedPath, srcDir, unit); err != nil {
 			return "", err
 		}
-		// Git source is already a repo — just tag current HEAD as upstream
+		// Git source is already a repo — just tag current HEAD with
+		// the yoe/pin marker.
 		if err := tagUpstream(srcDir); err != nil {
 			return "", err
 		}
@@ -95,6 +127,45 @@ func Prepare(projectDir, scopeDir string, unit *yoestar.Unit, cachedSourceState 
 	return srcDir, nil
 }
 
+// upstreamMatchesTag reports whether the local yoe/pin git tag in
+// srcDir resolves to the same commit as the unit's declared pin tag.
+// Used to recognize a valid pin checkout (produced by DevToPin or by
+// the freshly-cloned path below). Both refs must resolve cleanly; any
+// git error returns false so the caller falls through to clean+clone.
+func upstreamMatchesTag(srcDir, tag string) bool {
+	upstream, err := exec.Command("git", "-C", srcDir, "rev-parse", PinTag+"^{commit}").Output()
+	if err != nil {
+		return false
+	}
+	pin, err := exec.Command("git", "-C", srcDir, "rev-parse", tag+"^{commit}").Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(upstream)) == strings.TrimSpace(string(pin))
+}
+
+// makeRemovable walks dir and chmods every entry so a subsequent
+// os.RemoveAll can delete it. The Go module cache fetches dependencies
+// with mode 0400 (read-only) by design — RemoveAll fails silently on
+// those without a prior chmod. Best-effort: any error from chmod is
+// swallowed, since the user's only signal is whether RemoveAll later
+// succeeds.
+func makeRemovable(dir string) {
+	if _, err := os.Stat(dir); err != nil {
+		return
+	}
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		// Make every entry user-rwx so unlinkat (used by RemoveAll)
+		// works on read-only files inside writable parent dirs, and
+		// can recurse into read-only directories.
+		_ = os.Chmod(path, 0o700)
+		return nil
+	})
+}
+
 // hasLocalCommits checks if a source directory is a git repo with commits
 // beyond the upstream tag.
 func hasLocalCommits(srcDir string) bool {
@@ -103,7 +174,7 @@ func hasLocalCommits(srcDir string) bool {
 		return false
 	}
 
-	cmd := exec.Command("git", "rev-list", "--count", "upstream..HEAD")
+	cmd := exec.Command("git", "rev-list", "--count", PinTag+"..HEAD")
 	cmd.Dir = srcDir
 	out, err := cmd.Output()
 	if err != nil {
@@ -385,17 +456,19 @@ func extractWithTar(tarPath, destDir string) error {
 	return nil
 }
 
-// tagUpstream tags the current HEAD as "upstream" in an existing git repo.
-// Used for git-sourced recipes where the checkout is already a git repo.
+// tagUpstream tags the current HEAD as the yoe-internal pin marker
+// in an existing git repo. The tag name is namespaced (yoe/pin) so it
+// can never collide with real upstream tags — important for
+// DevPromoteToPin's "pick a tag pointing at HEAD" logic.
 func tagUpstream(srcDir string) error {
 	// Ensure we're on a branch (shallow clones may be detached)
 	branchCmd := exec.Command("git", "checkout", "-b", "yoe-work")
 	branchCmd.Dir = srcDir
 	branchCmd.Run() // ignore error if branch already exists
-	cmd := exec.Command("git", "tag", "-f", "upstream")
+	cmd := exec.Command("git", "tag", "-f", PinTag)
 	cmd.Dir = srcDir
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git tag upstream: %s\n%s", err, out)
+		return fmt.Errorf("git tag %s: %s\n%s", PinTag, err, out)
 	}
 	return nil
 }
@@ -407,7 +480,7 @@ func initGitRepo(srcDir string) error {
 		{"git", "config", "user.name", "yoe"},
 		{"git", "add", "-A"},
 		{"git", "commit", "-m", "upstream source"},
-		{"git", "tag", "upstream"},
+		{"git", "tag", PinTag},
 	}
 
 	for _, args := range cmds {
@@ -419,6 +492,14 @@ func initGitRepo(srcDir string) error {
 	}
 
 	return nil
+}
+
+// ApplyPatches applies the unit's patches list as commits on top of the
+// current HEAD. Exported so callers outside the build flow (e.g.
+// internal/dev.go's reset-in-place pin transition) can re-apply patches
+// without re-running the entire Prepare flow.
+func ApplyPatches(projectDir, srcDir string, unit *yoestar.Unit) error {
+	return applyPatches(projectDir, srcDir, unit)
 }
 
 func applyPatches(projectDir, srcDir string, unit *yoestar.Unit) error {

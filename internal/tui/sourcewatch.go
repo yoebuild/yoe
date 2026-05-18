@@ -32,13 +32,18 @@ type sourceStateChangedMsg struct {
 // watchedSource is one tracked dev* clone. `dir` is the directory
 // passed to source.DetectState; for units that's the unit's `src`
 // directory, for modules it's the module's clone dir. `last` is the
-// most recently observed state — the watcher only sends a message
-// when DetectState returns a different value.
+// most recently observed state. `lastInputs` is the result of
+// source.SrcHashInputs at the last observation — needed because the
+// state token (dev-dirty) doesn't change when the user edits a
+// different file or modifies a different line, but the diff sha
+// inside SrcHashInputs does. Comparing both lets the watcher catch
+// content drift within dev-dirty in addition to state transitions.
 type watchedSource struct {
-	target sourceTarget
-	name   string
-	dir    string
-	last   source.State
+	target     sourceTarget
+	name       string
+	dir        string
+	last       source.State
+	lastInputs string
 }
 
 // sourceWatcher polls a fixed set of dev* clones for state changes.
@@ -125,13 +130,23 @@ func (w *sourceWatcher) tick() {
 	w.mu.Unlock()
 
 	for _, it := range snapshot {
-		cur, _ := source.DetectState(it.dir)
-		if cur == it.last {
+		// Pass `it.last` as the cached state so DetectState can
+		// distinguish pin from clean dev (their git state is identical
+		// when origin is set, which is now the default for pin too).
+		cur, _ := source.DetectState(it.dir, it.last)
+		// Compute SrcHashInputs too — for dev-dirty the state token
+		// stays the same when the user edits a different file or
+		// modifies a different line, but the inputs (which fold in
+		// the diff sha) change. Comparing both catches content drift
+		// within dev-dirty in addition to state transitions.
+		curInputs := source.SrcHashInputs(it.dir, cur)
+		if cur == it.last && curInputs == it.lastInputs {
 			continue
 		}
 		w.mu.Lock()
 		if cached, ok := w.items[watcherKey(it.target, it.name)]; ok {
 			cached.last = cur
+			cached.lastInputs = curInputs
 		}
 		w.mu.Unlock()
 		if send != nil {
@@ -143,13 +158,19 @@ func (w *sourceWatcher) tick() {
 // Arm starts watching a unit/module clone. Calling Arm on an already
 // armed item updates its directory and last-known state — handy when
 // the dev clone moves between scope dirs (e.g. machine switch).
+//
+// Seeds lastInputs alongside the state token so the first poll has a
+// baseline to diff against. Without this, the watcher would compute
+// the (non-empty) SrcHashInputs on the first poll, compare to the
+// zero-value "", and fire a spurious state-change event.
 func (w *sourceWatcher) Arm(target sourceTarget, name, dir string, current source.State) {
 	w.mu.Lock()
 	w.items[watcherKey(target, name)] = &watchedSource{
-		target: target,
-		name:   name,
-		dir:    dir,
-		last:   current,
+		target:     target,
+		name:       name,
+		dir:        dir,
+		last:       current,
+		lastInputs: source.SrcHashInputs(dir, current),
 	}
 	w.mu.Unlock()
 }

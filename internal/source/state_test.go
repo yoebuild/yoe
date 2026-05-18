@@ -8,7 +8,7 @@ import (
 
 func TestDetectState_EmptyDir(t *testing.T) {
 	dir := t.TempDir()
-	got, err := DetectState(filepath.Join(dir, "does-not-exist"))
+	got, err := DetectState(filepath.Join(dir, "does-not-exist"), "")
 	if err != nil {
 		t.Fatalf("DetectState on missing dir: %v", err)
 	}
@@ -19,7 +19,7 @@ func TestDetectState_EmptyDir(t *testing.T) {
 
 func TestDetectState_NoGitDir(t *testing.T) {
 	dir := t.TempDir()
-	got, err := DetectState(dir)
+	got, err := DetectState(dir, "")
 	if err != nil {
 		t.Fatalf("DetectState on non-git dir: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestDetectState_Pin(t *testing.T) {
 	dir := initRepo(t)
 	markUpstream(t, dir)
 
-	got, err := DetectState(dir)
+	got, err := DetectState(dir, "")
 	if err != nil {
 		t.Fatalf("DetectState: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestDetectState_Dev(t *testing.T) {
 	markUpstream(t, dir)
 	addOriginRemote(t, dir)
 
-	got, err := DetectState(dir)
+	got, err := DetectState(dir, "")
 	if err != nil {
 		t.Fatalf("DetectState: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestDetectState_DevMod(t *testing.T) {
 	addOriginRemote(t, dir)
 	commitFile(t, dir, "extra.c", "// new content\n", "add extra.c")
 
-	got, err := DetectState(dir)
+	got, err := DetectState(dir, "")
 	if err != nil {
 		t.Fatalf("DetectState: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestDetectState_DevDirty_Modified(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := DetectState(dir)
+	got, err := DetectState(dir, "")
 	if err != nil {
 		t.Fatalf("DetectState: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestDetectState_DevDirty_Untracked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := DetectState(dir)
+	got, err := DetectState(dir, "")
 	if err != nil {
 		t.Fatalf("DetectState: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestDetectState_DevDirtyOverridesDevMod(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := DetectState(dir)
+	got, err := DetectState(dir, "")
 	if err != nil {
 		t.Fatalf("DetectState: %v", err)
 	}
@@ -145,12 +145,51 @@ func TestDetectState_NoUpstreamTag(t *testing.T) {
 	// no tagUpstream call
 	addOriginRemote(t, dir)
 
-	got, err := DetectState(dir)
+	got, err := DetectState(dir, "")
 	if err == nil {
 		t.Fatal("expected non-nil error when upstream tag is missing")
 	}
 	if got != StateDev {
 		t.Errorf("got %q, want %q (best-effort fallback)", got, StateDev)
+	}
+}
+
+// TestDetectState_CachedPinDisambiguatesCleanCheckout covers the new
+// design: pin keeps origin configured, so a clean checkout with origin
+// could be either pin or dev. The cached toggle decision disambiguates.
+func TestDetectState_CachedPinDisambiguatesCleanCheckout(t *testing.T) {
+	dir := initRepo(t)
+	markUpstream(t, dir)
+	addOriginRemote(t, dir)
+
+	// Without a cached state, clean+origin defaults to dev.
+	if got, _ := DetectState(dir, ""); got != StateDev {
+		t.Errorf("no cache → got %q, want %q", got, StateDev)
+	}
+	// Cached pin → stays pin even with origin configured.
+	if got, _ := DetectState(dir, StatePin); got != StatePin {
+		t.Errorf("cached pin → got %q, want %q", got, StatePin)
+	}
+	// Cached dev → stays dev (no-op vs default but documents intent).
+	if got, _ := DetectState(dir, StateDev); got != StateDev {
+		t.Errorf("cached dev → got %q, want %q", got, StateDev)
+	}
+}
+
+// TestDetectState_DirtyBeatsCachedPin: dev-dirty wins even when cached
+// state says pin. The user's uncommitted edits are the higher-risk
+// signal — pin discipline says don't edit in pin, but if they have,
+// we surface dev-dirty.
+func TestDetectState_DirtyBeatsCachedPin(t *testing.T) {
+	dir := initRepo(t)
+	markUpstream(t, dir)
+	addOriginRemote(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "main.c"), []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := DetectState(dir, StatePin)
+	if got != StateDevDirty {
+		t.Errorf("got %q, want %q (dirty must win over cached pin)", got, StateDevDirty)
 	}
 }
 
@@ -249,12 +288,13 @@ func initRepo(t *testing.T) string {
 	return dir
 }
 
-// markUpstream tags the current HEAD as `upstream`, matching what
-// source.Prepare does after a fresh clone. Named to avoid colliding
-// with the package-level `tagUpstream` helper in workspace.go.
+// markUpstream tags the current HEAD with yoe's internal pin marker
+// (yoe/pin), matching what source.Prepare does after a fresh clone.
+// Named to avoid colliding with the package-level `tagUpstream`
+// helper in workspace.go.
 func markUpstream(t *testing.T, dir string) {
 	t.Helper()
-	run(t, dir, "git", "tag", "upstream")
+	run(t, dir, "git", "tag", PinTag)
 }
 
 // addOriginRemote configures a stub origin remote — the URL doesn't have

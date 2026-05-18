@@ -48,14 +48,23 @@ sed -i '/^# >>> yoe-dev$/,/^# <<< yoe-dev$/d' /etc/apk/repositories
     printf '%%s\n' '%s'
     printf '# <<< yoe-dev\n'
 } >> /etc/apk/repositories
-# --no-cache forces apk to bypass /var/cache/apk and refetch the
-# APKINDEX from each repo on every run. Without it, apk-tools 2.x can
-# hold onto a stale cached index even when the server has fresh content
-# (observed when the yoe-dev feed pushes a new package between deploys),
-# silently giving "no such package" errors for the new package.
-apk --no-cache update
-apk add --upgrade %s
-`, in.FeedURL, in.Unit)
+# update the cache
+apk update
+# Dev iteration rebuilds an apk with the same pkgver-r<rel> string,
+# so the various --upgrade / --force-reinstall / fix --reinstall paths
+# all skip the install on apk-tools 2.x (--force-reinstall isn't a
+# valid flag in 2.x, and fix --reinstall reports 'APK unavailable,
+# skipped' in some apk-tools builds even when the index is fresh).
+#
+# The portable, always-works pattern is del+add: remove the existing
+# package (with --no-scripts so we don't fire the pre-uninstall hook
+# that disables the service in OpenRC), then add the fresh apk. The
+# 2>/dev/null ignores the "not installed" case on a first deploy.
+# The user is expected to restart the service to pick up the new
+# binary; apk doesn't restart services on its own anyway.
+apk del --no-scripts %s 2>/dev/null || true
+apk add %s
+`, in.FeedURL, in.Unit, in.Unit)
 
 	return ssh(ctx, in.Target, script, in.Out, in.Out)
 }

@@ -70,7 +70,7 @@ func ModuleToUpstream(m yoestar.ResolvedModule, opts ModuleUpstreamOpts) error {
 	// HEAD == upstream, dev-mod after a local commit, dev-dirty when
 	// the work tree is dirty). Modules don't get this tag at sync time
 	// — only when the user opts into dev mode.
-	if _, err := gitOut(repo, "tag", "-f", "upstream", "HEAD"); err != nil {
+	if _, err := gitOut(repo, "tag", "-f", source.PinTag, "HEAD"); err != nil {
 		return fmt.Errorf("ModuleToUpstream: tagging upstream: %w", err)
 	}
 	// Hide the state file from `git status` so it doesn't taint the
@@ -104,7 +104,7 @@ func ModuleToPin(m yoestar.ResolvedModule, force bool) error {
 	}
 
 	if !force {
-		state, _ := source.DetectState(repo)
+		state, _ := source.DetectState(repo, ReadState(repo))
 		switch state {
 		case source.StateDevDirty:
 			return fmt.Errorf("ModuleToPin: %s has uncommitted edits; commit/stash or pass force=true", m.Name)
@@ -127,7 +127,7 @@ func ModuleToPin(m yoestar.ResolvedModule, force bool) error {
 	// source.DetectState query (during a TUI cold-start before the
 	// user re-toggles to dev) doesn't see the old upstream commit and
 	// misreport dev-mod against a freshly reset clone.
-	if _, err := gitOut(repo, "tag", "-f", "upstream", "HEAD"); err != nil {
+	if _, err := gitOut(repo, "tag", "-f", source.PinTag, "HEAD"); err != nil {
 		// best effort; the state-file clear below is the authoritative
 		// signal for the TUI.
 		_ = err

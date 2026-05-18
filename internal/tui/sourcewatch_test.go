@@ -42,7 +42,7 @@ func makeDevClone(t *testing.T) string {
 	// fine for DetectState's purposes (it only checks that origin is
 	// configured, never actually fetches).
 	runSh(t, dir, "git", "remote", "add", "origin", "file://"+dir)
-	runSh(t, dir, "git", "tag", "-f", "upstream", "HEAD")
+	runSh(t, dir, "git", "tag", "-f", "yoe/pin", "HEAD")
 	return dir
 }
 

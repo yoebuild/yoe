@@ -30,8 +30,9 @@ func TestDeployScriptInstallsUnit(t *testing.T) {
 		"# >>> yoe-dev",
 		"http://laptop.local:8765/myproj",
 		"# <<< yoe-dev",
-		"apk --no-cache update",
-		"apk add --upgrade myapp",
+		"apk update",
+		"apk del --no-scripts myapp",
+		"apk add myapp",
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("script missing %q:\n%s", want, script)

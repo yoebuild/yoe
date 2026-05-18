@@ -253,16 +253,16 @@ to SSH into a Raspberry Pi to get real work done.
 When a build runs much faster on a different native architecture — for example,
 building ARM64 packages from an x86_64 workstation — those build steps can be
 dispatched to a native builder (a local ARM board on the network, an AWS
-Graviton instance, a Hetzner ARM box) without changing the developer's
-workflow. This is similar to how CI systems dispatch jobs to remote runners:
-the developer's workstation plays the role of the orchestrator, and remote
-machines act as architecture-specific runners. Orchestration, source edits,
-project state, the TUI, and the CLI stay on the workstation; only the per-unit
-build steps that benefit from native execution run elsewhere.
+Graviton instance, a Hetzner ARM box) without changing the developer's workflow.
+This is similar to how CI systems dispatch jobs to remote runners: the
+developer's workstation plays the role of the orchestrator, and remote machines
+act as architecture-specific runners. Orchestration, source edits, project
+state, the TUI, and the CLI stay on the workstation; only the per-unit build
+steps that benefit from native execution run elsewhere.
 
-If a remote builder isn't available — offline, on a plane, or the cloud
-runner is down — QEMU user-mode emulation is the fallback so builds can always
-continue locally. It's slower, but the workflow doesn't break.
+If a remote builder isn't available — offline, on a plane, or the cloud runner
+is down — QEMU user-mode emulation is the fallback so builds can always continue
+locally. It's slower, but the workflow doesn't break.
 
 The result: developers stay in the environment they already have tuned, and
 `[yoe]` puts the right machine behind each build step.
