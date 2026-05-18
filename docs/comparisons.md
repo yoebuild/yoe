@@ -1161,6 +1161,17 @@ ecosystem. At that scale the operational weight is a worthwhile trade — the or
 already has the people, and the flexibility pays for itself across hundreds of
 products and engineers.
 
+The trap is assuming the enterprise problem set is universal. It usually isn't:
+the problems a startup or ten-person product team faces are not a smaller
+version of the problems a thousand-engineer platform org faces — they are often
+different problems entirely. A team without a platform group doesn't need
+hash-equivalence servers or a Remote Execution cluster; it needs to not think
+about the build system at all. Adopting tools built for a scale you don't have
+imports their operational cost without their payoff — the
+[_You Are Not Google_](https://blog.bradfieldcs.com/you-are-not-google-84912cf44afb)
+point, and the reason so many small teams end up running Kubernetes to deploy
+three containers.
+
 `[yoe]` inverts the calibration. It optimizes for the **team of one to ten**
 building a product where the application is the differentiator and the base OS
 is plumbing — a team that cannot spare an engineer to become the in-house Yocto
@@ -1217,7 +1228,7 @@ reading unit files. `[yoe]` requires editing Starlark by hand.
 **Documentation and community.** Yocto has comprehensive manuals, Bootlin
 training materials, and years of mailing list archives. Buildroot has a
 well-maintained manual and active list. Problems are googleable. `[yoe]` has
-design docs and a small team.
+design docs; community knowledge and third-party support are still thin.
 
 **Legal compliance tooling.** Yocto's `do_populate_lic` and Buildroot's
 `make legal-info` generate license manifests and source archives. This is

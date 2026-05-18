@@ -54,6 +54,15 @@ closely and prioritize fast iteration over strict reproducibility. If your
 product ships frequent updates, runs containerized services, or depends heavily
 on Go/Rust/Python ecosystems, `[yoe]` may be a better fit.
 
+More fundamentally, `[yoe]` assumes a small-team problem set, not a scaled-down
+enterprise one. A startup or ten-person product team doesn't have smaller
+versions of an enterprise's problems — it often has different problems entirely,
+and adopting tooling built for scale you don't have imports its operational cost
+without the payoff (the
+[_You Are Not Google_](https://blog.bradfieldcs.com/you-are-not-google-84912cf44afb)
+point. `[yoe]` is calibrated for the problems small teams and startups actually
+have.
+
 ## 🚀 Getting Started
 
 Prerequisites: Linux or macOS with Git and Docker installed. Windows users:
