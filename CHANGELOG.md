@@ -12,6 +12,8 @@ and this project adheres to
   screen.** When a query matched nothing, the "no units match" notice used to
   push the layout down and hide the tab bar off the top. It now shows on the
   bottom row and the rest of the screen stays put.
+- **Rename `module-rpi` to `module-bsp`.** We are going to try keeping common
+  machines in one place.
 
 ## [0.10.10] - 2026-05-15
 
