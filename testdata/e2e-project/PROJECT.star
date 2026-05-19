@@ -3,7 +3,7 @@ project(
     version = "0.1.0",
     defaults = defaults(machine = "qemu-x86_64", image = "base-image"),
     # modules listed in priority order: later entries shadow earlier ones,
-    # so module-core wins over module-rpi and the Alpine/Jetson prebuilts.
+    # so module-core wins over module-bsp and the Alpine/Jetson prebuilts.
     modules = [
         module("https://github.com/yoebuild/module-alpine.git",
               ref = "main"),
@@ -11,7 +11,7 @@ project(
               ref = "main"),
         module("github.com/yoebuild/yoe",
               local = "../..",
-              path = "modules/module-rpi"),
+              path = "modules/module-bsp"),
         module("github.com/yoebuild/yoe",
               local = "../..",
               path = "modules/module-core"),
