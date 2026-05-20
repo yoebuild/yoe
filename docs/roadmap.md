@@ -8,8 +8,9 @@
 
 ## Next
 
-- Ignore flash devices, save in local.star, and then they are not presented in
-  the flash list again. This helps prevent accidental writes to media.
+- Option to ignore certain flash devices, save in local.star, and then they are
+  not presented in the flash list again. This helps prevent accidental writes to
+  media.
 - Lock all writes to build.json files, local.star, etc
 - create patches for src trees
 - Beagle Play
