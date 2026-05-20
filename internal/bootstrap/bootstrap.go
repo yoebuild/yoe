@@ -91,7 +91,7 @@ func Stage0(proj *yoestar.Project, projectDir string, w io.Writer) error {
 		}
 
 		// Package the output
-		apkPath, err := artifact.CreateAPK(unit, destDir, filepath.Join(buildDir, "pkg"), arch, "", nil)
+		apkPath, err := artifact.CreateAPK(unit, destDir, "", filepath.Join(buildDir, "pkg"), arch, "", nil)
 		if err != nil {
 			return fmt.Errorf("packaging %s: %w", unit.Name, err)
 		}
@@ -170,7 +170,7 @@ func Stage1(proj *yoestar.Project, projectDir string, w io.Writer) error {
 		}
 
 		// Package and publish (overwriting Stage 0 packages)
-		apkPath, err := artifact.CreateAPK(unit, destDir, filepath.Join(buildDir, "pkg"), arch, "", nil)
+		apkPath, err := artifact.CreateAPK(unit, destDir, "", filepath.Join(buildDir, "pkg"), arch, "", nil)
 		if err != nil {
 			return fmt.Errorf("packaging %s: %w", unit.Name, err)
 		}

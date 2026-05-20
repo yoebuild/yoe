@@ -31,7 +31,7 @@ func TestCreateAPK(t *testing.T) {
 		RuntimeDeps: []string{"glibc"},
 	}
 
-	apkPath, err := CreateAPK(unit, destDir, outputDir, "x86_64", "", nil)
+	apkPath, err := CreateAPK(unit, destDir, "", outputDir, "x86_64", "", nil)
 	if err != nil {
 		t.Fatalf("CreateAPK: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestCreateAPK_EmptyDestDir(t *testing.T) {
 		Version: "1.0.0",
 	}
 
-	apkPath, err := CreateAPK(unit, destDir, outputDir, "x86_64", "", nil)
+	apkPath, err := CreateAPK(unit, destDir, "", outputDir, "x86_64", "", nil)
 	if err != nil {
 		t.Fatalf("CreateAPK: %v", err)
 	}

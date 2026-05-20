@@ -928,6 +928,51 @@ func TestRefreshDetailFiles_WalksDestdir(t *testing.T) {
 	}
 }
 
+// TestRefreshDetailFiles_ImageWalksRootfs verifies that the Files tab
+// for an image unit walks destdir/rootfs/ rather than destdir/, so the
+// listing matches the units-page SIZE column (BuildMeta.InstalledBytes,
+// which is also DirSize(destdir/rootfs)). Walking destdir/ would
+// include the assembled <name>.img artifact, whose apparent size is
+// the partition size and would dominate the listing.
+func TestRefreshDetailFiles_ImageWalksRootfs(t *testing.T) {
+	projDir := t.TempDir()
+	destDir := filepath.Join(projDir, "build", "img.x86_64", "destdir")
+	rootfs := filepath.Join(destDir, "rootfs")
+	if err := os.MkdirAll(filepath.Join(rootfs, "etc"), 0o755); err != nil {
+		t.Fatalf("mkdir rootfs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootfs, "etc", "hostname"), []byte("jukebox\n"), 0o644); err != nil {
+		t.Fatalf("write hostname: %v", err)
+	}
+	// The assembled disk image sits next to rootfs/ under destdir/; it
+	// must NOT appear in the Files tab. Use a sentinel size much larger
+	// than the rootfs contents so a regression would be obvious.
+	if err := os.WriteFile(filepath.Join(destDir, "img.img"), make([]byte, 10_000_000), 0o644); err != nil {
+		t.Fatalf("write img: %v", err)
+	}
+
+	m := &model{
+		projectDir: projDir,
+		arch:       "x86_64",
+		detailUnit: "img",
+		proj: &yoestar.Project{
+			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
+			Units: map[string]*yoestar.Unit{
+				"img": {Name: "img", Class: "image"},
+			},
+		},
+	}
+	m.refreshDetailFiles()
+
+	if len(m.detailFiles) != 1 {
+		t.Fatalf("got %d files, want 1 (the .img must be excluded): %+v",
+			len(m.detailFiles), m.detailFiles)
+	}
+	if m.detailFiles[0].Path != "/etc/hostname" {
+		t.Fatalf("path = %q, want /etc/hostname", m.detailFiles[0].Path)
+	}
+}
+
 // TestBuildProgress_TracksWaitingAndDone verifies the progress totals
 // driven off the executor's pre-scan: each "waiting" event grows the
 // queue, each "done"/"failed" advances the bar.

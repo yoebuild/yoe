@@ -56,17 +56,21 @@ architecture description live under `docs/` (start with `docs/intro.md` and
   easier for AI to reason about the system and for humans to understand what a
   unit does without reading class internals. If a value is required, error when
   it is missing rather than silently defaulting.
-- **Installed packages run their services.** If a package ships an init script
-  (`/etc/init.d/<svc>`) or systemd unit
-  (`/usr/lib/systemd/system/<svc>.service`), installing the package means the
-  service runs at boot. Image assembly discovers services by scanning the
-  assembled rootfs and wires the appropriate runlevel/target symlinks
-  automatically. Do not add a `services = [...]` field on units and do not add
-  an `enable_services = [...]` field on images — both push policy to the wrong
-  place. The right way to "not run a service" is to not install the package; if
-  a project genuinely needs a package installed but a service disabled, that's
-  an explicit per-image opt-out (not an opt-in), and the bar for adding one is
-  high.
+- **Units declare their own services; images do not.** When a unit ships an
+  OpenRC init script (`/etc/init.d/<svc>`) or systemd service unit, the unit
+  decides whether installing it also enables the service at boot, via a
+  `services = [...]` field that materializes the runlevel/target symlinks
+  into the package itself. This is yoe's analog to Alpine's `setup-<pkg>`
+  helpers: the package author — not the image, not the project — knows which
+  init scripts represent the package's intended runtime. Alpine's own
+  packages deliberately ship init scripts unenabled because they assume a
+  human installer running `rc-update add`; yoe has no such human, so the
+  unit takes that responsibility. **Do not add an `enable_services = [...]`
+  (or equivalent) field on images.** Per-image enablement multiplies the
+  cache surface, fragments runtime behavior across projects, and pushes
+  policy to the wrong place. If a project genuinely needs a package
+  installed but a service disabled, that's an explicit per-image opt-out
+  (not an opt-in), and the bar for adding one is high.
 - **No backward compatibility concerns.** The project is pre-1.0. Do not add
   compatibility shims, legacy conversion paths, or deprecated-but-still- working
   code. When a design changes, update everything to the new design and delete

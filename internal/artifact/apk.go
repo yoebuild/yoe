@@ -40,7 +40,7 @@ import (
 // later be published into (`<repo>/<arch>/<filename>.apk`). For arch-scoped
 // and machine-scoped units this is the target architecture (e.g., x86_64,
 // aarch64); for noarch units it is the literal string "noarch".
-func CreateAPK(unit *yoestar.Unit, destDir, outputDir, arch, commit string, signer *Signer) (string, error) {
+func CreateAPK(unit *yoestar.Unit, destDir, sysroot, outputDir, arch, commit string, signer *Signer) (string, error) {
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return "", fmt.Errorf("creating output dir: %w", err)
 	}
@@ -57,7 +57,7 @@ func CreateAPK(unit *yoestar.Unit, destDir, outputDir, arch, commit string, sign
 	// destDir before we tar it. The symlinks become regular package
 	// content, so on-target `apk add` and image-time `apk add` produce the
 	// same result — yoe never patches the rootfs after apk has run.
-	if err := materializeServiceSymlinks(unit, destDir); err != nil {
+	if err := materializeServiceSymlinks(unit, destDir, sysroot); err != nil {
 		return "", fmt.Errorf("creating service symlinks: %w", err)
 	}
 
@@ -611,19 +611,21 @@ func generatePKGINFO(unit *yoestar.Unit, destDir, dataHashHex, arch, commit stri
 //
 //	/etc/runlevels/default/<svc> -> /etc/init.d/<svc>
 //
-// The target script (`<destDir>/etc/init.d/<svc>`) must already exist; if it
-// doesn't, that's the unit's bug — we fail loudly rather than ship a dangling
+// The target script must already exist in this unit's destDir *or* in its
+// sysroot (i.e. shipped by a depended-on unit). The sysroot case is yoe's
+// analog to Alpine's `setup-<pkg>` helpers: a "conf" unit that depends on
+// the package shipping the init script can enable the service without
+// duplicating the script. If neither location has it, that's a unit bug
+// (typo or missing dep) and we fail loudly rather than ship a dangling
 // symlink.
-func materializeServiceSymlinks(unit *yoestar.Unit, destDir string) error {
+func materializeServiceSymlinks(unit *yoestar.Unit, destDir, sysroot string) error {
 	if len(unit.Services) == 0 {
 		return nil
 	}
-	initd := filepath.Join(destDir, "etc", "init.d")
 	runlevel := filepath.Join(destDir, "etc", "runlevels", "default")
 	for _, svc := range unit.Services {
-		targetPath := filepath.Join(initd, svc)
-		if _, err := os.Stat(targetPath); err != nil {
-			return fmt.Errorf("service %q declared but %s missing in destdir", svc, filepath.Join("/etc/init.d", svc))
+		if !initScriptAvailable(destDir, sysroot, svc) {
+			return fmt.Errorf("service %q declared but /etc/init.d/%s missing in destdir or sysroot", svc, svc)
 		}
 		linkPath := filepath.Join(runlevel, svc)
 		if _, err := os.Lstat(linkPath); err == nil {
@@ -640,6 +642,22 @@ func materializeServiceSymlinks(unit *yoestar.Unit, destDir string) error {
 		}
 	}
 	return nil
+}
+
+// initScriptAvailable returns true if /etc/init.d/<svc> exists in either the
+// unit's own destDir (the unit ships the script) or its sysroot (a depended-on
+// unit ships it). Either is sufficient for the runlevel symlink to resolve at
+// boot — at runtime the rootfs has merged both.
+func initScriptAvailable(destDir, sysroot, svc string) bool {
+	if _, err := os.Stat(filepath.Join(destDir, "etc", "init.d", svc)); err == nil {
+		return true
+	}
+	if sysroot != "" {
+		if _, err := os.Stat(filepath.Join(sysroot, "etc", "init.d", svc)); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // APKHash computes the SHA256 hash of an .apk file.

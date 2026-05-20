@@ -4051,24 +4051,35 @@ func (m *model) refreshDetail() {
 	}
 }
 
-// refreshDetailFiles populates m.detailFiles by walking the unit's
-// destdir — what `apk` would later pack into the .apk. Directories
-// are skipped (only files and symlinks are listed) since the user is
-// looking at "what got installed". Walked once on tab activation; no
-// background polling, since destdir contents only change on a rebuild
-// and that already drives a `refreshDetail` for the log panes.
+// refreshDetailFiles populates m.detailFiles by walking the files that
+// will be installed on the target. For non-image units that's the
+// destdir (what `apk` later packs into the .apk); for image units it's
+// destdir/rootfs/ — the same root the executor uses for
+// BuildMeta.InstalledBytes — so the file list and the units-page SIZE
+// column tell a consistent story. Walking destdir/ on an image would
+// also include the assembled .img artifact, which is partition-sized
+// (e.g. 600M reserved free space) and would dominate the listing
+// without describing anything the user installed.
+//
+// Directories are skipped (only files and symlinks are listed) since
+// the user is looking at "what got installed". Walked once on tab
+// activation; no background polling, since contents only change on a
+// rebuild and that already drives a `refreshDetail` for the log panes.
 func (m *model) refreshDetailFiles() {
 	m.detailFiles = nil
 	m.detailFilesScroll = 0
-	destDir := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit), "destdir")
-	filepath.Walk(destDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || path == destDir {
+	walkRoot := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit), "destdir")
+	if u, ok := m.proj.Units[m.detailUnit]; ok && u.Class == "image" {
+		walkRoot = filepath.Join(walkRoot, "rootfs")
+	}
+	filepath.Walk(walkRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil || path == walkRoot {
 			return nil
 		}
 		if info.IsDir() {
 			return nil
 		}
-		rel, relErr := filepath.Rel(destDir, path)
+		rel, relErr := filepath.Rel(walkRoot, path)
 		if relErr != nil {
 			return nil
 		}

@@ -1,7 +1,9 @@
 package build
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,9 +58,20 @@ func fnDirSizeMB(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tup
 		return nil, fmt.Errorf("dir_size_mb: stat %s: %w", hostPath, err)
 	}
 
+	// The rootfs we're sizing is assembled with per-file ownership from
+	// each apk's tar headers — mode-700 dirs owned by root or by service
+	// users (navidrome, postgres, …) exist and the build user can't enter
+	// them. Fail-soft on EACCES: skip what we can't read, sum what we
+	// can. The result is a slight underestimate of contents that fit-
+	// preflights against the partition size; the preflight's headroom
+	// margin absorbs the gap, and mkfs.ext4 -d running as root in the
+	// container is the authoritative fit check downstream.
 	var total int64
 	walkErr := filepath.Walk(hostPath, func(_ string, info os.FileInfo, err error) error {
 		if err != nil {
+			if errors.Is(err, fs.ErrPermission) {
+				return nil // skip dirs/files we cannot read; downstream mkfs sees them
+			}
 			return err
 		}
 		if info.Mode().IsRegular() {

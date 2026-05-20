@@ -45,7 +45,7 @@ func TestAPKRoundTripWithUpstreamApk(t *testing.T) {
 		License:     "MIT",
 		Description: "test package for apk compat",
 	}
-	apkPath, err := artifact.CreateAPK(unit, destDir, out, "x86_64", "", nil)
+	apkPath, err := artifact.CreateAPK(unit, destDir, "", out, "x86_64", "", nil)
 	if err != nil {
 		t.Fatalf("CreateAPK: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestAPKRepoInstallWithUpstreamApk(t *testing.T) {
 		License:     "MIT",
 		Description: "test package for apk repo compat",
 	}
-	apkPath, err := artifact.CreateAPK(unit, destDir, out, "x86_64", "", nil)
+	apkPath, err := artifact.CreateAPK(unit, destDir, "", out, "x86_64", "", nil)
 	if err != nil {
 		t.Fatalf("CreateAPK: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestAPKSignedRepoInstallWithUpstreamApk(t *testing.T) {
 		License:     "MIT",
 		Description: "test package for signed apk compat",
 	}
-	apkPath, err := artifact.CreateAPK(unit, destDir, out, "x86_64", "", signer)
+	apkPath, err := artifact.CreateAPK(unit, destDir, "", out, "x86_64", "", signer)
 	if err != nil {
 		t.Fatalf("CreateAPK: %v", err)
 	}

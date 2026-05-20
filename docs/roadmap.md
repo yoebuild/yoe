@@ -8,6 +8,8 @@
 
 ## Next
 
+- Building from console is not confusing with parallel build as to what is
+  happening [1/1] task: build (should also include unit)
 - Option to ignore certain flash devices, save in local.star, and then they are
   not presented in the flash list again. This helps prevent accidental writes to
   media.
@@ -67,6 +69,8 @@
 - yoe self build/install. Easily for anyone to modify yoe, build/install to
   ~/bin
 - yoe chain commands
+- Can we limit random starlark commands in privledged containers? Saved the
+  privileged stuff for image building, etc. that is all controlled Go code?
 
 ## Bugs / Improvements
 
