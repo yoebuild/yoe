@@ -1790,7 +1790,7 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else if strings.HasPrefix(action, "clean:") {
 			name := strings.TrimPrefix(action, "clean:")
 			buildDir := build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name)
-			if err := os.RemoveAll(buildDir); err != nil {
+			if err := yoe.RemoveDirAnyOwner(buildDir, m.projectDir); err != nil {
 				m.message = fmt.Sprintf("Clean failed: %v", err)
 			} else {
 				m.statuses[name] = statusNone
@@ -1808,7 +1808,7 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		} else if action == "clean-all" {
 			buildDir := filepath.Join(m.projectDir, "build")
-			if err := os.RemoveAll(buildDir); err != nil {
+			if err := yoe.RemoveDirAnyOwner(buildDir, m.projectDir); err != nil {
 				m.message = fmt.Sprintf("Clean failed: %v", err)
 			} else {
 				for _, name := range m.units {

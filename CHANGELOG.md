@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **TUI clean (`c` and `C`) now works on image units.** Previously failed with
+  permission errors on the root-owned files left by image builds; now routes
+  through the same container-side `rm` that `yoe clean` uses.
+
 ## [0.10.11] - 2026-05-20
 
 - **`beagleplay` machine.** New target for the TI AM625 BeaglePlay. Build with
