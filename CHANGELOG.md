@@ -8,61 +8,60 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.11] - 2026-05-20
+
+- **BeaglePlay (TI AM625) machine in `module-bsp`.** A new `beagleplay` machine
+  ships with a TI K3 boot chain — `tiboot3.bin` (R5 SPL), `tispl.bin` +
+  `u-boot.img` (A53 SPL + U-Boot proper, with TF-A and OP-TEE folded in),
+  `Image` and `k3-am625-beagleplay.dtb`, and a `uEnv.txt` that points U-Boot at
+  them. Pick it with `--machine beagleplay`. The R5 SPL (Cortex-R5F / armv7-R)
+  pulls Alpine's `gcc-arm-none-eabi` cross toolchain through `module-alpine` so
+  the build runs in the same aarch64 container as the rest of the BSP, no
+  Dockerfile or arch-list changes needed.
 - **Image rootfs now preserves per-file ownership from packages.** Service
   packages whose data directories need a specific user — `/var/lib/navidrome`
   owned by `navidrome`, `/var/lib/postgresql` by `postgres`, and so on — now
-  retain that ownership all the way through to the booted system. Services
-  that previously refused to start because they couldn't write into their
-  own data dirs (the directory was silently chowned to root) now work out
-  of the box. Inspecting `build/<image>.<arch>/destdir/rootfs/` on the host
-  shows the same uid/gid the running image sees, which makes service-
-  ownership bugs trivially debuggable. Trade-off: those build directories
-  now contain root- and service-user-owned files, so `rm -rf build/` from
-  your shell will fail with permission errors — use `yoe clean` instead
-  (it routes the rm through the container).
+  retain that ownership all the way through to the booted system. Services that
+  previously refused to start because they couldn't write into their own data
+  dirs (the directory was silently chowned to root) now work out of the box.
+  Inspecting `build/<image>.<arch>/destdir/rootfs/` on the host shows the same
+  uid/gid the running image sees, which makes service- ownership bugs trivially
+  debuggable. Trade-off: those build directories now contain root- and
+  service-user-owned files, so `rm -rf build/` from your shell will fail with
+  permission errors — use `yoe clean` instead (it routes the rm through the
+  container).
 - **New "Security and Threat Model" doc.** Explains what the build container
   actually protects against, which paths run as root, what `run(host = True)`
   and `run(privileged = True)` give a unit author, and how to think about
   trusting modules and units. The short version: the build container is a
-  convenience for hermetic toolchains, not a security boundary — treat units
-  the same way you treat `curl | sh`.
+  convenience for hermetic toolchains, not a security boundary — treat units the
+  same way you treat `curl | sh`.
 - **The Files tab on an image unit now shows the rootfs contents, not the
-  assembled disk image.** Previously the tab listed every file under
-  `destdir/`, which included the partition-sized `<image>.img` artifact — a
-  600 M row that dwarfed the rest and didn't match the SIZE column on the
-  units page. The listing now matches the installed footprint shown
-  elsewhere in the TUI.
+  assembled disk image.** Previously the tab listed every file under `destdir/`,
+  which included the partition-sized `<image>.img` artifact — a 600 M row that
+  dwarfed the rest and didn't match the SIZE column on the units page. The
+  listing now matches the installed footprint shown elsewhere in the TUI.
 - **`jukebox-image` now builds out of the box.** Navidrome's transitive
-  dependency closure (ffmpeg → glib, eudev, e2fsprogs) pulled in Alpine's
-  split `libblkid` / `libmount` packages, which collided with the
-  source-built `util-linux`'s bundled copies of the same libraries. `yoe
-  init` and the e2e project now pin `util-linux` to Alpine so the
-  libraries and the binaries come from one coordinated source, the same
-  way `xz` and `zstd` are already pinned.
+  dependency closure (ffmpeg → glib, eudev, e2fsprogs) pulled in Alpine's split
+  `libblkid` / `libmount` packages, which collided with the source-built
+  `util-linux`'s bundled copies of the same libraries. `yoe init` and the e2e
+  project now pin `util-linux` to Alpine so the libraries and the binaries come
+  from one coordinated source, the same way `xz` and `zstd` are already pinned.
 - **Filtering the Units tab to no matches no longer scrolls the tabs off the
   screen.** When a query matched nothing, the "no units match" notice used to
   push the layout down and hide the tab bar off the top. It now shows on the
   bottom row and the rest of the screen stays put.
 - **Rename `module-rpi` to `module-bsp`.** We are going to try keeping common
   machines in one place.
-- **BeaglePlay (TI AM625) machine in `module-bsp`.** A new `beagleplay` machine
-  ships with a TI K3 boot chain — `tiboot3.bin` (R5 SPL), `tispl.bin` +
-  `u-boot.img` (A53 SPL + U-Boot proper, with TF-A and OP-TEE folded in),
-  `Image` and `k3-am625-beagleplay.dtb`, and a `uEnv.txt` that points U-Boot
-  at them. Pick it with `--machine beagleplay`. The R5 SPL (Cortex-R5F /
-  armv7-R) pulls Alpine's `gcc-arm-none-eabi` cross toolchain through
-  `module-alpine` so the build runs in the same aarch64 container as the
-  rest of the BSP, no Dockerfile or arch-list changes needed.
-- **Per-board docs under a new "Boards" section.** `docs/` now carries
-  dedicated pages for BeaglePlay, Raspberry Pi (RPi4 / RPi5), and QEMU
-  (arm64 / x86_64) — boot chain, which units produce what, partition
-  layout, and the common failure modes for each board.
+- **Per-board docs under a new "Boards" section.** `docs/` now carries dedicated
+  pages for BeaglePlay, Raspberry Pi (RPi4 / RPi5), and QEMU (arm64 / x86_64) —
+  boot chain, which units produce what, partition layout, and the common failure
+  modes for each board.
 - **SD-card images now boot on BeaglePlay (and other K3 boards).** yoe was
   marking the rootfs partition as MBR-bootable instead of the boot partition;
-  the AM62x ROM scans for a bootable FAT and silently rejected the card, so
-  the SD boot path hung in ROM with no serial output. The bootable flag now
-  sits on the first partition, matching what every supported board's firmware
-  expects.
+  the AM62x ROM scans for a bootable FAT and silently rejected the card, so the
+  SD boot path hung in ROM with no serial output. The bootable flag now sits on
+  the first partition, matching what every supported board's firmware expects.
 
 ## [0.10.10] - 2026-05-15
 
