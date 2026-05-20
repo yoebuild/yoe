@@ -173,7 +173,12 @@ def _create_disk_image(name, partitions):
         ptype = "c" if p.type == "vfat" else "83"
         # Only specify size for non-last partitions; last gets remaining space
         size_spec = "size=%dMiB, " % size_mb if i < len(partitions) - 1 else ""
-        bootable = ", bootable" if p.root else ""
+        # MBR bootable flag goes on the partition the firmware reads at
+        # boot — that's partition 1 across every machine yoe currently
+        # supports (the FAT boot partition on K3/RPi, the only partition
+        # on QEMU). Flagging the rootfs instead made the AM62x ROM
+        # silently reject SD cards as non-bootable.
+        bootable = ", bootable" if i == 0 else ""
         sfdisk_lines += "%stype=%s%s\\n" % (size_spec, ptype, bootable)
 
     run("printf '%s' | sfdisk %s" % (sfdisk_lines, img))
