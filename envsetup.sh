@@ -13,21 +13,35 @@ yoe_test() {
 	(cd "${OE_BASE}" && go test ./...) || return 1
 }
 
+# Enumerate markdown files via git so the build/ tree (root-owned files
+# from image-class builds) and other gitignored caches are never walked.
+# Plain `**/*.md` trips EACCES on directories the host user can't scandir.
+# Symlinks (e.g. docs/CHANGELOG.md → CHANGELOG.md) are dropped so prettier
+# doesn't error on "explicitly specified pattern is a symbolic link".
+_yoe_md_files() {
+	(cd "${OE_BASE}" && git ls-files '*.md' | while IFS= read -r f; do
+		[ -L "$f" ] && continue
+		printf '%s\0' "$f"
+	done)
+}
+
 yoe_format() {
 	if command -v prettier >/dev/null 2>&1; then
-		(cd "${OE_BASE}" && prettier --write "**/*.md") || return 1
+		(cd "${OE_BASE}" && _yoe_md_files | xargs -0 -r prettier --write) || return 1
 	else
-		docker run --rm -v "${OE_BASE}:/work" -w /work node:20-alpine \
-			npx --yes prettier --write "**/*.md" || return 1
+		(cd "${OE_BASE}" && _yoe_md_files | xargs -0 -r \
+			docker run --rm -i -v "${OE_BASE}:/work" -w /work node:20-alpine \
+			npx --yes prettier --write) || return 1
 	fi
 }
 
 yoe_format_check() {
 	if command -v prettier >/dev/null 2>&1; then
-		(cd "${OE_BASE}" && prettier --check "**/*.md") || return 1
+		(cd "${OE_BASE}" && _yoe_md_files | xargs -0 -r prettier --check) || return 1
 	else
-		docker run --rm -v "${OE_BASE}:/work" -w /work node:20-alpine \
-			npx --yes prettier --check "**/*.md" || return 1
+		(cd "${OE_BASE}" && _yoe_md_files | xargs -0 -r \
+			docker run --rm -i -v "${OE_BASE}:/work" -w /work node:20-alpine \
+			npx --yes prettier --check) || return 1
 	fi
 }
 
