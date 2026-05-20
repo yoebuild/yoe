@@ -33,11 +33,18 @@
 - [apk Signing](signing.md)
 - [module-alpine](module-alpine.md)
 - [Alpine apk Passthrough](apk-passthrough.md)
+- [Security and Threat Model](security.md)
 
 # Base System
 
 - [libc, init, and the Rootfs Base](libc-and-init.md)
 - [Containers on yoe Images](containers.md)
+
+# Boards
+
+- [BeaglePlay (AM625)](machine-beagleplay.md)
+- [Raspberry Pi (RPi4, RPi5)](machine-rpi.md)
+- [QEMU (arm64, x86_64)](machine-qemu.md)
 
 # Project
 

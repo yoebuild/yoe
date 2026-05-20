@@ -1,0 +1,10 @@
+# Upstream source trees yoe pulls into the project; their READMEs and
+# docs are not ours to reformat.
+/testdata/e2e-project/build
+/testdata/e2e-project/cache
+/testdata/e2e-project/repo
+/cache
+
+# Generated docs (mdbook output and the README.md → intro.md copy).
+/book
+/docs/intro.md

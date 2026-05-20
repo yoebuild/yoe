@@ -15,6 +15,9 @@ architecture description live under `docs/` (start with `docs/intro.md` and
   provides only the minimal bootstrap toolchain (gcc, binutils, make, etc.);
   everything else is a unit. For non-essential features (docs, man pages),
   disabling via configure flags is also acceptable.
+- **Need a tool Alpine already packages? Pull it through `module-alpine`, don't
+  build from source.** See the `pulling-alpine-packages` skill for the workflow,
+  the `module-alpine` cache layout, and the push-upstream rules.
 - **Container units set arch explicitly.** Classes set `container` and
   `container_arch` explicitly; units inherit these from their class. Do not let
   container selection happen by implicit default.
@@ -53,17 +56,20 @@ architecture description live under `docs/` (start with `docs/intro.md` and
   easier for AI to reason about the system and for humans to understand what a
   unit does without reading class internals. If a value is required, error when
   it is missing rather than silently defaulting.
-- **Installed packages run their services.** If a package ships an init script
-  (`/etc/init.d/<svc>`) or systemd unit
-  (`/usr/lib/systemd/system/<svc>.service`), installing the package means the
-  service runs at boot. Image assembly discovers services by scanning the
-  assembled rootfs and wires the appropriate runlevel/target symlinks
-  automatically. Do not add a `services = [...]` field on units and do not add
-  an `enable_services = [...]` field on images — both push policy to the wrong
-  place. The right way to "not run a service" is to not install the package; if
-  a project genuinely needs a package installed but a service disabled, that's
-  an explicit per-image opt-out (not an opt-in), and the bar for adding one is
-  high.
+- **Units declare their own services; images do not.** When a unit ships an
+  OpenRC init script (`/etc/init.d/<svc>`) or systemd service unit, the unit
+  decides whether installing it also enables the service at boot, via a
+  `services = [...]` field that materializes the runlevel/target symlinks into
+  the package itself. This is yoe's analog to Alpine's `setup-<pkg>` helpers:
+  the package author — not the image, not the project — knows which init scripts
+  represent the package's intended runtime. Alpine's own packages deliberately
+  ship init scripts unenabled because they assume a human installer running
+  `rc-update add`; yoe has no such human, so the unit takes that responsibility.
+  **Do not add an `enable_services = [...]` (or equivalent) field on images.**
+  Per-image enablement multiplies the cache surface, fragments runtime behavior
+  across projects, and pushes policy to the wrong place. If a project genuinely
+  needs a package installed but a service disabled, that's an explicit per-image
+  opt-out (not an opt-in), and the bar for adding one is high.
 - **No backward compatibility concerns.** The project is pre-1.0. Do not add
   compatibility shims, legacy conversion paths, or deprecated-but-still- working
   code. When a design changes, update everything to the new design and delete
@@ -167,6 +173,17 @@ than scanning the directories.
   project that builds out of the box. The two diverge only in module references
   — e2e uses `local = "../.."` to test the in-tree modules, while init uses
   upstream URLs.
+- **Test builds for new/changed units always go in `testdata/e2e-project`.**
+  When a unit (new or modified) needs a test build, run it inside the existing
+  `testdata/e2e-project/` checkout — do not create another test project
+  directory under `testdata/` for one-off builds. `e2e-project` is the shared
+  scratch space: its `cache/modules/` already has the live `module-alpine` and
+  friends, its PROJECT.star already wires the standard module set, and reusing
+  it keeps the module cache warm across builds. If the unit needs project-level
+  configuration that e2e doesn't have, add the configuration to
+  `testdata/e2e-project/PROJECT.star` (and propagate to `internal/init.go` per
+  the "`yoe init` mirrors the e2e-project template" rule), rather than spinning
+  up a parallel project.
 - **External-module fixes go in the cached copy and must be pushed.** When the
   right place to change something is an external module (e.g. `module-alpine`,
   `module-jetson`), edit the file in place under

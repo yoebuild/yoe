@@ -30,7 +30,7 @@ func RunInit(projectDir string, machine string) error {
     defaults = defaults(machine = %q, image = "base-image"),
     sources = sources(go_proxy = "https://proxy.golang.org"),
     # modules listed in priority order: later entries shadow earlier ones,
-    # so module-core wins over module-rpi and the Alpine/Jetson prebuilts.
+    # so module-core wins over module-bsp and the Alpine/Jetson prebuilts.
     modules = [
         module("https://github.com/yoebuild/module-alpine.git",
                ref = "main"),
@@ -38,7 +38,7 @@ func RunInit(projectDir string, machine string) error {
                ref = "main"),
         module("https://github.com/yoebuild/yoe.git",
                ref = "main",
-               path = "modules/module-rpi"),
+               path = "modules/module-bsp"),
         module("https://github.com/yoebuild/yoe.git",
                ref = "main",
                path = "modules/module-core"),
@@ -57,6 +57,16 @@ func RunInit(projectDir string, machine string) error {
         # versions). Pin zstd to Alpine so the .so and CLI come from one
         # source.
         "zstd": "alpine",
+        # module-core's source-built util-linux is one monolithic apk that
+        # bundles libblkid.so.1, libmount.so.1, and libuuid.so.1 (via
+        # --enable-libblkid/--enable-libmount). Alpine splits those libs
+        # into separate libblkid/libmount/libuuid packages, which get
+        # pulled in transitively by eudev, glib, e2fsprogs, etc. as soon
+        # as an image grows past the base set (e.g. jukebox-image's
+        # navidrome closure). Both then claim ownership of the same
+        # SONAMEs and apk refuses to install. Pin util-linux to Alpine so
+        # util-linux and its split libs come from one coordinated source.
+        "util-linux": "alpine",
     },
 )
 `, name, defaultMachine)

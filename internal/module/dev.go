@@ -38,7 +38,7 @@ func ModuleToUpstream(m yoestar.ResolvedModule, opts ModuleUpstreamOpts) error {
 	}
 	// Git operations target the clone root (where .git lives), not the
 	// MODULE.star subdir — they differ when the module declares a
-	// `path = "..."` field (e.g. module-rpi inside a multi-module repo).
+	// `path = "..."` field (e.g. module-bsp inside a multi-module repo).
 	repo := m.CloneDir
 	if repo == "" {
 		repo = m.Dir

@@ -8,6 +8,27 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.11] - 2026-05-20
+
+- **`beagleplay` machine.** New target for the TI AM625 BeaglePlay. Build with
+  `--machine beagleplay`.
+- **`jukebox-image`.** Music server image running Navidrome (Subsonic API).
+- **Image rootfs preserves per-file ownership from packages.** Services like
+  Navidrome and Postgres that need a specific data-dir owner now start cleanly.
+  Side effect: `rm -rf build/` fails because some files are root-owned — use
+  `yoe clean` instead.
+- **New "Security and Threat Model" doc.** What the build container does and
+  doesn't protect against. Short version: treat units like `curl | sh`.
+- **Files tab for image units shows rootfs contents, not the whole `destdir/`.**
+  Now matches the unit's SIZE column.
+- **Filtering the Units tab to no matches no longer scrolls the tab bar off the
+  screen.**
+- **`module-rpi` renamed to `module-bsp`.** Common boards live in one module.
+- **New "Boards" section in the docs.** Dedicated pages for BeaglePlay,
+  Raspberry Pi, and QEMU.
+- **SD-card images boot on BeaglePlay (and other K3 boards).** Previously hung
+  in ROM with no serial output.
+
 ## [0.10.10] - 2026-05-15
 
 - **Building a prebuilt package no longer fails on a fresh checkout.** Building

@@ -82,6 +82,11 @@ capable but carries significant complexity.
   configuration of mirrors, hash equivalence servers, and signing. `[yoe]`'s
   cache is per-unit, stored in S3-compatible object storage, and needs only a
   bucket URL.
+- The `pseudo` LD_PRELOAD layer and its SQLite ownership database. yoe takes
+  Alpine's "be real root in a container" approach instead — see
+  [Rootfs Ownership: How Each Project Handles It](#rootfs-ownership-how-each-project-handles-it)
+  below for Yocto's pseudo mechanism in depth and the reasoning behind yoe's
+  choice.
 - Cross-compilation toolchains.
 - Python as the tooling language.
 
@@ -1365,13 +1370,59 @@ kernel.
 
 ### How specific projects apply these
 
-**Alpine Linux** — two halves:
+**Alpine Linux** — by far the simplest answer of any distribution: it just
+requires real root. apk-tools is a C program that, during package extraction,
+reads each tar header's `uid`/`gid` (and `uname`/`gname` strings) and calls
+`chown(path, hdr.uid, hdr.gid)` (or `lchown` for symlinks) directly. `chown`
+requires `CAP_CHOWN`, which means the process must actually be uid 0 — there is
+no LD_PRELOAD, no SQLite database, no negotiation. If the process isn't root,
+`chown` returns `EPERM` and the file is left owned by the caller; apk
+historically warned and continued, modern versions fail harder.
 
-- **Package build** (`abuild`) wraps the whole build in `fakeroot` so the
-  resulting `.apk` tar records `root:root` ownership regardless of who ran
-  abuild.
-- **Rootfs assembly** (`apk add`, `alpine-make-rootfs`) runs as real root on a
-  live system or inside a build chroot.
+Two halves of the Alpine story:
+
+- **Package build** (`abuild`) wraps the whole build in `fakeroot` so that
+  ownership is preserved into the resulting `.apk` tar headers regardless of who
+  ran abuild. This is the same problem `dpkg-buildpackage` solves the same way.
+  fakeroot is fine here because the whole build runs in one process; the
+  in-memory database doesn't need to survive across invocations. Important: this
+  is solving package _creation_, not package _extraction_ — abuild's fakeroot is
+  not what makes ownership work at install time. The two sides are independent.
+- **Rootfs assembly** (`apk add`, `alpine-make-rootfs`, `mkimage.sh`, Alpine's
+  Docker base images) runs as real root, full stop. There is no unprivileged
+  rootfs-assembly path in the official Alpine toolchain. The
+  [`alpine-make-rootfs`](https://github.com/alpinelinux/alpine-make-rootfs)
+  README literally says "must run as root or in a way that allows it to use
+  chroot."
+  [`alpine-chroot-install`](https://github.com/alpinelinux/alpine-chroot-install)
+  documents `sudo` as a requirement. The official Docker images build their
+  rootfs inside a container that the Docker daemon launches as uid 0.
+
+The mechanics of how ownership gets correct at install time:
+
+1. apk reads the .apk's data tar header for each entry. Headers carry both
+   numeric and string forms — e.g.
+   `uid=100, uname=navidrome, gid=100, gname=navidrome` — in POSIX ustar/PAX
+   format.
+2. Before any file extraction, apk runs `.pre-install` if the package ships one.
+   Service packages typically use `.pre-install` to call `adduser -S` /
+   `addgroup -S`, which allocate a system uid in the 100–999 range and write
+   entries into the _rootfs being built's_ `/etc/passwd` and `/etc/group` — not
+   the host's. For navidrome this creates uid/gid 100 inside the target.
+3. apk then extracts each file (`open`/`creat`/`mkdir`/`symlink`) and calls
+   `chown(path, hdr.uid, hdr.gid)`. Because the process is root and the target
+   rootfs now has a `navidrome` entry at uid 100, the chown succeeds and
+   `var/lib/navidrome/` lands correctly owned. `.post-install` runs last for any
+   final fixups.
+
+Alpine gets away with the "just be root" answer for two reasons Yocto can't:
+extraction is a single short-lived process (no need for cross-process state
+persistence), and Alpine doesn't promise unprivileged rootfs builds from
+arbitrary host distros (whereas Yocto explicitly does). The lesson for any
+embedded-Linux builder is that once you have a privileged execution context of
+_some kind_ — live root, a chroot, a container, a user namespace — the ownership
+problem becomes uninteresting. The complexity of fakeroot and pseudo is the
+price of refusing to require any of those.
 
 **Debian / Ubuntu** — historically real root; modern tooling offers all three:
 
@@ -1388,11 +1439,41 @@ kernel.
 in-memory database doesn't persist across process invocations, so Buildroot does
 the whole image pack in one fakeroot session.
 
-**Yocto / OpenEmbedded** — uses `pseudo` instead of `fakeroot`. `pseudo` is an
-enhanced fakeroot that persists state to an on-disk SQLite database, so
-ownership survives across the many separate steps a Yocto task graph spawns.
-This is necessary for OE's execution model and is one of the reasons Yocto
-builds have a heavier tooling footprint than Alpine/Buildroot.
+**Yocto / OpenEmbedded** — uses [`pseudo`](https://git.yoctoproject.org/pseudo/)
+instead of `fakeroot`. Mechanically, `pseudo` is an LD_PRELOAD shim that
+intercepts a wide set of file-related libc calls — `chown`, `chmod`, `lchown`,
+`lstat`/`stat`/`fstatat`, `mknod`, `link`, `rename`, `setxattr`/`lgetxattr`,
+`open`/`openat` with `O_CREAT`, `getuid`/`geteuid`, and so on — and stores
+intended ownership, mode, xattr, and inode-number state in a SQLite database
+under `${PSEUDO_LOCALSTATEDIR}` (typically
+`tmp/sysroots-components/.../pseudo`). When a build step later reads the
+filesystem through any pseudo-aware process, it sees the database-recorded
+values; the on-disk inode actually stays owned by the build user. Yocto ships
+pseudo as the `pseudo-native` recipe — it's built as a host tool early in the
+build and reused throughout.
+
+Tasks opt into pseudo via the `fakeroot = "1"` task flag in a recipe, which
+tells BitBake to launch that task with `LD_PRELOAD=libpseudo.so` and the right
+environment (`PSEUDO_PREFIX`, `PSEUDO_LOCALSTATEDIR`, `PSEUDO_NOSYMLINKEXP`).
+`do_install`, `do_package`, and the image-construction tasks (`do_rootfs`,
+`do_image_*`) all carry this flag because each one writes files that need
+ownership the build user cannot directly grant — `/etc/shadow` as `root:root`,
+`/var/lib/postgresql` as `postgres:postgres`, setuid bits on `/usr/bin/su`, and
+so on. When `mksquashfs`/`mkfs.ext4 -d`/`tar` later read the staged sysroot,
+they're also running under the same pseudo session, so they see the recorded
+ownership and pack it into the final image.
+
+Why SQLite instead of fakeroot's in-memory hash table: Yocto's task graph spawns
+each task as a separate process, and a single recipe may run dozens of tasks
+across hours of wallclock time. Ownership state set in `do_install` must survive
+until `do_package` and `do_image_ext4` read it, possibly from a different
+BitBake invocation entirely. fakeroot's in-memory database can't span process
+lifetimes; pseudo's SQLite file can. This is also why a corrupted pseudo DB
+(interrupted build, disk full, parallel tasks racing) typically forces a full
+`bitbake -c cleansstate` and rebuild — there's no way to reconstruct the
+intended ownership of a half-staged sysroot. Heavier tooling, but it's the price
+of running an unprivileged multi-process build that produces correctly-owned
+root filesystems.
 
 **NixOS** — builds entirely under a sandboxing daemon (`nix-daemon`) running as
 root; individual builders drop privileges. Image assembly for NixOS system
@@ -1415,17 +1496,82 @@ images as a first-class concern.
   `$DESTDIR` back to the host build user at the end so the next build's
   host-side cleanup works. This is roughly Alpine's "run as real root" path,
   adapted to our docker-with-host-ownership cache model.
-- **Future direction** — the planned move of image assembly to the host via
-  `bwrap --unshare-user --uid 0 --gid 0`
-  (`docs/superpowers/plans/host-image-building-bwrap.md`) is the user-namespace
-  approach: the same category as `mmdebstrap --mode=unshare`. When it lands, the
-  `chown` dance disappears — bwrap's namespace provides pseudo-root with
-  host-owned files for free.
+- **Direction: stay with container-as-root.** Earlier design notes
+  (`docs/plans/host-image-building-bwrap.md`) proposed migrating image assembly
+  to host-side `bwrap --unshare-user`. After working through the tradeoffs we
+  picked the other path. Two reasons drove the decision:
+  - **Debug visibility.** With container-as-root,
+    `ls -la build/<image>.<arch>/destdir/rootfs/var/lib/navidrome` on the host
+    shows `navidrome:navidrome` directly — the same uid/gid the booted system
+    sees. With bwrap + subuid, the same `ls` would show an opaque host uid
+    (e.g. 100100) from the build user's subuid range, and recovering the real
+    value would require either mental math, a yoe-side `inspect` helper that
+    re-enters the namespace, or reading inodes back out of the final ext4 image
+    with `debugfs`. Several debug sessions in this repo's own history relied on
+    direct `ls` of the rootfs; preserving that workflow is worth the
+    cleanup-step inconvenience.
+  - **CI portability.** Container-as-root works on every CI system that supports
+    privileged Docker — essentially all of them, including hosted GitHub
+    Actions, GitLab, CircleCI, Buildkite, Jenkins, AWS CodeBuild.
+    bwrap-with-subuid would need bubblewrap preinstalled on the runner (hosted
+    GitHub Actions doesn't ship it), unprivileged user namespaces enabled in the
+    kernel (disabled in some hardened distros and locked-down Kubernetes
+    runners), and per-runner subuid configuration. Container-as-root has none of
+    those requirements — if Docker works, it works.
 
-The short version: we match Alpine's tar-ownership convention for packages,
-we're currently doing the "real root in a container" move for rootfs assembly,
-and we have a documented path to the `mmdebstrap --mode=unshare` equivalent for
-the host.
+  Security baseline is unchanged from yoe's existing model. The build container
+  already runs `--privileged` and several paths run as root inside it
+  (`mkfs.ext4 -d`, `losetup`, `mount`, `extlinux`, the bootstrap stage, the QEMU
+  device runner) — see [Security and Threat Model](security.md) for the full
+  table. Adding apk extraction (`installPackages`) to that set extends the
+  existing pattern rather than introducing a new class of privileged execution.
+  A unit that wanted to abuse root in the container already had several ways in.
+
+  The actual code change is small and lives entirely in
+  `modules/module-core/classes/image.star`'s `_assemble_rootfs` /
+  `_create_disk_image` task functions. `apk add --root` already runs with
+  `privileged = True` inside the container — that's been the case for as long as
+  image-class units have existed, and it's what gives apk
+  `chown(path, hdr.uid, hdr.gid)` rights at extract time. The fix is to stop
+  _throwing the result away_:
+  - Drop the post-apk `chown -R $(stat -c %u:%g /project) $DESTDIR/rootfs` that
+    normalizes everything to the host build user so subsequent host-side walks
+    (`dir_size_mb`) can enter the tree.
+  - Drop the pre-mkfs `chown -R 0:0 $DESTDIR/rootfs` that collapses everything
+    to root.
+  - Drop the trailing `chown -R $(stat -c %u:%g /project) $DESTDIR` that hands
+    things back to the build user so plain host `rm -rf build/` works.
+
+  With those three gone, per-file ownership from apk tar metadata flows straight
+  through to ext4 inodes — `/var/lib/navidrome` lands as `navidrome:navidrome`,
+  `/etc/shadow` as `root:root`, setuid bits intact. On-disk ownership in
+  `build/<image>.<arch>/destdir/rootfs/` reflects what the booted image will
+  see; that's the visibility win. The cost is that cleanup needs to be
+  container-mediated rather than a plain `rm -rf build/`. `yoe cache clean` and
+  `yoe build --clean` route the rm through the same container so the host user
+  doesn't need `sudo` for routine work.
+
+  One downstream fix is needed: `dir_size_mb` (the preflight that walks the
+  rootfs on the host to check whether contents will fit in the partition) now
+  encounters dirs the build user can't enter (mode 700 root-owned dirs like
+  `/root`, or service-user-owned dirs the build user isn't a member of). The fix
+  is to make the walk fail-soft on EACCES — silently skip what it can't read.
+  The preflight then under-estimates by a few KB to a few MB; the existing 25 MB
+  headroom margin absorbs the inaccuracy, and `mkfs.ext4 -d` (which runs as root
+  in the container) remains the authoritative backstop.
+
+  bwrap with user namespaces remains a sensible direction for security-sensitive
+  deployments that want a stronger isolation boundary than privileged Docker
+  provides — at the cost of the visibility and CI-portability properties above.
+  The plan doc stays on disk as a record of that alternative; it isn't on yoe's
+  current roadmap.
+
+The short version: we match Alpine's tar-ownership convention for packages, and
+we use Alpine's container-as-root mechanism for rootfs assembly. The visibility
+cost of bwrap's subuid mapping and the CI-portability cost of requiring
+bubblewrap + unprivileged-userns turned out to outweigh the incremental
+isolation it would provide above privileged Docker, which is already yoe's
+documented baseline.
 
 ## Summary Matrix
 

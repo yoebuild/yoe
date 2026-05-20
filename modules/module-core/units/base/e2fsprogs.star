@@ -2,6 +2,13 @@
 # the duplicate copies in e2fsprogs to avoid conflicting headers/libs in the
 # sysroot.
 #
+# Build deps pull in Alpine's split util-linux layout: util-linux-dev for
+# headers (uuid.h, blkid.h, mount.h) and pkg-config files, libuuid/libblkid/
+# libmount for the .so files. yoe's per-unit sysroot follows `deps` only
+# (alpine_pkg sets deps=[] and exposes runtime_deps through PKGINFO, not the
+# DAG), so the library packages have to be listed explicitly here even
+# though Alpine's util-linux-dev declares them as runtime_deps.
+#
 # Use the kernel.org tarball: it ships a pre-baked configure with AX_PTHREAD
 # already expanded. configure.ac references AX_PTHREAD from autoconf-archive
 # which isn't in the container, so we must NOT run autoreconf — the autotools
@@ -13,7 +20,7 @@ unit(
     sha256 = "08242e64ca0e8194d9c1caad49762b19209a06318199b63ce74ae4ef2d74e63c",
     license = "GPL-2.0-only AND LGPL-2.0-only AND BSD-3-Clause AND MIT",
     description = "ext2/ext3/ext4 filesystem utilities (mkfs, fsck, tune2fs)",
-    deps = ["util-linux", "toolchain-musl"],
+    deps = ["util-linux-dev", "libuuid", "libblkid", "libmount", "toolchain-musl"],
     runtime_deps = ["util-linux"],
     replaces = ["busybox"],
     container = "toolchain-musl",

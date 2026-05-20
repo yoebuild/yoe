@@ -127,14 +127,14 @@ for kvdir in $DESTDIR/rootfs/lib/modules/*/; do
 done
 """, privileged = True)
 
-    # apk ran as root and left root-owned files (e.g. /root with mode 700)
-    # throughout the rootfs. Subsequent host-side steps (`dir_size_mb`
-    # below, the destdir walks in the build executor) run as the host
-    # build user and can't enter those dirs. Hand ownership back to the
-    # build user; _create_disk_image will chown to root again right
-    # before mkfs.ext4 -d so the on-target rootfs is owned by root.
-    run("chown -R $(stat -c %u:%g /project) $DESTDIR/rootfs",
-        privileged = True)
+    # apk add applied per-file ownership directly from each apk's tar
+    # headers — e.g. /var/lib/navidrome:navidrome:navidrome, /etc/shadow
+    # root:root with mode 600, setuid bits intact — and we deliberately do
+    # not touch it again. `dir_size_mb` and any other host-side walks must
+    # tolerate dirs they cannot enter (see fnDirSizeMB, which fail-softs
+    # on EACCES); mkfs.ext4 -d runs root in the container and remains the
+    # authoritative reader of the assembled tree. See docs/security.md
+    # and docs/comparisons.md for the design discussion.
 
     if hostname:
         run("mkdir -p $DESTDIR/rootfs/etc")
@@ -152,10 +152,12 @@ def _create_disk_image(name, partitions):
     if not partitions:
         return
 
-    # Capture the rootfs size before the chown to root below — dir_size_mb
-    # walks on the host as the build user, and a post-chown walk can't enter
-    # mode-700 root-owned dirs (e.g., /root). Used by the ext4 preflight
-    # below to fail with a clear message when contents won't fit.
+    # Walk the rootfs as the host build user to estimate partition fit
+    # for the preflight below. dir_size_mb fail-softs on EACCES — dirs the
+    # build user can't enter (mode-700 /root, service-user data dirs) are
+    # skipped, so this is a slight underestimate. The 25 MB headroom in
+    # the preflight absorbs that; mkfs.ext4 -d, which runs as root inside
+    # the container, is the authoritative fit check.
     rootfs_mb = dir_size_mb("rootfs")
 
     total_mb = 1
@@ -176,13 +178,10 @@ def _create_disk_image(name, partitions):
 
     run("printf '%s' | sfdisk %s" % (sfdisk_lines, img))
 
-    # Rootfs was assembled as the host build user (docker --user uid:gid), so
-    # every file under $DESTDIR/rootfs is owned by that uid. mkfs.ext4 -d copies
-    # ownership into the filesystem verbatim, so the booted system would see
-    # files owned by whatever host user ran the build. Chown to root before
-    # packing, and chown the destdir back at the end so the next build's
-    # os.RemoveAll() on the host can clean it up.
-    run("chown -R 0:0 $DESTDIR/rootfs", privileged = True)
+    # No pre-mkfs chown: per-file ownership has been preserved end-to-end
+    # from each apk's tar headers (apk add ran with privileged = True, and
+    # nothing has touched the tree since). mkfs.ext4 -d reads stat()
+    # ownership verbatim into the ext4 inodes, which is what we want.
 
     offset = 1
     for p in partitions:
@@ -219,10 +218,14 @@ def _create_disk_image(name, partitions):
     if ctx.arch == "x86_64":
         _install_syslinux(img, partitions)
 
-    # Restore destdir ownership to the host build user. The chown -R above,
-    # plus any root-owned files the privileged mkfs/mcopy/syslinux steps left
-    # behind, would otherwise block the next build's os.RemoveAll on the host.
-    run("chown -R $(stat -c %u:%g /project) $DESTDIR", privileged = True)
+    # No post-build chown back to the host user. The point of preserving
+    # per-file ownership end-to-end is that on-disk state in
+    # $DESTDIR/rootfs reflects what the image actually contains — flipping
+    # everything back to the build user here would destroy the debug
+    # visibility we just spent the build preserving. Cleanup goes through
+    # the container via `yoe build --clean` / `yoe cache clean`, both of
+    # which rm as root in the same privileged context. See
+    # docs/security.md for the threat-model implications.
 
 def _install_syslinux(img, partitions):
     """Install syslinux MBR boot code and extlinux on an x86 disk image."""

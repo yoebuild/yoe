@@ -3,7 +3,7 @@ project(
     version = "0.1.0",
     defaults = defaults(machine = "qemu-x86_64", image = "base-image"),
     # modules listed in priority order: later entries shadow earlier ones,
-    # so module-core wins over module-rpi and the Alpine/Jetson prebuilts.
+    # so module-core wins over module-bsp and the Alpine/Jetson prebuilts.
     modules = [
         module("https://github.com/yoebuild/module-alpine.git",
               ref = "main"),
@@ -11,7 +11,7 @@ project(
               ref = "main"),
         module("github.com/yoebuild/yoe",
               local = "../..",
-              path = "modules/module-rpi"),
+              path = "modules/module-bsp"),
         module("github.com/yoebuild/yoe",
               local = "../..",
               path = "modules/module-core"),
@@ -30,5 +30,15 @@ project(
         # versions). Pin zstd to Alpine so the .so and CLI come from one
         # source.
         "zstd": "alpine",
+        # module-core's source-built util-linux is one monolithic apk that
+        # bundles libblkid.so.1, libmount.so.1, and libuuid.so.1 (via
+        # --enable-libblkid/--enable-libmount). Alpine splits those libs
+        # into separate libblkid/libmount/libuuid packages, which get
+        # pulled in transitively by eudev, glib, e2fsprogs, etc. as soon
+        # as an image grows past the base set (e.g. jukebox-image's
+        # navidrome closure). Both then claim ownership of the same
+        # SONAMEs and apk refuses to install. Pin util-linux to Alpine so
+        # util-linux and its split libs come from one coordinated source.
+        "util-linux": "alpine",
     },
 )

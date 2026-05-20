@@ -141,8 +141,13 @@ func partitionImage(imgPath string, partitions []yoestar.Partition, projectDir s
 		if p.Type == "vfat" {
 			ptype = "c" // W95 FAT32 (LBA)
 		}
+		// MBR bootable flag goes on the partition the firmware reads at
+		// boot — that's partition 1 across every machine yoe currently
+		// supports (the FAT boot partition on K3/RPi, the only partition
+		// on QEMU). Flagging the rootfs instead made the AM62x ROM
+		// silently reject SD cards as non-bootable.
 		bootable := ""
-		if p.Root {
+		if i == 0 {
 			bootable = ", bootable"
 		}
 		script += fmt.Sprintf("%stype=%s%s\n", size, ptype, bootable)
