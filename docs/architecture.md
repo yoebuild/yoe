@@ -40,8 +40,9 @@ Typical modules:
 
 - `module-core` — base classes (autotools, cmake, go), common units (busybox,
   openssl, openssh, kernel), and reference images.
-- A BSP module (e.g. `module-jetson`, `module-rpi`) — machine definitions and
-  hardware-specific units for a board family.
+- `module-bsp` and `module-jetson` — BSP modules with machine definitions
+  (Raspberry Pi 4/5, BeaglePlay, NVIDIA Jetson) and the matching kernel /
+  bootloader / firmware units.
 - `module-alpine` — passthrough access to upstream Alpine `.apk` packages.
 
 Modules are referenced by URL and Git ref in `PROJECT.star`. The `[yoe]` CLI

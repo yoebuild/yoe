@@ -14,6 +14,18 @@ and this project adheres to
   bottom row and the rest of the screen stays put.
 - **Rename `module-rpi` to `module-bsp`.** We are going to try keeping common
   machines in one place.
+- **BeaglePlay (TI AM625) machine in `module-bsp`.** A new `beagleplay` machine
+  ships with a TI K3 boot chain — `tiboot3.bin` (R5 SPL), `tispl.bin` +
+  `u-boot.img` (A53 SPL + U-Boot proper, with TF-A and OP-TEE folded in),
+  `Image` and `k3-am625-beagleplay.dtb`, and a `uEnv.txt` that points U-Boot
+  at them. Pick it with `--machine beagleplay`. The R5 SPL (Cortex-R5F /
+  armv7-R) pulls Alpine's `gcc-arm-none-eabi` cross toolchain through
+  `module-alpine` so the build runs in the same aarch64 container as the
+  rest of the BSP, no Dockerfile or arch-list changes needed.
+- **Per-board docs under a new "Boards" section.** `docs/` now carries
+  dedicated pages for BeaglePlay, Raspberry Pi (RPi4 / RPi5), and QEMU
+  (arm64 / x86_64) — boot chain, which units produce what, partition
+  layout, and the common failure modes for each board.
 
 ## [0.10.10] - 2026-05-15
 
