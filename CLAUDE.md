@@ -15,6 +15,9 @@ architecture description live under `docs/` (start with `docs/intro.md` and
   provides only the minimal bootstrap toolchain (gcc, binutils, make, etc.);
   everything else is a unit. For non-essential features (docs, man pages),
   disabling via configure flags is also acceptable.
+- **Need a tool Alpine already packages? Pull it through `module-alpine`, don't
+  build from source.** See the `pulling-alpine-packages` skill for the
+  workflow, the `module-alpine` cache layout, and the push-upstream rules.
 - **Container units set arch explicitly.** Classes set `container` and
   `container_arch` explicitly; units inherit these from their class. Do not let
   container selection happen by implicit default.
@@ -167,6 +170,17 @@ than scanning the directories.
   project that builds out of the box. The two diverge only in module references
   — e2e uses `local = "../.."` to test the in-tree modules, while init uses
   upstream URLs.
+- **Test builds for new/changed units always go in `testdata/e2e-project`.**
+  When a unit (new or modified) needs a test build, run it inside the existing
+  `testdata/e2e-project/` checkout — do not create another test project
+  directory under `testdata/` for one-off builds. `e2e-project` is the shared
+  scratch space: its `cache/modules/` already has the live `module-alpine` and
+  friends, its PROJECT.star already wires the standard module set, and reusing
+  it keeps the module cache warm across builds. If the unit needs project-level
+  configuration that e2e doesn't have, add the configuration to
+  `testdata/e2e-project/PROJECT.star` (and propagate to `internal/init.go` per
+  the "`yoe init` mirrors the e2e-project template" rule), rather than spinning
+  up a parallel project.
 - **External-module fixes go in the cached copy and must be pushed.** When the
   right place to change something is an external module (e.g. `module-alpine`,
   `module-jetson`), edit the file in place under
