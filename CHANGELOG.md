@@ -18,6 +18,7 @@ and this project adheres to
   pulls Alpine's `gcc-arm-none-eabi` cross toolchain through `module-alpine` so
   the build runs in the same aarch64 container as the rest of the BSP, no
   Dockerfile or arch-list changes needed.
+- **`jukebox-image`.** Includes Navidrome Music Server.
 - **Image rootfs now preserves per-file ownership from packages.** Service
   packages whose data directories need a specific user — `/var/lib/navidrome`
   owned by `navidrome`, `/var/lib/postgresql` by `postgres`, and so on — now
@@ -41,12 +42,6 @@ and this project adheres to
   which included the partition-sized `<image>.img` artifact — a 600 M row that
   dwarfed the rest and didn't match the SIZE column on the units page. The
   listing now matches the installed footprint shown elsewhere in the TUI.
-- **`jukebox-image` now builds out of the box.** Navidrome's transitive
-  dependency closure (ffmpeg → glib, eudev, e2fsprogs) pulled in Alpine's split
-  `libblkid` / `libmount` packages, which collided with the source-built
-  `util-linux`'s bundled copies of the same libraries. `yoe init` and the e2e
-  project now pin `util-linux` to Alpine so the libraries and the binaries come
-  from one coordinated source, the same way `xz` and `zstd` are already pinned.
 - **Filtering the Units tab to no matches no longer scrolls the tabs off the
   screen.** When a query matched nothing, the "no units match" notice used to
   push the layout down and hide the tab bar off the top. It now shows on the
