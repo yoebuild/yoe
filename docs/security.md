@@ -218,11 +218,14 @@ These are explicit gaps, not unintentional bugs. PRs welcome.
   because image-class units need it; splitting the container invocation into
   privileged and non-privileged variants — and only escalating for the steps
   that genuinely need it — would dramatically reduce the host blast radius.
-- **Sandbox or remove `run(host = True)`.** The Starlark escape hatch is what
-  makes "rogue unit = host compromise" trivial. Container builds via
-  `docker build` are the main legitimate caller; running buildx inside the build
-  container, or moving container assembly to a Go-side driver, would let us
-  delete this hatch.
+- **Remove `run(host = True)` and `run(privileged = True)` from Starlark.**
+  The two kwargs that make "rogue unit = host compromise" trivial today.
+  Spec'd in
+  [Starlark unprivileged-only](specs/2026-05-20-starlark-unprivileged-only.md):
+  delete both kwargs and move image-class and container-class privileged
+  operations into Go drivers in `internal/`. Only two `.star` files in the
+  whole tree use the kwargs today, both yoe-shipped classes, so the
+  migration is bounded.
 - **Pin modules by commit hash, not by ref.** A
   `module(ref = "v1.4.0", commit = "<sha>")` form, verified at clone and fetch
   time, would close the "upstream retagged the release" hole.
