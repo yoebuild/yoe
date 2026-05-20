@@ -8,6 +8,8 @@
 
 ## Next
 
+- building from console is not confusing with parallel build as to what is
+  happening [1/1] task: build (should also include unit)
 - Lock all writes to build.json files, local.star, etc
 - create patches for src trees
 - Beagle Play
