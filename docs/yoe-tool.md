@@ -1097,6 +1097,16 @@ yoe clean --all
 yoe clean openssh
 ```
 
+Image rootfs builds deliberately leave per-file ownership (e.g.
+`/var/lib/navidrome:navidrome:navidrome`) on disk so that
+`build/<image>.<arch>/destdir/rootfs/` inspects with the same uid/gid the
+booted system sees — see [Security and Threat Model](security.md). A plain
+shell `rm -rf build/` will fail with permission errors on those files.
+`yoe clean` handles the cleanup correctly: it tries a host-side rm first
+and, on EACCES, falls back to running the rm inside the build container
+where it has the privilege to remove root- and service-user-owned files.
+You don't need `sudo`.
+
 ## Environment Variables
 
 | Variable                | Default   | Description                                     |

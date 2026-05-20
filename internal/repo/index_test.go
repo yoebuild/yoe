@@ -28,7 +28,7 @@ func TestGenerateIndex(t *testing.T) {
 		License:     "MIT",
 	}
 
-	apkPath, err := artifact.CreateAPK(unit, destDir, outputDir, "x86_64", "", nil)
+	apkPath, err := artifact.CreateAPK(unit, destDir, "", outputDir, "x86_64", "", nil)
 	if err != nil {
 		t.Fatalf("CreateAPK: %v", err)
 	}

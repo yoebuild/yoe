@@ -16,10 +16,13 @@ base_files(
 # Subsonic API to any compatible client (DSub, Substreamer, Symfonium,
 # Tempo, ...). Web UI on http://<host>:4533.
 #
-# The OpenRC init script ships in navidrome-openrc and is auto-enabled
-# at boot by image assembly (per the "installed packages run their
-# services" rule in CLAUDE.md). ffmpeg + libtag come along as
-# navidrome's transcoding and tag-reading runtime deps.
+# navidrome-openrc ships the OpenRC init script (verbatim from upstream
+# Alpine — yoe re-signs but does not modify the data tar). navidrome-conf
+# is a small yoe-built companion that ships only the runlevel symlink,
+# enabling autostart at boot. The pattern mirrors Alpine's setup-<pkg>
+# helpers: upstream packages stay byte-identical, distro wiring lives in
+# a separate apk. ffmpeg + libtag come along as navidrome's transcoding
+# and tag-reading runtime deps.
 #
 # `hostname = "jukebox"` overrides the per-machine default so a fleet of
 # identically-imaged devices is reachable at jukebox.local regardless of
@@ -34,6 +37,6 @@ image(
         "dhcpcd", "ntp-client", "mdnsd", "openssh", "ca-certificates",
         "curl", "bash", "less", "file", "procps-ng",
         "htop", "strace", "apk-tools",
-        "navidrome", "navidrome-openrc",
+        "navidrome", "navidrome-openrc", "navidrome-conf",
     ],
 )

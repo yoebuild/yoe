@@ -478,17 +478,14 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	// root-owned files left by a previous failed image build.
 	containerImage := resolveContainerImage(proj, unit, opts.Arch)
 
-	// Image-class units chown rootfs to root for mkfs.ext4 -d and chown back
-	// only on success. If anything between fails, the destdir is left owned
-	// by root and the host can't clean it up. Restore ownership after every
-	// image build (success or failure) so the next build can proceed.
-	if unit.Class == "image" {
-		defer func() {
-			if err := chownDirToHost(ctx, destDir, opts.ProjectDir, containerImage); err != nil {
-				fmt.Fprintf(w, "  (warning: restoring destdir ownership failed: %v)\n", err)
-			}
-		}()
-	}
+	// No post-image chown-back-to-host defer. The image class deliberately
+	// preserves per-file ownership from each apk's tar headers so that
+	// destdir/rootfs inspects with the same uid/gid the booted system
+	// sees — see docs/security.md and docs/comparisons.md. The next
+	// build's removeDirRobust below handles cleanup via the container if
+	// host-side RemoveAll hits EACCES on root- or service-user-owned
+	// files; that's slower than a plain rm but correct, and it's what
+	// makes the visibility-vs-cleanup tradeoff workable.
 
 	if opts.Clean {
 		if err := removeDirRobust(ctx, srcDir, opts.ProjectDir, containerImage); err != nil {
@@ -728,7 +725,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 				archDir = a
 			}
 		} else {
-			apkPath, err = artifact.CreateAPK(unit, destDir, filepath.Join(buildDir, "pkg"), archDir, opts.ProjectCommit, opts.Signer)
+			apkPath, err = artifact.CreateAPK(unit, destDir, sysroot, filepath.Join(buildDir, "pkg"), archDir, opts.ProjectCommit, opts.Signer)
 			if err != nil {
 				return fmt.Errorf("creating apk: %w", err)
 			}

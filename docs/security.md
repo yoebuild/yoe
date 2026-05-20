@@ -63,16 +63,33 @@ Two things in that command line dominate the security picture:
 
 ### Code paths that run as root in the privileged container
 
-| Path                                           | Why                                              |
-| ---------------------------------------------- | ------------------------------------------------ |
-| `image`-class units                            | `mkfs.ext4 -d`, `losetup`, `mount`, `extlinux`   |
-| Any `run(..., privileged = True)` in a unit    | Same, exposed as a Starlark builtin              |
-| Ownership recovery (`chownDirToHost`)          | Reclaims root-owned files left by a failed image |
-| QEMU device runner (`internal/device/qemu.go`) | Needs `/dev/kvm`                                 |
-| Bootstrap stage 1 (`createBuildRoot`)          | `apk add --root` builds the build root           |
+| Path                                           | Why                                                                                         |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `image`-class units                            | apk extraction (preserves per-file uid/gid from package tar metadata), `mkfs.ext4 -d`, `losetup`, `mount`, `extlinux` |
+| Any `run(..., privileged = True)` in a unit    | Same, exposed as a Starlark builtin                                                         |
+| QEMU device runner (`internal/device/qemu.go`) | Needs `/dev/kvm`                                                                            |
+| Bootstrap stage 1 (`createBuildRoot`)          | `apk add --root` builds the build root                                                      |
+| `yoe cache clean` and `yoe build --clean`      | Removes the resulting root-owned files from `build/` since the host user can't `rm` them    |
 
 For these paths, container UID is root, all caps are present, and the host's
 `/dev` is reachable. There is no defense-in-depth layer beneath that.
+
+The apk-extraction step on the `image`-class row deserves a short note: it
+runs as root in the container so that `chown(path, hdr.uid, hdr.gid)` calls
+during tar extraction actually succeed, which is what makes the assembled
+rootfs contain (and the resulting ext4 image preserve) per-file ownership
+like `navidrome:navidrome` for `/var/lib/navidrome` or `postgres:postgres`
+for `/var/lib/postgresql`. The earlier workaround — `chown -R 0:0` on the
+rootfs followed by a chown-back-to-host at end-of-build — collapsed all
+ownership to root and obscured what the booted system would see; the
+current path preserves real ownership and accepts the cost that
+`build/<image>.<arch>/destdir/rootfs/` is owned by root after a build.
+`yoe cache clean` and `yoe build --clean` route cleanup through the same
+container so the host user doesn't need `sudo` for routine work. See
+[Comparisons § Rootfs
+Ownership](comparisons.md#rootfs-ownership-how-each-project-handles-it)
+for why this is preferred over LD_PRELOAD (fakeroot/pseudo) or
+user-namespace (bwrap) alternatives.
 
 ### `run(host = True)` — there is no container at all
 
