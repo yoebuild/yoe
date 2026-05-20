@@ -57,6 +57,12 @@ and this project adheres to
   dedicated pages for BeaglePlay, Raspberry Pi (RPi4 / RPi5), and QEMU
   (arm64 / x86_64) — boot chain, which units produce what, partition
   layout, and the common failure modes for each board.
+- **SD-card images now boot on BeaglePlay (and other K3 boards).** yoe was
+  marking the rootfs partition as MBR-bootable instead of the boot partition;
+  the AM62x ROM scans for a bootable FAT and silently rejected the card, so
+  the SD boot path hung in ROM with no serial output. The bootable flag now
+  sits on the first partition, matching what every supported board's firmware
+  expects.
 
 ## [0.10.10] - 2026-05-15
 
