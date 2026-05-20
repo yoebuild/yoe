@@ -815,6 +815,14 @@ or size — handy for spotting the biggest payloads or confirming a binary
 actually landed where you expected. Symlinks are dimmed; directories are
 omitted. Empty until the unit has been built at least once.
 
+For image units the tab walks `destdir/rootfs/` rather than `destdir/`, so the
+listing reflects the same content that drives the units-page **SIZE** column
+(`BuildMeta.InstalledBytes`) and the on-target install footprint. The
+assembled `<image>.img` artifact is intentionally not shown — its apparent
+size is the machine's partition size (e.g. 600 M of reserved free space for
+`qemu-x86_64`), so including it would dwarf every other row without
+describing anything the user installed.
+
 | Key         | Action                                             |
 | ----------- | -------------------------------------------------- |
 | `tab`       | Switch between Info and Files tabs                 |

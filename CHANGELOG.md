@@ -14,6 +14,12 @@ and this project adheres to
   trusting modules and units. The short version: the build container is a
   convenience for hermetic toolchains, not a security boundary — treat units
   the same way you treat `curl | sh`.
+- **The Files tab on an image unit now shows the rootfs contents, not the
+  assembled disk image.** Previously the tab listed every file under
+  `destdir/`, which included the partition-sized `<image>.img` artifact — a
+  600 M row that dwarfed the rest and didn't match the SIZE column on the
+  units page. The listing now matches the installed footprint shown
+  elsewhere in the TUI.
 - **Filtering the Units tab to no matches no longer scrolls the tabs off the
   screen.** When a query matched nothing, the "no units match" notice used to
   push the layout down and hide the tab bar off the top. It now shows on the
