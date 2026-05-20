@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **New "Security and Threat Model" doc.** Explains what the build container
+  actually protects against, which paths run as root, what `run(host = True)`
+  and `run(privileged = True)` give a unit author, and how to think about
+  trusting modules and units. The short version: the build container is a
+  convenience for hermetic toolchains, not a security boundary — treat units
+  the same way you treat `curl | sh`.
 - **Filtering the Units tab to no matches no longer scrolls the tabs off the
   screen.** When a query matched nothing, the "no units match" notice used to
   push the layout down and hide the tab bar off the top. It now shows on the
