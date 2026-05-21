@@ -4,10 +4,10 @@ unit(
     license = "Apache-2.0",
     description = "First-boot service that expands the rootfs partition to fill the disk",
     services = ["grow-rootfs"],
-    # util-linux supplies sfdisk + partx; e2fsprogs supplies resize2fs.
-    # Both are in dev-image already; we declare them as runtime_deps so
-    # this unit is also usable in slimmer images.
-    runtime_deps = ["openrc", "util-linux", "e2fsprogs"],
+    # Alpine ships sfdisk and partx as separate top-level apks (NOT
+    # subpackages of util-linux — util-linux-misc has fdisk but not
+    # sfdisk). e2fsprogs supplies resize2fs.
+    runtime_deps = ["openrc", "sfdisk", "partx", "e2fsprogs"],
     container = "toolchain-musl",
     container_arch = "target",
     tasks = [
