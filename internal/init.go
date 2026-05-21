@@ -67,6 +67,14 @@ func RunInit(projectDir string, machine string) error {
         # SONAMEs and apk refuses to install. Pin util-linux to Alpine so
         # util-linux and its split libs come from one coordinated source.
         "util-linux": "alpine",
+        # module-core's source-built curl bundles its own libcurl.so.4 at
+        # 8.11.1's soversion. Alpine ships libcurl as a separate package
+        # at 8.14.1, and other Alpine packages (git, libcurl consumers)
+        # link against it. Mixing both trips a so:libcurl.so.4 conflict
+        # the moment an image pulls in git or any other libcurl consumer
+        # from Alpine. Pin curl to Alpine so curl and libcurl come from
+        # one coordinated source.
+        "curl": "alpine",
     },
 )
 `, name, defaultMachine)
