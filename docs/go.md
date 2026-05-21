@@ -27,7 +27,7 @@ Cross-compilation is automatic: yoe sets `GOARCH` from the target machine's arch
 (`x86_64` → `amd64`, `arm64` → `arm64`, `riscv64` → `riscv64`) and forces
 `CGO_ENABLED=0 GOOS=linux` so the result is a statically-linked Linux binary.
 
-The build runs inside the upstream `golang:1.24` container by default. Override
+The build runs inside the upstream `golang:1.26` container by default. Override
 with `container = "golang:1.23"` (or any pullable Go image) when a unit needs a
 specific toolchain version.
 
@@ -77,7 +77,7 @@ file will show your username, not `root`.
 ## Build sandbox notes
 
 Go builds run inside the build container as `--user $(id -u):$(id -g)`, so all
-cache writes land on the host as your user. The `golang:1.24` upstream image has
+cache writes land on the host as your user. The `golang:1.26` upstream image has
 `/go` owned by root, but the bind mount overlays that with the project cache
 directory before any build step runs.
 
@@ -94,7 +94,7 @@ Common knobs on `go_binary`:
 | -------------- | -------------- | -------------------------------------------------------------------------------------- |
 | `go_package`   | `./cmd/<name>` | Path passed as the final arg to `go build`.                                            |
 | `binary`       | `<name>`       | Installed filename when it differs from the unit name (e.g. `simpleiot` → `siot`).     |
-| `container`    | `golang:1.24`  | Override to pin a different toolchain.                                                 |
+| `container`    | `golang:1.26`  | Override to pin a different toolchain.                                                 |
 | `tasks`        | empty          | Extra tasks (e.g. installing init scripts) merged after the default `build` task.      |
 | `runtime_deps` | empty          | Packages installed alongside the binary on the device (e.g. `openrc` for the service). |
 
