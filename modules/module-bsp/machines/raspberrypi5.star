@@ -11,6 +11,6 @@ machine(
     packages = ["rpi-firmware", "rpi5-config"],
     partitions = [
         partition(label = "boot", type = "vfat", size = "64M", contents = ["kernel", "dtbs", "firmware"]),
-        partition(label = "rootfs", type = "ext4", size = "1G", root = True),
+        partition(label = "rootfs", type = "ext4", size = "4G", root = True),
     ],
 )
