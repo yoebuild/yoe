@@ -466,7 +466,9 @@ regardless of whether a fresh build would produce identical bytes.
 
 Contributions are welcome — especially BSPs for new boards and units for new
 packages. AI-assisted contributions are fine; just make sure the result actually
-works, and keep PRs small and reviewable.
+works, and keep PRs small and reviewable. Please 
+[discuss](https://github.com/yoebuild/yoe/discussions) architectural or significant
+UI changes before implementing.
 
 ## 💚 Sponsors
 
