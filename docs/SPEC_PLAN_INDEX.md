@@ -35,6 +35,7 @@ Status of every spec in `docs/specs/` and every plan in `docs/plans/`.
 | 2026-05-13 | Feeds as modules                      | [feeds-as-modules](specs/2026-05-13-feeds-as-modules.md)                                           | —                                                                                           | Not started | Spec landed today; no `alpine_feed()` builtin or synthetic-module machinery yet.            |
 | 2026-05-18 | Mirror Alpine, keep Alpine's keys     | [mirror-alpine-keep-keys](specs/2026-05-18-mirror-alpine-keep-keys.md)                             | —                                                                                           | Spec only   | Trust/runtime companion to feeds-as-modules; drops `RepackAPK` re-sign, dual keyring.       |
 | 2026-05-20 | Starlark unprivileged-only            | [starlark-unprivileged-only](specs/2026-05-20-starlark-unprivileged-only.md)                       | —                                                                                           | Spec only   | Remove `run(host=True)` / `run(privileged=True)`; image+container assembly moves to Go.     |
+| 2026-05-20 | swupdate + Zig initramfs              | [swupdate-zig-initramfs](specs/2026-05-20-swupdate-zig-initramfs.md)                               | —                                                                                           | Spec only   | swupdate-driven `.swu` updates with a Zig init in a kernel-embedded initramfs.              |
 
 ## Undated plans
 
