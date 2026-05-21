@@ -304,17 +304,16 @@ to be capable enough for real engineering work, not just demo targets, and
 surfaces gaps in container hosting, editor experience, and the build cache all
 at once.
 
-Compilers stay in the build containers (gcc, binutils, headers, language
-toolchains live in `toolchain-musl` and friends, not the rootfs). What the
-device itself needs:
+The first cut shipped as `selfhost-image` for the Raspberry Pi 5 — see
+[selfhost-rpi5.md](selfhost-rpi5.md). It bundles yoe, Go, Docker, git,
+bubblewrap, and the dev-image tool set. What's still open:
 
-- **`yoe` binary in the project's apk repo** so a yoe-built device can
-  `apk add yoe` like any other unit.
-- **Go on-device** for editing yoe source comfortably (`gopls`, `delve`), not
-  for the build itself.
-- **`git`** unit.
-- **An editor that runs on musl.** Fix the helix glibc issue (cargo-from-source
-  build) or commit to neovim as the default.
-- **CI gate** that builds yoe from source on a yoe-built image and runs the test
-  suite, so toolchain or libc-compatibility regressions break the build instead
-  of being discovered later.
+- **CI gate** that builds yoe from source on a yoe-built image and runs the
+  test suite, so toolchain or libc-compatibility regressions break the build
+  instead of being discovered later.
+- **Backport `selfhost-image` to other boards** — RPi4 first (mostly mechanical;
+  swap `linux-rpi5` → `linux-rpi4` in the manifest), then BeaglePlay, then
+  Jetson once the Tegra kernel carries the container CONFIG fragment.
+- **Cross-arch builds from the RPi5** — install `qemu-user-static` and register
+  binfmt handlers in the image so the device can also build x86_64 / RISC-V
+  packages.

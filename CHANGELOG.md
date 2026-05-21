@@ -11,6 +11,10 @@ and this project adheres to
 - **TUI clean (`c` and `C`) now works on image units.** Previously failed with
   permission errors on the root-owned files left by image builds; now routes
   through the same container-side `rm` that `yoe clean` uses.
+- **`selfhost-image` for the Raspberry Pi 5.** A bootable image that bundles
+  yoe, Go, Docker, git, and the dev-image tool set — flash, boot, and the
+  RPi5 is a standalone yoe build host. The rootfs grows to fill the SD or
+  NVMe on first boot. See docs/selfhost-rpi5.md.
 
 ## [0.10.11] - 2026-05-20
 

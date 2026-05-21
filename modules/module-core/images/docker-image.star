@@ -11,11 +11,12 @@ base_files(
 )
 
 # Ships the Docker userspace (engine, CLI, buildx, containerd, runc, tini,
-# iptables) on top of the dev-image content. The kernel currently lacks the
-# CONFIG fragment Docker needs (overlayfs, bridge/veth, netfilter, cgroup v2,
-# seccomp, namespaces) and busybox init does not supervise dockerd, so
-# `dockerd` will not actually start a container on this image yet — that is
-# the next milestone. See docs/containers.md.
+# iptables) on top of the dev-image content. The kernel `container.cfg`
+# fragment (overlayfs, bridge/veth, netfilter, cgroup v2, seccomp,
+# namespaces) is merged into linux-rpi4/linux-rpi5/linux-beagleplay, so
+# `dockerd` starts cleanly under OpenRC on those targets. For a complete
+# build-host stack (yoe + Go + git + Docker on one image), see
+# selfhost-image.star and docs/selfhost-rpi5.md.
 image(
     name = "docker-image",
     artifacts = [

@@ -17,6 +17,7 @@
 
 - [QEMU (arm64, x86_64)](machine-qemu.md)
 - [Raspberry Pi (RPi4, RPi5)](machine-rpi.md)
+  - [Self-Host on RPi5](selfhost-rpi5.md)
 - [BeaglePlay (AM625)](machine-beagleplay.md)
 
 # Reference

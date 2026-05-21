@@ -338,6 +338,14 @@ clone the per-board kernel + config unit, swap defconfig and DTB names, and add
 a machine descriptor. The firmware unit and the partition layout don't need to
 change.
 
+## Self-hosting yoe builds on the RPi5
+
+The `selfhost-image` turns a Raspberry Pi 5 into a standalone yoe build
+host — yoe CLI, Go, Docker, git, helix, and the rest of the dev image, all
+on one bootable card or NVMe SSD. See
+[Self-Host on RPi5](selfhost-rpi5.md) for the build, flash, first-boot, and
+NVMe setup walkthrough.
+
 ## When something fails
 
 - **Rainbow screen, no kernel boot.** GPU firmware loaded but couldn't find the
