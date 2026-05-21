@@ -931,15 +931,21 @@ func cmdRun(args []string) {
 	memory := fs.String("memory", "1G", "RAM size")
 	display := fs.Bool("display", false, "enable graphical display")
 	daemon := fs.Bool("daemon", false, "run in background")
+	// 8G default gives grow-rootfs ~6 GiB of slack past the 2 GiB
+	// partition to expand into — enough to exercise the grow path and
+	// hold the Docker image cache during on-target work. Pass an empty
+	// string to disable and run against disk.img directly.
+	diskSize := fs.String("disk-size", "8G", "grow QEMU disk image to this size for the run (empty to disable)")
 	var ports stringSlice
 	fs.Var(&ports, "port", "host:guest port forwarding (repeatable)")
 	fs.Parse(args)
 
 	opts := device.QEMUOptions{
-		Memory:  *memory,
-		Ports:   ports,
-		Display: *display,
-		Daemon:  *daemon,
+		Memory:   *memory,
+		Ports:    ports,
+		Display:  *display,
+		Daemon:   *daemon,
+		DiskSize: *diskSize,
 	}
 
 	proj := loadProject()

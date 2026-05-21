@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	yoe "github.com/yoebuild/yoe/internal"
@@ -18,6 +19,14 @@ type QEMUOptions struct {
 	Ports   []string // host:guest port mappings
 	Display bool
 	Daemon  bool
+	// DiskSize, if non-empty, is the size to grow the QEMU-side image
+	// copy to before launch. Format is the usual K/M/G suffix (e.g. "8G").
+	// The built disk.img is left untouched so `yoe flash` keeps writing
+	// only the partition-sized image; the grown copy lives alongside as
+	// disk.run.img and is reused across runs. Enables on-target
+	// grow-rootfs to actually have free space to extend into.
+	// Empty string disables the copy (yoe run uses disk.img directly).
+	DiskSize string
 }
 
 // RunQEMU launches an image in QEMU.
@@ -44,6 +53,17 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 	imgPath := findImage(projectDir, machine.Name, unitName)
 	if imgPath == "" {
 		return fmt.Errorf("no built image for %q — run yoe build %s first", unitName, unitName)
+	}
+
+	// Optionally grow a side-by-side copy of the image so grow-rootfs on
+	// the guest has free space to extend the partition into. Leaves the
+	// original disk.img untouched.
+	if opts.DiskSize != "" {
+		grown, err := ensureGrownQEMUImage(imgPath, opts.DiskSize)
+		if err != nil {
+			return fmt.Errorf("growing QEMU image: %w", err)
+		}
+		imgPath = grown
 	}
 
 	qemuBin := qemuBinary(machine.Arch)
@@ -132,6 +152,113 @@ func findKernelImage(projectDir, scopeDir, kernelUnit string) string {
 		return vmlinuz
 	}
 	return ""
+}
+
+// ensureGrownQEMUImage copies src to a side file (src with `.run` inserted
+// before the extension) and grows it sparsely to targetSize. If the side
+// file already exists and is at least targetSize bytes AND newer than src,
+// it's reused. Returns the path to the side file.
+func ensureGrownQEMUImage(src, targetSize string) (string, error) {
+	targetBytes, err := parseSizeBytes(targetSize)
+	if err != nil {
+		return "", fmt.Errorf("parsing disk size %q: %w", targetSize, err)
+	}
+
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return "", fmt.Errorf("stat src image: %w", err)
+	}
+	// Source already meets or exceeds target — no copy needed.
+	if srcInfo.Size() >= targetBytes {
+		return src, nil
+	}
+
+	ext := filepath.Ext(src)
+	dst := strings.TrimSuffix(src, ext) + ".run" + ext
+
+	// Reuse an existing side file when it's at least target size AND not
+	// stale relative to the source. A rebuild updates src's mtime, which
+	// invalidates the cached copy.
+	if dstInfo, err := os.Stat(dst); err == nil {
+		if dstInfo.Size() >= targetBytes && dstInfo.ModTime().After(srcInfo.ModTime()) {
+			return dst, nil
+		}
+		_ = os.Remove(dst)
+	}
+
+	// Sparse copy: read src, write only non-zero blocks. Then truncate
+	// up to targetBytes. os.O_CREATE | os.O_TRUNC + io.Copy is plenty;
+	// we don't need to detect holes in the source because the source is
+	// already a sparse file and io.Copy preserves zero runs into a fresh
+	// destination via the same byte writes — but for an explicit sparse
+	// result we use cp --sparse=always when available, falling back to
+	// plain Go copy + truncate.
+	if err := copySparse(src, dst); err != nil {
+		_ = os.Remove(dst)
+		return "", fmt.Errorf("copy %s -> %s: %w", src, dst, err)
+	}
+	if err := os.Truncate(dst, targetBytes); err != nil {
+		_ = os.Remove(dst)
+		return "", fmt.Errorf("truncate %s to %s: %w", dst, targetSize, err)
+	}
+	return dst, nil
+}
+
+// copySparse copies src to dst. Tries `cp --sparse=always` first so zero
+// runs in the source stay holes in the destination; falls back to a plain
+// byte copy if cp isn't available or rejects the flag (BusyBox cp).
+func copySparse(src, dst string) error {
+	if cp, err := exec.LookPath("cp"); err == nil {
+		// --sparse=always is a GNU coreutils extension; ignore failure
+		// and fall back rather than producing a non-sparse copy with no
+		// warning.
+		c := exec.Command(cp, "--sparse=always", src, dst)
+		if err := c.Run(); err == nil {
+			return nil
+		}
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Sync()
+}
+
+// parseSizeBytes turns "8G" / "512M" / "1024K" into bytes. Plain digits
+// are bytes.
+func parseSizeBytes(s string) (int64, error) {
+	if s == "" {
+		return 0, fmt.Errorf("empty size")
+	}
+	mult := int64(1)
+	switch s[len(s)-1] {
+	case 'K', 'k':
+		mult = 1024
+		s = s[:len(s)-1]
+	case 'M', 'm':
+		mult = 1024 * 1024
+		s = s[:len(s)-1]
+	case 'G', 'g':
+		mult = 1024 * 1024 * 1024
+		s = s[:len(s)-1]
+	case 'T', 't':
+		mult = 1024 * 1024 * 1024 * 1024
+		s = s[:len(s)-1]
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return n * mult, nil
 }
 
 func qemuBinary(arch string) string {
