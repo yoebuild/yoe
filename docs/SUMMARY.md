@@ -13,6 +13,12 @@
 - [Feed Server and yoe deploy](feed-server.md)
 - [On-Device Package Management](on-device-apk.md)
 
+# Boards
+
+- [QEMU (arm64, x86_64)](machine-qemu.md)
+- [Raspberry Pi (RPi4, RPi5)](machine-rpi.md)
+- [BeaglePlay (AM625)](machine-beagleplay.md)
+
 # Reference
 
 - [Architecture](architecture.md)
@@ -39,12 +45,6 @@
 
 - [libc, init, and the Rootfs Base](libc-and-init.md)
 - [Containers on yoe Images](containers.md)
-
-# Boards
-
-- [BeaglePlay (AM625)](machine-beagleplay.md)
-- [Raspberry Pi (RPi4, RPi5)](machine-rpi.md)
-- [QEMU (arm64, x86_64)](machine-qemu.md)
 
 # Project
 

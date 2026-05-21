@@ -17,6 +17,144 @@ Units under `modules/module-bsp/units/bsp/`:
 - `linux-rpi4`, `linux-rpi5` — per-board kernel builds
 - `rpi4-config`, `rpi5-config` — per-board `config.txt` + `cmdline.txt`
 
+![Raspberry Pi 4 Model B](assets/raspberrypi4.jpg)
+
+_Raspberry Pi 4 Model B. Photo: Laserlicht / Wikimedia Commons, CC BY-SA 4.0._
+
+![Raspberry Pi 5](assets/raspberrypi5.jpg)
+
+_Raspberry Pi 5. Photo: SimonWaldherr / Wikimedia Commons, CC BY 4.0._
+
+## Running it on hardware
+
+After `yoe build --machine raspberrypi4 base-image` (or `raspberrypi5`, or
+whatever image you've picked), yoe produces a single disk image under
+`build/<image>.raspberrypi{4,5}/disk.img`. The next steps are: write it to a
+microSD card, connect serial + power, and power on.
+
+Authoritative hardware reference for everything below:
+<https://www.raspberrypi.com/documentation/>. The notes here cover the
+yoe-specific bits and a quick start; for pinouts, mechanical layout, and silicon
+details, defer to the Foundation's docs.
+
+### Writing the image to a microSD card
+
+Two ways:
+
+- **TUI** — open `yoe` (no arguments), highlight the image unit, press `f`. The
+  flash UI shows the candidate removable devices and you pick one. This is the
+  fast path during development.
+- **CLI** — `yoe flash <image-unit> <device>`. List candidates first:
+
+  ```
+  yoe flash list
+  ```
+
+  That prints the `/dev/sdN` (or `/dev/mmcblkN`) entries with size and model so
+  you can identify the card. Then write:
+
+  ```
+  yoe flash --machine raspberrypi4 base-image /dev/sdN
+  ```
+
+  Swap `base-image` for whichever image unit you built and `raspberrypi4` for
+  `raspberrypi5` as appropriate. `--dry-run` shows what it would do without
+  touching the device; `--yes` skips the confirmation prompt for scripted flows.
+
+Either path picks the right disk image from the build tree, refuses to write to
+anything mounted or anything that looks like an internal disk, and confirms
+before overwriting. If a partition on the target is mounted (most desktops
+auto-mount removable media on insert), the flash exits with a message — unmount
+the partitions and retry. **Read the device path it's about to write to**;
+flashing the wrong block device will silently overwrite it.
+
+### Power
+
+- **RPi4** takes 5 V over USB-C. Plan for **5 V / 3 A** in practice — the
+  official 15 W USB-C supply or a class-compliant laptop / phone charger that
+  negotiates 5 V / 3 A. Underpowering shows up as the lightning-bolt under-volt
+  warning in dmesg, SD card corruption, WiFi disconnects under load, or the
+  board silently rebooting once anything is plugged into USB.
+- **RPi5** takes 5 V over USB-C with USB-PD. The official 27 W supply
+  negotiates 5 V / 5 A and is required for full peripheral current on the USB
+  ports; a 5 V / 3 A PD supply boots fine but the firmware caps USB current
+  unless you set `usb_max_current_enable=1` in `config.txt`.
+
+### Serial console
+
+The kernel and the GPU firmware both bring up a UART on the GPIO header when
+`enable_uart=1` is in `config.txt`. Settings are **115200 8N1**, no flow
+control, on three pins of the 40-pin header:
+
+| Pin | Signal |
+| --- | ------ |
+| 6   | `GND`  |
+| 8   | `TXD`  |
+| 10  | `RXD`  |
+
+The Linux device name differs between boards:
+
+- **RPi4** — mini-UART on `ttyS0` (cmdline.txt's `console=ttyS0,115200`)
+- **RPi5** — PL011 on `ttyAMA10` (cmdline.txt's `console=ttyAMA10,115200`)
+
+Raspberry Pi boards do **not** have an on-board USB-to-serial bridge. The
+header is wired in the standard **Raspberry Pi USB-to-TTL serial cable** pinout,
+so you'll need an external 3.3 V adapter:
+
+- **Recommended: FTDI TTL-232R-RPi**
+  ([product page](https://ftdichip.com/products/ttl-232r-rpi/) ·
+  [Digi-Key](https://www.digikey.com/en/products/detail/ftdi-future-technology-devices-international-ltd/TTL-232R-RPI/4382044)).
+  Purpose-built for this header, 3.3 V signals, genuine FTDI silicon (so the
+  host's `ftdi_sio` driver picks it up reliably and you don't fight knock-off
+  CP210x / CH340 driver quirks). Plug-and-play with no wiring decisions.
+- Any other 3.3 V USB-TTL adapter (Adafruit 954, generic FTDI/CP210x/CH340
+  dongles) works too — connect three jumpers, leave the 5 V lead disconnected
+  since the board has its own power.
+
+Wiring is "cross-over": the cable's **TX goes to the board's RX** (pin 10), and
+the cable's **RX goes to the board's TX** (pin 8). `GND` to `GND` (pin 6).
+
+Once wired, plug the USB end into the host; it enumerates as `/dev/ttyUSB0`
+(FTDI / CH340 / CP210x) or `/dev/ttyACM0` (some CDC ACM adapters). Open it at
+115200 with [tio](https://github.com/tio/tio):
+
+```
+tio -b 115200 /dev/ttyUSB0
+```
+
+If nothing appears after power-on:
+
+- Confirm `enable_uart=1` made it into `config.txt` on the boot partition.
+- Swap RX/TX. The single most common mistake.
+- Confirm the adapter is **3.3 V**, not 5 V. A 5 V adapter on the SoC's UART
+  pins is the fastest way to brick that GPIO.
+- `dmesg | tail` on the host — the USB-TTL adapter should enumerate within a
+  second or two of plugging in. If it doesn't, the cable / dongle is the issue,
+  not the board.
+
+### First boot
+
+A successful boot prints (roughly, abbreviated):
+
+```
+[    0.000000] Booting Linux on physical CPU 0x...
+[    0.000000] Linux version 6.12.x ...
+...
+Welcome to <hostname>
+<hostname> login:
+```
+
+(The GPU firmware stage is silent on the UART — the first thing you see is the
+kernel's earlycon output.)
+
+The default credentials from `base-files-*` are `root` (no password) and `user`
+/ `password`. **Change them before connecting the board to any network you don't
+fully control** — the OpenSSH unit defaults to enabled once the package lands in
+the image.
+
+If you get a rainbow splash and nothing else, the GPU firmware loaded but
+couldn't find a kernel. See [When something fails](#when-something-fails) below.
+
 ## The Raspberry Pi boot chain
 
 Raspberry Pi boards do not use a conventional CPU-side bootloader. The boot

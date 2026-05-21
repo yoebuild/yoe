@@ -8,15 +8,16 @@
 
 ## Next
 
-- Building from console is not confusing with parallel build as to what is
+- Building from console is now confusing with parallel build as to what is
   happening [1/1] task: build (should also include unit)
 - Option to ignore certain flash devices, save in local.star, and then they are
   not presented in the flash list again. This helps prevent accidental writes to
   media.
+- yoe kiosk browser support
 - Lock all writes to build.json files, local.star, etc
 - create patches for src trees
-- Beagle Play
 - Odroid C4
+- Built-in serial terminal.
 - Use a generic container for alpine repackaing, so a container bump does not
   cause all alpine packages to rebuild.
 - Yoe unit that builds in place
@@ -27,9 +28,7 @@
   Useful for incremental development.
 - Allow running yoe build/deploy in a unit build src dir. We walk up the
   directory to learn what unit it is, and load the project.
-- why do modules not show pin on startup?
 - module dev status should update
-- video on src modifications
 - Block diagram on src modifications (needs some work)
 - mDNS on rPI does not work
 - Units output multiple packages. Seems like this will be required for
