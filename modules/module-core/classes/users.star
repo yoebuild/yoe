@@ -1,4 +1,4 @@
-def user(name, uid, gid, home = "", shell = "/bin/sh", password = "", gecos = ""):
+def user(name, uid, gid, home = "", shell = "/bin/sh", password = "", gecos = "", groups = None):
     """Returns a dict describing a user account.
 
     Args:
@@ -9,12 +9,19 @@ def user(name, uid, gid, home = "", shell = "/bin/sh", password = "", gecos = ""
         shell: login shell (default: /bin/sh)
         password: plaintext password (hashed at build time via openssl); empty = no password
         gecos: comment/full name field
+        groups: list of secondary group names to add the user to (e.g. ["docker"]).
+                Each named group is created in /etc/group with a system GID if
+                it doesn't already exist; later package install scripts that
+                create the same group (e.g. docker-engine's `addgroup -S
+                docker`) become idempotent no-ops.
     """
     if not home:
         if uid == 0:
             home = "/root"
         else:
             home = "/home/" + name
+    if groups == None:
+        groups = []
     return {
         "name": name,
         "uid": uid,
@@ -23,6 +30,7 @@ def user(name, uid, gid, home = "", shell = "/bin/sh", password = "", gecos = ""
         "shell": shell,
         "password": password,
         "gecos": gecos,
+        "groups": groups,
     }
 
 def users_commands(users):
@@ -66,4 +74,22 @@ def users_commands(users):
     for u in users:
         if u["uid"] == 0:
             cmds.append("chmod 0700 $DESTDIR" + u["home"])
+
+    # Secondary group memberships. Build a {group: [user, ...]} map across
+    # all users, then emit one /etc/group line per group. We assign GIDs
+    # in Alpine's system-group convention (high, descending from 982) so
+    # they don't collide with primary user GIDs (which start at 1000).
+    secondary = {}
+    for u in users:
+        for g in u["groups"]:
+            if g not in secondary:
+                secondary[g] = []
+            secondary[g].append(u["name"])
+    gid = 982
+    for g in secondary:
+        cmds.append(
+            "echo '" + g + ":x:" + str(gid) + ":" +
+            ",".join(secondary[g]) + "' >> $DESTDIR/etc/group",
+        )
+        gid = gid - 1
     return cmds
