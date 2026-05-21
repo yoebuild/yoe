@@ -9,7 +9,7 @@ machine(
         cmdline = "console=ttyAMA0 root=/dev/vda1 rw",
     ),
     partitions = [
-        partition(label = "rootfs", type = "ext4", size = "4G", root = True),
+        partition(label = "rootfs", type = "ext4", size = "2G", root = True),
     ],
     qemu = qemu_config(
         machine = "virt",

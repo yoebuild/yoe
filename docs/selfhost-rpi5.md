@@ -100,8 +100,10 @@ from a workstation — flash an SD to a separate target device, or
 
 ## Storage and resource notes
 
-- The rootfs partition is 4 GB at flash time, then grown to fill the
-  underlying device on first boot.
+- The rootfs partition is 2 GB at flash time, then grown to fill the
+  underlying device on first boot. (Kept tight at flash time so
+  `yoe flash` doesn't have to write 4 GB of mostly-zero blocks to a
+  microSD card — `flash_write.go` is not sparse-aware yet.)
 - Docker's storage (`/var/lib/docker`) lives on the rootfs. No separate
   data partition.
 - The project tree, build cache, and per-unit Docker images all live on
