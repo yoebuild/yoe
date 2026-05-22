@@ -145,9 +145,9 @@ The launcher in `internal/device/qemu.go`:
    `display = "none"`), the virtio-blk drive, the virtio-net device with port
    forwards, and `-bios` if a firmware (OVMF/AAVMF) is set. On a same-arch host
    it adds `-enable-kvm` when `/dev/kvm` is present; when it is not (notably
-   qemu-in-qemu without nested virtualization) it drops KVM, downgrades a
-   `host` CPU to `max`, and runs under TCG software emulation instead — slower,
-   but it still boots.
+   qemu-in-qemu without nested virtualization) it drops KVM, downgrades a `host`
+   CPU to `max`, and runs under TCG software emulation instead — slower, but it
+   still boots.
 3. If the machine has no `firmware`, appends
    `-kernel <vmlinuz> -append <cmdline>` for the direct-boot path (this is what
    qemu-arm64 uses).
@@ -186,8 +186,8 @@ bare host, and `yoe run` handles both:
    yoe run base-image --port 12222:22 --port 18080:80 --port 18118:8118
    ```
 
-2. **No KVM.** A guest has no `/dev/kvm` unless its host was started with
-   nested virtualization. `yoe run` detects this and falls back to TCG software
+2. **No KVM.** A guest has no `/dev/kvm` unless its host was started with nested
+   virtualization. `yoe run` detects this and falls back to TCG software
    emulation automatically — it prints `using TCG software emulation (slower)`
    and boots. No flag is needed; expect roughly a 10–20× slowdown versus KVM.
 
