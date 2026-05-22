@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.12] - 2026-05-22
+
 - **CI builds `base-image` from source on every push to `main`.** A full
   end-to-end build — bootstrap toolchain, kernel, and image assembly — now runs
   in CI, so build regressions surface immediately instead of at the next
@@ -42,10 +44,8 @@ and this project adheres to
 - **TUI clean (`c` and `C`) now works on image units.** Previously failed with
   permission errors on the root-owned files left by image builds; now routes
   through the same container-side `rm` that `yoe clean` uses.
-- **`selfhost-image`.** Bootable image that bundles yoe, Go, Docker, git, and
-  the dev-image tool set — flash, boot, and the RPi5 is a standalone yoe build
-  host. The rootfs grows to fill the SD or NVMe on first boot. See
-  docs/selfdost-rpi5.md.
+- **`selfhost-image`.** Bootable image that bundles `yoe`, Go, Docker, git, and
+  the dev-image tool set (tested on QEMU, soon native ARM systems).
 
 ## [0.10.11] - 2026-05-20
 
