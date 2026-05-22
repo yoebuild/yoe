@@ -127,8 +127,18 @@ userspace layout.
 `yoe qemu` wires a single virtio-net device through QEMU's user-mode networking
 (SLIRP). The default forwards in the machine descriptor land SSH on host port
 2222 and a couple of HTTP ports for app dev. Extra forwards can be passed on the
-CLI (`yoe qemu --port 9000:9000`); they append to the machine-declared list,
-with CLI entries taking precedence on collision.
+CLI (`yoe run --port 9000:9000`, repeatable). A `--port` entry whose **guest**
+port matches a machine forward replaces that forward; an entry with a new guest
+port is appended.
+
+That replace-on-match behavior is what makes `--port` work for qemu-in-qemu.
+When `yoe run` executes inside a QEMU guest, the outer guest already holds the
+machine's default host forwards (2222, 8080, 8118), so a nested run collides on
+them. Remap the host side instead:
+
+```sh
+yoe run base-image --port 12222:22 --port 18080:80 --port 18118:8118
+```
 
 ## How `yoe qemu` runs
 
@@ -138,7 +148,11 @@ The launcher in `internal/device/qemu.go`:
    `qemu-system-riscv64`.
 2. Builds the arg list: `-machine`, `-cpu`, `-m`, `-nographic` (if
    `display = "none"`), the virtio-blk drive, the virtio-net device with port
-   forwards, and `-bios` if a firmware (OVMF/AAVMF) is set.
+   forwards, and `-bios` if a firmware (OVMF/AAVMF) is set. On a same-arch host
+   it adds `-enable-kvm` when `/dev/kvm` is present; when it is not (notably
+   qemu-in-qemu without nested virtualization) it drops KVM, downgrades a
+   `host` CPU to `max`, and runs under TCG software emulation instead — slower,
+   but it still boots.
 3. If the machine has no `firmware`, appends
    `-kernel <vmlinuz> -append <cmdline>` for the direct-boot path (this is what
    qemu-arm64 uses).

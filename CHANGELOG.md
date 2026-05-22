@@ -12,6 +12,17 @@ and this project adheres to
   end-to-end build — bootstrap toolchain, kernel, and image assembly — now runs
   in CI, so build regressions surface immediately instead of at the next
   release.
+- **`yoe run` works inside a QEMU guest (qemu-in-qemu).** When no `/dev/kvm`
+  is available, `yoe run` now falls back to TCG software emulation instead of
+  failing with a KVM error, so you can launch a guest from within a guest. It
+  prints a one-line note that emulation is in use.
+- **`yoe run --port` can remap a machine's default forwards.** A `--port`
+  entry whose guest port matches a machine forward now replaces it instead of
+  adding a second, colliding one — so a nested `yoe run` can move its host-side
+  ports off the ones the outer guest already holds.
+- **`yoe run` flags work after the image name.** `yoe run base-image --port …`
+  previously ignored every flag that followed the image name; flags and the
+  image name may now appear in any order.
 - **`yoe run` explains a port conflict instead of failing cryptically.** When a
   QEMU guest is already running, `yoe run` (and the TUI `r` key) now report
   which host port is taken and that an earlier run is probably still up, rather

@@ -34,12 +34,49 @@ func checkQEMUPortsFree(ports []string) error {
 	return nil
 }
 
+// mergeQEMUPorts combines a machine's declared forwards with CLI `--port`
+// entries. A CLI entry whose guest port matches a machine entry replaces
+// that machine entry; a CLI entry with a new guest port is appended.
+//
+// Replacing (rather than appending) is what makes `--port` usable for
+// qemu-in-qemu: when `yoe run` executes inside a QEMU guest, the outer
+// guest already holds the machine's default host forwards (2222, 8080,
+// 8118). `--port 18118:8118` then moves the host side of the 8118 forward
+// off the taken port instead of declaring a second, still-colliding
+// forward for the same guest port.
+func mergeQEMUPorts(machinePorts, cliPorts []string) []string {
+	guestPort := func(p string) (string, bool) {
+		_, guest, ok := strings.Cut(p, ":")
+		return guest, ok && guest != ""
+	}
+	merged := append([]string(nil), machinePorts...)
+	for _, cp := range cliPorts {
+		guest, ok := guestPort(cp)
+		if !ok {
+			merged = append(merged, cp)
+			continue
+		}
+		replaced := false
+		for i, mp := range merged {
+			if g, ok := guestPort(mp); ok && g == guest {
+				merged[i] = cp
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			merged = append(merged, cp)
+		}
+	}
+	return merged
+}
+
 // CheckQEMUPortsAvailable verifies the host forward ports a `yoe run` of
 // this machine would bind are free. The CLI and the TUI both call it
 // before launching so a guest that is already running is reported
 // clearly instead of as an opaque QEMU exit code.
 func CheckQEMUPortsAvailable(machine *yoestar.Machine, extraPorts []string) error {
-	return checkQEMUPortsFree(append(machine.QEMUPorts(), extraPorts...))
+	return checkQEMUPortsFree(mergeQEMUPorts(machine.QEMUPorts(), extraPorts))
 }
 
 // qemuStderrTail returns the last non-empty line of captured QEMU stderr,
@@ -98,7 +135,7 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 
 	// Fail fast (before the disk grow) if a guest is already holding the
 	// host forward ports — the common "an image is already running" case.
-	if err := checkQEMUPortsFree(append(machine.QEMUPorts(), opts.Ports...)); err != nil {
+	if err := checkQEMUPortsFree(mergeQEMUPorts(machine.QEMUPorts(), opts.Ports)); err != nil {
 		return err
 	}
 
@@ -120,9 +157,9 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 		a := baseQEMUArgs(machine, opts)
 		a = append(a, "-drive", fmt.Sprintf("file=%s,format=raw,if=virtio", imgFile))
 
-		// Merge machine-defined ports with CLI ports (CLI takes precedence)
-		ports := machine.QEMUPorts()
-		ports = append(ports, opts.Ports...)
+		// Merge machine-defined ports with CLI ports. A CLI --port entry
+		// whose guest port matches a machine forward replaces it.
+		ports := mergeQEMUPorts(machine.QEMUPorts(), opts.Ports)
 
 		netdev := "user,id=net0"
 		for _, port := range ports {
@@ -151,6 +188,9 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 	// Try host QEMU first
 	if _, err := exec.LookPath(qemuBin); err == nil {
 		fmt.Fprintf(w, "Starting QEMU (host): %s %s\n", qemuBin, machine.Arch)
+		if machine.Arch == detectHostArch() && !kvmAvailable() {
+			fmt.Fprintf(w, "  /dev/kvm not available — using TCG software emulation (slower)\n")
+		}
 		args := buildArgs(imgPath)
 		cmd := exec.Command(qemuBin, args...)
 		cmd.Stdin = os.Stdin
@@ -338,40 +378,55 @@ func detectHostArch() string {
 	}
 }
 
+// kvmAvailable reports whether /dev/kvm exists — the prerequisite for KVM
+// acceleration. Inside a QEMU guest it is absent unless the outer guest
+// was started with nested virtualization, so qemu-in-qemu runs fall back
+// to TCG emulation.
+func kvmAvailable() bool {
+	_, err := os.Stat("/dev/kvm")
+	return err == nil
+}
+
+// qemuCPU resolves the -cpu model. `host` (and the implicit default) only
+// works under an accelerator; without KVM it becomes `max`, the broadest
+// TCG-emulatable model. Any other explicit model is passed through.
+func qemuCPU(configured string, useKVM bool) string {
+	if useKVM {
+		return configured // "" lets QEMU pick its default
+	}
+	if configured == "" || configured == "host" {
+		return "max"
+	}
+	return configured
+}
+
 func baseQEMUArgs(machine *yoestar.Machine, opts QEMUOptions) []string {
 	var args []string
 
-	hostArch := detectHostArch()
-	crossArch := machine.Arch != hostArch
+	// KVM needs a same-arch host with an accessible /dev/kvm. The latter
+	// is absent in qemu-in-qemu unless the outer guest was given nested
+	// virtualization, so fall back to TCG emulation rather than failing.
+	useKVM := machine.Arch == detectHostArch() && kvmAvailable()
 
 	qemu := machine.QEMU
 	if qemu != nil {
 		if qemu.Machine != "" {
 			args = append(args, "-machine", qemu.Machine)
 		}
-		if crossArch {
-			args = append(args, "-cpu", "max")
-		} else if qemu.CPU != "" {
-			args = append(args, "-cpu", qemu.CPU)
+		if cpu := qemuCPU(qemu.CPU, useKVM); cpu != "" {
+			args = append(args, "-cpu", cpu)
 		}
 	} else {
 		switch machine.Arch {
-		case "arm64":
-			args = append(args, "-machine", "virt")
-		case "riscv64":
+		case "arm64", "riscv64":
 			args = append(args, "-machine", "virt")
 		default:
 			args = append(args, "-machine", "q35")
 		}
-		if crossArch {
-			args = append(args, "-cpu", "max")
-		} else {
-			args = append(args, "-cpu", "host")
-		}
+		args = append(args, "-cpu", qemuCPU("host", useKVM))
 	}
 
-	// Enable KVM only for same-arch
-	if !crossArch {
+	if useKVM {
 		args = append(args, "-enable-kvm")
 	}
 

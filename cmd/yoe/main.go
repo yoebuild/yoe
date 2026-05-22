@@ -957,8 +957,17 @@ func cmdRun(args []string) {
 	// string to disable and run against disk.img directly.
 	diskSize := fs.String("disk-size", "8G", "grow QEMU disk image to this size for the run (empty to disable)")
 	var ports stringSlice
-	fs.Var(&ports, "port", "host:guest port forwarding (repeatable)")
+	fs.Var(&ports, "port", "host:guest port forwarding (repeatable); a matching guest port replaces the machine's default forward")
+	// Go's flag package stops parsing at the first non-flag argument, so
+	// `yoe run base-image --port ...` would silently drop every flag after
+	// the image name. Re-parse the tail after each positional so flags and
+	// the image name may appear in any order.
 	fs.Parse(args)
+	var positional []string
+	for rest := fs.Args(); len(rest) > 0; rest = fs.Args() {
+		positional = append(positional, rest[0])
+		fs.Parse(rest[1:])
+	}
 
 	opts := device.QEMUOptions{
 		Ports:    ports,
@@ -988,7 +997,10 @@ func cmdRun(args []string) {
 	}
 
 	proj := loadProject()
-	unitName := fs.Arg(0)
+	unitName := ""
+	if len(positional) > 0 {
+		unitName = positional[0]
+	}
 	if unitName == "" {
 		unitName = proj.Defaults.Image
 	}
