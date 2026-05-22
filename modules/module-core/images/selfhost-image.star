@@ -33,6 +33,6 @@ image(
         # build-host additions
         "yoe", "go", "git", "bubblewrap",
         "docker", "docker-init",
-        "grow-rootfs",
+        "grow-rootfs", "qemu-system-x86_64"
     ],
 )
