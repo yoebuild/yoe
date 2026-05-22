@@ -14,7 +14,7 @@ machine(
     qemu = qemu_config(
         machine = "virt",
         cpu = "host",
-        memory = "1G",
+        memory = "4G",
         display = "none",
         ports = ["2222:22", "8080:80", "8118:8118"],
     ),

@@ -31,8 +31,10 @@ units.
 | Extra packages   | none                              | `syslinux`                   |
 | Default forwards | `2222:22`, `8080:80`, `8118:8118` | same                         |
 
-Both default to 1 GB RAM and `display = "none"`; the `-nographic` flag sends
-serial to the controlling terminal.
+Both default to 4 GB RAM and `display = "none"`; the `-nographic` flag sends
+serial to the controlling terminal. 4 GB is the floor for memory-heavy unit
+builds inside the guest — the kernel link step alone needs well over 1 GB, so a
+self-hosted `yoe build` of `linux` is OOM-killed on a smaller VM.
 
 ## qemu-arm64
 
@@ -49,7 +51,7 @@ machine(
         partition(label = "rootfs", type = "ext4", size = "512M", root = True),
     ],
     qemu = qemu_config(
-        machine = "virt", cpu = "host", memory = "1G",
+        machine = "virt", cpu = "host", memory = "4G",
         display = "none",
         ports = ["2222:22", "8080:80", "8118:8118"],
     ),
@@ -87,7 +89,7 @@ machine(
         partition(label = "rootfs", type = "ext4", size = "600M", root = True),
     ],
     qemu = qemu_config(
-        machine = "q35", cpu = "host", memory = "1G",
+        machine = "q35", cpu = "host", memory = "4G",
         firmware = "seabios",
         display = "none",
         ports = ["2222:22", "8080:80", "8118:8118"],

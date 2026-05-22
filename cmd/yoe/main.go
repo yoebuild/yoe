@@ -928,7 +928,7 @@ func cmdFlashList(_ []string) {
 func cmdRun(args []string) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	machineName := fs.String("machine", "", "target machine")
-	memory := fs.String("memory", "1G", "RAM size")
+	memory := fs.String("memory", "", "RAM size (overrides the machine's qemu memory)")
 	display := fs.Bool("display", false, "enable graphical display")
 	daemon := fs.Bool("daemon", false, "run in background")
 	// 8G default gives grow-rootfs ~6 GiB of slack past the 2 GiB
