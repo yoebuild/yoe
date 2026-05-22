@@ -12,6 +12,164 @@ and a small device-manager ("DM") payload — both shipped as signed blobs by TI
 The machine descriptor lives at `modules/module-bsp/machines/beagleplay.star`;
 everything below is built by units under `modules/module-bsp/units/bsp/`.
 
+![BeaglePlay board](assets/beagleplay.webp)
+
+_Photo: [BeagleBoard.org](https://docs.beagleboard.org/boards/beagleplay/), CC
+BY-SA 4.0._
+
+## Running it on hardware
+
+After `yoe build --machine beagleplay base-image` (or whatever image you've
+picked), yoe produces a single disk image under
+`build/<image>.beagleplay/disk.img` (the exact path depends on the image's
+`disk` task). The next steps are: write it to a microSD card, connect serial
+
+- power, and power on.
+
+Authoritative hardware reference for everything below:
+<https://docs.beagleboard.org/boards/beagleplay/>. The notes here cover the
+yoe-specific bits and a quick start; for pinouts, mechanical layout, and silicon
+details, defer to BeagleBoard.org's docs.
+
+### Writing the image to a microSD card
+
+Two ways:
+
+- **TUI** — open `yoe` (no arguments), highlight the image unit, press `f`. The
+  flash UI shows the candidate removable devices and you pick one. This is the
+  fast path during development.
+- **CLI** — `yoe flash <image-unit> <device>`. List candidates first:
+
+  ```
+  yoe flash list
+  ```
+
+  That prints the `/dev/sdN` (or `/dev/mmcblkN`) entries with size and model so
+  you can identify the card. Then write:
+
+  ```
+  yoe flash --machine beagleplay base-image /dev/sdN
+  ```
+
+  Swap `base-image` for whichever image unit you built (`jukebox-image`, your
+  own, …). `--dry-run` shows what it would do without touching the device;
+  `--yes` skips the confirmation prompt for scripted flows.
+
+Either path picks the right disk image from the build tree, refuses to write to
+anything mounted or anything that looks like an internal disk, and confirms
+before overwriting. If a partition on the target is mounted (most desktops
+auto-mount removable media on insert), the flash exits with a message — unmount
+the partitions and retry. **Read the device path it's about to write to**;
+flashing the wrong block device will silently overwrite it.
+
+### Choosing boot media (SD vs eMMC)
+
+The AM625 ROM checks boot sources in a sequence set by the SYSBOOT straps on the
+board. On BeaglePlay the default boot order looks at the on-board 16 GB eMMC
+first.
+
+To boot from microSD instead, **hold the `USR` button while applying power or
+pressing reset**. That overrides the ROM's boot search to start at the SD slot.
+Release the button once you see the SPL banner on the serial console (~1
+second). The override is per-boot — power-cycling without the button reverts to
+eMMC.
+
+For development you typically want microSD boot: it's easy to re-flash, hard to
+brick, and leaves the eMMC's contents alone. For production you'd flash a known
+image into eMMC (either by booting an SD-based installer or over USB-DFU) and
+ship without an SD card.
+
+The yoe image is identical for both paths — the boot chain on eMMC and on SD
+comes from the same `tiboot3.bin` / `tispl.bin` / `u-boot.img` artifacts. yoe's
+`uEnv.txt` hardcodes `root=/dev/mmcblk1p2` (eMMC); if you boot off SD without
+re-flashing eMMC, the kernel will still try to mount the eMMC's rootfs. Either
+flash both, or edit `bootargs` to `root=/dev/mmcblk0p2` for SD-only.
+
+### Power
+
+BeaglePlay takes 5 V over USB-C on the dedicated power connector. A phone-class
+5 V / 1 A supply is enough for the board itself idling. Plan for **at least 3
+A** in practice — a class-compliant USB-C charger (a laptop / phone charger that
+negotiates 5 V / 3 A) is the cheapest path. Underpowering shows up as kernel
+crashes during DRAM stress, WiFi disconnects under load, or the board silently
+rebooting once anything is plugged into USB.
+
+The power connector is not the same physical port as the debug serial-USB. Read
+the silkscreen.
+
+### Serial console
+
+The kernel and U-Boot both use the SoC's `UART0` (Linux `ttyS2`) at **115200
+8N1**, no flow control. This is the same setting `uEnv.txt` expects and what
+`am62xx.inc` upstream uses, so any client targeting "BeaglePlay serial console"
+will be at 115200 by default.
+
+BeaglePlay does **not** have an on-board USB-to-serial bridge. The debug UART is
+brought out on a 3-pin header wired in the **Raspberry Pi USB-to-TTL serial
+cable** pinout — the same `GND` / `RXD` / `TXD` layout the standard Pi debug
+cables use. You'll need an external adapter:
+
+- **Recommended: FTDI TTL-232R-RPi**
+  ([product page](https://ftdichip.com/products/ttl-232r-rpi/) ·
+  [Digi-Key](https://www.digikey.com/en/products/detail/ftdi-future-technology-devices-international-ltd/TTL-232R-RPI/4382044)).
+  Purpose-built for the Pi-style header, 3.3 V signals, genuine FTDI silicon (so
+  the host's `ftdi_sio` driver picks it up reliably and you don't fight
+  knock-off CP210x / CH340 driver quirks). Plug-and-play with no wiring
+  decisions.
+- Any other 3.3 V USB-TTL adapter (Adafruit 954, generic FTDI/CP210x/CH340
+  dongles) works too — connect three jumpers, leave the 5 V lead disconnected
+  since the board has its own power.
+
+Wiring is "cross-over": the cable's **TX goes to the board's RX**, and vice
+versa. `GND` to `GND`. Check the silkscreen on the BeaglePlay header for `RX` /
+`TX` markings — those refer to the board's signals.
+
+Once wired, plug the USB end into the host; it enumerates as `/dev/ttyUSB0`
+(FTDI / CH340 / CP210x) or `/dev/ttyACM0` (some CDC ACM adapters). Open it at
+115200 with [tio](https://github.com/tio/tio):
+
+```
+tio -b 115200 /dev/ttyUSB0
+```
+
+If nothing appears after power-on:
+
+- Swap RX/TX. The single most common mistake.
+- Confirm the adapter is **3.3 V**, not 5 V. A 5 V adapter on the AM625's UART
+  pins is the fastest way to brick the SoC's UART block.
+- `dmesg | tail` on the host — the USB-TTL adapter should enumerate within a
+  second or two of plugging in. If it doesn't, the cable / dongle is the issue,
+  not the board.
+
+### First boot
+
+A successful boot prints (roughly, abbreviated):
+
+```
+U-Boot SPL 2025.10 ...                  ← R5 SPL (from tiboot3.bin)
+Trying to boot from MMC1                 ← reading tispl.bin
+U-Boot SPL 2025.10 ...                  ← A53 SPL (from tispl.bin)
+NOTICE:  BL31: ...                       ← TF-A handoff
+I/TC: OP-TEE version: 4.9.0 ...          ← OP-TEE handoff
+U-Boot 2025.10 ...                       ← U-Boot proper
+Hit any key to stop autoboot:
+...
+Booting Linux on physical CPU 0x...      ← kernel
+...
+Welcome to <hostname>
+<hostname> login:
+```
+
+The default credentials from `base-files-*` are `root` (no password) and `user`
+/ `password`. **Change them before connecting the board to any network you don't
+fully control** — the OpenSSH unit defaults to enabled once the package lands in
+the image.
+
+If the boot stops at U-Boot's `Hit any key` prompt and never autoboots, either
+`uEnv.txt` wasn't found on the boot partition, or `uenvcmd` failed mid-way. Drop
+to the U-Boot shell, `ls mmc 1:1` to see what's on the FAT partition, and re-run
+the load commands one by one to see which one errors.
+
 ## Boot chain at a glance
 
 The AM625 boot ROM expects a multi-stage handoff. Each blob feeds the next, and
@@ -195,166 +353,6 @@ The MMC layout the AM625 ROM expects:
 The kernel command line in `uEnv.txt` resolves `root=/dev/mmcblk1p2`, which is
 the ext4 partition on the on-board eMMC (`mmc 1` in U-Boot, `mmcblk1` in Linux —
 `mmc 0` is the SD slot).
-
-## Running it on hardware
-
-After `yoe build --machine beagleplay base-image` (or whatever image you've
-picked), yoe produces a single disk image under
-`build/<image>.beagleplay/disk.img` (the exact path depends on the image's
-`disk` task). The next steps are: write it to a microSD card, connect serial
-
-- power, and power on.
-
-Authoritative hardware reference for everything below:
-<https://docs.beagleboard.org/boards/beagleplay/>. The notes here cover the
-yoe-specific bits and a quick start; for pinouts, mechanical layout, and silicon
-details, defer to BeagleBoard.org's docs.
-
-### Writing the image to a microSD card
-
-Two ways:
-
-- **TUI** — open `yoe` (no arguments), highlight the image unit, press `f`. The
-  flash UI shows the candidate removable devices and you pick one. This is the
-  fast path during development.
-- **CLI** — `yoe flash <image-unit> <device>`. List candidates first:
-
-  ```
-  yoe flash list
-  ```
-
-  That prints the `/dev/sdN` (or `/dev/mmcblkN`) entries with size and model so
-  you can identify the card. Then write:
-
-  ```
-  yoe flash --machine beagleplay base-image /dev/sdN
-  ```
-
-  Swap `base-image` for whichever image unit you built (`jukebox-image`, your
-  own, …). `--dry-run` shows what it would do without touching the device;
-  `--yes` skips the confirmation prompt for scripted flows.
-
-Either path picks the right disk image from the build tree, refuses to write to
-anything mounted or anything that looks like an internal disk, and confirms
-before overwriting. If a partition on the target is mounted (most desktops
-auto-mount removable media on insert), the flash exits with a message — unmount
-the partitions and retry. **Read the device path it's about to write to**;
-flashing the wrong block device will silently overwrite it.
-
-### Choosing boot media (SD vs eMMC)
-
-The AM625 ROM checks boot sources in a sequence set by the SYSBOOT straps on the
-board. On BeaglePlay the default boot order looks at the on-board 16 GB eMMC
-first.
-
-To boot from microSD instead, **hold the `USR` button while applying power or
-pressing reset**. That overrides the ROM's boot search to start at the SD slot.
-Release the button once you see the SPL banner on the serial console (~1
-second). The override is per-boot — power-cycling without the button reverts to
-eMMC.
-
-For development you typically want microSD boot: it's easy to re-flash, hard to
-brick, and leaves the eMMC's contents alone. For production you'd flash a known
-image into eMMC (either by booting an SD-based installer or over USB-DFU) and
-ship without an SD card.
-
-The yoe image is identical for both paths — the boot chain on eMMC and on SD
-comes from the same `tiboot3.bin` / `tispl.bin` / `u-boot.img` artifacts. yoe's
-`uEnv.txt` hardcodes `root=/dev/mmcblk1p2` (eMMC); if you boot off SD without
-re-flashing eMMC, the kernel will still try to mount the eMMC's rootfs. Either
-flash both, or edit `bootargs` to `root=/dev/mmcblk0p2` for SD-only.
-
-### Power
-
-BeaglePlay takes 5 V over USB-C on the dedicated power connector. A phone-class
-5 V / 1 A supply is enough for the board itself idling. Plan for **at least 3
-A** in practice — a class-compliant USB-C charger (a laptop / phone charger that
-negotiates 5 V / 3 A) is the cheapest path. Underpowering shows up as kernel
-crashes during DRAM stress, WiFi disconnects under load, or the board silently
-rebooting once anything is plugged into USB.
-
-The power connector is not the same physical port as the debug serial-USB. Read
-the silkscreen.
-
-### Serial console
-
-The kernel and U-Boot both use the SoC's `UART0` (Linux `ttyS2`) at **115200
-8N1**, no flow control. This is the same setting `uEnv.txt` expects and what
-`am62xx.inc` upstream uses, so any client targeting "BeaglePlay serial console"
-will be at 115200 by default.
-
-BeaglePlay does **not** have an on-board USB-to-serial bridge. The debug UART is
-brought out on a 3-pin header wired in the **Raspberry Pi USB-to-TTL serial
-cable** pinout — the same `GND` / `RXD` / `TXD` layout the standard Pi debug
-cables use. You'll need an external adapter:
-
-- **Recommended: FTDI TTL-232R-RPi**
-  ([product page](https://ftdichip.com/products/ttl-232r-rpi/) ·
-  [Digi-Key](https://www.digikey.com/en/products/detail/ftdi-future-technology-devices-international-ltd/TTL-232R-RPI/4382044)).
-  Purpose-built for the Pi-style header, 3.3 V signals, genuine FTDI silicon (so
-  the host's `ftdi_sio` driver picks it up reliably and you don't fight
-  knock-off CP210x / CH340 driver quirks). Plug-and-play with no wiring
-  decisions.
-- Any other 3.3 V USB-TTL adapter (Adafruit 954, generic FTDI/CP210x/CH340
-  dongles) works too — connect three jumpers, leave the 5 V lead disconnected
-  since the board has its own power.
-
-Wiring is "cross-over": the cable's **TX goes to the board's RX**, and vice
-versa. `GND` to `GND`. Check the silkscreen on the BeaglePlay header for `RX` /
-`TX` markings — those refer to the board's signals.
-
-Once wired, plug the USB end into the host; it enumerates as `/dev/ttyUSB0`
-(FTDI / CH340 / CP210x) or `/dev/ttyACM0` (some CDC ACM adapters). Open it at
-115200 with any serial client:
-
-```
-# minicom
-minicom -D /dev/ttyUSB0 -b 115200
-
-# screen
-screen /dev/ttyUSB0 115200
-
-# picocom (no escape gotchas with Ctrl-A)
-picocom -b 115200 /dev/ttyUSB0
-```
-
-If nothing appears after power-on:
-
-- Swap RX/TX. The single most common mistake.
-- Confirm the adapter is **3.3 V**, not 5 V. A 5 V adapter on the AM625's UART
-  pins is the fastest way to brick the SoC's UART block.
-- `dmesg | tail` on the host — the USB-TTL adapter should enumerate within a
-  second or two of plugging in. If it doesn't, the cable / dongle is the issue,
-  not the board.
-
-### First boot
-
-A successful boot prints (roughly, abbreviated):
-
-```
-U-Boot SPL 2025.10 ...                  ← R5 SPL (from tiboot3.bin)
-Trying to boot from MMC1                 ← reading tispl.bin
-U-Boot SPL 2025.10 ...                  ← A53 SPL (from tispl.bin)
-NOTICE:  BL31: ...                       ← TF-A handoff
-I/TC: OP-TEE version: 4.9.0 ...          ← OP-TEE handoff
-U-Boot 2025.10 ...                       ← U-Boot proper
-Hit any key to stop autoboot:
-...
-Booting Linux on physical CPU 0x...      ← kernel
-...
-Welcome to <hostname>
-<hostname> login:
-```
-
-The default credentials from `base-files-*` are `root` (no password) and `user`
-/ `password`. **Change them before connecting the board to any network you don't
-fully control** — the OpenSSH unit defaults to enabled once the package lands in
-the image.
-
-If the boot stops at U-Boot's `Hit any key` prompt and never autoboots, either
-`uEnv.txt` wasn't found on the boot partition, or `uenvcmd` failed mid-way. Drop
-to the U-Boot shell, `ls mmc 1:1` to see what's on the FAT partition, and re-run
-the load commands one by one to see which one errors.
 
 ## U-Boot environment
 

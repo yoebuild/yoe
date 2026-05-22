@@ -1,0 +1,77 @@
+name: E2E Build
+
+# Full from-source build of base-image: the bootstrap toolchain, musl,
+# busybox, the kernel, and image assembly. This is the expensive
+# regression tier, so it runs on pushes to main, on a nightly schedule,
+# and on demand -- not on every pull request.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-build:
+    name: E2E Build (base-image)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          # A cold from-source build (toolchain, kernel, cache, container
+          # image) needs more headroom than the runner ships with.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build yoe
+        run: |
+          VERSION=$(git describe --tags HEAD 2>/dev/null || echo "dev")
+          go build -ldflags "-X main.version=${VERSION}" -o yoe ./cmd/yoe
+
+      - name: Cache yoe build cache
+        uses: actions/cache@v4
+        with:
+          # Content-addressed objects, synced modules, and fetched sources.
+          # The run-id key always saves a fresh cache; restore-keys pulls the
+          # most recent prior cache so successive runs build incrementally.
+          path: testdata/e2e-project/cache
+          key: yoe-cache-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            yoe-cache-${{ runner.os }}-
+
+      - name: Build base-image
+        working-directory: testdata/e2e-project
+        run: ../../yoe build -j "$(nproc)" base-image
+
+      - name: Verify image artifact
+        working-directory: testdata/e2e-project
+        run: |
+          img=build/base-image.qemu-x86_64/destdir/base-image.img
+          if [ ! -s "$img" ]; then
+            echo "::error::base-image build produced no image at $img"
+            exit 1
+          fi
+          ls -lh "$img"
+
+      - name: Upload image
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: base-image
+          path: testdata/e2e-project/build/base-image.qemu-x86_64/destdir/base-image.img
+          retention-days: 7

@@ -14,7 +14,7 @@ func RunClean(projectDir, arch string, all bool, force bool, units []string) err
 	if len(units) > 0 {
 		for _, r := range units {
 			dir := filepath.Join(buildDir, arch, r)
-			if err := removeDirAnyOwner(dir, projectDir); err != nil {
+			if err := RemoveDirAnyOwner(dir, projectDir); err != nil {
 				return fmt.Errorf("removing %s: %w", dir, err)
 			}
 			fmt.Printf("Cleaned %s\n", r)
@@ -32,7 +32,7 @@ func RunClean(projectDir, arch string, all bool, force bool, units []string) err
 		}
 		dirs := []string{buildDir, filepath.Join(projectDir, "repo")}
 		for _, dir := range dirs {
-			if err := removeDirAnyOwner(dir, projectDir); err != nil {
+			if err := RemoveDirAnyOwner(dir, projectDir); err != nil {
 				return fmt.Errorf("removing %s: %w", dir, err)
 			}
 		}
@@ -45,7 +45,7 @@ func RunClean(projectDir, arch string, all bool, force bool, units []string) err
 				return nil
 			}
 		}
-		if err := removeDirAnyOwner(buildDir, projectDir); err != nil {
+		if err := RemoveDirAnyOwner(buildDir, projectDir); err != nil {
 			return fmt.Errorf("removing %s: %w", buildDir, err)
 		}
 		fmt.Println("Cleaned build intermediates (packages preserved)")
@@ -54,17 +54,17 @@ func RunClean(projectDir, arch string, all bool, force bool, units []string) err
 	return nil
 }
 
-// removeDirAnyOwner removes dir, falling back to a container-side `rm -rf` when
-// host-side os.RemoveAll hits EACCES on root- or service-user-owned files left
-// by image-class builds. The container runs as uid 0 (NoUser: true) and has
-// the privilege to remove them.
+// RemoveDirAnyOwner removes dir, falling back to a container-side `rm -rf`
+// when host-side os.RemoveAll hits EACCES on root- or service-user-owned
+// files left by image-class builds. The container runs as uid 0 (NoUser:
+// true) and has the privilege to remove them.
 //
 // dir must be under projectDir (we bind-mount projectDir into the container at
 // /project and translate). The host user cannot rm those files without sudo,
 // and yoe deliberately leaves them owned correctly so that
 // build/<image>.<arch>/destdir/rootfs inspects with the same uid/gid the
 // booted system will see — see docs/security.md and docs/comparisons.md.
-func removeDirAnyOwner(dir, projectDir string) error {
+func RemoveDirAnyOwner(dir, projectDir string) error {
 	if err := os.RemoveAll(dir); err == nil {
 		return nil
 	}

@@ -19,6 +19,10 @@ kernel=kernel_2712.img
 dtoverlay=vc4-kms-v3d-pi5
 # Disable RPi logo on boot
 disable_splash=1
+# Enable the PCIe controller so an NVMe HAT shows up as /dev/nvme0n1.
+# No-op on SD-only setups. To boot from NVMe, also flip
+# cmdline.txt's `root=` to /dev/nvme0n1p2.
+dtparam=nvme
 EOF
 """,
             """

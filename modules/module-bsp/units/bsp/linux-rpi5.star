@@ -20,6 +20,26 @@ make ARCH=arm64 bcm2712_defconfig
 scripts/kconfig/merge_config.sh -m -O . .config .yoe-container.cfg
 make ARCH=arm64 olddefconfig
 """,
+            # Audit the resolved .config for the CONFIG options Docker /
+            # containerd / runc require. Fails fast (before the expensive
+            # `make Image` step) if container.cfg drifts out of sync with
+            # what container runtimes actually need.
+            """
+required="CONFIG_NAMESPACES CONFIG_PID_NS CONFIG_NET_NS CONFIG_IPC_NS \
+CONFIG_UTS_NS CONFIG_USER_NS CONFIG_CGROUPS CONFIG_MEMCG CONFIG_CPUSETS \
+CONFIG_OVERLAY_FS CONFIG_BRIDGE CONFIG_VETH CONFIG_NF_TABLES \
+CONFIG_NF_NAT CONFIG_IP_NF_IPTABLES CONFIG_SECCOMP CONFIG_SECCOMP_FILTER \
+CONFIG_KEYS CONFIG_POSIX_MQUEUE CONFIG_BPF_SYSCALL"
+missing=""
+for opt in $required; do
+    grep -qE "^${opt}=(y|m)" .config || missing="$missing $opt"
+done
+if [ -n "$missing" ]; then
+    echo "container-config check FAILED — missing CONFIGs:$missing" >&2
+    exit 1
+fi
+echo "container-config check passed"
+""",
             "make ARCH=arm64 -j$NPROC Image modules dtbs",
             # Install kernel as kernel_2712.img (RPi5 naming convention)
             "install -D arch/arm64/boot/Image $DESTDIR/boot/kernel_2712.img",

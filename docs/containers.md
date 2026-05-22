@@ -177,7 +177,7 @@ patches that work in practice.
 
 The pure-Go components (`docker` CLI, `containerd`) drop into the existing
 `go_binary` class without ceremony — that class already pulls the upstream
-`golang:1.24` container and builds with `CGO_ENABLED=0`. The interesting case is
+`golang:1.26` container and builds with `CGO_ENABLED=0`. The interesting case is
 `runc`, which needs cgo + a working C compiler + `libseccomp` headers and
 libraries, all in the same build environment.
 
@@ -199,7 +199,7 @@ sysroot, and uses `go` from the sysroot. One container, three pieces, all native
 to the Yoe model.
 
 The one wrinkle: `classes/go.star::go_binary` currently hardcodes
-`container = "golang:1.24"` and `CGO_ENABLED=0`, which is fine for pure-Go units
+`container = "golang:1.26"` and `CGO_ENABLED=0`, which is fine for pure-Go units
 but cannot express the cgo + musl + sysroot-deps combination above. The class
 should grow a `cgo = True` mode that switches the container to `toolchain-musl`,
 drops the `CGO_ENABLED=0`, and relies on `deps` for the Go toolchain instead of

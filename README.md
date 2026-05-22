@@ -259,6 +259,11 @@ development loop is centered on the machine where developers already have their
 editor, shell, browser, debugger, and Git workflow set up. You should not need
 to SSH into a Raspberry Pi to get real work done.
 
+That said, the option is there. The `selfhost-image` for the Raspberry Pi 5
+bundles `yoe`, Go, Docker, git, and the dev-image tool set (helix, yazi, zellij)
+— flash, boot, and a freshly-imaged RPi5 is a complete native ARM64 build host.
+See [Self-Host on RPi5](docs/selfhost-rpi5.md).
+
 When a build runs much faster on a different native architecture — for example,
 building ARM64 packages from an x86_64 workstation — those build steps can be
 dispatched to a native builder (a local ARM board on the network, an AWS

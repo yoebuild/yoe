@@ -10,12 +10,12 @@ machine(
     ),
     packages = ["syslinux"],
     partitions = [
-        partition(label = "rootfs", type = "ext4", size = "600M", root = True),
+        partition(label = "rootfs", type = "ext4", size = "2G", root = True),
     ],
     qemu = qemu_config(
         machine = "q35",
         cpu = "host",
-        memory = "1G",
+        memory = "4G",
         firmware = "seabios",
         display = "none",
         ports = ["2222:22", "8080:80", "8118:8118"],

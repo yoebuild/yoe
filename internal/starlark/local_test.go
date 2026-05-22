@@ -13,6 +13,7 @@ func TestLocalOverrides_RoundTrip(t *testing.T) {
 		Image:      "dev-image",
 		DeployHost: "localhost:2222",
 		Query:      "in:base-image",
+		QEMUMemory: "8G",
 	}
 	if err := WriteLocalOverrides(dir, in); err != nil {
 		t.Fatalf("write: %v", err)

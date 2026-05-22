@@ -1,0 +1,79 @@
+#!/sbin/openrc-run
+
+description="Expand the rootfs partition and filesystem to fill the disk on first boot"
+
+# One-shot. Runs once per boot until the sentinel exists, then removes
+# itself from the default runlevel so subsequent boots skip the work.
+# Runs before docker so /var/lib/docker lands on the expanded filesystem.
+depend() {
+    before docker
+    need localmount
+}
+
+start() {
+    if [ -e /var/lib/grow-rootfs.done ]; then
+        einfo "rootfs already grown, skipping"
+        return 0
+    fi
+
+    rootdev=""
+    for arg in $(cat /proc/cmdline); do
+        case "$arg" in
+            root=*) rootdev="${arg#root=}" ;;
+        esac
+    done
+    if [ -z "$rootdev" ]; then
+        eerror "could not determine root device from /proc/cmdline"
+        return 1
+    fi
+
+    # Resolve UUID/PARTUUID-style root= specifications to a concrete /dev path.
+    case "$rootdev" in
+        UUID=*)     rootdev=$(blkid -U "${rootdev#UUID=}") ;;
+        PARTUUID=*) rootdev=$(blkid -t PARTUUID="${rootdev#PARTUUID=}" -o device | head -1) ;;
+    esac
+
+    # Split <disk><partsep><partno>. mmcblkNpM and nvmeNnMpK use 'p' as the
+    # separator; sdX/vdX/hdX append the number directly.
+    case "$rootdev" in
+        /dev/mmcblk*p[0-9]*|/dev/nvme*n*p[0-9]*)
+            partno="${rootdev##*p}"
+            disk="${rootdev%p*}"
+            ;;
+        /dev/sd*[0-9]|/dev/vd*[0-9]|/dev/hd*[0-9])
+            partno=$(echo "$rootdev" | sed 's/.*[^0-9]\([0-9][0-9]*\)$/\1/')
+            disk=$(echo "$rootdev" | sed 's/[0-9][0-9]*$//')
+            ;;
+        *)
+            eerror "unsupported root device layout: $rootdev"
+            return 1
+            ;;
+    esac
+
+    einfo "expanding ${disk} partition ${partno}"
+    # --no-reread: rootfs is mounted; kernel would refuse BLKRRPART on the
+    # live disk. sfdisk still rewrites the partition table; partx -u below
+    # tells the kernel about the new size of the touched partition.
+    if ! echo ",+" | sfdisk --no-reread --force -N "$partno" "$disk"; then
+        eerror "sfdisk failed"
+        return 1
+    fi
+    partx -u "$disk" || ewarn "partx -u failed; reboot may be required"
+
+    einfo "resizing filesystem on ${rootdev}"
+    if ! resize2fs "$rootdev"; then
+        eerror "resize2fs failed"
+        return 1
+    fi
+
+    : > /var/lib/grow-rootfs.done
+    # Remove ourselves from the default runlevel so subsequent boots are
+    # no-ops without even invoking start().
+    rc-update del grow-rootfs default 2>/dev/null || true
+    einfo "rootfs grown successfully"
+    return 0
+}
+
+stop() {
+    return 0
+}

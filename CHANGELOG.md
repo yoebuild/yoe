@@ -8,6 +8,45 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.12] - 2026-05-22
+
+- **CI builds `base-image` from source on every push to `main`.** A full
+  end-to-end build — bootstrap toolchain, kernel, and image assembly — now runs
+  in CI, so build regressions surface immediately instead of at the next
+  release.
+- **`yoe run` works inside a QEMU guest (qemu-in-qemu).** When no `/dev/kvm` is
+  available, `yoe run` now falls back to TCG software emulation instead of
+  failing with a KVM error, so you can launch a guest from within a guest. It
+  prints a one-line note that emulation is in use.
+- **`yoe run --port` can remap a machine's default forwards.** A `--port` entry
+  whose guest port matches a machine forward now replaces it instead of adding a
+  second, colliding one — so a nested `yoe run` can move its host-side ports off
+  the ones the outer guest already holds.
+- **`yoe run` flags work after the image name.** `yoe run base-image --port …`
+  previously ignored every flag that followed the image name; flags and the
+  image name may now appear in any order.
+- **`yoe run` explains a port conflict instead of failing cryptically.** When a
+  QEMU guest is already running, `yoe run` (and the TUI `r` key) now report
+  which host port is taken and that an earlier run is probably still up, rather
+  than an opaque `exit status 1`. Other QEMU launch failures now include the
+  reason QEMU printed.
+- **`yoe run` remembers the QEMU guest memory.** Pass `--memory 8G` once and the
+  value is saved to `local.star`, so later runs reuse it without the flag. Set
+  it without a run via `yoe config set qemu-memory 8G`, or on the TUI Setup page
+  with ←/→. Clear it with an empty value to fall back to the machine default.
+- **QEMU can now be installed into an image.** Adding QEMU pulled in filesystem
+  libraries that conflicted with the bundled `e2fsprogs`, aborting the image
+  build; that conflict is now resolved.
+- **QEMU machines now default to 4 GB RAM.** The old 1 GB default was too small
+  for memory-heavy unit builds run inside the guest — a self-hosted `yoe build`
+  of the Linux kernel was OOM-killed at the link step. Bump the `memory` field
+  in your machine file if you need more or less.
+- **TUI clean (`c` and `C`) now works on image units.** Previously failed with
+  permission errors on the root-owned files left by image builds; now routes
+  through the same container-side `rm` that `yoe clean` uses.
+- **`selfhost-image`.** Bootable image that bundles `yoe`, Go, Docker, git, and
+  the dev-image tool set (tested on QEMU, soon native ARM systems).
+
 ## [0.10.11] - 2026-05-20
 
 - **`beagleplay` machine.** New target for the TI AM625 BeaglePlay. Build with
