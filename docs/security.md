@@ -236,7 +236,7 @@ These are explicit gaps, not unintentional bugs. PRs welcome.
   that genuinely need it — would dramatically reduce the host blast radius.
 - **Remove `run(host = True)` and `run(privileged = True)` from Starlark.** The
   two kwargs that make "rogue unit = host compromise" trivial today. Spec'd in
-  [Starlark unprivileged-only](specs/2026-05-20-starlark-unprivileged-only.md):
+  [Starlark unprivileged-only](https://github.com/yoebuild/yoe/blob/main/docs/specs/2026-05-20-starlark-unprivileged-only.md):
   delete both kwargs and move image-class and container-class privileged
   operations into Go drivers in `internal/`. Only two `.star` files in the whole
   tree use the kwargs today, both yoe-shipped classes, so the migration is
