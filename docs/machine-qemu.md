@@ -131,14 +131,9 @@ CLI (`yoe run --port 9000:9000`, repeatable). A `--port` entry whose **guest**
 port matches a machine forward replaces that forward; an entry with a new guest
 port is appended.
 
-That replace-on-match behavior is what makes `--port` work for qemu-in-qemu.
-When `yoe run` executes inside a QEMU guest, the outer guest already holds the
-machine's default host forwards (2222, 8080, 8118), so a nested run collides on
-them. Remap the host side instead:
-
-```sh
-yoe run base-image --port 12222:22 --port 18080:80 --port 18118:8118
-```
+That replace-on-match behavior is what makes `--port` usable for qemu-in-qemu —
+see [Running inside a QEMU guest](#running-inside-a-qemu-guest-qemu-in-qemu)
+below.
 
 ## How `yoe qemu` runs
 
@@ -175,3 +170,27 @@ image is regenerated, the guest starts clean.
   Apple Silicon Mac, an Ampere server) it uses KVM and is fast.
 - For anything physical-board-shaped — secure boot, vendor blobs, display, real
   I/O — use the actual board's machine descriptor.
+
+## Running inside a QEMU guest (qemu-in-qemu)
+
+`yoe run` works from within a guest that is itself running under QEMU — useful
+for exercising a self-hosted `yoe` build. Two things differ from a run on the
+bare host, and `yoe run` handles both:
+
+1. **Port forwards collide.** The outer guest already holds the machine's
+   default host forwards (`2222`, `8080`, `8118`), so a nested run cannot bind
+   them. Remap the host side with `--port`; an entry whose guest port matches a
+   default forward replaces it:
+
+   ```sh
+   yoe run base-image --port 12222:22 --port 18080:80 --port 18118:8118
+   ```
+
+2. **No KVM.** A guest has no `/dev/kvm` unless its host was started with
+   nested virtualization. `yoe run` detects this and falls back to TCG software
+   emulation automatically — it prints `using TCG software emulation (slower)`
+   and boots. No flag is needed; expect roughly a 10–20× slowdown versus KVM.
+
+To get full-speed nested runs instead of TCG, enable nested virtualization on
+the bare-metal host (`kvm_intel`/`kvm_amd` module option `nested=1`) and start
+the outer guest with a passthrough CPU so `/dev/kvm` appears inside it.
