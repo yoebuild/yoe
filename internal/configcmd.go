@@ -18,13 +18,26 @@ func ShowConfig(dir string, w io.Writer) error {
 	fmt.Fprintf(w, "Image:      %s (default)\n", proj.Defaults.Image)
 	fmt.Fprintf(w, "Cache:      %s\n", proj.Cache.Path)
 
+	ov, _ := yoestar.LoadLocalOverrides(dir)
+
 	parallel := yoestar.DefaultParallelBuilds
 	parallelNote := "default"
-	if ov, err := yoestar.LoadLocalOverrides(dir); err == nil && ov.ParallelBuilds > 0 {
+	if ov.ParallelBuilds > 0 {
 		parallel = ov.ParallelBuilds
 		parallelNote = "local.star"
 	}
 	fmt.Fprintf(w, "Parallel:   %d (%s)\n", parallel, parallelNote)
+
+	// QEMU memory `yoe run` gives the guest: local.star qemu_memory wins,
+	// otherwise the default machine's own qemu memory.
+	qemuMem, qemuNote := "unset", "machine default"
+	if m, ok := proj.Machines[proj.Defaults.Machine]; ok && m.QEMU != nil && m.QEMU.Memory != "" {
+		qemuMem, qemuNote = m.QEMU.Memory, "machine default"
+	}
+	if ov.QEMUMemory != "" {
+		qemuMem, qemuNote = ov.QEMUMemory, "local.star"
+	}
+	fmt.Fprintf(w, "QEMU mem:   %s (%s)\n", qemuMem, qemuNote)
 
 	fmt.Fprintf(w, "Machines:   %d defined\n", len(proj.Machines))
 	fmt.Fprintf(w, "Units:    %d defined\n", len(proj.Units))

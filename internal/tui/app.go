@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/user"
@@ -355,6 +356,42 @@ type buildEventMsg struct {
 
 type execDoneMsg struct {
 	err error
+	// stderr is the captured standard error of the subprocess, set only
+	// by callers that wire a capture buffer (currently `yoe run`). When
+	// the process fails, its tail gives a real reason instead of a bare
+	// exit code.
+	stderr string
+}
+
+// stderrSummary distills captured subprocess stderr into one status-line
+// message: the `yoe` "Error:" verdict plus any wrapped detail lines when
+// present, otherwise the last non-empty line. Returns "" when there is
+// nothing useful to show.
+func stderrSummary(s string) string {
+	lines := strings.Split(s, "\n")
+	start := -1
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "Error:") {
+			start = i // last "Error:" wins
+		}
+	}
+	var pick []string
+	if start >= 0 {
+		for _, line := range lines[start:] {
+			t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "Error:"))
+			if t != "" {
+				pick = append(pick, t)
+			}
+		}
+	} else {
+		for i := len(lines) - 1; i >= 0; i-- {
+			if t := strings.TrimSpace(lines[i]); t != "" {
+				pick = append(pick, t)
+				break
+			}
+		}
+	}
+	return strings.Join(pick, " — ")
 }
 
 type notifyMsg string
@@ -445,6 +482,7 @@ type model struct {
 	machineCursor  int      // cursor within machine list
 	imageCursor    int      // cursor within image list
 	parallelBuilds int      // effective `yoe build` concurrency (adjusted on the Setup page)
+	qemuMemory     string   // local.star qemu_memory ("" = machine default; adjusted on the Setup page)
 
 	// Flash view
 	flashUnit       string
@@ -602,6 +640,7 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 		buildPending:    make(map[string]bool),
 		deployHost:      ov.DeployHost,
 		parallelBuilds:  parallelBuilds,
+		qemuMemory:      ov.QEMUMemory,
 		loadOpts:        cfg.LoadOpts,
 		globalFlagArgs:  cfg.GlobalFlagArgs,
 	}
@@ -818,7 +857,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case execDoneMsg:
 		if msg.err != nil {
-			m.message = fmt.Sprintf("Command error: %v", msg.err)
+			if summary := stderrSummary(msg.stderr); summary != "" {
+				m.message = summary
+			} else {
+				m.message = fmt.Sprintf("Command error: %v", msg.err)
+			}
 		}
 		return m, nil
 
@@ -1195,12 +1238,27 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
 			if u, ok := m.proj.Units[name]; ok && u.Class == "image" {
+				// Catch "a guest is already running" before launching, so
+				// the reason shows in the TUI rather than scrolling past
+				// as an opaque subprocess exit code.
+				if mc, ok := m.proj.Machines[m.proj.Defaults.Machine]; ok {
+					if err := device.CheckQEMUPortsAvailable(mc, nil); err != nil {
+						m.message = err.Error()
+						return m, nil
+					}
+				}
 				args := append([]string{}, m.globalFlagArgs...)
 				args = append(args, "run", name, "--machine", m.proj.Defaults.Machine)
 				c := exec.Command(os.Args[0], args...)
 				c.Dir = m.projectDir
+				// Capture stderr (still shown live via the tee) so a
+				// QEMU launch failure surfaces its reason in the TUI
+				// instead of a bare exit code. stdin/stdout stay nil so
+				// tea.ExecProcess wires them to the guest console.
+				var errBuf strings.Builder
+				c.Stderr = io.MultiWriter(os.Stderr, &errBuf)
 				return m, tea.ExecProcess(c, func(err error) tea.Msg {
-					return execDoneMsg{err: err}
+					return execDoneMsg{err: err, stderr: errBuf.String()}
 				})
 			}
 			m.message = fmt.Sprintf("%s is not an image unit", name)
@@ -1825,7 +1883,33 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // Setup option names — add new options here.
-var setupOptions = []string{"Machine", "Image", "Parallel builds"}
+var setupOptions = []string{"Machine", "Image", "Parallel builds", "QEMU memory"}
+
+// qemuMemoryLadder is the ←/→ preset ladder for the Setup page's QEMU
+// memory row. The empty-string value (machine default) sits one step
+// below the first entry.
+var qemuMemoryLadder = []string{"128M", "256M", "512M", "1G", "2G", "4G", "8G", "16G"}
+
+// qemuMemoryLadderIndex returns the position of v in qemuMemoryLadder, or
+// -1 for the machine-default (empty) value and for any off-ladder value —
+// either way the next ←/→ press steps onto the ladder.
+func qemuMemoryLadderIndex(v string) int {
+	for i, s := range qemuMemoryLadder {
+		if s == v {
+			return i
+		}
+	}
+	return -1
+}
+
+// machineDefaultMemory returns the qemu memory the project's default
+// machine declares, or "" if it declares none.
+func (m model) machineDefaultMemory() string {
+	if mc, ok := m.proj.Machines[m.proj.Defaults.Machine]; ok && mc.QEMU != nil {
+		return mc.QEMU.Memory
+	}
+	return ""
+}
 
 func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.setupField {
@@ -1853,22 +1937,46 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "left", "h", "right", "l":
-		if setupOptions[m.setupCursor] != "Parallel builds" {
-			return m, nil
-		}
-		if msg.String() == "left" || msg.String() == "h" {
-			if m.parallelBuilds > 1 {
-				m.parallelBuilds--
+		left := msg.String() == "left" || msg.String() == "h"
+		switch setupOptions[m.setupCursor] {
+		case "Parallel builds":
+			if left {
+				if m.parallelBuilds > 1 {
+					m.parallelBuilds--
+				}
+			} else {
+				m.parallelBuilds++
 			}
-		} else {
-			m.parallelBuilds++
-		}
-		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
-		ov.ParallelBuilds = m.parallelBuilds
-		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
-			m.message = fmt.Sprintf("Parallel builds set to %d (warning: failed to save local.star: %v)", m.parallelBuilds, err)
-		} else {
-			m.message = fmt.Sprintf("Parallel builds set to %d (saved to local.star)", m.parallelBuilds)
+			ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+			ov.ParallelBuilds = m.parallelBuilds
+			if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
+				m.message = fmt.Sprintf("Parallel builds set to %d (warning: failed to save local.star: %v)", m.parallelBuilds, err)
+			} else {
+				m.message = fmt.Sprintf("Parallel builds set to %d (saved to local.star)", m.parallelBuilds)
+			}
+		case "QEMU memory":
+			idx := qemuMemoryLadderIndex(m.qemuMemory)
+			if left {
+				if idx >= 0 {
+					idx-- // -1 lands on the machine default
+				}
+			} else if idx < len(qemuMemoryLadder)-1 {
+				idx++
+			}
+			if idx < 0 {
+				m.qemuMemory = ""
+			} else {
+				m.qemuMemory = qemuMemoryLadder[idx]
+			}
+			ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+			ov.QEMUMemory = m.qemuMemory
+			if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
+				m.message = fmt.Sprintf("QEMU memory (warning: failed to save local.star: %v)", err)
+			} else if m.qemuMemory == "" {
+				m.message = "QEMU memory set to machine default (saved to local.star)"
+			} else {
+				m.message = fmt.Sprintf("QEMU memory set to %s (saved to local.star)", m.qemuMemory)
+			}
 		}
 		return m, nil
 
@@ -2728,12 +2836,12 @@ func (m model) helpSections() (string, []helpSection) {
 		}
 
 	case viewSetup:
-		return "Setup — machine, default image, parallel builds", []helpSection{
+		return "Setup — machine, default image, parallel builds, QEMU memory", []helpSection{
 			{title: "Navigate", entries: []helpEntry{
-				{"↑  ·  k", "move up (Machine / Image / Parallel builds)"},
+				{"↑  ·  k", "move up (Machine / Image / Parallel builds / QEMU memory)"},
 				{"↓  ·  j", "move down"},
 				{"Enter", "open the picker for the selected option"},
-				{"←/→  ·  h/l", "adjust Parallel builds"},
+				{"←/→  ·  h/l", "adjust Parallel builds / QEMU memory"},
 				{"Esc  ·  q", "back to the unit list"},
 			}},
 			{title: "In a picker", entries: []helpEntry{
@@ -3288,6 +3396,15 @@ func (m model) viewSetup() string {
 				value = headerStyle.Render(m.proj.Defaults.Image)
 			case "Parallel builds":
 				value = headerStyle.Render(fmt.Sprintf("%d", m.parallelBuilds))
+			case "QEMU memory":
+				disp := m.qemuMemory
+				if disp == "" {
+					disp = "machine default"
+					if md := m.machineDefaultMemory(); md != "" {
+						disp = "machine default (" + md + ")"
+					}
+				}
+				value = headerStyle.Render(disp)
 			}
 			b.WriteString(fmt.Sprintf("%s%s  %s\n", cursor, style.Render(opt), value))
 		}

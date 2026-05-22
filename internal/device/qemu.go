@@ -3,6 +3,7 @@ package device
 import (
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,46 @@ import (
 	yoe "github.com/yoebuild/yoe/internal"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
+
+// checkQEMUPortsFree returns a descriptive error if any host-side forward
+// port is already bound. A bound forward port almost always means another
+// QEMU guest from an earlier `yoe run` is still running — a live guest
+// holds its forwards for its whole lifetime — so this turns an opaque
+// QEMU "exit status 1" into a message that names the actual problem.
+func checkQEMUPortsFree(ports []string) error {
+	for _, p := range ports {
+		host, _, ok := strings.Cut(p, ":")
+		if !ok || host == "" {
+			continue
+		}
+		ln, err := net.Listen("tcp", ":"+host)
+		if err != nil {
+			return fmt.Errorf("host port %s is already in use — a QEMU guest from an earlier `yoe run` is probably still running. Stop that guest first, or pass --port to forward different host ports", host)
+		}
+		_ = ln.Close()
+	}
+	return nil
+}
+
+// CheckQEMUPortsAvailable verifies the host forward ports a `yoe run` of
+// this machine would bind are free. The CLI and the TUI both call it
+// before launching so a guest that is already running is reported
+// clearly instead of as an opaque QEMU exit code.
+func CheckQEMUPortsAvailable(machine *yoestar.Machine, extraPorts []string) error {
+	return checkQEMUPortsFree(append(machine.QEMUPorts(), extraPorts...))
+}
+
+// qemuStderrTail returns the last non-empty line of captured QEMU stderr,
+// prefixed with a newline, or "" when there is nothing useful to add.
+func qemuStderrTail(s string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			return "\n" + line
+		}
+	}
+	return ""
+}
 
 // QEMUOptions configures a QEMU run.
 type QEMUOptions struct {
@@ -53,6 +94,12 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 	imgPath := findImage(projectDir, machine.Name, unitName)
 	if imgPath == "" {
 		return fmt.Errorf("no built image for %q — run yoe build %s first", unitName, unitName)
+	}
+
+	// Fail fast (before the disk grow) if a guest is already holding the
+	// host forward ports — the common "an image is already running" case.
+	if err := checkQEMUPortsFree(append(machine.QEMUPorts(), opts.Ports...)); err != nil {
+		return err
 	}
 
 	// Optionally grow a side-by-side copy of the image so grow-rootfs on
@@ -108,18 +155,23 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 		cmd := exec.Command(qemuBin, args...)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
 		if opts.Daemon {
 			cmd.Stdin = nil
 			cmd.Stdout = nil
-			cmd.Stderr = nil
 			if err := cmd.Start(); err != nil {
 				return fmt.Errorf("starting QEMU: %w", err)
 			}
 			fmt.Fprintf(w, "QEMU running in background (PID %d)\n", cmd.Process.Pid)
 			return nil
 		}
-		return cmd.Run()
+		// Tee stderr so a QEMU launch failure can be reported with the
+		// reason QEMU printed, not just a bare exit code.
+		var errBuf strings.Builder
+		cmd.Stderr = io.MultiWriter(os.Stderr, &errBuf)
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("QEMU exited with an error: %w%s", err, qemuStderrTail(errBuf.String()))
+		}
+		return nil
 	}
 
 	// Fall back to container

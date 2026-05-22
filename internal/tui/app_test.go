@@ -1073,3 +1073,34 @@ func TestRenderHomeHeader_ProgressReplacesFeed(t *testing.T) {
 		t.Fatalf("feed banner should return after session reset")
 	}
 }
+
+func TestStderrSummary(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{
+			name: "error line wins",
+			in:   "cloning module...\nError: host port 2222 is already in use — stop that guest\n",
+			want: "host port 2222 is already in use — stop that guest",
+		},
+		{
+			name: "error line plus wrapped detail",
+			in:   "qemu: warning\nError: QEMU exited with an error: exit status 1\nqemu-system-x86_64: Failed to get write lock\n",
+			want: "QEMU exited with an error: exit status 1 — qemu-system-x86_64: Failed to get write lock",
+		},
+		{
+			name: "no error line falls back to last non-empty",
+			in:   "starting up\nsomething odd happened\n\n",
+			want: "something odd happened",
+		},
+		{name: "empty", in: "", want: ""},
+		{name: "blank only", in: "\n  \n", want: ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := stderrSummary(c.in); got != c.want {
+				t.Fatalf("stderrSummary(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}

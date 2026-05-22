@@ -25,6 +25,9 @@ type LocalOverrides struct {
 	DeployHost  string // last-used target for `yoe deploy` from the TUI
 	FlashDevice string // last-used flash target (e.g. /dev/sdb) for the TUI flash view
 	Query       string // last-saved TUI search query (in:base-image, etc.)
+	// QEMUMemory overrides the RAM `yoe run` gives the QEMU guest (e.g.
+	// "8G"). Empty means "not set" — the machine's own qemu memory is used.
+	QEMUMemory string
 	// ParallelBuilds caps how many units `yoe build` builds concurrently.
 	// Zero means "not set" — the build picks its own default.
 	ParallelBuilds int
@@ -75,6 +78,8 @@ func LoadLocalOverrides(projectDir string) (LocalOverrides, error) {
 				captured.FlashDevice = string(v)
 			case "query":
 				captured.Query = string(v)
+			case "qemu_memory":
+				captured.QEMUMemory = string(v)
 			default:
 				return nil, fmt.Errorf("local: unknown keyword %q", string(key))
 			}
@@ -113,6 +118,9 @@ func WriteLocalOverrides(projectDir string, ov LocalOverrides) error {
 	}
 	if ov.Query != "" {
 		fmt.Fprintf(&b, "    query = %q,\n", ov.Query)
+	}
+	if ov.QEMUMemory != "" {
+		fmt.Fprintf(&b, "    qemu_memory = %q,\n", ov.QEMUMemory)
 	}
 	if ov.ParallelBuilds > 0 {
 		fmt.Fprintf(&b, "    parallel_builds = %d,\n", ov.ParallelBuilds)

@@ -12,6 +12,15 @@ and this project adheres to
   end-to-end build — bootstrap toolchain, kernel, and image assembly — now runs
   in CI, so build regressions surface immediately instead of at the next
   release.
+- **`yoe run` explains a port conflict instead of failing cryptically.** When a
+  QEMU guest is already running, `yoe run` (and the TUI `r` key) now report which
+  host port is taken and that an earlier run is probably still up, rather than an
+  opaque `exit status 1`. Other QEMU launch failures now include the reason QEMU
+  printed.
+- **`yoe run` remembers the QEMU guest memory.** Pass `--memory 8G` once and the
+  value is saved to `local.star`, so later runs reuse it without the flag. Set
+  it without a run via `yoe config set qemu-memory 8G`, or on the TUI Setup page
+  with ←/→. Clear it with an empty value to fall back to the machine default.
 - **QEMU can now be installed into an image.** Adding QEMU pulled in filesystem
   libraries that conflicted with the bundled `e2fsprogs`, aborting the image
   build; that conflict is now resolved.

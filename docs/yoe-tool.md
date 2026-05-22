@@ -265,8 +265,8 @@ yoe run base-image --machine qemu-arm64
 # 8080→80, and 8118→8118 — `--port` adds to that list)
 yoe run --port 9000:9000
 
-# Allocate more memory
-yoe run --memory 2G
+# Allocate more memory — also saved to local.star and reused next time
+yoe run --memory 8G
 
 # Run with graphical output (default is serial console)
 yoe run --display
@@ -310,7 +310,7 @@ machine(
     qemu = qemu_config(
         machine = "q35",
         cpu = "host",
-        memory = "1G",
+        memory = "4G",
         firmware = "ovmf",
         display = "none",
     ),
@@ -321,6 +321,16 @@ When `yoe run` is given a machine with a `qemu` configuration, it uses those
 settings directly. When given a hardware machine without `qemu` configuration,
 it falls back to a reasonable default QEMU configuration for the machine's
 architecture.
+
+**Guest memory** follows this precedence: the `--memory` flag, then
+`qemu_memory` in `local.star`, then the machine's own `qemu` memory. Passing
+`--memory` also writes the value to `local.star`, so later runs (and the TUI)
+reuse it without re-passing the flag — the same persistence `-j` uses for
+`parallel-builds`. Set it without a run via `yoe config set qemu-memory 8G`, or
+clear it with `yoe config set qemu-memory ""` to fall back to the machine
+default. The TUI Setup page (`s`) exposes it too: select **QEMU memory** and
+press ←/→ to step a preset ladder — machine default, then 128M doubling up to
+16G.
 
 ### `yoe serve`
 
@@ -576,19 +586,26 @@ View project configuration and set the per-developer settings stored in
 `local.star`.
 
 ```sh
-# Show current configuration (includes the effective parallel-builds value)
+# Show current configuration (includes parallel-builds and qemu-memory)
 yoe config show
 
 # Set how many units build in parallel (written to local.star)
 yoe config set parallel-builds 12
+
+# Set the RAM `yoe run` gives the QEMU guest (written to local.star)
+yoe config set qemu-memory 8G
+
+# Clear it so the machine's own qemu memory applies again
+yoe config set qemu-memory ""
 ```
 
 `yoe config show` reads `PROJECT.star` and reports the project name, default
-machine and image, cache path, and the parallel-build concurrency in effect
-(annotated `default` or `local.star`).
+machine and image, cache path, the parallel-build concurrency in effect, and
+the QEMU guest memory in effect (each annotated `default`, `machine default`,
+or `local.star`).
 
 `yoe config set` only writes settings that live in the yoe-generated
-`local.star`; today that is `parallel-builds`. Project configuration
+`local.star`: `parallel-builds` and `qemu-memory`. Project configuration
 (`defaults.machine`, `defaults.image`, etc.) lives in hand-authored
 `PROJECT.star` and is edited there directly — `config set` does not patch
 Starlark.
@@ -777,7 +794,7 @@ visible. Press `P` to capture the new HEAD as the new pin.
 | `l`         | Open unit's build log in `$EDITOR`                          |
 | `d`         | Launch `claude diagnose` for the unit                       |
 | `a`         | Launch `claude /new-unit`                                   |
-| `s`         | Open Setup (machine / default image / parallel builds)      |
+| `s`         | Open Setup (machine / image / parallel builds / QEMU memory) |
 | `/`         | Edit the active query (substring + `type:` `module:` `in:`) |
 | `\`         | Snap query back to the saved default in `local.star`        |
 | `S`         | Save the current query as the new default                   |

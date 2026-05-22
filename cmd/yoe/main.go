@@ -467,7 +467,27 @@ func cmdConfig(args []string) {
 			fmt.Printf("parallel-builds = %d (saved to local.star)\n", n)
 			return
 		}
-		fmt.Fprintf(os.Stderr, "config set: only 'parallel-builds <n>' is supported; edit PROJECT.star directly for project config\n")
+		if len(args) == 3 && args[1] == "qemu-memory" {
+			mem := strings.TrimSpace(args[2])
+			root, err := findProjectRootForLocal(projectDir())
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			ov, _ := yoestar.LoadLocalOverrides(root)
+			ov.QEMUMemory = mem // empty string clears it — machine default reapplies
+			if err := yoestar.WriteLocalOverrides(root, ov); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			if mem == "" {
+				fmt.Printf("qemu-memory cleared from local.star; the machine default applies\n")
+			} else {
+				fmt.Printf("qemu-memory = %s (saved to local.star)\n", mem)
+			}
+			return
+		}
+		fmt.Fprintf(os.Stderr, "config set: supported keys are 'parallel-builds <n>' and 'qemu-memory <size>'; edit PROJECT.star directly for project config\n")
 		os.Exit(1)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown config subcommand: %s\n", args[0])
@@ -928,7 +948,7 @@ func cmdFlashList(_ []string) {
 func cmdRun(args []string) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	machineName := fs.String("machine", "", "target machine")
-	memory := fs.String("memory", "", "RAM size (overrides the machine's qemu memory)")
+	memory := fs.String("memory", "", "RAM size, e.g. 8G (overrides the machine's qemu memory; saved to local.star)")
 	display := fs.Bool("display", false, "enable graphical display")
 	daemon := fs.Bool("daemon", false, "run in background")
 	// 8G default gives grow-rootfs ~6 GiB of slack past the 2 GiB
@@ -941,11 +961,30 @@ func cmdRun(args []string) {
 	fs.Parse(args)
 
 	opts := device.QEMUOptions{
-		Memory:   *memory,
 		Ports:    ports,
 		Display:  *display,
 		Daemon:   *daemon,
 		DiskSize: *diskSize,
+	}
+
+	// QEMU memory precedence: --memory flag > local.star qemu_memory >
+	// the machine's own qemu memory (resolved in device.RunQEMU when
+	// opts.Memory is empty). A --memory value is persisted so subsequent
+	// runs (and the TUI) reuse it without re-passing the flag.
+	if root, err := findProjectRootForLocal(projectDir()); err == nil {
+		ov, _ := yoestar.LoadLocalOverrides(root)
+		opts.Memory = ov.QEMUMemory
+		if *memory != "" {
+			opts.Memory = *memory
+			if ov.QEMUMemory != *memory {
+				ov.QEMUMemory = *memory
+				if werr := yoestar.WriteLocalOverrides(root, ov); werr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not save qemu_memory to local.star: %v\n", werr)
+				}
+			}
+		}
+	} else if *memory != "" {
+		opts.Memory = *memory
 	}
 
 	proj := loadProject()
