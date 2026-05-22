@@ -75,10 +75,10 @@ flashing the wrong block device will silently overwrite it.
   negotiates 5 V / 3 A. Underpowering shows up as the lightning-bolt under-volt
   warning in dmesg, SD card corruption, WiFi disconnects under load, or the
   board silently rebooting once anything is plugged into USB.
-- **RPi5** takes 5 V over USB-C with USB-PD. The official 27 W supply
-  negotiates 5 V / 5 A and is required for full peripheral current on the USB
-  ports; a 5 V / 3 A PD supply boots fine but the firmware caps USB current
-  unless you set `usb_max_current_enable=1` in `config.txt`.
+- **RPi5** takes 5 V over USB-C with USB-PD. The official 27 W supply negotiates
+  5 V / 5 A and is required for full peripheral current on the USB ports; a 5 V
+  / 3 A PD supply boots fine but the firmware caps USB current unless you set
+  `usb_max_current_enable=1` in `config.txt`.
 
 ### Serial console
 
@@ -97,9 +97,9 @@ The Linux device name differs between boards:
 - **RPi4** — mini-UART on `ttyS0` (cmdline.txt's `console=ttyS0,115200`)
 - **RPi5** — PL011 on `ttyAMA10` (cmdline.txt's `console=ttyAMA10,115200`)
 
-Raspberry Pi boards do **not** have an on-board USB-to-serial bridge. The
-header is wired in the standard **Raspberry Pi USB-to-TTL serial cable** pinout,
-so you'll need an external 3.3 V adapter:
+Raspberry Pi boards do **not** have an on-board USB-to-serial bridge. The header
+is wired in the standard **Raspberry Pi USB-to-TTL serial cable** pinout, so
+you'll need an external 3.3 V adapter:
 
 - **Recommended: FTDI TTL-232R-RPi**
   ([product page](https://ftdichip.com/products/ttl-232r-rpi/) ·
@@ -340,11 +340,10 @@ change.
 
 ## Self-hosting yoe builds on the RPi5
 
-The `selfhost-image` turns a Raspberry Pi 5 into a standalone yoe build
-host — yoe CLI, Go, Docker, git, helix, and the rest of the dev image, all
-on one bootable card or NVMe SSD. See
-[Self-Host on RPi5](selfhost-rpi5.md) for the build, flash, first-boot, and
-NVMe setup walkthrough.
+The `selfhost-image` turns a Raspberry Pi 5 into a standalone yoe build host —
+yoe CLI, Go, Docker, git, helix, and the rest of the dev image, all on one
+bootable card or NVMe SSD. See [Self-Host on RPi5](selfhost-rpi5.md) for the
+build, flash, first-boot, and NVMe setup walkthrough.
 
 ## When something fails
 

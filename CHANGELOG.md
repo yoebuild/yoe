@@ -13,10 +13,10 @@ and this project adheres to
   in CI, so build regressions surface immediately instead of at the next
   release.
 - **`yoe run` explains a port conflict instead of failing cryptically.** When a
-  QEMU guest is already running, `yoe run` (and the TUI `r` key) now report which
-  host port is taken and that an earlier run is probably still up, rather than an
-  opaque `exit status 1`. Other QEMU launch failures now include the reason QEMU
-  printed.
+  QEMU guest is already running, `yoe run` (and the TUI `r` key) now report
+  which host port is taken and that an earlier run is probably still up, rather
+  than an opaque `exit status 1`. Other QEMU launch failures now include the
+  reason QEMU printed.
 - **`yoe run` remembers the QEMU guest memory.** Pass `--memory 8G` once and the
   value is saved to `local.star`, so later runs reuse it without the flag. Set
   it without a run via `yoe config set qemu-memory 8G`, or on the TUI Setup page
@@ -32,9 +32,9 @@ and this project adheres to
   permission errors on the root-owned files left by image builds; now routes
   through the same container-side `rm` that `yoe clean` uses.
 - **`selfhost-image` for the Raspberry Pi 5.** A bootable image that bundles
-  yoe, Go, Docker, git, and the dev-image tool set — flash, boot, and the
-  RPi5 is a standalone yoe build host. The rootfs grows to fill the SD or
-  NVMe on first boot. See docs/selfhost-rpi5.md.
+  yoe, Go, Docker, git, and the dev-image tool set — flash, boot, and the RPi5
+  is a standalone yoe build host. The rootfs grows to fill the SD or NVMe on
+  first boot. See docs/selfhost-rpi5.md.
 
 ## [0.10.11] - 2026-05-20
 

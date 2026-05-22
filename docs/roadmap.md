@@ -308,9 +308,9 @@ The first cut shipped as `selfhost-image` for the Raspberry Pi 5 — see
 [selfhost-rpi5.md](selfhost-rpi5.md). It bundles yoe, Go, Docker, git,
 bubblewrap, and the dev-image tool set. What's still open:
 
-- **CI gate** that builds yoe from source on a yoe-built image and runs the
-  test suite, so toolchain or libc-compatibility regressions break the build
-  instead of being discovered later.
+- **CI gate** that builds yoe from source on a yoe-built image and runs the test
+  suite, so toolchain or libc-compatibility regressions break the build instead
+  of being discovered later.
 - **Backport `selfhost-image` to other boards** — RPi4 first (mostly mechanical;
   swap `linux-rpi5` → `linux-rpi4` in the manifest), then BeaglePlay, then
   Jetson once the Tegra kernel carries the container CONFIG fragment.
