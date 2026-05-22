@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **QEMU can now be installed into an image.** Adding QEMU pulled in filesystem
+  libraries that conflicted with the bundled `e2fsprogs`, aborting the image
+  build; that conflict is now resolved.
+- **QEMU machines now default to 4 GB RAM.** The old 1 GB default was too small
+  for memory-heavy unit builds run inside the guest — a self-hosted `yoe build`
+  of the Linux kernel was OOM-killed at the link step. Bump the `memory` field
+  in your machine file if you need more or less.
 - **TUI clean (`c` and `C`) now works on image units.** Previously failed with
   permission errors on the root-owned files left by image builds; now routes
   through the same container-side `rm` that `yoe clean` uses.

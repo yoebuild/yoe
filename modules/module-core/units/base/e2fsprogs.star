@@ -23,6 +23,14 @@ unit(
     deps = ["util-linux-dev", "libuuid", "libblkid", "libmount", "toolchain-musl"],
     runtime_deps = ["util-linux"],
     replaces = ["busybox"],
+    # Built with --enable-elf-shlibs, this unit ships libext2fs.so.2,
+    # libe2p.so.2, libss.so.2 and libcom_err.so.2 — the same files and
+    # SONAMEs as Alpine's split e2fsprogs-libs and libcom_err packages.
+    # Declaring the virtuals routes consumers' runtime_deps (e.g. xen-libs
+    # depends on e2fsprogs-libs) to this unit so the Alpine packages aren't
+    # pulled in alongside, which would make `apk add` abort on the
+    # conflicting SONAMEs.
+    provides = ["e2fsprogs-libs", "libcom_err"],
     container = "toolchain-musl",
     container_arch = "target",
     sandbox = True,
