@@ -3,10 +3,10 @@
 > **Status:** This document describes the intended shape of yoe's test story.
 > Today, yoe ships Go unit tests under `internal/*` and a single end-to-end Go
 > test at `internal/build/e2e_test.go` that loads `testdata/e2e-project/` and
-> exercises a dry-run build. There is no `yoe test` subcommand, no on-device
-> test runner, no image smoke-test framework, and no CI workflow that runs tests
-> or builds (the only CI today is markdown formatting via
-> `.github/workflows/doc-check.yaml`). The sections below describe what's
+> exercises a dry-run build. CI (`.github/workflows/`) runs `go test ./...`, a
+> `yoe` build, markdown formatting, and a full from-source build of `base-image`
+> via `e2e-build.yaml`. There is no `yoe test` subcommand, no on-device test
+> runner, and no image smoke-test framework. The sections below describe what's
 > planned; each one calls out what exists today vs. what's future work.
 
 ## Goals
@@ -69,8 +69,16 @@ minutes of compute.
 
 ### CI
 
-`.github/workflows/doc-check.yaml` runs `prettier --check` on `**/*.md`. There
-is no workflow that runs `go test`, builds yoe, or builds an image.
+Two workflows run under `.github/workflows/`:
+
+- `ci.yaml` — on every push to `main` and every pull request: `go test ./...`, a
+  `yoe` binary build, and `prettier --check` on `**/*.md`.
+- `e2e-build.yaml` — a full from-source build of `base-image` (bootstrap
+  toolchain, musl, busybox, the kernel, image assembly), verifying the resulting
+  `base-image.img`. Because it is expensive (Docker, tens of minutes), it runs
+  on pushes to `main`, on a nightly schedule, and via manual dispatch — not on
+  every pull request. Successive runs reuse the content-addressed cache via
+  `actions/cache`, so an unchanged graph rebuilds incrementally.
 
 ## Build-time Package QA (planned)
 
@@ -220,20 +228,21 @@ The driver:
 already-running device. Useful for testing real hardware without a separate test
 harness.
 
-## CI Integration (planned)
+## CI Integration
 
-> **Status:** Not implemented.
+Three CI tiers, in order of cost:
 
-Three CI workflows worth adding, in order of cost:
-
-1. **Go tests** — `go test ./...` on every PR. Cheap, catches the bulk of
-   regressions.
-2. **Dry-run image build** — `yoe build dev-image --dry-run` on every PR.
-   Catches Starlark-level breakage and unit-graph regressions without needing a
-   real build.
-3. **Full image build + smoke tests** —
-   `yoe build dev-image && yoe test dev-image` on a schedule (nightly?) or on
-   `main`. Expensive (Docker, minutes) but catches actual build regressions.
+1. **Go tests** — `go test ./...` on every push and PR (`ci.yaml`). Cheap,
+   catches the bulk of regressions. The dry-run image build lives here too:
+   `internal/build/e2e_test.go` loads `testdata/e2e-project/` and resolves the
+   unit graph without building, catching Starlark-level and graph breakage.
+   _Implemented._
+2. **Full image build** — `yoe build base-image` from source on pushes to
+   `main`, nightly, and on demand (`e2e-build.yaml`). Expensive (Docker, tens of
+   minutes) but catches actual build regressions. _Implemented._
+3. **Image smoke tests** — boot the built image and assert over SSH (the
+   `yoe test <image>` driver below). _Planned;_ once it lands, `e2e-build.yaml`
+   gains a `yoe test base-image` step after the build.
 
 ## Build History / Regression Tracking (planned)
 

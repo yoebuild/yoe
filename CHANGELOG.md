@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **CI builds `base-image` from source on every push to `main`.** A full
+  end-to-end build — bootstrap toolchain, kernel, and image assembly — now runs
+  in CI, so build regressions surface immediately instead of at the next
+  release.
 - **QEMU can now be installed into an image.** Adding QEMU pulled in filesystem
   libraries that conflicted with the bundled `e2fsprogs`, aborting the image
   build; that conflict is now resolved.
