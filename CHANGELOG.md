@@ -12,14 +12,14 @@ and this project adheres to
   end-to-end build — bootstrap toolchain, kernel, and image assembly — now runs
   in CI, so build regressions surface immediately instead of at the next
   release.
-- **`yoe run` works inside a QEMU guest (qemu-in-qemu).** When no `/dev/kvm`
-  is available, `yoe run` now falls back to TCG software emulation instead of
+- **`yoe run` works inside a QEMU guest (qemu-in-qemu).** When no `/dev/kvm` is
+  available, `yoe run` now falls back to TCG software emulation instead of
   failing with a KVM error, so you can launch a guest from within a guest. It
   prints a one-line note that emulation is in use.
-- **`yoe run --port` can remap a machine's default forwards.** A `--port`
-  entry whose guest port matches a machine forward now replaces it instead of
-  adding a second, colliding one — so a nested `yoe run` can move its host-side
-  ports off the ones the outer guest already holds.
+- **`yoe run --port` can remap a machine's default forwards.** A `--port` entry
+  whose guest port matches a machine forward now replaces it instead of adding a
+  second, colliding one — so a nested `yoe run` can move its host-side ports off
+  the ones the outer guest already holds.
 - **`yoe run` flags work after the image name.** `yoe run base-image --port …`
   previously ignored every flag that followed the image name; flags and the
   image name may now appear in any order.
@@ -42,10 +42,10 @@ and this project adheres to
 - **TUI clean (`c` and `C`) now works on image units.** Previously failed with
   permission errors on the root-owned files left by image builds; now routes
   through the same container-side `rm` that `yoe clean` uses.
-- **`selfhost-image` for the Raspberry Pi 5.** A bootable image that bundles
-  yoe, Go, Docker, git, and the dev-image tool set — flash, boot, and the RPi5
-  is a standalone yoe build host. The rootfs grows to fill the SD or NVMe on
-  first boot. See docs/selfhost-rpi5.md.
+- **`selfhost-image`.** Bootable image that bundles yoe, Go, Docker, git, and
+  the dev-image tool set — flash, boot, and the RPi5 is a standalone yoe build
+  host. The rootfs grows to fill the SD or NVMe on first boot. See
+  docs/selfdost-rpi5.md.
 
 ## [0.10.11] - 2026-05-20
 

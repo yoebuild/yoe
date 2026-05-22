@@ -1,14 +1,19 @@
-# Self-Host yoe Builds on a Raspberry Pi 5
+# Self-Host Builds
 
-`selfhost-image` turns a Raspberry Pi 5 into a standalone yoe build host. Flash
-it to a microSD or NVMe SSD, power on, log in, and you can `git clone` a yoe
-project and run `yoe build` on the device — no workstation in the loop. The
-image includes the yoe CLI, Go, Docker, git, bubblewrap, and the dev-image tool
-set (helix, yazi, zellij, openssh, bash, htop, strace).
+`selfhost-image` turns a QEMU (and soon Raspberry Pi 5) into a standalone
+`[yoe]` build host. Flash it to a microSD or NVMe SSD, power on, log in, and you
+can `yoe-init` or `git clone` a yoe project and run `yoe build` on the device —
+no workstation in the loop. The image includes the yoe CLI, Go, Docker, git,
+bubblewrap, and the dev-image tool set (helix, yazi, zellij, openssh, bash,
+htop, strace).
 
 This is the developer's dogfood path. The same yoe build flow that runs on an
-x86_64 workstation runs on the RPi5, only natively: ARM64 builds without QEMU
-emulation.
+x86_64 workstation runs on the RPi5 on top of a yoe image, only natively: ARM64
+builds without QEMU emulation.
+
+_Note, eventually we plan to deploy individual units to a remote ARM native
+runner. For now, running the `yoe build` on an ARM system is the fastest way to
+do ARM builds._
 
 ## What's in the image
 
