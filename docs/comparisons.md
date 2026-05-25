@@ -312,6 +312,44 @@ transparency directly influences `[yoe]`'s design.
 for personal use and value having full manual control. Arch's philosophy works
 well for power users on general-purpose hardware.
 
+### SteamOS and the Steam Deck
+
+Arch's reputation — rolling, hands-on, assemble-it-yourself — makes it an
+unlikely base for a sealed consumer appliance. Valve's SteamOS 3 ("holo"), the
+OS on the Steam Deck, is exactly that, and a useful existence proof for choices
+`[yoe]` is making.
+
+SteamOS 1 and 2 were Debian-based; SteamOS 3, shipped with the Steam Deck
+in 2022, switched to an Arch foundation. The device a user actually runs,
+though, looks nothing like a hands-on Arch install:
+
+- **Immutable, read-only root.** The system partition is mounted read-only.
+  `pacman` is not the update path; the rootfs is sealed, and
+  `steamos-readonly disable` (plus reinitializing the pacman keyring) is the
+  documented — and discouraged — escape hatch for developers.
+- **A/B atomic image updates with rollback.** SteamOS updates by downloading a
+  complete new rootfs image into the inactive half of an A/B partition pair and
+  switching over atomically; a failed or unwanted update rolls back to the other
+  slot. This is image-based updating, not `pacman -Syu`.
+- **Arch is the build-time ingredient, not the runtime model.** Valve uses
+  Arch's packages and rolling base to _build_ the OS image, then ships that
+  image as an atomic unit. Users install applications as Flatpaks into a
+  writable overlay, leaving the base untouched.
+
+The relevance to `[yoe]`: SteamOS demonstrates that "rolling Arch-style base"
+and "sealed, atomically-updated appliance" are not in tension — you take Arch's
+package freshness and simplicity at build time and impose immutability and A/B
+rollback at the image layer. That is the split `[yoe]` draws too: a rolling,
+content-addressed package set at build time, with image-level assembly and
+(planned) atomic update plus rollback on the device.
+
+It is also a caution. SteamOS's immutability and update system are Valve-built
+layers on top of Arch, specific to one device — not something a general Arch
+user inherits. Reproducing that stack for a different board is exactly the
+BSP-and-image work the note above says Arch does not provide. SteamOS is what it
+looks like when a well-resourced team does that work themselves; `[yoe]` aims to
+make it a property of the build system instead.
+
 ## vs. Debian
 
 Debian is the oldest and most conservative general-purpose Linux distribution.
@@ -441,6 +479,38 @@ existing Debian `.deb`s (inheriting the size and package-model properties
 above), while `[yoe]` builds from source into content-addressed apks; debos
 recipes are flat action sequences, while `[yoe]`'s Starlark units form a
 dependency graph with a shared, content-addressed build cache.
+
+**[isar](https://github.com/ilbers/isar)** — "Integration System for Automated
+Root filesystem generation," maintained by ilbers GmbH — is the most
+architecturally interesting Debian builder relative to `[yoe]`, because it
+shares `[yoe]`'s core bets while keeping a Debian userland:
+
+- **BitBake as the engine, Debian as the content.** isar reuses Yocto's BitBake
+  and its layer/recipe model, but recipes assemble Debian root filesystems from
+  `.deb`s rather than cross-compiling everything from source. It is, in effect,
+  BitBake without OpenEmbedded.
+- **Native builds under QEMU, not cross-compilation.** isar builds custom
+  packages with `dpkg-buildpackage` inside an emulated foreign-arch chroot
+  (binfmt_misc + `qemu-user`) rather than maintaining a cross toolchain — the
+  same choice `[yoe]` makes. Yocto cross-compiles; isar and `[yoe]` both run
+  native toolchains under emulation.
+- **Prebuilt distro packages for the base, source only where needed.** isar
+  bootstraps with `debootstrap`/`apt` and reserves from-source builds for the
+  packages a project actually customizes — the same two-tier "prebuilt for the
+  long tail, source where it matters" split `[yoe]` gets from `alpine_pkg` plus
+  source units.
+
+Contrast with `[yoe]`: isar still inherits Debian's size floor (~150 MB+, `.deb`
+maintainer scripts) and still requires learning BitBake's metadata model and
+layer system — the very things the Yocto section explains `[yoe]` set out to
+replace. isar's bet is "keep BitBake, swap OpenEmbedded's from-source recipes
+for Debian packaging"; `[yoe]`'s is "keep a binary package model, replace
+BitBake with a single Starlark + Go engine."
+
+**When to prefer isar:** when you want a Debian userland on custom hardware, are
+comfortable with BitBake and the Yocto layer model, and want native-under-QEMU
+builds without cross-compilation — particularly if your team already knows Yocto
+tooling and would rather reuse it against Debian than learn a new system.
 
 **[aptly](https://www.aptly.info/)** is the canonical tool for running a
 private, pinned Debian/Ubuntu repository. For teams that do ship Debian-based
