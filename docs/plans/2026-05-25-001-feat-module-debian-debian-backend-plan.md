@@ -217,6 +217,41 @@ publish), F5 (target install/upgrade). **Origin acceptance examples:** AE1–AE1
 - Foreign-arch debootstrap under binfmt — <https://wiki.debian.org/Arm64Qemu>,
   <https://muxup.com/2024q4/rootless-cross-architecture-debootstrap>
 
+### isar as stuck-reference
+
+A local clone of [isar](https://github.com/ilbers/isar) lives at
+`/scratch4/yoe/isar`. When stuck during implementation on the Debian-specific
+mechanics — chroot setup discipline, mount handling, apt configuration, dpkg
+behavior in foreign-arch chroots, preset/divert patterns, repo emission,
+maintainer-script quirks, multi-arch resolution — grep through that tree
+**before re-deriving from manpages**. isar has shaken these out in production
+for years.
+
+Highest-leverage files for "I'm stuck, what does isar do":
+
+- `meta/recipes-core/isar-mmdebstrap/files/chroot-setup.sh` — canonical
+  divert-based stub setup/cleanup. The reference for U12's chroot hygiene.
+- `meta/classes-recipe/rootfs.bbclass` — mount discipline, rootfs cleanup
+  postprocess steps (`ROOTFS_POSTPROCESS_COMMAND` chain), apt config baked
+  into the image. The reference for U12 + U16.
+- `meta/classes-recipe/image.bbclass` — `ROOTFS_FEATURES` defaults
+  (clean-package-cache, clean-pycache, generate-manifest); image-level
+  composition.
+- `meta/classes-recipe/dpkg-raw.bbclass` — the destdir-to-deb path (closest
+  isar analog to yoe's project-deb build model). Reference for U2.
+- `meta/classes-recipe/multiarch.bbclass` — `Multi-Arch: foreign|same`
+  handling in dep resolution. Reference for U7.
+- `meta/classes-recipe/repository.bbclass` — apt-ftparchive shell-out
+  patterns. Reference for U8.
+- `scripts/mount_chroot.sh`, `scripts/umount_chroot.sh` — mount/unmount
+  ordering with idempotency. Reference for U12 mount discipline.
+
+Caveats: do NOT copy isar's architecture (BitBake recipes, layers, BBCLASSEXTEND
+machinery, `debootstrap`-based bootstrap, schroot-based package builds). Those
+are the things yoe deliberately replaces. **Borrow tactical solutions** where
+the underlying Debian behavior is what matters; **reject the surrounding
+metadata model**.
+
 ### Sibling specs (must coordinate)
 
 - `docs/specs/2026-05-13-feeds-as-modules.md` — synthetic-module infrastructure
@@ -638,7 +673,11 @@ staged destdir plus a control file.
   `container(name="toolchain-glibc", version="1", description="Tools-only build container for Debian/glibc target")`.
 - Create: `modules/module-core/containers/toolchain-glibc/Dockerfile` —
   `FROM debian:bookworm-slim`,
-  `apt-get install --no-install-recommends -y <bootstrap toolchain + dpkg-dev + apt-utils + debootstrap + gpg + fakeroot + bubblewrap + dosfstools + mtools + ...>`.
+  `apt-get install --no-install-recommends -y <bootstrap toolchain + dpkg-dev + apt-utils + debootstrap + gpg + fakeroot + eatmydata + bubblewrap + dosfstools + mtools + ...>`.
+  Include `eatmydata` explicitly — U12 wraps the `dpkg --configure -a`
+  invocation with it to no-op `fsync`/`fdatasync` during image-build configure
+  (isar-proven optimization: ~10x speedup on configure-heavy images; the image
+  is archived wholesale so fsync during build is wasted work).
 
 **Approach:**
 
@@ -646,9 +685,9 @@ staged destdir plus a control file.
   extra build logic.
 - Bootstrap toolchain (gcc, g++, make, binutils, autoconf, automake, libtool,
   pkgconf, bison, flex, perl, sed, gawk) plus Debian-specific tooling (dpkg-dev,
-  apt-utils, debootstrap, gpg, fakeroot) plus yoe-side helpers (bubblewrap,
-  dosfstools, mtools, e2fsprogs, sfdisk equivalent — `util-linux` is already a
-  Debian dep).
+  apt-utils, debootstrap, gpg, fakeroot, eatmydata) plus yoe-side helpers
+  (bubblewrap, dosfstools, mtools, e2fsprogs, sfdisk equivalent — `util-linux`
+  is already a Debian dep).
 - Carveout from CLAUDE.md "no installing packages in the container": the
   Dockerfile bootstraps a minimal toolchain via apt-get, matching
   toolchain-musl's `apk add` carveout. Document this in the Dockerfile comment
@@ -683,7 +722,7 @@ staged destdir plus a control file.
 - Image size is reasonable (~600 MB compressed for arm64, comparable to
   toolchain-musl).
 - The image contains `dpkg`, `dpkg-deb`, `apt-utils`, `apt-ftparchive`, `gpg`,
-  `debootstrap`, `fakeroot`, plus the bootstrap toolchain.
+  `debootstrap`, `fakeroot`, `eatmydata`, plus the bootstrap toolchain.
 
 ---
 
@@ -1046,6 +1085,17 @@ the alternative-bar handled and version constraints checked.
   version meets the constraint.
 - Edge case: `Depends: libfoo:any (>= 2.0)` with arch qualifier — qualifier
   respected.
+- Edge case: `Multi-Arch: foreign` provider satisfying a `:any` qualifier from
+  an other-arch consumer (e.g., `libc6` marked `Multi-Arch: foreign` is a
+  legitimate provider for `libfoo:any` regardless of consumer arch). Resolver
+  treats foreign-marked providers as arch-agnostic for `:any` qualifier
+  resolution. This is a real apt-on-target case that isar got bitten by
+  historically; fixture test mirrors a small slice of the real bookworm
+  `libc6` + a dependent.
+- Edge case: `Multi-Arch: same` package — same package may legitimately be
+  installed for multiple arches simultaneously (co-installable). v1 image
+  builds always target a single arch so this case degenerates to "pick the
+  match"; document the limitation and error if a multi-arch image surfaces.
 - Edge case: `Pre-Depends:` resolved identically to `Depends:` for v1 (no
   separate ordering; dpkg `--configure -a` handles ordering at install time).
 - Error path: no provider for a required dep → clear error with the dep text and
@@ -1306,6 +1356,13 @@ identical.
   typical small Debian image has 200-400 debs).
 - Permissions, ownership, and special files (devices, symlinks) preserved via
   `archive/tar`.
+- Thread `SOURCE_DATE_EPOCH` through extraction: every tar entry's mtime/atime
+  is clamped to `SOURCE_DATE_EPOCH` if set (matching the value U2's `BuildDeb`
+  uses for project debs). isar discipline: the entire build pipeline runs
+  under one fixed `SOURCE_DATE_EPOCH` per image (derived from the project's
+  highest pinned source timestamp) so two builds of the same input produce
+  byte-identical rootfs trees. Same clamp applies in U12's chroot
+  invocations.
 
 **Patterns to follow:**
 
@@ -1351,17 +1408,60 @@ them at image finalize.
 
 - Create: `internal/image/configure_deb.go` —
   `ConfigureDebianRootfs(rootfs string, arch string) error`:
-  1. Write `/usr/sbin/policy-rc.d` → returning 101.
-  2. Replace `/usr/bin/ischroot` with symlink to `/bin/true` (preserving
-     original at `/usr/bin/ischroot.dist`).
-  3. Stub `/sbin/start-stop-daemon` with a no-op wrapper.
-  4. Run `chroot <rootfs> dpkg --configure -a --no-triggers` inside the
-     toolchain-glibc container with binfmt active.
-  5. Run `chroot <rootfs> dpkg --triggers-only -a` once.
-  6. Restore `/usr/bin/ischroot.dist` → `/usr/bin/ischroot`; remove
-     `/usr/sbin/policy-rc.d`; restore real `/sbin/start-stop-daemon` (if a
-     Debian package owns it — typically yes via `dpkg` itself, so just remove
-     the stub at the path).
+  1. Mount the rootfs with isar-derived discipline:
+     - bind `/dev` → `<rootfs>/dev` (private)
+     - tmpfs on `<rootfs>/dev/shm`
+     - bind `/dev/pts` → `<rootfs>/dev/pts` (private)
+     - proc on `<rootfs>/proc`
+     - bind `/sys` → `<rootfs>/sys` + `mount --make-rslave`
+     - tmpfs on `<rootfs>/sys/firmware` (prevents host hardware data leaking
+       into postinsts — real isar-shaken hygiene point)
+  2. Install build-time hygiene stubs using `dpkg-divert` (the canonical
+     Debian mechanism — tracks the diversion in dpkg's database so a deb
+     being configured that ships the same path won't clobber the stub):
+     - Divert `/usr/sbin/policy-rc.d` (if present) and write a stub script
+       returning 101 (blocks `invoke-rc.d start`).
+     - Divert `/sbin/start-stop-daemon` and write a no-op wrapper that warns
+       and exits 0.
+     - If `/sbin/initctl` exists (upstart leftovers — uncommon but real
+       on some bookworm derivatives), divert it and write a stub returning 0
+       (passthrough `initctl version` to the original).
+     - Note: yoe's earlier draft listed `runlevel`, `systemd-detect-virt`,
+       `ischroot`, and `invoke-rc.d` wrappers as stubs. Actual isar
+       `chroot-setup.sh` does NOT stub these; the divert-based 3-stub set
+       (policy-rc.d, start-stop-daemon, initctl) is sufficient for real
+       Debian postinst behavior. Don't over-engineer.
+  3. Run `eatmydata chroot <rootfs> dpkg --configure -a --no-triggers` inside
+     the toolchain-glibc container with binfmt active. `eatmydata` LD_PRELOAD
+     no-ops `fsync`/`fdatasync` for the duration; the image is archived
+     wholesale so build-time fsync is wasted work. Empirically ~10x speedup
+     on 200-400 deb images (isar reports same range). Chroot env carries
+     `DEBIAN_FRONTEND=noninteractive`, `LANG=C`, `LC_ALL=C`,
+     `SOURCE_DATE_EPOCH=<image's pinned epoch>`.
+  4. Run `eatmydata chroot <rootfs> dpkg --triggers-only -a` once with the
+     same env.
+  5. Run `chroot <rootfs> systemctl preset-all --preset-mode="enable-only"` if
+     systemd is installed (`dpkg-query --show systemd`). This is the canonical
+     Debian-native service-enable mechanism — upstream debs ship preset files
+     declaring enable/disable, and `preset-all` resolves them. U13's per-unit
+     `services=[...]` baking continues to apply to project debs (which can
+     ship a preset file in `data.tar` or bake symlinks directly); preset-all
+     covers the mirrored-upstream-deb case that yoe's per-unit model doesn't.
+  6. Reproducibility + size cleanup (each step a separate post-configure call):
+     - `rm -f <rootfs>/var/cache/ldconfig/aux-cache` (Debian bug 845034 — the
+       aux-cache is not portable and breaks reproducibility).
+     - `rm -rf <rootfs>/var/cache/debconf/*` (debconf state).
+     - `find <rootfs>/usr -type f -name '*.pyc' -delete; find <rootfs>/usr
+       -type d -name __pycache__ -delete` (pycache).
+     - `rm -rf <rootfs>/tmp/*` (/tmp is non-persistent by definition).
+     - `apt-get clean; rm -rf <rootfs>/var/lib/apt/lists/*; rm -rf
+       <rootfs>/var/cache/apt/archives` (image-size).
+  7. Restore diverted stubs: for each diverted path, remove the stub and run
+     `dpkg-divert --remove --rename` to restore the real binary in dpkg's
+     view.
+  8. Unmount in reverse order (tmpfs on /sys/firmware → sys → proc → dev/pts
+     → dev/shm → dev). Idempotent — checks `mountpoint -q` before each
+     umount so a partial earlier failure doesn't compound.
 - Modify: `internal/image/rootfs.go:16-53` — `Assemble` calls
   `ConfigureDebianRootfs` between `installPackages` and `applyConfig` for
   `distro="debian"` images.
@@ -1377,10 +1477,22 @@ them at image finalize.
   with `--platform linux/<arch>` so binfmt translates target-arch syscalls.
   Postinsts run under emulation.
 - The build-time stubs prevent: services starting (`policy-rc.d` returning 101
-  blocks `invoke-rc.d start`); `ischroot` false-negatives causing postinsts to
-  skip work; `start-stop-daemon` actually launching daemons.
-- After configure + triggers, the stubs are removed so the image's first boot
-  has the real binaries.
+  blocks `invoke-rc.d start`), `start-stop-daemon` actually launching daemons,
+  and (when upstart leftovers exist) `initctl` interacting with init. The
+  divert mechanism is canonical Debian: the real binary remains addressable as
+  `<path>.distrib` for any postinst that wants the original, and cleanup
+  cleanly restores via `dpkg-divert --remove --rename`.
+- After configure + triggers + preset-all, all stubs are reverted via divert,
+  so the image's first boot has the real binaries.
+- `eatmydata` is bundled in `toolchain-glibc` (U3) and invoked as the chroot
+  command prefix. It does not modify the rootfs content — it only suppresses
+  fsync during the build's chroot operations. Confirmed safe by isar's
+  multi-year production use.
+- `SOURCE_DATE_EPOCH` is set in the chroot environment for the duration of
+  configure + triggers. dpkg honors this when stamping installation metadata;
+  postinsts that touch mtimes deterministically use it too. Reproducibility
+  closes the loop with U11's tar-extraction clamp and U2's `BuildDeb`
+  determinism check.
 - `--no-triggers` on the first pass deduplicates trigger work; the single
   `--triggers-only -a` at the end fires everything once.
 - The pattern is the same one debootstrap's `--second-stage` uses; the canonical
@@ -1404,9 +1516,27 @@ them at image finalize.
   and `chrony` → after Assemble, `ssh.service` is enabled in the rootfs
   (`/etc/systemd/system/multi-user.target.wants/ssh.service` exists),
   `chronyd.service` is NOT enabled (preset=disable respected). Covers AE8.
-- Happy path: stubs are removed by the end of `ConfigureDebianRootfs` —
-  `/usr/sbin/policy-rc.d` does not exist in the final rootfs,
-  `/usr/bin/ischroot` is the real binary.
+- Happy path: all stubs are reverted by the end of `ConfigureDebianRootfs` —
+  `dpkg-divert --list` shows no yoe-installed diversions; `/usr/sbin/policy-rc.d`
+  does not exist in the final rootfs; `/sbin/start-stop-daemon` is the real
+  binary (verify via `file` or by running it); if `initctl` was diverted, the
+  real `/sbin/initctl` is restored.
+- Happy path (systemd preset): an image with `openssh-server` installed via
+  upstream-mirrored deb (which ships a preset file declaring `enable
+  ssh.service`) ends up with `/etc/systemd/system/multi-user.target.wants/
+  ssh.service` symlinked, courtesy of `systemctl preset-all`. yoe's unit did
+  not have to declare `services=["ssh"]`.
+- Happy path (cleanups): after `ConfigureDebianRootfs` completes, none of
+  `/var/cache/ldconfig/aux-cache`, `/var/cache/debconf/*`, `*.pyc` files,
+  `__pycache__` dirs, or `/var/lib/apt/lists/*` exist in the rootfs. Image
+  size after configure is materially smaller than before cleanup.
+- Performance: a 300-deb image configures under `eatmydata` in &lt;2 minutes on
+  a typical dev machine; without `eatmydata`, the same configure runs ~10x
+  longer. Spot-check during U12 implementation; if speedup is &lt;3x, audit
+  whether `eatmydata` is actually intercepting the relevant syscalls.
+- Reproducibility: two builds of the same image with identical inputs and
+  `SOURCE_DATE_EPOCH` produce byte-identical rootfs trees (file contents,
+  mtimes, ownership). Captured by a `diff -r` over two staging dirs in CI.
 - Edge case: a deb whose postinst calls `systemctl restart foo` — under
   policy-rc.d=101, fails harmlessly; the service ends up disabled on the device
   (preset machinery decides).
@@ -1434,6 +1564,26 @@ them at image finalize.
 ---
 
 #### U13. Move service enablement from image-level scan to per-unit baking; extend `materializeServiceSymlinks` to handle systemd
+
+**Coordination with systemd preset (U12):** U12 runs `systemctl preset-all
+--preset-mode="enable-only"` after configure, which is the canonical Debian
+mechanism for service enablement. Upstream-mirrored debs ship preset files
+(`/lib/systemd/system-preset/*.preset`) declaring `enable` or `disable`;
+`preset-all` resolves them. yoe's per-unit `services=[...]` model (this unit)
+remains correct for **project-built debs** where the unit author wants
+explicit control. Two compatible options for how a project-built deb expresses
+that intent:
+
+- **Bake symlinks directly** (the path this unit implements) — concrete and
+  explicit; works even if preset-all is skipped.
+- **Ship a preset file** in the deb's `data.tar` at
+  `/lib/systemd/system-preset/<priority>-<pkg>.preset` declaring
+  `enable <svc>.service`. More Debian-native; composes with upstream presets;
+  preset-all then materializes the symlink.
+
+V1 implements bake-symlinks (this unit) because it's the existing apk pattern
+extended; ship-preset-file is a future option if a project genuinely needs to
+compose with another preset author.
 
 **Goal:** The systemd-symlink loop in `internal/image/rootfs.go:applyConfig`
 (lines ~168-176) is **active code**, not dead —
@@ -1704,8 +1854,9 @@ yoe core.
 **Goal:** During image assembly, write the project's GPG public key to
 `/etc/apt/keyrings/<project>.gpg` on the rootfs and write a deb822-style sources
 file at `/etc/apt/sources.list.d/<project>.sources` pointing at the project repo
-over HTTPS, with `Signed-By:` referencing the keyring. Also bake the
-`APT::Get::Never-Include-Phased-Updates "true";` config.
+over HTTPS, with `Signed-By:` referencing the keyring. Also bake apt defaults
+appropriate for embedded fleets (phased-updates off, recommends/suggests off,
+retry policy).
 
 **Requirements:** R17, R20, R26.
 
@@ -1727,14 +1878,30 @@ over HTTPS, with `Signed-By:` referencing the keyring. Also bake the
 
 **Approach:**
 
-- `StageAptConfig` writes three files into the staging rootfs:
+- `StageAptConfig` writes the following into the staging rootfs:
   - `/etc/apt/keyrings/<project>.gpg` (binary, 0644).
   - `/etc/apt/sources.list.d/<project>.sources` (deb822, 0644). Body:
     `Types: deb`, `URIs: <project repo URL>/debian`, `Suites: <suite>`,
     `Components: main`, `Architectures: <arch>`,
     `Signed-By: /etc/apt/keyrings/<project>.gpg`.
-  - `/etc/apt/apt.conf.d/99-yoe-phased-updates.conf` containing
-    `APT::Get::Never-Include-Phased-Updates "true";`.
+  - `/etc/apt/apt.conf.d/99-yoe-defaults.conf` (0644) bundling the apt
+    defaults yoe wants on every embedded image (isar's `50isar` template
+    is the reference shape; renamed and trimmed for yoe):
+
+    ```
+    APT::Get::Never-Include-Phased-Updates "true";
+    APT::Install-Recommends "0";
+    APT::Install-Suggests "0";
+    Acquire::Retries "3";
+    Acquire::Retries::Delay::Maximum "30";
+    ```
+
+    Rationale: phased updates would cause divergent fleet behavior on
+    embedded devices that roll atomically (R26 already commits to disabling
+    them). Recommends/Suggests off prevents `apt-get install <pkg>` from
+    pulling in tens of MB of optional packages on a constrained device.
+    Retry policy survives a flaky cellular/wifi link without manual
+    intervention. All four are isar-proven defaults for embedded use.
 - No `/etc/apt/trusted.gpg.d/` writes — per Key Decisions, `signed-by=` scoping
   is the v1 posture.
 - The Debian release keyring is NOT staged on the device (mirror-trust runs
@@ -1748,8 +1915,12 @@ over HTTPS, with `Signed-By:` referencing the keyring. Also bake the
 
 **Test scenarios:**
 
-- Happy path: `StageAptConfig` writes three files at correct paths with correct
-  content; permissions are 0644.
+- Happy path: `StageAptConfig` writes the keyring, the `.sources` file, and
+  the `99-yoe-defaults.conf` at correct paths with correct content;
+  permissions are 0644 on all three.
+- Happy path (apt behavior on device): `apt-get install <pkg-with-recommends>`
+  installs ONLY `<pkg>`, not its `Recommends:` list — confirms the
+  `Install-Recommends "0"` default takes effect. Spot-check during U20 e2e.
 - Edge case: `repoURL = "http://..."` → evaluation error before build runs.
 - Edge case: rootfs already contains a conflicting `<project>.sources` (e.g.
   from a prior build) → overwrite cleanly.
@@ -2038,6 +2209,14 @@ R13, R15, R17, R18, R19, R20, R21, R22, R24, R26.
 - QEMU boot test: boot the image with QEMU + cloud-init equivalent (or just a
   raw boot if init handles things); SSH in; run smoke commands; assert each
   succeeds.
+- **CI matrix:** v1 commits to one suite (`bookworm`) × two arches
+  (`amd64`, `arm64`). The primary e2e exercises `bookworm × arm64` because
+  that path covers binfmt + QEMU user-mode + foreign-arch postinsts under
+  emulation — the highest-risk part of the implementation. A faster
+  `bookworm × amd64` native run lands alongside as hygiene coverage (no
+  binfmt, fast feedback for non-cross-arch regressions). Both run on every
+  PR; `arm64` is the gate. Inspired by isar's matrix structure but trimmed
+  to one suite for v1 (per Open Questions: cross-suite is out of scope).
 - This is the canonical proof point that the Debian backend works end-to-end.
   Covers AE5-AE10.
 
@@ -2071,8 +2250,9 @@ R13, R15, R17, R18, R19, R20, R21, R22, R24, R26.
 
 **Verification:**
 
-- `go test ./internal/build/...` passes including the e2e debian image build.
-- CI pipeline includes the debian image build and reports success.
+- `go test ./internal/build/...` passes including the e2e debian image build
+  for both `bookworm × arm64` (gate) and `bookworm × amd64` (hygiene).
+- CI pipeline includes both debian image builds and reports success.
 - Manual: `yoe build qemu-arm64-debian` + QEMU boot reproduces the e2e smoke
   tests interactively.
 
