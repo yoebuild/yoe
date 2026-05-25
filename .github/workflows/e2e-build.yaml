@@ -2,11 +2,9 @@ name: E2E Build
 
 # Full from-source build of base-image: the bootstrap toolchain, musl,
 # busybox, the kernel, and image assembly. This is the expensive
-# regression tier, so it runs on pushes to main, on a nightly schedule,
-# and on demand -- not on every pull request.
+# regression tier, so it runs on a nightly schedule and on demand --
+# not on every push or pull request.
 on:
-  push:
-    branches: [main]
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
@@ -32,6 +30,14 @@ jobs:
             /opt/hostedtoolcache/CodeQL
           sudo docker image prune --all --force || true
           df -h /
+
+      - name: Enable unprivileged user namespaces
+        run: |
+          # Ubuntu 24.04 (ubuntu-latest) restricts unprivileged user
+          # namespaces via AppArmor, which makes bwrap inside the build
+          # container fail with "setting up uid map: Permission denied"
+          # even though the container is --privileged.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Setup Go
         uses: actions/setup-go@v5
