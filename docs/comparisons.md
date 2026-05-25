@@ -1126,6 +1126,129 @@ apply. On a mixed design (Linux SoC plus companion MCU), use both: `[yoe]` for
 the Linux side, Pigweed for the firmware side. They meet at the board, not in
 the build.
 
+## vs. Container Image Builders (planned)
+
+> **Status:** `[yoe]` does not emit OCI container images today. Build outputs
+> are `.apk` packages plus bootable disk images (see
+> [`modules/module-core/classes/image.star`](../modules/module-core/classes/image.star)).
+> This section describes the design question: if a `format = "oci"` mode were
+> added to the image class — assembling the same content-addressed `.apk` set
+> into an OCI manifest plus layers — how would it compare to dedicated container
+> image builders? The intent is to clarify when the feature would earn its keep,
+> so it is added for the right audience rather than as default scope creep.
+
+Modern container image building is dominated by four patterns: multi-stage
+`Dockerfile`, Chainguard's `apko` + `melange`, Bazel with `rules_oci`, and Nix
+with `dockerTools`. The question for `[yoe]` is whether a fifth path — assemble
+existing `[yoe]` units into an OCI image — adds value, and for whom.
+
+**Strict scope:** this section is about producing OCI images _from sources
+`[yoe]` already builds_, not about replacing those tools for teams that have no
+other use for `[yoe]`. The conclusion is calibrated accordingly.
+
+### The four alternatives, in brief
+
+- **Multi-stage `Dockerfile`** — one build stage per app, a final stage that
+  `COPY --from=...`s binaries onto a small base (`alpine`, `debian:slim`,
+  `distroless`). Universal, zero new tooling, build logic lives in `RUN` shell.
+- **[`apko`](https://github.com/chainguard-dev/apko) +
+  [`melange`](https://github.com/chainguard-dev/melange)** — the architectural
+  closest match. `melange` builds source-built `.apk`s from a YAML recipe in a
+  QEMU-sandboxed environment; `apko` declaratively assembles a set of apks into
+  a minimal, layered OCI image with no `Dockerfile` and no shell. Used by
+  Chainguard to produce the [Wolfi](https://wolfi.dev/) container images.
+- **[Bazel](https://bazel.build/) +
+  [`rules_oci`](https://github.com/bazel-contrib/rules_oci)** — proper
+  compiler-grain dependency graph through `rules_go` / `rules_rust` /
+  `rules_jvm_external`, then `oci_image` assembles the layers. Strong remote
+  caching via REAPI. See the [Bazel section above](#vs-bazel) for the broader
+  comparison.
+- **Nix +
+  [`dockerTools.streamLayeredImage`](https://nixos.org/manual/nixpkgs/stable/#sec-pkgs-dockerTools)**
+  — each app is a Nix derivation; `dockerTools` snaps them into a deterministic
+  layered image with automatic cross-image layer dedup.
+
+### What changes once `[yoe]` units exist for the apps
+
+The four alternatives above exist to bridge "source code" to "container image."
+If `[yoe]` is already that bridge for the embedded side, _the same unit produces
+the binary that ships to a device and the binary that ships in a container_ —
+one source of truth, one cached `.apk`, two delivery shapes. The structural win
+is not technical superiority on any axis; it is **eliminating a parallel build
+definition** that teams running both embedded and container deployments
+otherwise maintain (and watch drift).
+
+| Property                                    | Multi-stage Docker          | apko + melange      | Bazel + rules_oci         | Nix + dockerTools  | `[yoe]` (with OCI output)   |
+| ------------------------------------------- | --------------------------- | ------------------- | ------------------------- | ------------------ | --------------------------- |
+| Config language                             | Dockerfile + shell          | YAML                | Starlark (`BUILD`)        | Nix expression     | Starlark (unit)             |
+| Build cache shared across team              | Buildx remote cache (extra) | per-apk CAS (Wolfi) | REAPI cluster             | Cachix / nix-serve | Same S3 bucket as device    |
+| Cache shared _between device and container_ | No                          | No                  | No                        | No                 | **Yes**                     |
+| Multi-arch                                  | `buildx` per-platform       | QEMU usermode       | rules_oci platforms       | Nix cross          | Already done, QEMU usermode |
+| Reproducibility                             | Weak                        | Good                | Strong                    | Bit-perfect        | Strong (content-addressed)  |
+| Onboarding for a team already writing units | Learn Dockerfile idioms     | Learn melange YAML  | Learn Bazel + N rule sets | Learn Nix          | **Zero — same unit syntax** |
+
+The "cache shared between device and container" and "zero onboarding" rows are
+the only two where `[yoe]` has a structural edge. They only matter to teams that
+are already in the unit-writing flow for other reasons.
+
+### Where each alternative still wins
+
+- **`apko` + `melange`** — OCI-native niceties are first-class today: SBOMs,
+  Sigstore signatures, in-toto attestations, distroless-style hardening, cosign
+  integration. `[yoe]` would have to build all of this. For a team publishing to
+  a security-conscious registry that enforces attestations on every push, `apko`
+  is years ahead and the gap is not closing soon.
+- **Bazel + rules_oci** — compiler-invocation-grain incrementality. `[yoe]` is
+  unit-grain; touch one `.c` file and the whole unit rebuilds. For most app
+  codebases the unit _is_ the right grain (one Go service = one unit, and
+  `go build` reuses its own object cache inside the unit container), but a
+  monorepo with thousands of fine-grained build targets genuinely benefits from
+  Bazel's action graph.
+- **Nix + `dockerTools`** — bit-perfect reproducibility and aggressive layer
+  dedup across many images. If you produce dozens of container images that share
+  most of their userspace, Nix's layer dedup is hard to beat.
+- **Multi-stage `Dockerfile`** — disappears as soon as the team is fluent in
+  Starlark units. Its only advantage was "every dev already knows it," which the
+  assumption invalidates.
+
+### Where the assumption breaks and the recommendation flips back
+
+1. **The polyglot gap is the real risk.** Source-built `[yoe]` units for the
+   long tail of Java / JavaScript / Python-with-binary-wheels packages is a lot
+   of work. `apko` leans on Wolfi's full archive; `[yoe]` leans on Alpine's via
+   `alpine_pkg` passthrough. As long as passthrough covers most of your stack,
+   the gap is small. The day you need a container with a Python app whose
+   dependencies pull half of PyPI's C extensions, that pressure shows up.
+2. **OCI layer design discipline.** `[yoe]`'s current image assembler is shaped
+   for bootable rootfs (one small base + payload). A good container image has
+   its layers ordered for registry cache friendliness: rarely-changing apks low,
+   frequently-changing app on top. That is a deliberate design step in `apko`
+   and it would need to be a deliberate design step in `[yoe]`'s OCI exporter
+   too — not a side effect of reusing the rootfs assembler.
+3. **A team that isn't doing embedded.** The prerequisite "units exist for the
+   apps you ship" is itself the whole investment. If you are not getting
+   embedded value out of `[yoe]`, paying that cost just to build containers is
+   the wrong trade — `apko` is right there, focused on exactly that.
+
+### Net call
+
+For a team that ships **both** embedded and containers, `[yoe]`-with-OCI-output
+becomes the clearly best option once the unit ecosystem covers their apps. The
+wins — one source of truth, no parallel build definitions, shared cache across
+artifact types — are unique to `[yoe]` and structural, not incremental
+improvements over what `apko` or Bazel already do.
+
+For a team that ships **only** containers, `apko` + `melange` remains the right
+answer — and `[yoe]`'s value proposition for them is the embedded story, not the
+container output. The honest framing of the long-term view is not "`[yoe]`
+replaces `apko`" — it is "`[yoe]` makes `apko` unnecessary for teams that have
+`[yoe]` for other reasons."
+
+This is the same shape as the audience argument in the
+[Value Proposition](#value-proposition-and-strategic-positioning) section: a
+feature added to serve a population that is already in the project, not a land
+grab for a population that has better-aimed tools.
+
 ## Value Proposition and Strategic Positioning
 
 ### The Core Thesis
