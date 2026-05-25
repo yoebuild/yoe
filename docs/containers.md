@@ -1,247 +1,259 @@
-# Running Containers on yoe Images (planned)
+# Running Containers on yoe Images
 
-> **Status:** No container runtime ships in any yoe-built image today. This
-> document captures the design discussion and prerequisites for getting a
-> container runtime (Docker, Podman, or containerd) running on devices built
-> from yoe units. Nothing described here is implemented yet.
+> **Status:** Shipped on x86_64 QEMU and Raspberry Pi 5; kernel config also
+> merged for Raspberry Pi 4 and BeaglePlay. Docker (engine + CLI + buildx +
+> containerd + runc + libseccomp + iptables) ships via Alpine apk
+> passthrough, started under OpenRC. The HAOS-style hardening pattern
+> (read-only rootfs, separate data partition, A/B atomic updates) and a
+> source-built runtime are still on the roadmap — see
+> [What is not yet shipped](#what-is-not-yet-shipped) below.
 
-Supporting container workloads on yoe-built images is a high-value feature: it
-is the single biggest thing that turns a minimal embedded Linux into something
-people actually want to deploy on real devices. This document records what it
-would take.
+Running container workloads on yoe-built devices turns a minimal embedded
+Linux into something people actually want to deploy. Two shipped images
+cover the common cases, and the kernel + apk + service plumbing they rely
+on is reusable for any other yoe image that wants to add a container
+runtime.
 
-## Reference Point: Home Assistant OS
+## Shipped images
 
-Home Assistant OS (HAOS) is the clearest proof that full Docker on embedded
-devices is viable, and it is a useful reference architecture. Key facts:
+### `docker-image`
 
-- **Base:** Buildroot (not Yocto)
-- **Container runtime:** full Docker Engine (`dockerd` + `containerd` + `runc`)
-- **Orchestration:** their own "Supervisor" — a privileged container that
-  manages addon containers and talks to the host via D-Bus
-- **Rootfs:** read-only squashfs with A/B partitions for atomic updates (RAUC)
-- **Data partition:** separate ext4/btrfs for `/var/lib/docker` and addon state
+A `dev-image`-style base plus the Docker userspace.
+
+- Defined in
+  [`modules/module-core/images/docker-image.star`](../modules/module-core/images/docker-image.star).
+- Adds `docker` and the `docker-init` OpenRC service to the dev-image
+  artifact list. The Alpine `docker` meta-apk pulls in `docker-engine`,
+  `docker-cli`, `docker-cli-buildx`, `containerd`, `runc`, `libseccomp`,
+  and `iptables` transitively.
+- Suitable for any machine whose kernel has the container config fragment
+  merged in (`linux`, `linux-rpi4`, `linux-rpi5`, `linux-beagleplay` —
+  see [Kernel config](#kernel-config) below).
+
+### `selfhost-image`
+
+`docker-image` plus the full yoe build-host toolchain — `yoe`, `go`,
+`git`, `bubblewrap`, `qemu-system-x86_64`, and `grow-rootfs` for
+first-boot partition expansion.
+
+- Defined in
+  [`modules/module-core/images/selfhost-image.star`](../modules/module-core/images/selfhost-image.star).
+- Targets the Raspberry Pi 5 self-host workflow described in
+  [selfhost.md](selfhost.md): flash, boot, `yoe build` on the device with
+  no workstation in the loop.
+- The default `user` is added to the `docker` group via `base-files`, so
+  `docker run` and yoe's per-unit container builds work without `sudo`.
+
+## Kernel config
+
+The container-runtime kernel options live in a single config fragment:
+[`modules/module-core/units/base/linux/container.cfg`](../modules/module-core/units/base/linux/container.cfg).
+
+It is merged into the kernel `.config` via
+`scripts/kconfig/merge_config.sh` during the `linux` unit's build, and is
+referenced from each container-host-capable kernel unit:
+
+| Kernel unit       | Path                                                             |
+| ----------------- | ---------------------------------------------------------------- |
+| `linux`           | `modules/module-core/units/base/linux.star` (x86_64 QEMU)        |
+| `linux-rpi4`      | `modules/module-bsp/units/bsp/linux-rpi4.star`                   |
+| `linux-rpi5`      | `modules/module-bsp/units/bsp/linux-rpi5.star`                   |
+| `linux-beagleplay`| `modules/module-bsp/units/bsp/linux-beagleplay.star`             |
+
+What the fragment turns on, grouped:
+
+- **Namespaces:** `PID`, `NET`, `IPC`, `UTS`, `USER`, `MNT`.
+- **Cgroups v2** plus the per-controller flags Docker enumerates at
+  start (`MEMCG`, `CPUSETS`, `PIDS`, `DEVICE`, `FREEZER`, `BLK_CGROUP`,
+  `NET_PRIO`, `NET_CLASSID`, `CPUACCT`, `HUGETLB`).
+- **Storage:** `OVERLAY_FS` so dockerd uses `overlay2` rather than
+  falling back to `vfs`.
+- **Networking:** `BRIDGE`, `VETH`, `VLAN_8021Q`, `MACVLAN`, `IPVLAN`,
+  `VXLAN`; full `NETFILTER` + `NF_NAT` + `NF_TABLES` + `NFT_COMPAT`
+  surface so both the iptables-legacy and iptables-nft backends work.
+- **Sandboxing:** `SECCOMP`, `SECCOMP_FILTER`.
+- **eBPF:** `BPF`, `BPF_SYSCALL`, `BPF_JIT` for cgroup v2 device control
+  and runc.
+- **Misc:** `KEYS`, `POSIX_MQUEUE`.
+
+Adding a new container-host kernel is one line plus a reference to the
+fragment — see the `linux-rpi5.star` recipe for the pattern.
+
+## Userspace
+
+Everything Docker needs at runtime ships via Alpine apk passthrough
+(see [apk-passthrough.md](apk-passthrough.md) for how that works):
+
+| Package           | Source                          | Role                                                          |
+| ----------------- | ------------------------------- | ------------------------------------------------------------- |
+| `docker`          | `community/docker` (meta)       | Pulls engine + CLI + tooling                                  |
+| `docker-engine`   | `community/docker-engine`       | `dockerd`                                                     |
+| `docker-cli`      | `community/docker-cli`          | `docker` CLI                                                  |
+| `docker-cli-buildx` | `community/docker-cli-buildx` | `docker buildx` plugin                                        |
+| `containerd`      | `community/containerd`          | Container runtime daemon, pulled in transitively              |
+| `runc`            | `community/runc`                | OCI runtime                                                   |
+| `libseccomp`      | `main/libseccomp`               | Seccomp filtering for runc                                    |
+| `iptables`        | `main/iptables`                 | Required by `dockerd` for the default bridge network          |
+| `ca-certificates` | `main/ca-certificates`          | TLS for pulling images                                        |
+| `util-linux`      | `main/util-linux`               | Mount options busybox `mount` does not handle                 |
+| `kmod`            | `main/kmod`                     | Load `overlay`, `bridge`, and netfilter modules on demand     |
+| `e2fsprogs`       | `main/e2fsprogs`                | Filesystem tooling                                            |
+
+## Init integration
+
+The `docker` service is wired into OpenRC by the
+[`docker-init`](../modules/module-core/units/net/docker-init.star) unit,
+which installs `/etc/init.d/docker` and declares `services = ["docker"]`
+so yoe's image assembly drops a symlink into the default runlevel.
+
+The default init is **OpenRC** on yoe images that ship Docker. Container
+runtimes themselves do not require systemd (Alpine, Void, and Chimera
+have shipped Docker on non-systemd inits for years), and OpenRC is the
+path of least resistance because Alpine's own `docker-engine` apk ships
+ready-to-use OpenRC service scripts.
+
+`cgroups v2` is mounted at `/sys/fs/cgroup` at boot. No systemd glue is
+needed; containerd and Docker handle the unified hierarchy directly.
+
+## Reference architecture: Home Assistant OS
+
+Home Assistant OS (HAOS) remains the clearest production reference for
+"full Docker on an embedded device" and is where the long-term hardening
+pattern below is heading.
+
+- **Base:** Buildroot
+- **Container runtime:** Docker Engine (`dockerd` + `containerd` + `runc`)
+- **Orchestration:** their privileged "Supervisor" container, talking to
+  the host over D-Bus
+- **Rootfs:** read-only squashfs + A/B partitions for atomic updates
+  (RAUC)
+- **Data partition:** separate ext4/btrfs for `/var/lib/docker`
 - **Init:** systemd
 - **Networking:** NetworkManager
 
-HAOS images are ~350 MB compressed / ~1 GB installed and run comfortably on a
-Raspberry Pi 4 with 2 GB RAM. Source and kernel fragments are public at
+HAOS images are ~350 MB compressed / ~1 GB installed and run on a
+Raspberry Pi 4 with 2 GB RAM. Source and kernel fragments are at
 <https://github.com/home-assistant/operating-system>.
 
-The takeaway: Buildroot-with-Docker has been a proven path for years. Nothing in
-yoe's architecture prevents matching or bettering it.
+The takeaway: Buildroot-with-Docker has been a proven path for years.
+yoe matches the basic shape today; the read-only + A/B story is where
+the bulk of the remaining engineering sits.
 
-## Kernel Requirements
+## Resource envelope
 
-A container-capable kernel needs a specific set of CONFIG options. The upstream
-`moby/moby` repository ships a `check-config.sh` script that enumerates them and
-is worth wiring into the kernel unit's QA step.
+From running `docker-image` and `selfhost-image` and matching HAOS field
+experience:
 
-Essentials:
+- **Storage:** Docker engine + CLI + containerd + runc + buildx land
+  around 200–300 MB installed. Add image and volume storage on top —
+  `/var/lib/docker` grows with whatever workloads run. For RPi5
+  self-host, an NVMe SSD (≥64 GB) is the practical target; a microSD
+  fills up quickly once toolchain images cache.
+- **RAM:** 512 MB minimum to be non-miserable. 2 GB+ for comfortable
+  multi-container workloads. The RPi5 self-host workflow wants 8 GB and
+  benefits from 16 GB.
+- **Rootfs:** writable `/var` today. `/var/lib/docker` lives on the
+  shared rootfs, so there is no second data partition to worry about —
+  with the trade-off that the rootfs cannot yet be read-only.
 
-- **Namespaces:** `PID`, `NET`, `IPC`, `UTS`, `USER`, `MNT`, `CGROUP`
-- **Cgroups v2** (`CONFIG_CGROUPS`, `CONFIG_MEMCG`, `CONFIG_CPUSETS`, etc.) —
-  modern Docker and containerd assume v2
-- **Storage driver:** `CONFIG_OVERLAY_FS` — without this the engine falls back
-  to the `vfs` driver, which is unusably slow
-- **Networking:** `CONFIG_BRIDGE`, `CONFIG_VETH`, `CONFIG_NETFILTER*`,
-  `CONFIG_NF_NAT`, `CONFIG_NF_TABLES` (or legacy `CONFIG_IP_NF_*`)
-- **Security:** `CONFIG_SECCOMP`, `CONFIG_SECCOMP_FILTER`, `CONFIG_KEYS`
-- **Misc:** `CONFIG_POSIX_MQUEUE`
+## What is not yet shipped
 
-The plan is to ship a `kernel-container-host.cfg` config fragment alongside the
-kernel unit and add a build-time check that runs `check-config.sh` against the
-resulting `.config`.
+### Read-only rootfs + separate data partition
 
-## Userspace Prerequisites
+Today `/var/lib/docker` is on the shared rootfs. The HAOS pattern —
+read-only squashfs rootfs with a dedicated writable data partition for
+container state — is the long-term target. This is where the bulk of
+the remaining engineering sits, because it touches the image-assembly
+flow, the bootloader, and the update mechanism.
 
-Container runtimes pull in userspace tools that yoe does not yet package.
-Shipping a container-capable image forces the following units from the
-[roadmap](roadmap.md) to land first:
+### A/B atomic updates
 
-- `iptables` or `nftables` — Docker refuses to start without one
-- `ca-certificates` — required to pull images over TLS
-- `util-linux` — container runtimes use `mount` with flags that busybox mount
-  does not handle cleanly
-- `kmod` — needed to load `overlay`, `bridge`, and netfilter modules at runtime,
-  unless everything is built into the kernel
-- `e2fsprogs` — for formatting a dedicated `/var/lib/docker` partition
+`grow-rootfs` handles first-boot expansion, but there are no A/B
+partitions and no rollback on a failed update. Pairing the read-only
+rootfs change above with an A/B layout + signed update bundles is the
+HAOS-style hardening goal.
 
-This is a nice forcing function: these units are all on the roadmap for other
-reasons, and shipping a container host is a concrete goal that justifies landing
-them.
+### `check-config.sh` QA
 
-## libc and Init System
+The fragment is correct today, but if an upstream kernel change drops or
+renames a CONFIG, the failure mode is "`dockerd` fails to start on the
+device." Wiring `moby/moby`'s `check-config.sh` into the kernel unit's
+QA step so the build fails noisily at integration time is the cheapest
+prevention.
 
-All mainstream container runtimes — Docker, containerd, runc, Podman, nerdctl —
-are Go and do not meaningfully care about the host libc. Alpine Linux (musl +
-OpenRC) has shipped full Docker for years; Void (musl + runit) and Chimera
-(musl + dinit) do the same. yoe currently targets musl, so this is a
-well-trodden path with even less friction than the glibc equivalent.
+### Source-built Docker / containerd / runc
 
-Known musl-specific caveats, all survivable:
+The Alpine apk passthrough was the right first move — it shipped a
+working container host on day one, on top of a glibc-free musl base.
+A source-built path is still useful for two cases that the passthrough
+cannot serve:
 
-- musl's DNS resolver does not honor `/etc/nsswitch.conf` and differs from glibc
-  in edge cases. This affects _workloads running in containers_, but most
-  container images bring their own libc (Debian, Alpine, distroless), so the
-  host's libc rarely reaches the workload.
-- Prebuilt Go binaries compiled with `CGO_ENABLED=1` against glibc will not run
-  on a musl host. yoe builds everything from source, so this is moot.
+- A version newer or older than what is in Alpine's repository at the
+  time of build.
+- Static or non-Alpine libc bases (e.g. a glibc-flavoured yoe image).
 
-None of these runtimes require systemd. Docker ships a SysV-style init script
-upstream; Alpine's packaging supplies OpenRC services for `dockerd`,
-`containerd`, and Podman. Podman is daemonless and needs no init integration at
-all.
+The component breakdown for a source build:
 
-Init-system considerations for yoe:
+- **`docker` CLI** — pure Go, `CGO_ENABLED=0`, no system-library deps.
+- **`containerd`** — mostly pure Go, builds with `CGO_ENABLED=0`.
+- **`runc`** — cgo + `libseccomp` required for serious use.
+- **`dockerd`** — optional cgo paths for graphdrivers; all avoidable
+  with overlay2 as the default storage driver.
+- **`tini`** (`docker-init`) — small C program, trivial autotools build.
 
-- yoe currently uses **busybox init**, which is fine for `dev-image` but thin
-  for a container host — no dependency ordering, no supervision, no auto-restart
-  of crashed daemons.
-- **OpenRC** is the natural next step: small, well-supported by Alpine's
-  packaging, and the path of least resistance for Docker/containerd service
-  scripts.
-- **s6** or **runit** are lighter alternatives if supervision is the main need
-  and OpenRC's dependency machinery feels heavy.
-- **systemd** is possible but a large addition and not required. Adopt only if a
-  downstream workload genuinely needs it.
-- **cgroups v2 without systemd:** mount `cgroup2` at `/sys/fs/cgroup` at boot
-  and configure the kernel cmdline accordingly. containerd and Docker handle
-  this fine; no systemd-specific glue is needed.
+The Yoe-native shape is one C-library unit (`libseccomp`), four Go units
+(`runc`, `containerd`, `docker`, `dockerd`), one trivial autotools unit
+(`tini`). For cgo-using units like `runc`, the existing
+`units/dev/go.star` unit installs Go into the build sysroot via `deps`,
+so a unit with `container = "toolchain-musl"`,
+`deps = ["go", "libseccomp"]` gets the toolchain, the C compiler from
+the container, and the seccomp headers from the sysroot all in one
+place. The pattern is reusable for any future cgo unit.
 
-The init choice should be made deliberately before the `container-host-image`
-milestone. OpenRC is the default recommendation unless there is a reason to pick
-otherwise.
-
-## Runtime Choice
-
-Three credible options, in rough order of embedded-friendliness:
-
-### Option 1: containerd + runc + nerdctl
-
-- Smallest footprint (~50–100 MB installed)
-- What Kubernetes and K3s use under the hood
-- `nerdctl` provides a `docker`-compatible CLI
-- Best pick if the device is a workload runner rather than a developer box
-- **Recommended as the first milestone** — smallest surface, proves the concept,
-  leaves room for Docker CE later
-
-### Option 2: Podman
-
-- Daemonless, rootless-friendly
-- CLI-compatible with `docker`
-- Popular in Red Hat ecosystems and increasingly in embedded
-- Good middle ground if users expect a `docker`-like UX without the daemon
-
-### Option 3: Docker CE
-
-- Largest footprint (~200–300 MB across `dockerd`, `containerd`, `runc`, CLI)
-- Maximum ecosystem compatibility — Compose, Swarm, third-party tooling
-- What users ask for by name because of familiarity
-- Worth adding after containerd is working, if there is demand
-
-## Building from Source
-
-Docker's prebuilt "static" binaries (from `download.docker.com/linux/static/`)
-are not truly static — `dockerd`, `containerd`, and `runc` are linked against
-glibc and pull in `libseccomp`/`libdevmapper` dynamically on some releases — so
-they will not run on a musl-based yoe rootfs. Building from source is the only
-serious path.
-
-The toolchain side is already solved: `modules/module-core/units/dev/go.star`
-provides a Go toolchain (currently Go 1.26.2) and `classes/go.star` gives Go
-units a build class. The component breakdown:
-
-- **`docker` CLI** — pure Go, `CGO_ENABLED=0`, no system-library deps
-- **`containerd`** — mostly pure Go, builds with `CGO_ENABLED=0` for the daemon
-  and `ctr`
-- **`runc`** — effectively requires cgo + `libseccomp` to be useful; without
-  seccomp filtering it is not a serious container runtime, so a `libseccomp`
-  unit must land first
-- **`dockerd`** — optional cgo paths for graphdrivers (devicemapper, btrfs), all
-  avoidable with overlay2 as the default storage driver
-- **`tini`** (`docker-init`) — small C program, trivial autotools build
-
-So the work is one C library unit (`libseccomp`), four Go units (`runc`,
-`containerd`, `docker`, `dockerd`), and one trivial autotools unit (`tini`). The
-genuinely hard pieces are the runtime concerns covered elsewhere in this
-document — kernel config, init integration, iptables/nftables, the
-`/var/lib/docker` data partition — not the source builds themselves.
+The wrinkle: `classes/go.star::go_binary` currently hardcodes
+`container = "golang:1.26"` and `CGO_ENABLED=0`. Adding a `cgo = True`
+mode that switches to `toolchain-musl` and relies on `deps` for the Go
+toolchain is the right place to land this.
 
 Alpine's `aports` tree (`community/docker`, `community/containerd`,
-`community/runc`) is the obvious reference: those packages are already
-musl-native and the APKBUILDs document the exact configure flags, ldflags, and
-patches that work in practice.
+`community/runc`) is the obvious reference for configure flags, ldflags,
+and patches that work in practice — the apks we passthrough today come
+straight from there.
 
-### Building cgo Units (runc, libseccomp consumers)
+### Other runtimes
 
-The pure-Go components (`docker` CLI, `containerd`) drop into the existing
-`go_binary` class without ceremony — that class already pulls the upstream
-`golang:1.26` container and builds with `CGO_ENABLED=0`. The interesting case is
-`runc`, which needs cgo + a working C compiler + `libseccomp` headers and
-libraries, all in the same build environment.
+- **Podman / nerdctl.** No yoe units yet. Podman is daemonless and
+  rootless-friendly; nerdctl is the minimal containerd-only path. Both
+  are reasonable follow-ons; neither is required while Docker covers the
+  primary use cases.
 
-The Yoe-native answer is to use the existing `units/dev/go.star` as a build-time
-dep rather than introducing a new "Go + GCC" container:
+### Container workload orchestration
 
-- A unit's `deps` are installed into the build sysroot before that unit builds.
-  The Go toolchain unit installs to `$PREFIX/lib/go` with `/usr/bin/{go,gofmt}`
-  symlinks, so a unit with `deps = ["go"]` gets `go` on `PATH` at build time.
-- The same mechanism lands a `libseccomp` unit's headers and `.so` in the
-  sysroot, where `pkg-config --cflags --libs libseccomp` finds them.
-- The existing `toolchain-musl` container already provides `gcc`, `binutils`,
-  `make`, etc.
+Shipping a runtime is different from managing workloads on it. A
+managed-container story — declarative workload definitions, OTA-aware
+pull/restart, health checks — is not in scope here and is the obvious
+next layer.
 
-So a `runc` unit is: `container = "toolchain-musl"`,
-`deps = ["go", "libseccomp"]`, and a build task that runs the upstream Makefile.
-`go build` invokes `gcc` from the container, links against `libseccomp` from the
-sysroot, and uses `go` from the sysroot. One container, three pieces, all native
-to the Yoe model.
+## Why this matters for yoe
 
-The one wrinkle: `classes/go.star::go_binary` currently hardcodes
-`container = "golang:1.26"` and `CGO_ENABLED=0`, which is fine for pure-Go units
-but cannot express the cgo + musl + sysroot-deps combination above. The class
-should grow a `cgo = True` mode that switches the container to `toolchain-musl`,
-drops the `CGO_ENABLED=0`, and relies on `deps` for the Go toolchain instead of
-the upstream Go image. This same path will be reused by anything else needing
-cgo (devmapper, btrfs, AppArmor consumers), so it is worth making first-class
-rather than hand-rolling tasks per unit.
+- Enabling Docker on Buildroot is famously fiddly; on Yocto it requires
+  the large `meta-virtualization` layer. yoe ships a clean, opinionated
+  path that is smaller and more approachable than either, in two image
+  recipes and a single kernel fragment.
+- `selfhost-image` is the dogfood proof: a yoe-built RPi5 builds yoe
+  itself, natively, using the same Docker the device hosts for user
+  workloads. The build host and the deploy host are the same image.
+- It turns yoe from "a nicer way to build a minimal Linux" into "a
+  reasonable way to build a production-shaped device OS" — which is the
+  audience that actually ships products.
 
-## Resource Envelope
+## Related docs
 
-From HAOS experience and general rules of thumb:
-
-- **Storage:** ~100 MB (containerd-only) to ~300 MB (Docker CE) for the engine
-  itself, plus whatever images and volumes the workloads need. A dedicated data
-  partition for `/var/lib/containerd` or `/var/lib/docker` is strongly
-  recommended.
-- **RAM:** 256 MB minimum for the daemon to be non-miserable; 512 MB+ for
-  anything real; 2 GB+ for comfortable multi-container workloads.
-- **Rootfs:** writable `/var` (or a writable overlay) is required. A read-only
-  rootfs with a separate writable data partition — HAOS-style — is the right
-  long-term pattern.
-
-## Suggested Path
-
-1. Land the roadmap units `util-linux`, `kmod`, `iptables`/`nftables`,
-   `ca-certificates`, and `e2fsprogs`. These are needed for other reasons too.
-2. Add a `kernel-container-host.cfg` fragment and wire `check-config.sh` into
-   the kernel unit's QA step.
-3. Package `runc`, `containerd`, and `nerdctl` as the first milestone.
-4. Ship a `container-host-image` alongside `dev-image` that pulls it all
-   together — kernel config, userspace, engine, and a writable data partition.
-5. Consider Podman and/or Docker CE as follow-on units once the containerd path
-   is solid.
-6. Longer term: mirror HAOS's update architecture (A/B partitions, read-only
-   rootfs, signed update bundles). That is where HAOS spent its engineering
-   budget, and it is the real differentiator against ad-hoc Buildroot images.
-
-## Why This Matters for yoe
-
-- Enabling Docker on Buildroot is famously fiddly; on Yocto it requires the
-  large `meta-virtualization` layer. yoe can ship a clean, opinionated path that
-  is smaller and more approachable than either.
-- A `container-host-image` is a credible, demo-able milestone that proves the
-  machine-portability claims in `docs/metadata-format.md` are real.
-- It turns yoe from "a nicer way to build a minimal Linux" into "a reasonable
-  way to build a production-shaped device OS" — a much larger audience.
+- [Self-Host Builds](selfhost.md) — what `selfhost-image` is for and
+  how to use it.
+- [Alpine apk passthrough](apk-passthrough.md) — how the Docker apks
+  reach the image.
+- [Feed Server and `yoe deploy`](feed-server.md) — the OTA + per-package
+  update path that complements container workloads.
+- [libc, init, and the Rootfs Base](libc-and-init.md) — why OpenRC on
+  musl is the current base and what would change for glibc/systemd.
