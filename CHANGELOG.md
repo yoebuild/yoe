@@ -18,6 +18,13 @@ and this project adheres to
 - **The Modules tab shows declared feeds.** Each `alpine_feed()` call appears
   in a FEEDS section under the regular module list with its parent module and
   the total package count.
+- **`yoe update-feeds` refreshes feed APKINDEX files from upstream.** Run
+  inside a module repo, the new subcommand fetches every `alpine_feed()`'s
+  APKINDEX for every active arch, verifies the upstream RSA signature against
+  the keys the module declared, and writes the new indices to disk for the
+  maintainer to review with `git diff` and commit. Signature verification is
+  pure-Go and never consults the host's `/etc/apk/keys/` — the trust list the
+  feed declares is the one that's actually enforced.
 
 ## [0.10.12] - 2026-05-22
 
