@@ -561,6 +561,36 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		}
 	}
 
+	// Materialize build-time deps that reference synthetic units. The
+	// image-phase closure walk pulls in runtime_deps; build-time deps
+	// (`deps = [...]` on source-built units) are separate. A
+	// source-built unit may declare a build-time dep on a name now
+	// served only by alpine_feed / debian_feed, and BuildDAG below
+	// would fail with "depends on X, which does not exist" unless we
+	// materialize those names here. Iterate to fixpoint in case a
+	// newly-materialized unit pulls in further synthetic deps.
+	for {
+		added := 0
+		for name, unit := range eng.Units() {
+			for _, dep := range unit.Deps {
+				resolved := eng.resolveProvides(dep)
+				if _, ok := eng.Units()[resolved]; ok {
+					continue
+				}
+				u, err := eng.lookupOrMaterialize(resolved)
+				if err != nil {
+					return nil, fmt.Errorf("materializing build-time dep %q of unit %q: %w", dep, name, err)
+				}
+				if u != nil {
+					added++
+				}
+			}
+		}
+		if added == 0 {
+			break
+		}
+	}
+
 	// Validate prefer_modules: every value must name a known module
 	// (real or synthetic). Surfaces a fixit message with the closest
 	// candidates when a pin lands on a name no module advertises —
@@ -793,10 +823,21 @@ func peekModuleInfo(modulePath string) *ModuleInfo {
 			}
 			return moduleRefValue{ref: ref}, nil
 		})
+	// alpine_feed / debian_feed / etc. are no-ops during the peek —
+	// we only need to capture module_info(). Without these stubs
+	// Starlark's compile-time resolver aborts before module_info()
+	// runs, falling back to the basename and breaking synthetic
+	// module names (alpine_feed registers under <parent>.<feed>,
+	// where parent comes from this peek).
+	noop := starlark.NewBuiltin("noop",
+		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
+			return starlark.None, nil
+		})
 	thread := &starlark.Thread{Name: file}
 	_, _ = starlark.ExecFileOptions(fileOpts, thread, file, src, starlark.StringDict{
 		"module_info": moduleInfo,
 		"module":      moduleBuiltin,
+		"alpine_feed": noop,
 	})
 	return info
 }

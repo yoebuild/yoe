@@ -22,14 +22,14 @@ project(
     # answer (e.g. xz is built static-only in module-core, but kmod's
     # depmod needs the shared liblzma.so.5).
     prefer_modules = {
-        "xz": "alpine",
+        "xz": "alpine.main",
         # module-core's source-built zstd ships libzstd.so.1 at its own
         # soversion. Alpine's nodejs links against libzstd.so.1 from
         # Alpine's zstd-libs, so mixing the two trips an apk conflict
         # (both packages own the same .so path with incompatible
         # versions). Pin zstd to Alpine so the .so and CLI come from one
         # source.
-        "zstd": "alpine",
+        "zstd": "alpine.main",
         # module-core's source-built util-linux is one monolithic apk that
         # bundles libblkid.so.1, libmount.so.1, and libuuid.so.1 (via
         # --enable-libblkid/--enable-libmount). Alpine splits those libs
@@ -39,7 +39,7 @@ project(
         # navidrome closure). Both then claim ownership of the same
         # SONAMEs and apk refuses to install. Pin util-linux to Alpine so
         # util-linux and its split libs come from one coordinated source.
-        "util-linux": "alpine",
+        "util-linux": "alpine.main",
         # module-core's source-built curl bundles its own libcurl.so.4 at
         # 8.11.1's soversion. Alpine ships libcurl as a separate package
         # at 8.14.1, and other Alpine packages (git, libcurl consumers)
@@ -47,6 +47,6 @@ project(
         # the moment an image pulls in git or any other libcurl consumer
         # from Alpine. Pin curl to Alpine so curl and libcurl come from
         # one coordinated source.
-        "curl": "alpine",
+        "curl": "alpine.main",
     },
 )

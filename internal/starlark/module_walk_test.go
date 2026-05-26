@@ -128,6 +128,39 @@ func TestLoadProject_TransitiveProjectWins(t *testing.T) {
 	}
 }
 
+func TestPeekModuleInfo_TolerantOfFeedBuiltins(t *testing.T) {
+	// MODULE.star that uses alpine_feed must still let peekModuleInfo
+	// capture the declared module name. Starlark resolves identifiers
+	// at compile time, so without a no-op stub for alpine_feed the
+	// peek aborts before module_info runs and the loader falls back
+	// to the basename (breaking <parent>.<feed> synthetic names).
+	dir := t.TempDir()
+	src := `module_info(name = "alpine", description = "test")
+
+alpine_feed(
+    name = "main",
+    url = "https://example.com/alpine",
+    branch = "v3.21",
+    section = "main",
+    index = "feeds/main",
+    keys = ["keys/k.rsa.pub"],
+)
+`
+	if err := os.WriteFile(filepath.Join(dir, "MODULE.star"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info := peekModuleInfo(dir)
+	if info == nil {
+		t.Fatal("peekModuleInfo returned nil")
+	}
+	if info.Name != "alpine" {
+		t.Errorf("Name = %q, want %q", info.Name, "alpine")
+	}
+	if info.Description != "test" {
+		t.Errorf("Description = %q", info.Description)
+	}
+}
+
 // writeProjectFiles materializes a {relpath: content} map under root.
 func writeProjectFiles(root string, files map[string]string) error {
 	for rel, content := range files {

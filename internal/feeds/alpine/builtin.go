@@ -21,12 +21,39 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"go.starlark.net/starlark"
 
 	"github.com/yoebuild/yoe/internal/apkindex"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
+
+// engineFeeds maps each Engine to the archStates registered against
+// it. Cross-feed dep resolution walks every state in this list so a
+// community package's so:libcrypto.so.3 finds main's openssl-libs
+// (the canonical R7/AE4 case). The map is per-process and keyed by
+// pointer so independent engines (e.g. multiple test fixtures in one
+// run) don't interfere.
+var (
+	engineFeedsMu sync.Mutex
+	engineFeeds   = map[*yoestar.Engine][]*archState{}
+)
+
+func registerFeedState(eng *yoestar.Engine, s *archState) {
+	engineFeedsMu.Lock()
+	defer engineFeedsMu.Unlock()
+	engineFeeds[eng] = append(engineFeeds[eng], s)
+}
+
+func feedStatesFor(eng *yoestar.Engine) []*archState {
+	engineFeedsMu.Lock()
+	defer engineFeedsMu.Unlock()
+	src := engineFeeds[eng]
+	out := make([]*archState, len(src))
+	copy(out, src)
+	return out
+}
 
 // archMap mirrors module-alpine/classes/alpine_pkg.star's _ARCH_MAP:
 // yoe canonical arches → Alpine arch tokens used in repo URLs and as
@@ -114,6 +141,7 @@ func buildSyntheticModule(eng *yoestar.Engine, composedName, parent, indexRoot s
 		eng:       eng,
 		byArch:    make(map[string]*archCache),
 	}
+	registerFeedState(eng, s)
 
 	return &yoestar.SyntheticModule{
 		Name:   composedName,
@@ -179,7 +207,63 @@ func (s *archState) lookup(moduleName, name string) (*yoestar.Unit, error) {
 	if !ok {
 		return nil, nil // miss — resolver continues to the next module
 	}
-	return apkindex.MaterializeUnit(*entry, apkindex.TableProviders{Table: c.provides}, moduleName)
+	// Build a project-wide providers view: this feed's table first,
+	// then every sibling feed registered against the same engine.
+	// Closes the cross-feed gap (community openssh-server depends on
+	// so:libcrypto.so.3 which lives in main's openssl-libs).
+	providers := newMultiFeedProviders(s.eng, arch, c.provides)
+	return apkindex.MaterializeUnit(*entry, providers, moduleName)
+}
+
+// multiFeedProviders implements apkindex.Providers across every
+// alpine_feed registered against an Engine. The local feed's table
+// wins ties; siblings are consulted in registration order. This is
+// the practical realization of the plan's "project-wide provides
+// table merged from every registered synthetic module's per-feed
+// table in resolver priority order" rule.
+type multiFeedProviders struct {
+	primary  *apkindex.ProvidesTable
+	siblings []*apkindex.ProvidesTable
+}
+
+func newMultiFeedProviders(eng *yoestar.Engine, arch string, primary *apkindex.ProvidesTable) multiFeedProviders {
+	out := multiFeedProviders{primary: primary}
+	for _, sibling := range feedStatesFor(eng) {
+		if sibling.provides(arch) == primary {
+			continue // skip self
+		}
+		if t := sibling.provides(arch); t != nil {
+			out.siblings = append(out.siblings, t)
+		}
+	}
+	return out
+}
+
+// Resolve consults primary first, then siblings. Returns the bare
+// package name of whichever entry first provides the token.
+func (m multiFeedProviders) Resolve(token string) (string, bool) {
+	if e := m.primary.Lookup(token); e != nil {
+		return e.Name, true
+	}
+	for _, t := range m.siblings {
+		if e := t.Lookup(token); e != nil {
+			return e.Name, true
+		}
+	}
+	return "", false
+}
+
+// provides returns the cached provides table for the given arch,
+// loading the APKINDEX lazily on first call. Returns nil when the
+// feed has no entries for the arch (or the index is missing) —
+// caller treats that as "no sibling contribution" rather than an
+// error.
+func (s *archState) provides(arch string) *apkindex.ProvidesTable {
+	c, err := s.cacheFor(arch)
+	if err != nil {
+		return nil
+	}
+	return c.provides
 }
 
 func (s *archState) names() []string {
