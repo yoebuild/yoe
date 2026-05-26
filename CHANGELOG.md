@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **TUI Setup gained a QEMU settings sub-screen.** Press `s` then Enter on
+  "QEMU settings" to adjust the guest's RAM with ←/→, toggle the graphical
+  display, and add or remove host:guest port forwards for `yoe run`. Choices
+  persist to `local.star` and apply automatically the next time you launch
+  the guest — no need to remember `--memory`, `--display`, or `--port` flags
+  for routine work.
+
 ## [0.10.14] - 2026-05-26
 
 - **Modules tab no longer scrolls the title off the top.** When a project

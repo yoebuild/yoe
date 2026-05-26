@@ -135,6 +135,24 @@ That replace-on-match behavior is what makes `--port` usable for qemu-in-qemu �
 see [Running inside a QEMU guest](#running-inside-a-qemu-guest-qemu-in-qemu)
 below.
 
+## Tuning at run time
+
+Three knobs override the machine descriptor for a given developer without
+editing checked-in `.star` files:
+
+| Knob       | Local override         | CLI flag        | Persisted by                |
+| ---------- | ---------------------- | --------------- | --------------------------- |
+| RAM        | `qemu_memory = "8G"`   | `--memory 8G`   | `--memory` and TUI          |
+| Display    | `qemu_display = "on"`  | `--display`     | TUI                         |
+| Forwards   | `qemu_ports = [...]`   | `--port h:g`    | TUI                         |
+
+All three live in `local.star` and apply the next time you run the same image.
+The TUI editor is on **Setup → QEMU settings** (press `s`, move down to
+**QEMU settings**, press Enter). Local-override forwards layer over the
+machine's defaults with the same replace-on-guest-port rule that `--port`
+uses; the order at run time is machine ← `local.star` ← CLI, so a one-off
+`--port` still beats a saved entry for the same guest port.
+
 ## How `yoe qemu` runs
 
 The launcher in `internal/device/qemu.go`:

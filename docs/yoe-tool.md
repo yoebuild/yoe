@@ -328,9 +328,29 @@ architecture.
 reuse it without re-passing the flag — the same persistence `-j` uses for
 `parallel-builds`. Set it without a run via `yoe config set qemu-memory 8G`, or
 clear it with `yoe config set qemu-memory ""` to fall back to the machine
-default. The TUI Setup page (`s`) exposes it too: select **QEMU memory** and
-press ←/→ to step a preset ladder — machine default, then 128M doubling up to
-16G.
+default. The TUI Setup page (`s`) exposes it under **QEMU settings** (see
+below).
+
+**Graphical display** follows the precedence: the `--display` flag, then
+`qemu_display` in `local.star` (`"on"` / `"off"`), then off. The TUI sub-screen
+is the editor for the persisted value.
+
+**Port forwards** layer over the machine's declared `qemu.ports` like this:
+local-overrides (`qemu_ports` in `local.star`) come first, then `--port` flags
+on the command line. In both lists, an entry whose guest port matches one in
+the machine's defaults *replaces* that default instead of adding a duplicate —
+the same rule `--port` already follows for qemu-in-qemu.
+
+**QEMU settings sub-screen.** Open Setup with `s`, move to **QEMU settings**,
+press Enter. The sub-screen lays out three sections:
+
+- **Memory** — ←/→ steps a preset ladder (machine default, then 128M doubling
+  up to 16G).
+- **Display** — ←/→ cycles `default (off)` / `off` / `on`.
+- **Ports** — read-only rows show the machine's declared forwards; below them,
+  each row is a local override. Press Enter (or `a` / `+`) on the trailing
+  `[+] add port` row to type a new `host:guest` mapping; press `d` (or `-`)
+  on a local row to remove it. Every change writes through to `local.star`.
 
 ### `yoe serve`
 
@@ -794,7 +814,7 @@ visible. Press `P` to capture the new HEAD as the new pin.
 | `l`         | Open unit's build log in `$EDITOR`                            |
 | `d`         | Launch `claude diagnose` for the unit                         |
 | `a`         | Launch `claude /new-unit`                                     |
-| `s`         | Open Setup (machine / image / parallel builds / QEMU memory)  |
+| `s`         | Open Setup (machine / image / parallel builds / QEMU settings) |
 | `/`         | Edit the active query (substring + `type:` `module:` `in:`)   |
 | `\`         | Snap query back to the saved default in `local.star`          |
 | `S`         | Save the current query as the new default                     |

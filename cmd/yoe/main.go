@@ -1024,6 +1024,16 @@ func cmdRun(args []string) {
 		fs.Parse(rest[1:])
 	}
 
+	// Whether --display was set on the command line (vs. left at its default
+	// false). Distinguishes "user asked for no display" from "user didn't
+	// say" so the local.star tri-state can take over in the latter case.
+	displaySet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "display" {
+			displaySet = true
+		}
+	})
+
 	opts := device.QEMUOptions{
 		Ports:    ports,
 		Display:  *display,
@@ -1035,6 +1045,15 @@ func cmdRun(args []string) {
 	// the machine's own qemu memory (resolved in device.RunQEMU when
 	// opts.Memory is empty). A --memory value is persisted so subsequent
 	// runs (and the TUI) reuse it without re-passing the flag.
+	//
+	// QEMU display precedence: --display flag > local.star qemu_display
+	// > false. Only --display on the command line writes to local.star;
+	// the TUI is the editor for the persisted preference.
+	//
+	// QEMU ports: local.star qemu_ports are appended to the CLI --port
+	// list before the run-side merge with the machine's declared forwards.
+	// The CLI list comes last so a one-off --port still beats a saved
+	// override for the same guest port.
 	if root, err := findProjectRootForLocal(projectDir()); err == nil {
 		ov, _ := yoestar.LoadLocalOverrides(root)
 		opts.Memory = ov.QEMUMemory
@@ -1046,6 +1065,12 @@ func cmdRun(args []string) {
 					fmt.Fprintf(os.Stderr, "Warning: could not save qemu_memory to local.star: %v\n", werr)
 				}
 			}
+		}
+		if !displaySet {
+			opts.Display = ov.QEMUDisplay == "on"
+		}
+		if len(ov.QEMUPorts) > 0 {
+			opts.Ports = append(append([]string(nil), ov.QEMUPorts...), opts.Ports...)
 		}
 	} else if *memory != "" {
 		opts.Memory = *memory
