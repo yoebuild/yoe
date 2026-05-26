@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.14] - 2026-05-26
+
 - **Modules tab no longer scrolls the title off the top.** When a project
   declared one or more feeds, the FEEDS section pushed the body past the
   terminal height and you'd lose the title, tab bar, and column header. The
