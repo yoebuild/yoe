@@ -8,6 +8,17 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`alpine_feed()` declares a feed directly in a module's MODULE.star.** A
+  module can now expose thousands of upstream Alpine packages as yoe units
+  with a single declaration — point `alpine_feed()` at a checked-in directory
+  of APKINDEX files and the named packages become available to image artifacts
+  with no per-package `.star` file. Package units materialize lazily as the
+  image's runtime closure needs them, so working memory stays bounded by the
+  closure size rather than the catalog size.
+- **The Modules tab shows declared feeds.** Each `alpine_feed()` call appears
+  in a FEEDS section under the regular module list with its parent module and
+  the total package count.
+
 ## [0.10.12] - 2026-05-22
 
 - **CI builds `base-image` from source on every push to `main`.** A full
