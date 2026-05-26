@@ -1175,6 +1175,13 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "e":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
+			// Feed-materialized units (alpine_feed / debian_feed) have
+			// no .star file — the help bar already hides "e" for them,
+			// so swallow the keypress silently rather than printing a
+			// "could not find" message.
+			if m.unitFromFeed(name) {
+				return m, nil
+			}
 			// Use the resolved unit's DefinedIn (= the winning module's
 			// .star directory after prefer_modules + last-module-wins
 			// shadowing) so editing opens the file yoe actually uses,
@@ -1483,11 +1490,24 @@ func (m model) modulesViewportHeight() int {
 	chrome++ // detail strip "url: ..."
 	chrome++ // blank before bottom row
 	chrome++ // help / message
+	chrome += m.syntheticModulesSectionLines()
 	h := m.height - chrome
 	if h < 3 {
 		h = 3
 	}
 	return h
+}
+
+// syntheticModulesSectionLines returns the vertical footprint of the
+// FEEDS section rendered by viewModulesTab beneath the navigable rows
+// (blank+title, column header, one row per synthetic module). Returns 0
+// when no feeds are declared so projects without alpine_feed / debian_feed
+// keep using the full screen height.
+func (m model) syntheticModulesSectionLines() int {
+	if m.proj == nil || len(m.proj.SyntheticModules) == 0 {
+		return 0
+	}
+	return 3 + len(m.proj.SyntheticModules)
 }
 
 // diagnosticsViewportHeight returns the number of content lines that
@@ -2685,6 +2705,14 @@ func (m model) viewUnitsTab() string {
 						items = imageHelpItems
 					}
 				}
+				// Feed-materialized units (alpine_feed /
+				// debian_feed) have no .star file, so the edit
+				// key is dead for them — drop it from the help
+				// bar so the user isn't told to press a key that
+				// won't do anything.
+				if m.unitFromFeed(name) {
+					items = withoutHelpKey(items, "e")
+				}
 			}
 		}
 		b.WriteString(renderHelp(items))
@@ -2698,6 +2726,21 @@ func (m model) viewUnitsTab() string {
 type helpItem struct {
 	key   string
 	label string
+}
+
+// withoutHelpKey returns a copy of items with the entry whose key
+// matches dropped. Used to mask shortcuts that don't apply to the
+// cursor's current selection (e.g. "edit" on a feed-materialized
+// unit). Returns the original slice unchanged if no entry matches.
+func withoutHelpKey(items []helpItem, key string) []helpItem {
+	out := make([]helpItem, 0, len(items))
+	for _, it := range items {
+		if it.key == key {
+			continue
+		}
+		out = append(out, it)
+	}
+	return out
 }
 
 var (
@@ -3176,16 +3219,21 @@ func (m model) viewModulesTab() string {
 	}
 
 	// Detail strip for the cursor row — useful when fields are clipped.
+	// Always emit both rows (blank when the field is unset) so the body
+	// height stays constant as the cursor moves across modules with and
+	// without a remote URL.
 	if m.modulesCursor >= 0 && m.modulesCursor < len(mods) {
 		rm := mods[m.modulesCursor]
 		dir := rm.Dir
 		if dir == "" {
 			dir = "(not synced)"
 		}
-		fmt.Fprintf(&b, "  %s %s\n", dimStyle.Render("dir:"), dim(dir))
-		if rm.URL != "" {
-			fmt.Fprintf(&b, "  %s %s\n", dimStyle.Render("url:"), dim(rm.URL))
+		url := rm.URL
+		if url == "" {
+			url = "(local)"
 		}
+		fmt.Fprintf(&b, "  %s %s\n", dimStyle.Render("dir:"), dim(dir))
+		fmt.Fprintf(&b, "  %s %s\n", dimStyle.Render("url:"), dim(url))
 	} else {
 		b.WriteString("\n\n")
 	}
@@ -5062,6 +5110,27 @@ func (m model) renderBuildProgress() string {
 	}
 	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	return bar.View() + labelStyle.Render(label)
+}
+
+// unitFromFeed reports whether the named unit was materialized by a
+// synthetic module (alpine_feed / debian_feed) rather than declared in
+// a .star file. Feed-origin units have no source file to open, so the
+// editor / shell paths short-circuit on them and the help bar omits
+// their keybindings.
+func (m model) unitFromFeed(name string) bool {
+	if m.proj == nil {
+		return false
+	}
+	u, ok := m.proj.Units[name]
+	if !ok || u == nil || u.Module == "" {
+		return false
+	}
+	for _, sm := range m.proj.SyntheticModules {
+		if sm.Name == u.Module {
+			return true
+		}
+	}
+	return false
 }
 
 // unitStarPath returns the .star file that defines the given resolved

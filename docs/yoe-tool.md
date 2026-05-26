@@ -780,31 +780,31 @@ visible. Press `P` to capture the new HEAD as the new pin.
 
 #### Key bindings (unit list)
 
-| Key         | Action                                                       |
-| ----------- | ------------------------------------------------------------ |
-| `b`         | Build selected unit in background                            |
-| `B`         | Build all visible units in background                        |
-| `x`         | Cancel an in-progress build for the selected unit            |
-| `r`         | Run an image unit (boot in QEMU)                             |
-| `f`         | Flash a built image to a removable device                    |
-| `D`         | Deploy a non-image unit to a host over SSH                   |
-| `e`         | Open unit's `.star` file in `$EDITOR`                        |
-| `$`         | Open `$SHELL` in the unit's checked-out source dir           |
-| `u`         | Toggle the unit's source between pin and dev mode            |
-| `l`         | Open unit's build log in `$EDITOR`                           |
-| `d`         | Launch `claude diagnose` for the unit                        |
-| `a`         | Launch `claude /new-unit`                                    |
-| `s`         | Open Setup (machine / image / parallel builds / QEMU memory) |
-| `/`         | Edit the active query (substring + `type:` `module:` `in:`)  |
-| `\`         | Snap query back to the saved default in `local.star`         |
-| `S`         | Save the current query as the new default                    |
-| `o` / `O`   | Cycle sort column / toggle direction                         |
-| `tab`       | Switch to the next home-screen tab (Units → Modules → …)     |
-| `Enter`     | Open detail view for the selected unit                       |
-| `j/k` `↑/↓` | Navigate up/down                                             |
-| `g/G`       | Jump to top / bottom                                         |
-| `?`         | Show the keyboard cheat sheet for this page                  |
-| `q`         | Quit                                                         |
+| Key         | Action                                                        |
+| ----------- | ------------------------------------------------------------- |
+| `b`         | Build selected unit in background                             |
+| `B`         | Build all visible units in background                         |
+| `x`         | Cancel an in-progress build for the selected unit             |
+| `r`         | Run an image unit (boot in QEMU)                              |
+| `f`         | Flash a built image to a removable device                     |
+| `D`         | Deploy a non-image unit to a host over SSH                    |
+| `e`         | Open unit's `.star` file in `$EDITOR` (hidden for feed units) |
+| `$`         | Open `$SHELL` in the unit's checked-out source dir            |
+| `u`         | Toggle the unit's source between pin and dev mode             |
+| `l`         | Open unit's build log in `$EDITOR`                            |
+| `d`         | Launch `claude diagnose` for the unit                         |
+| `a`         | Launch `claude /new-unit`                                     |
+| `s`         | Open Setup (machine / image / parallel builds / QEMU memory)  |
+| `/`         | Edit the active query (substring + `type:` `module:` `in:`)   |
+| `\`         | Snap query back to the saved default in `local.star`          |
+| `S`         | Save the current query as the new default                     |
+| `o` / `O`   | Cycle sort column / toggle direction                          |
+| `tab`       | Switch to the next home-screen tab (Units → Modules → …)      |
+| `Enter`     | Open detail view for the selected unit                        |
+| `j/k` `↑/↓` | Navigate up/down                                              |
+| `g/G`       | Jump to top / bottom                                          |
+| `?`         | Show the keyboard cheat sheet for this page                   |
+| `q`         | Quit                                                          |
 
 The cursor auto-follows whatever unit is actively building, but only when you've
 been idle for a couple of seconds — pressing `j/k` or typing into the query bar

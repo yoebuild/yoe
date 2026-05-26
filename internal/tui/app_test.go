@@ -153,6 +153,112 @@ func TestViewModulesTab_RendersSyntheticModules(t *testing.T) {
 	}
 }
 
+// TestViewModulesTab_FeedsDoNotPushTopOffScreen guards the bug where
+// modulesViewportHeight() failed to account for the FEEDS section
+// (rendered after the navigable rows), causing total output to exceed
+// m.height and scroll the title/header off the top.
+func TestViewModulesTab_FeedsDoNotPushTopOffScreen(t *testing.T) {
+	mods := make([]yoestar.ResolvedModule, 0, 10)
+	for i := range 10 {
+		mods = append(mods, yoestar.ResolvedModule{
+			Name: fmt.Sprintf("module-%02d", i),
+			URL:  fmt.Sprintf("https://example.com/m%02d.git", i),
+		})
+	}
+	m := model{
+		proj: &yoestar.Project{
+			Defaults:        yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
+			Units:           map[string]*yoestar.Unit{},
+			ResolvedModules: mods,
+			SyntheticModules: []*yoestar.SyntheticModule{
+				{Name: "alpine.main", Parent: "alpine",
+					Names:  func() []string { return []string{"musl"} },
+					Lookup: func(string) (*yoestar.Unit, error) { return nil, nil }},
+				{Name: "alpine.community", Parent: "alpine",
+					Names:  func() []string { return []string{"nginx"} },
+					Lookup: func(string) (*yoestar.Unit, error) { return nil, nil }},
+			},
+		},
+		width: 120, height: 30,
+	}
+	got := m.viewModulesTab()
+	// Count newlines as a proxy for visual line count (lipgloss styles
+	// don't add lines). Allow the rendered output to equal m.height but
+	// never exceed it.
+	lines := strings.Count(got, "\n")
+	if lines > m.height {
+		t.Fatalf("viewModulesTab produced %d lines but m.height=%d — content overflows and the top scrolls off:\n%s",
+			lines, m.height, got)
+	}
+}
+
+// TestUnitFromFeed checks the synthetic-module detection: units
+// registered by a SyntheticModule are flagged, units defined by a
+// regular module (or the project root) are not.
+func TestUnitFromFeed(t *testing.T) {
+	m := model{
+		proj: &yoestar.Project{
+			Units: map[string]*yoestar.Unit{
+				"musl":     {Name: "musl", Module: "alpine.main"},
+				"hello":    {Name: "hello", Module: "module-core", DefinedIn: "/tmp/module-core"},
+				"rootunit": {Name: "rootunit"},
+			},
+			SyntheticModules: []*yoestar.SyntheticModule{
+				{Name: "alpine.main", Parent: "alpine"},
+			},
+		},
+	}
+	if !m.unitFromFeed("musl") {
+		t.Errorf("musl came from alpine.main feed but unitFromFeed returned false")
+	}
+	if m.unitFromFeed("hello") {
+		t.Errorf("hello came from regular module-core but unitFromFeed returned true")
+	}
+	if m.unitFromFeed("rootunit") {
+		t.Errorf("rootunit has no Module but unitFromFeed returned true")
+	}
+	if m.unitFromFeed("nonexistent") {
+		t.Errorf("nonexistent name unitFromFeed returned true")
+	}
+}
+
+// TestViewUnitsTab_HelpBarOmitsEditForFeedUnits checks that the
+// "e edit" shortcut is dropped from the units-tab help bar when the
+// cursor is on a feed-materialized unit (no .star file to open).
+func TestViewUnitsTab_HelpBarOmitsEditForFeedUnits(t *testing.T) {
+	m := model{
+		proj: &yoestar.Project{
+			Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
+			Units: map[string]*yoestar.Unit{
+				"musl":  {Name: "musl", Class: "unit", Module: "alpine.main"},
+				"hello": {Name: "hello", Class: "unit", Module: "module-core", DefinedIn: "/tmp/module-core"},
+			},
+			SyntheticModules: []*yoestar.SyntheticModule{
+				{Name: "alpine.main", Parent: "alpine"},
+			},
+		},
+		units:   []string{"musl", "hello"},
+		visible: []int{0, 1},
+		width:   120, height: 30,
+	}
+
+	// Cursor on a regular unit — edit must appear.
+	m.cursor = 1
+	got := m.viewUnitsTab()
+	if !strings.Contains(got, "edit") {
+		t.Errorf("regular unit help bar missing 'edit':\n%s", got)
+	}
+
+	// Cursor on a feed unit — edit must NOT appear.
+	m.cursor = 0
+	got = m.viewUnitsTab()
+	// The help bar renders "<key> <label>" pairs; look for the label.
+	// "edit" appears nowhere else in the rendered output for this fixture.
+	if strings.Contains(got, "edit") {
+		t.Errorf("feed unit help bar still advertises 'edit':\n%s", got)
+	}
+}
+
 func TestViewUnitsTab_CompletionsRenderUnderQueryLine(t *testing.T) {
 	m := model{
 		proj: &yoestar.Project{
