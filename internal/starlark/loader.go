@@ -561,7 +561,92 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		}
 	}
 
+	// Validate prefer_modules: every value must name a known module
+	// (real or synthetic). Surfaces a fixit message with the closest
+	// candidates when a pin lands on a name no module advertises —
+	// catches the common "alpine" → "alpine.main" / "alpine.community"
+	// confusion after the feeds-as-modules cutover, where the parent
+	// module-alpine no longer registers units directly.
+	if err := validatePreferModules(proj); err != nil {
+		return nil, err
+	}
+
 	return proj, nil
+}
+
+// validatePreferModules walks proj.PreferModules and errors when a
+// pin's value doesn't match any known module name. The error includes
+// up to three nearest-match suggestions (substring or prefix matches
+// against the union of real-module + synthetic-module names) so the
+// user can see immediately whether they meant a feed name they
+// forgot to qualify.
+func validatePreferModules(proj *Project) error {
+	if proj == nil || len(proj.PreferModules) == 0 {
+		return nil
+	}
+	known := make(map[string]struct{}, len(proj.ResolvedModules)+len(proj.SyntheticModules))
+	for _, rm := range proj.ResolvedModules {
+		if rm.Name != "" {
+			known[rm.Name] = struct{}{}
+		}
+	}
+	for _, sm := range proj.SyntheticModules {
+		if sm.Name != "" {
+			known[sm.Name] = struct{}{}
+		}
+	}
+	for unit, modName := range proj.PreferModules {
+		if modName == "" {
+			continue
+		}
+		if _, ok := known[modName]; ok {
+			continue
+		}
+		suggestions := suggestModuleNames(modName, known)
+		hint := ""
+		switch len(suggestions) {
+		case 0:
+			// nothing to suggest
+		case 1:
+			hint = fmt.Sprintf(" Did you mean %q?", suggestions[0])
+		default:
+			quoted := make([]string, len(suggestions))
+			for i, s := range suggestions {
+				quoted[i] = fmt.Sprintf("%q", s)
+			}
+			hint = fmt.Sprintf(" Did you mean one of: %s?", strings.Join(quoted, ", "))
+		}
+		return fmt.Errorf(
+			`prefer_modules entry %q: %q — module %q not found.%s See docs/module-alpine.md "alpine_feed: declaring a whole repo as one module entry" for the alpine → alpine.main/alpine.community migration.`,
+			unit, modName, modName, hint)
+	}
+	return nil
+}
+
+// suggestModuleNames picks up to three module names that are close
+// to `target` — prefix match wins, then substring match. Empty
+// suggestions returned when nothing matches.
+func suggestModuleNames(target string, known map[string]struct{}) []string {
+	var prefixed, contained []string
+	for name := range known {
+		switch {
+		case name == target:
+			continue
+		case strings.HasPrefix(name, target+"."):
+			// Exact qualifier promotion ("alpine" → "alpine.main"):
+			// always rank these first.
+			prefixed = append(prefixed, name)
+		case strings.Contains(name, target):
+			contained = append(contained, name)
+		}
+	}
+	sort.Strings(prefixed)
+	sort.Strings(contained)
+	out := append(prefixed, contained...)
+	if len(out) > 3 {
+		out = out[:3]
+	}
+	return out
 }
 
 func toStarlarkStringList(ss []string) *starlark.List {
