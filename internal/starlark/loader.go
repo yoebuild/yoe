@@ -157,13 +157,20 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		return nil, fmt.Errorf("evaluating %s: %w", projFile, err)
 	}
 
-	// Sync modules if a sync callback was provided (auto-clone missing modules).
-	if cfg.moduleSync != nil {
-		if proj := eng.Project(); proj != nil && len(proj.Modules) > 0 {
-			if err := cfg.moduleSync(proj.Modules, os.Stderr); err != nil {
-				return nil, fmt.Errorf("syncing modules: %w", err)
-			}
+	// Sync modules + walk their MODULE.star for transitive deps in an
+	// iterated sync↔peek fixpoint. Each round: (1) sync the current set,
+	// (2) peek each module for its declared `module_info(deps=...)`,
+	// (3) accumulate new deps, (4) repeat until no new deps appear.
+	//
+	// Cycle detection runs on the final dep graph; same-name + different
+	// ref collisions raise a clear error (project-level always wins
+	// against transitive collisions).
+	if proj := eng.Project(); proj != nil {
+		expanded, err := expandTransitiveDeps(proj.Modules, root, cfg.moduleSync, os.Stderr)
+		if err != nil {
+			return nil, err
 		}
+		proj.Modules = expanded
 	}
 
 	// Resolve each declared module to a canonical name and on-disk path.
@@ -538,34 +545,131 @@ func locateModulePath(m ModuleRef, projectRoot string) (modulePath, cloneDir str
 // MODULE.star is missing, fails to parse, or doesn't call module_info.
 // This is intentionally separate from the main engine eval so the canonical
 // name is known before any registration happens.
+//
+// Use peekModuleInfo when you also need the declared transitive deps (the
+// recursive-module walking path in LoadProjectFromRoot).
 func peekModuleName(modulePath string) string {
+	info := peekModuleInfo(modulePath)
+	if info == nil {
+		return ""
+	}
+	return info.Name
+}
+
+// peekModuleInfo evaluates MODULE.star in an isolated thread and returns
+// the declared name + transitive deps. Returns nil when MODULE.star is
+// missing or fails to parse. Errors inside module_info or module() are
+// swallowed — peek is a best-effort pre-evaluation pass and the real
+// evaluation later surfaces any syntax issues with proper error context.
+//
+// The captured Deps slice is what the recursive-module walker (U4)
+// uses to extend the project's module list to its transitive closure.
+func peekModuleInfo(modulePath string) *ModuleInfo {
 	file := filepath.Join(modulePath, "MODULE.star")
 	src, err := os.ReadFile(file)
 	if err != nil {
-		return ""
+		return nil
 	}
-	var captured string
+	info := &ModuleInfo{}
 	moduleInfo := starlark.NewBuiltin("module_info",
 		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 			for _, kv := range kwargs {
-				if k, ok := kv[0].(starlark.String); ok && string(k) == "name" {
+				key, ok := kv[0].(starlark.String)
+				if !ok {
+					continue
+				}
+				switch string(key) {
+				case "name":
 					if v, ok := kv[1].(starlark.String); ok {
-						captured = string(v)
+						info.Name = string(v)
 					}
+				case "description":
+					if v, ok := kv[1].(starlark.String); ok {
+						info.Description = string(v)
+					}
+				case "deps":
+					info.Deps = parsePeekDeps(kv[1])
 				}
 			}
 			return starlark.None, nil
 		})
-	moduleStub := starlark.NewBuiltin("module",
-		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
-			return starlark.None, nil
+	// `module(url=..., ref=..., path=..., local=...)` is the builder
+	// invoked inside module_info(deps=[module(...), ...]). The deps
+	// list captures ModuleRef structs; the builtin records them via a
+	// closure-shared slot so module_info's `deps=` arm can pick them
+	// up after evaluation.
+	moduleBuiltin := starlark.NewBuiltin("module",
+		func(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			ref := ModuleRef{}
+			if len(args) >= 1 {
+				if v, ok := args[0].(starlark.String); ok {
+					ref.URL = string(v)
+				}
+			}
+			for _, kv := range kwargs {
+				key, ok := kv[0].(starlark.String)
+				if !ok {
+					continue
+				}
+				switch string(key) {
+				case "url":
+					if v, ok := kv[1].(starlark.String); ok {
+						ref.URL = string(v)
+					}
+				case "ref":
+					if v, ok := kv[1].(starlark.String); ok {
+						ref.Ref = string(v)
+					}
+				case "path":
+					if v, ok := kv[1].(starlark.String); ok {
+						ref.Path = string(v)
+					}
+				case "local":
+					if v, ok := kv[1].(starlark.String); ok {
+						ref.Local = string(v)
+					}
+				}
+			}
+			return moduleRefValue{ref: ref}, nil
 		})
 	thread := &starlark.Thread{Name: file}
 	_, _ = starlark.ExecFileOptions(fileOpts, thread, file, src, starlark.StringDict{
 		"module_info": moduleInfo,
-		"module":      moduleStub,
+		"module":      moduleBuiltin,
 	})
-	return captured
+	return info
+}
+
+// moduleRefValue carries a ModuleRef through Starlark evaluation. It
+// satisfies starlark.Value so module_info(deps=[module(...), ...]) can
+// store it in a list without Starlark complaining about an unknown type.
+type moduleRefValue struct{ ref ModuleRef }
+
+func (moduleRefValue) String() string        { return "module_ref" }
+func (moduleRefValue) Type() string          { return "module_ref" }
+func (moduleRefValue) Freeze()               {}
+func (moduleRefValue) Truth() starlark.Bool  { return starlark.True }
+func (moduleRefValue) Hash() (uint32, error) { return 0, fmt.Errorf("module_ref is not hashable") }
+
+// parsePeekDeps unwraps a Starlark list of module() values into a Go
+// slice of ModuleRef. Anything that isn't a moduleRefValue is silently
+// skipped — the peek pass is best-effort and the real evaluation will
+// catch malformed entries with a proper error.
+func parsePeekDeps(v starlark.Value) []ModuleRef {
+	list, ok := v.(*starlark.List)
+	if !ok {
+		return nil
+	}
+	out := make([]ModuleRef, 0, list.Len())
+	iter := list.Iterate()
+	defer iter.Done()
+	var item starlark.Value
+	for iter.Next(&item) {
+		if mr, ok := item.(moduleRefValue); ok {
+			out = append(out, mr.ref)
+		}
+	}
+	return out
 }
 
 // buildMachineConfigStruct produces the ctx.machine_config struct from a
