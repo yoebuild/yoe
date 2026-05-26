@@ -283,18 +283,22 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	}
 
 	// Build ctx — a single Starlark struct exposing the active machine /
-	// project context to unit and image definitions. Replaces what used to
-	// be five separate globals (ARCH, MACHINE, PROJECT_VERSION,
-	// MACHINE_CONFIG, PROVIDES, RUNTIME_DEPS) with one named entry point.
-	// Defaults: arch = x86_64 if no machine is configured; machine and
-	// project_version are empty strings; machine_config is absent if no
-	// machine is configured.
+	// project context to unit and image definitions. Defaults: arch =
+	// x86_64 if no machine is configured; machine and project_version
+	// are empty strings; machine_config is absent if no machine is
+	// configured.
 	//
-	// ctx.provides and ctx.runtime_deps are mutable *starlark.Dict
-	// instances. We keep local Go references (`provides`, `runtimeDeps`)
-	// and embed the same pointers in the struct. Phase 2 mutations on the
-	// Go side flow through to image-time lookups because the struct holds
-	// dict identity, not a snapshot.
+	// ctx.provides is a mutable *starlark.Dict; the Go-side `provides`
+	// reference embedded in the struct lets Phase 2 mutations flow
+	// through to image-time lookups because the struct holds dict
+	// identity, not a snapshot.
+	//
+	// ctx.runtime_deps was removed in the feeds-as-modules cutover —
+	// the Starlark-side dict required eagerly materializing every
+	// registered unit's deps, which defeats R20's "closure size bounds
+	// memory" promise at Debian-class scale. Image classes now call
+	// the resolve_closure(artifacts) builtin instead, which walks the
+	// dep graph in Go and materializes only the units it reaches.
 	arch := "x86_64"
 	machine := ""
 	projectVersion := ""
@@ -315,14 +319,12 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 			starlark.String(activeMachine.Kernel.Unit),
 		)
 	}
-	runtimeDeps := starlark.NewDict(0)
 
 	ctxFields := starlark.StringDict{
 		"arch":            starlark.String(arch),
 		"machine":         starlark.String(machine),
 		"project_version": starlark.String(projectVersion),
 		"provides":        provides,
-		"runtime_deps":    runtimeDeps,
 	}
 	if activeMachine != nil {
 		ctxFields["machine_config"] = buildMachineConfigStruct(activeMachine)
@@ -429,11 +431,23 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		}
 	}
 
-	// Populate ctx.runtime_deps: unit name → list of runtime dep names.
-	// Mutates the dict in place; ctx already references it.
-	for _, u := range eng.Units() {
-		if len(u.RuntimeDeps) > 0 {
-			_ = runtimeDeps.SetKey(starlark.String(u.Name), toStarlarkStringList(u.RuntimeDeps))
+	// (Pre-feeds-as-modules this block populated ctx.runtime_deps —
+	// removed; image classes call resolve_closure(artifacts) instead.)
+
+	// Mirror the Starlark provides dict onto proj.Provides before the
+	// image phase so the closure walk (resolve_closure / Engine.closure)
+	// can consult it. This used to happen later, after the image phase,
+	// which worked because the Starlark-side closure walk read provides
+	// directly off ctx; the Go-side walk reads from proj.Provides and
+	// runs during image() evaluation, so the mirror must move earlier.
+	if proj := eng.Project(); proj != nil {
+		proj.Provides = map[string]string{}
+		for _, item := range provides.Items() {
+			k, kok := item[0].(starlark.String)
+			v, vok := item[1].(starlark.String)
+			if kok && vok {
+				proj.Provides[string(k)] = string(v)
+			}
 		}
 	}
 
@@ -481,9 +495,10 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		proj.SyntheticModules = synths
 	}
 
-	// Mirror the Starlark ctx.provides dict onto the Go side so callers that
-	// don't run inside a Starlark thread (the build executor, deploy path,
-	// describe command) can route virtual deps to concrete units.
+	// Re-mirror the Starlark ctx.provides dict onto the Go side. The
+	// pre-image-phase mirror above seeded proj.Provides so the closure
+	// walk could resolve virtuals; image() definitions can declare
+	// `provides` too, so re-sync here to capture any late additions.
 	proj.Provides = map[string]string{}
 	for _, item := range provides.Items() {
 		k, kok := item[0].(starlark.String)

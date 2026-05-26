@@ -33,6 +33,7 @@ func (e *Engine) builtins() starlark.StringDict {
 		"dir_size_mb":    starlark.NewBuiltin("dir_size_mb", fnDirSizeMBPlaceholder),
 		"install_file":     starlark.NewBuiltin("install_file", fnInstallFile),
 		"install_template": starlark.NewBuiltin("install_template", fnInstallTemplate),
+		"resolve_closure":  starlark.NewBuiltin("resolve_closure", e.fnResolveClosure),
 		"True":        starlark.True,
 		"False":       starlark.False,
 	}
