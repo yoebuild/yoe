@@ -132,9 +132,9 @@ func makeAlpineFeed(eng *yoestar.Engine) func(*starlark.Thread, *starlark.Builti
 // TUI search surface (U8) without materializing units.
 //
 // Both callbacks share a state struct that holds the loaded entries
-// and provides table, cached across calls. The first Lookup or Names
-// call for a given arch triggers ParseIndexWithCache; subsequent calls
-// hit the in-memory state directly.
+// and provides table, cached in-memory across calls. The first Lookup
+// or Names call for a given arch parses the on-disk APKINDEX text;
+// subsequent calls hit the in-memory state directly.
 func buildSyntheticModule(eng *yoestar.Engine, composedName, parent, indexRoot string, args alpineFeedArgs) *yoestar.SyntheticModule {
 	s := &archState{
 		indexRoot: indexRoot,
@@ -183,10 +183,11 @@ func (s *archState) cacheFor(arch string) (*archCache, error) {
 			arch, strings.Join(supportedArches(), ", "))
 	}
 	indexPath := filepath.Join(s.indexRoot, alpineArch, "APKINDEX")
-	entries, table, err := apkindex.ParseIndexWithCache(indexPath)
+	entries, err := apkindex.ParseIndexFile(indexPath)
 	if err != nil {
 		return nil, fmt.Errorf("alpine_feed: load %s: %w", indexPath, err)
 	}
+	table := apkindex.BuildProvidesTable(entries)
 	byName := make(map[string]*apkindex.Entry, len(entries))
 	for i := range entries {
 		byName[entries[i].Name] = &entries[i]

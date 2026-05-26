@@ -138,26 +138,3 @@ func TestLookupInSynthetics_PropagatesError(t *testing.T) {
 	}
 }
 
-func TestLookupInSynthetics_StablePointer(t *testing.T) {
-	// The contract: a SyntheticModule's Lookup must return the same
-	// *Unit pointer for repeated calls with the same name. The closure
-	// walk (U7) relies on this to dedup transitively-referenced units.
-	cache := map[string]*Unit{}
-	sm := &SyntheticModule{
-		Name: "test",
-		Lookup: func(name string) (*Unit, error) {
-			if u, ok := cache[name]; ok {
-				return u, nil
-			}
-			u := &Unit{Name: name, Module: "test"}
-			cache[name] = u
-			return u, nil
-		},
-		Names: func() []string { return []string{"foo"} },
-	}
-	a, _ := LookupInSynthetics([]*SyntheticModule{sm}, "foo")
-	b, _ := LookupInSynthetics([]*SyntheticModule{sm}, "foo")
-	if a != b {
-		t.Errorf("pointer identity broken: %p != %p", a, b)
-	}
-}

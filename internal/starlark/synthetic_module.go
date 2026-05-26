@@ -40,13 +40,14 @@ type SyntheticModule struct {
 
 	// Lookup materializes a *Unit for name when the resolver references
 	// it. Returns (nil, nil) for a miss — the resolver continues to the
-	// next module in priority order. Returns (nil, err) only for parse,
-	// I/O, or cache failures the caller should surface to the user.
+	// next module in priority order. Returns (nil, err) only for parse
+	// or I/O failures the caller should surface to the user.
 	//
-	// Implementations must cache returned pointers so repeated Lookups
-	// of the same name return the same *Unit identity. The closure walk
-	// (U7) calls Lookup multiple times for transitive deps and relies
-	// on stable pointers.
+	// Implementations are free to return a fresh *Unit on every call;
+	// pointer identity across repeated Lookups is NOT required. The
+	// closure walk (U7) caches materialized units in the Engine's
+	// proj.Units catalog after the first call, so subsequent references
+	// to the same name never re-enter Lookup.
 	Lookup func(name string) (*Unit, error)
 
 	// Names enumerates every name this synthetic module can materialize.

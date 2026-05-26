@@ -168,9 +168,8 @@ func resolveKeyPaths(moduleDir string, relPaths []string) ([]string, error) {
 // APKINDEX into ModuleDir/<Index>/<alpineArch>/APKINDEX. Returns the
 // number of bytes downloaded (for the maintainer's progress summary).
 //
-// Atomic write order: tmpfile → fsync → rename. Mirrors
-// internal/apkindex/cache.go's SaveCache so a SIGINT mid-write never
-// strands a partial file at the canonical path.
+// Atomic write order: tmpfile → fsync → rename — a SIGINT
+// mid-write never strands a partial file at the canonical path.
 func fetchOne(opts UpdateOptions, d FeedDecl, yoeArch, alpineArch string, trustedKeys []string) (int64, error) {
 	url := fmt.Sprintf("%s/%s/%s/%s/APKINDEX.tar.gz", d.URL, d.Branch, d.Section, alpineArch)
 	fmt.Fprintf(opts.Out, "  %s: fetching %s\n", yoeArch, url)
@@ -237,7 +236,7 @@ func extractInnerAPKINDEX(tarball []byte) ([]byte, error) {
 
 // atomicWrite writes data to path via tmpfile + fsync + rename so a
 // SIGINT mid-write never leaves a partial file at the canonical
-// location. Same shape as internal/apkindex/cache.go:SaveCache.
+// location.
 func atomicWrite(path string, data []byte) error {
 	tmp := path + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)

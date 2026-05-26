@@ -199,28 +199,3 @@ alpine_feed(name = "main")  # missing url, branch, section, index`,
 	}
 }
 
-func TestAlpineFeed_LookupCachesPerArch(t *testing.T) {
-	// Two Lookups must hit the same cached Entry — the in-memory
-	// state survives across calls. Verified by the absence of a
-	// second on-disk parse (cache file written once).
-	dir := projectWithFeed(t)
-	proj, err := yoestar.LoadProject(dir, yoestar.WithBuiltin("alpine_feed", Builtin))
-	if err != nil {
-		t.Fatalf("LoadProject: %v", err)
-	}
-	sm := proj.SyntheticModules[0]
-
-	_, _ = sm.Lookup("openssh-server")
-	cachePath := filepath.Join(dir, "modules/alpine/feeds/main/x86_64/APKINDEX.cache")
-	stat1, err := os.Stat(cachePath)
-	if err != nil {
-		t.Fatalf("cache file should exist after first Lookup: %v", err)
-	}
-	mtime1 := stat1.ModTime()
-
-	_, _ = sm.Lookup("musl")
-	stat2, _ := os.Stat(cachePath)
-	if !stat2.ModTime().Equal(mtime1) {
-		t.Errorf("cache rewritten on second Lookup (mtime changed) — should hit in-memory cache instead")
-	}
-}
