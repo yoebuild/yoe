@@ -3822,7 +3822,15 @@ func (m model) viewSetupQEMU() string {
 		}
 	}
 
+	// Equivalent qemu-system-* command line — a live preview of what `yoe
+	// run` would invoke with the current settings, so the user can see the
+	// effect of each Memory / Display / Ports edit immediately.
 	b.WriteString("\n")
+	b.WriteString(headerStyle.Render("  Equivalent qemu command"))
+	b.WriteString("\n")
+	b.WriteString(m.renderQEMUCommandPreview())
+	b.WriteString("\n")
+
 	if m.qemuEditing {
 		b.WriteString(helpStyle.Render("  type host:guest  enter save  esc cancel"))
 	} else {
@@ -3830,6 +3838,102 @@ func (m model) viewSetupQEMU() string {
 	}
 	b.WriteString("\n")
 
+	return b.String()
+}
+
+// renderQEMUCommandPreview builds the qemu-system-* invocation that `yoe run`
+// would emit with the current Memory / Display / Ports values and renders it
+// indented and line-wrapped at argument boundaries so the full command stays
+// readable on narrow terminals.
+func (m model) renderQEMUCommandPreview() string {
+	machine, ok := m.proj.Machines[m.proj.Defaults.Machine]
+	if !ok {
+		return dimStyle.Render("    (no default machine — set one on the Setup page)") + "\n"
+	}
+
+	// Mirror RunQEMU's flag precedence: --memory > local.star > machine.
+	opts := device.QEMUOptions{
+		Memory:  m.qemuMemory,
+		Display: m.qemuDisplay == "on",
+		Ports:   append([]string(nil), m.qemuPorts...),
+	}
+
+	// Placeholders stand in for paths the launcher would resolve at run
+	// time — the user hasn't necessarily built the image yet, and dragging
+	// the build state into a settings preview would mis-represent what the
+	// command actually says.
+	imgPlaceholder := "<image.img>"
+	kernelPlaceholder := ""
+	needsDirectBoot := machine.QEMU == nil || machine.QEMU.Firmware == ""
+	if needsDirectBoot && machine.Kernel.Unit != "" {
+		kernelPlaceholder = "<" + machine.Kernel.Unit + "/vmlinuz>"
+	}
+
+	args := device.BuildQEMUArgs(machine, opts, imgPlaceholder, kernelPlaceholder)
+
+	// Width budget for the wrapper: subtract the 4-char indent so wrapped
+	// continuations align under the first arg. Fall back to 80 if we don't
+	// yet know the terminal size (the very first render before the
+	// WindowSizeMsg arrives).
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+	return wrapShellCommand(device.QEMUBinary(machine.Arch), args, width-4, "    ")
+}
+
+// wrapShellCommand renders a binary + argv as an indented, backslash-continued
+// shell command, then runs the whole block through dimStyle.
+func wrapShellCommand(bin string, args []string, width int, indent string) string {
+	return dimStyle.Render(wrapShellCommandText(bin, args, width, indent))
+}
+
+// wrapShellCommandText is the pure-text wrapper underneath wrapShellCommand.
+// Splitting them out lets tests assert on the raw layout without fighting
+// lipgloss's multi-line padding.
+func wrapShellCommandText(bin string, args []string, width int, indent string) string {
+	if width < 20 {
+		width = 20
+	}
+	quote := func(s string) string {
+		if s == "" {
+			return "''"
+		}
+		needsQuote := false
+		for _, r := range s {
+			if r == ' ' || r == '\t' || r == '"' || r == '\'' || r == '$' || r == '*' ||
+				r == '?' || r == '[' || r == ']' || r == '(' || r == ')' || r == '&' ||
+				r == ';' || r == '|' || r == '<' || r == '>' || r == '`' || r == '\\' {
+				needsQuote = true
+				break
+			}
+		}
+		if !needsQuote {
+			return s
+		}
+		// Single-quote and escape any embedded single quotes the bash way.
+		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	}
+
+	var b strings.Builder
+	b.WriteString(indent)
+	line := bin
+	for _, a := range args {
+		tok := quote(a)
+		// +1 for the leading space between tokens, +2 reserved for the
+		// trailing " \\" continuation.
+		if len(indent)+len(line)+1+len(tok) > width-2 {
+			b.WriteString(line)
+			b.WriteString(" \\\n")
+			b.WriteString(indent)
+			b.WriteString("  ")
+			line = tok
+			continue
+		}
+		line += " " + tok
+	}
+	b.WriteString(line)
+	b.WriteString("\n")
 	return b.String()
 }
 

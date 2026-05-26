@@ -14,6 +14,11 @@ and this project adheres to
   persist to `local.star` and apply automatically the next time you launch
   the guest — no need to remember `--memory`, `--display`, or `--port` flags
   for routine work.
+- **The QEMU settings screen shows the equivalent qemu command.** A live
+  preview at the bottom of the sub-screen renders the exact
+  `qemu-system-*` invocation `yoe run` would emit with the current Memory /
+  Display / Ports values, so you can confirm what each tweak changes
+  before launching — and copy-paste the line to drive QEMU directly.
 
 ## [0.10.14] - 2026-05-26
 

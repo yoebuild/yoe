@@ -154,35 +154,12 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 
 	// Build common QEMU args (without image path — that differs host vs container)
 	buildArgs := func(imgFile string) []string {
-		a := baseQEMUArgs(machine, opts)
-		a = append(a, "-drive", fmt.Sprintf("file=%s,format=raw,if=virtio", imgFile))
-
-		// Merge machine-defined ports with CLI ports. A CLI --port entry
-		// whose guest port matches a machine forward replaces it.
-		ports := mergeQEMUPorts(machine.QEMUPorts(), opts.Ports)
-
-		netdev := "user,id=net0"
-		for _, port := range ports {
-			// port format is "host:guest", QEMU wants "hostfwd=tcp::host-:guest"
-			netdev += fmt.Sprintf(",hostfwd=tcp::%s", strings.Replace(port, ":", "-:", 1))
-		}
-		a = append(a, "-netdev", netdev)
-		a = append(a, "-device", "virtio-net-pci,netdev=net0")
-
-		// Direct kernel boot: when no firmware is configured, pass
-		// -kernel and -append for architectures that need it (arm64, riscv64).
+		kernelPath := ""
 		needsDirectBoot := machine.QEMU == nil || machine.QEMU.Firmware == ""
 		if needsDirectBoot && machine.Kernel.Unit != "" {
-			kernelPath := findKernelImage(projectDir, machine.Arch, machine.Kernel.Unit)
-			if kernelPath != "" {
-				a = append(a, "-kernel", kernelPath)
-				if machine.Kernel.Cmdline != "" {
-					a = append(a, "-append", machine.Kernel.Cmdline)
-				}
-			}
+			kernelPath = findKernelImage(projectDir, machine.Arch, machine.Kernel.Unit)
 		}
-
-		return a
+		return BuildQEMUArgs(machine, opts, imgFile, kernelPath)
 	}
 
 	// Try host QEMU first
@@ -362,6 +339,47 @@ func qemuBinary(arch string) string {
 	default:
 		return "qemu-system-x86_64"
 	}
+}
+
+// QEMUBinary returns the qemu-system-* executable that yoe would launch for
+// the given target arch. Exported so callers outside this package (the TUI
+// command preview, in particular) can render the full invocation.
+func QEMUBinary(arch string) string { return qemuBinary(arch) }
+
+// BuildQEMUArgs assembles the qemu-system-* argv (excluding the binary
+// itself) that yoe would pass for the given machine + options + concrete
+// on-disk paths. Both `RunQEMU` and the TUI's "equivalent command line"
+// preview go through here so the two stay in lock-step.
+//
+// imgPath is required; kernelPath may be empty (no `-kernel` argument is
+// emitted) or a placeholder string when the image hasn't been built yet
+// — the caller picks the placeholder.
+func BuildQEMUArgs(machine *yoestar.Machine, opts QEMUOptions, imgPath, kernelPath string) []string {
+	a := baseQEMUArgs(machine, opts)
+	a = append(a, "-drive", fmt.Sprintf("file=%s,format=raw,if=virtio", imgPath))
+
+	// Merge machine-defined ports with extra ports. An extra entry whose
+	// guest port matches a machine forward replaces it (qemu-in-qemu).
+	ports := mergeQEMUPorts(machine.QEMUPorts(), opts.Ports)
+	netdev := "user,id=net0"
+	for _, port := range ports {
+		// port format is "host:guest", QEMU wants "hostfwd=tcp::host-:guest"
+		netdev += fmt.Sprintf(",hostfwd=tcp::%s", strings.Replace(port, ":", "-:", 1))
+	}
+	a = append(a, "-netdev", netdev)
+	a = append(a, "-device", "virtio-net-pci,netdev=net0")
+
+	// Direct kernel boot: when no firmware is configured, pass -kernel and
+	// -append for architectures that need it (arm64, riscv64). Skipped if
+	// the caller couldn't resolve a kernel path.
+	needsDirectBoot := machine.QEMU == nil || machine.QEMU.Firmware == ""
+	if needsDirectBoot && machine.Kernel.Unit != "" && kernelPath != "" {
+		a = append(a, "-kernel", kernelPath)
+		if machine.Kernel.Cmdline != "" {
+			a = append(a, "-append", machine.Kernel.Cmdline)
+		}
+	}
+	return a
 }
 
 func detectHostArch() string {
