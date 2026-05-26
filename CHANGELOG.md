@@ -10,12 +10,12 @@ and this project adheres to
 
 - **Modules tab no longer scrolls the title off the top.** When a project
   declared one or more feeds, the FEEDS section pushed the body past the
-  terminal height and you'd lose the title, tab bar, and column header.
-  The viewport now sizes itself to leave room for the FEEDS section.
-- **The edit shortcut is hidden for feed-supplied units.** Units coming
-  from a feed (e.g. `alpine_feed()`) have no `.star` file to open, so
-  the Units tab no longer advertises `e edit` when the cursor is on one,
-  and pressing `e` on such a unit is a silent no-op.
+  terminal height and you'd lose the title, tab bar, and column header. The
+  viewport now sizes itself to leave room for the FEEDS section.
+- **The edit shortcut is hidden for feed-supplied units.** Units coming from a
+  feed (e.g. `alpine_feed()`) have no `.star` file to open, so the Units tab no
+  longer advertises `e edit` when the cursor is on one, and pressing `e` on such
+  a unit is a silent no-op.
 
 ## [0.10.13] - 2026-05-26
 
