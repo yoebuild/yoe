@@ -21,7 +21,25 @@ type loadConfig struct {
 	projectFile            string // alternative project file (instead of PROJECT.star)
 	showShadows            bool   // emit shadow / provides-override notices (default off)
 	allowDuplicateProvides bool   // accept multiple intra-module providers of the same virtual
+	extraBuiltins          []extraBuiltin
 }
+
+// extraBuiltin pairs a Starlark name with a factory that produces the
+// builtin once the Engine exists. The factory is called from
+// Engine.builtins() with the Engine instance so closures (like
+// alpine_feed) can hold a reference to it without an import cycle
+// between internal/starlark and the package that defines the builtin.
+type extraBuiltin struct {
+	name    string
+	factory BuiltinFactory
+}
+
+// BuiltinFactory produces a Starlark builtin closed over the loading
+// Engine. External packages (internal/feeds/alpine, etc.) use this to
+// register their own builtins via WithBuiltin without forcing
+// internal/starlark to import the heavy parser packages those builtins
+// pull in (apkindex, dpkg, etc.).
+type BuiltinFactory func(*Engine) *starlark.Builtin
 
 // WithModuleSync provides a callback that is invoked after PROJECT.star is
 // evaluated to ensure all declared modules are available (e.g. cloned).
@@ -56,6 +74,18 @@ func WithShowShadows(v bool) LoadOption {
 // apk's "any of these satisfies the dep" semantics.
 func WithAllowDuplicateProvides(v bool) LoadOption {
 	return func(c *loadConfig) { c.allowDuplicateProvides = v }
+}
+
+// WithBuiltin adds an extra Starlark builtin to the engine's predeclared
+// set before evaluation. The factory is invoked from inside builtins()
+// with the Engine instance so the builtin can hold a closure over it —
+// alpine_feed (internal/feeds/alpine) uses this to call
+// Engine.RegisterSyntheticModule without internal/starlark importing
+// internal/apkindex.
+func WithBuiltin(name string, factory BuiltinFactory) LoadOption {
+	return func(c *loadConfig) {
+		c.extraBuiltins = append(c.extraBuiltins, extraBuiltin{name: name, factory: factory})
+	}
 }
 
 // LoadProject finds the project root, evaluates all .star files, and returns
@@ -144,6 +174,16 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	eng.SetProjectRoot(root)
 	eng.SetShowShadows(cfg.showShadows)
 	eng.SetAllowDuplicateProvides(cfg.allowDuplicateProvides)
+
+	// Materialize any caller-supplied builtins (alpine_feed, etc.) so
+	// they're predeclared before any .star file evaluates.
+	if len(cfg.extraBuiltins) > 0 {
+		specs := make(map[string]BuiltinFactory, len(cfg.extraBuiltins))
+		for _, b := range cfg.extraBuiltins {
+			specs[b.name] = b.factory
+		}
+		eng.SetExtraBuiltins(specs)
+	}
 
 	// Evaluate project file (PROJECT.star or --project override)
 	projFile := filepath.Join(root, "PROJECT.star")
@@ -288,6 +328,27 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		ctxFields["machine_config"] = buildMachineConfigStruct(activeMachine)
 	}
 	eng.SetVar("ctx", starlarkstruct.FromStringDict(starlark.String("ctx"), ctxFields))
+
+	// Phase 1c: Evaluate each module's MODULE.star fully (not just the
+	// module_info peek used for the dep walk). This is where alpine_feed,
+	// debian_feed, and other feed-declaring builtins run — they register
+	// SyntheticModules against the engine. Runs after machines + ctx
+	// build so the feed builtins see the active arch.
+	//
+	// The project itself doesn't have a MODULE.star; only declared
+	// modules do. Set arch on the engine so lazy feed lookups can filter
+	// per-arch entries without arch threading.
+	eng.SetActiveArch(arch)
+	for i, rm := range resolvedModules {
+		modFile := filepath.Join(rm.path, "MODULE.star")
+		if _, statErr := os.Stat(modFile); statErr != nil {
+			continue // module without a MODULE.star — rare, but tolerated
+		}
+		eng.SetCurrentModule(rm.name, i+1)
+		if err := eng.ExecFile(modFile); err != nil {
+			return nil, fmt.Errorf("evaluating %s: %w", modFile, err)
+		}
+	}
 
 	// Phase 1b: Evaluate container definitions (project + modules).
 	// Containers must be loaded before units so that units can reference them.

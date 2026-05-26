@@ -17,6 +17,7 @@ import (
 	"github.com/yoebuild/yoe/internal/bootstrap"
 	"github.com/yoebuild/yoe/internal/build"
 	"github.com/yoebuild/yoe/internal/device"
+	"github.com/yoebuild/yoe/internal/feeds/alpine"
 	"github.com/yoebuild/yoe/internal/module"
 	"github.com/yoebuild/yoe/internal/repo"
 	"github.com/yoebuild/yoe/internal/resolve"
@@ -537,6 +538,7 @@ func projectLoadOpts() []yoestar.LoadOption {
 		yoestar.WithModuleSync(module.SyncIfNeeded),
 		yoestar.WithShowShadows(globalShowShadows),
 		yoestar.WithAllowDuplicateProvides(globalAllowDuplicateProvides),
+		yoestar.WithBuiltin("alpine_feed", alpine.Builtin),
 	}
 	if globalProjectFile != "" {
 		opts = append(opts, yoestar.WithProjectFile(globalProjectFile))

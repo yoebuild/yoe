@@ -1,0 +1,206 @@
+package alpine
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
+)
+
+// realisticFixture is a tiny APKINDEX: musl + openssh-server, enough
+// for end-to-end registration and Lookup checks.
+const realisticFixture = `C:Q1wmRLywlDhwD28lS6Qlp6nGlzzIk=
+P:openssh-server
+V:9.9_p2-r0
+A:x86_64
+S:482001
+I:1138688
+T:OpenBSD SSH server
+L:BSD-2-Clause
+o:openssh
+D:musl
+
+C:Q1gccWqxnp4T7mk08WsE7/XtS4YI4=
+P:musl
+V:1.2.5-r10
+A:x86_64
+S:128000
+I:300000
+T:musl libc
+L:MIT
+o:musl
+p:so:libc.musl-x86_64.so.1=1
+`
+
+// projectWithFeed builds a temp project tree:
+//
+//	PROJECT.star            (declares module-alpine local)
+//	machines/qemu.star      (x86_64 machine)
+//	modules/alpine/MODULE.star (calls alpine_feed)
+//	modules/alpine/feeds/main/x86_64/APKINDEX
+//
+// Returns the project root. Each test gets a fresh tree under t.TempDir.
+func projectWithFeed(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	files := map[string]string{
+		"PROJECT.star": `project(name = "p", version = "0.1.0",
+    defaults = defaults(machine = "qemu-x86_64"),
+    modules = [
+        module("https://example.com/alpine.git", local = "modules/alpine"),
+    ],
+)`,
+		"machines/qemu.star": `machine(name = "qemu-x86_64", arch = "x86_64")`,
+		"modules/alpine/MODULE.star": `module_info(name = "alpine")
+alpine_feed(
+    name = "main",
+    url = "https://dl-cdn.alpinelinux.org/alpine",
+    branch = "v3.21",
+    section = "main",
+    index = "feeds/main",
+)`,
+		"modules/alpine/feeds/main/x86_64/APKINDEX": realisticFixture,
+	}
+	for rel, content := range files {
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestAlpineFeed_RegistersSyntheticModule(t *testing.T) {
+	dir := projectWithFeed(t)
+	proj, err := yoestar.LoadProject(dir, yoestar.WithBuiltin("alpine_feed", Builtin))
+	if err != nil {
+		t.Fatalf("LoadProject: %v", err)
+	}
+	if len(proj.SyntheticModules) != 1 {
+		t.Fatalf("SyntheticModules: got %d, want 1", len(proj.SyntheticModules))
+	}
+	sm := proj.SyntheticModules[0]
+	if sm.Name != "alpine.main" {
+		t.Errorf("Name: got %q, want %q", sm.Name, "alpine.main")
+	}
+	if sm.Parent != "alpine" {
+		t.Errorf("Parent: got %q, want %q", sm.Parent, "alpine")
+	}
+}
+
+func TestAlpineFeed_LookupMaterializes(t *testing.T) {
+	dir := projectWithFeed(t)
+	proj, err := yoestar.LoadProject(dir, yoestar.WithBuiltin("alpine_feed", Builtin))
+	if err != nil {
+		t.Fatalf("LoadProject: %v", err)
+	}
+	sm := proj.SyntheticModules[0]
+
+	u, err := sm.Lookup("openssh-server")
+	if err != nil {
+		t.Fatalf("Lookup openssh-server: %v", err)
+	}
+	if u == nil {
+		t.Fatal("Lookup openssh-server: nil")
+	}
+	if u.Name != "openssh-server" || u.Version != "9.9_p2" {
+		t.Errorf("openssh-server: name=%q version=%q (want openssh-server, 9.9_p2)", u.Name, u.Version)
+	}
+	if u.Module != "alpine.main" {
+		t.Errorf("Module: got %q, want %q", u.Module, "alpine.main")
+	}
+	if len(u.RuntimeDeps) != 1 || u.RuntimeDeps[0] != "musl" {
+		t.Errorf("RuntimeDeps: got %v, want [musl]", u.RuntimeDeps)
+	}
+
+	musl, err := sm.Lookup("musl")
+	if err != nil {
+		t.Fatalf("Lookup musl: %v", err)
+	}
+	if musl == nil || musl.Name != "musl" {
+		t.Errorf("musl: %+v", musl)
+	}
+
+	miss, err := sm.Lookup("not-a-package")
+	if err != nil {
+		t.Errorf("miss: got err %v, want nil", err)
+	}
+	if miss != nil {
+		t.Errorf("miss: got %+v, want nil", miss)
+	}
+}
+
+func TestAlpineFeed_Names(t *testing.T) {
+	dir := projectWithFeed(t)
+	proj, err := yoestar.LoadProject(dir, yoestar.WithBuiltin("alpine_feed", Builtin))
+	if err != nil {
+		t.Fatalf("LoadProject: %v", err)
+	}
+	sm := proj.SyntheticModules[0]
+	names := sm.Names()
+
+	want := map[string]bool{"musl": false, "openssh-server": false}
+	for _, n := range names {
+		if _, ok := want[n]; ok {
+			want[n] = true
+		}
+	}
+	for n, ok := range want {
+		if !ok {
+			t.Errorf("Names missing %q (got %v)", n, names)
+		}
+	}
+}
+
+func TestAlpineFeed_MissingArgs(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"PROJECT.star":               `project(name = "p", version = "0.1.0", defaults = defaults(machine = "qemu"), modules = [module("https://example.com/alpine.git", local = "modules/alpine")])`,
+		"machines/qemu.star":         `machine(name = "qemu", arch = "x86_64")`,
+		"modules/alpine/MODULE.star": `module_info(name = "alpine")
+alpine_feed(name = "main")  # missing url, branch, section, index`,
+	}
+	for rel, content := range files {
+		full := filepath.Join(dir, rel)
+		_ = os.MkdirAll(filepath.Dir(full), 0o755)
+		_ = os.WriteFile(full, []byte(content), 0o644)
+	}
+	_, err := yoestar.LoadProject(dir, yoestar.WithBuiltin("alpine_feed", Builtin))
+	if err == nil {
+		t.Fatal("want error for missing args")
+	}
+	if !strings.Contains(err.Error(), "alpine_feed") {
+		t.Errorf("err: %v, want alpine_feed in message", err)
+	}
+}
+
+func TestAlpineFeed_LookupCachesPerArch(t *testing.T) {
+	// Two Lookups must hit the same cached Entry — the in-memory
+	// state survives across calls. Verified by the absence of a
+	// second on-disk parse (cache file written once).
+	dir := projectWithFeed(t)
+	proj, err := yoestar.LoadProject(dir, yoestar.WithBuiltin("alpine_feed", Builtin))
+	if err != nil {
+		t.Fatalf("LoadProject: %v", err)
+	}
+	sm := proj.SyntheticModules[0]
+
+	_, _ = sm.Lookup("openssh-server")
+	cachePath := filepath.Join(dir, "modules/alpine/feeds/main/x86_64/APKINDEX.cache")
+	stat1, err := os.Stat(cachePath)
+	if err != nil {
+		t.Fatalf("cache file should exist after first Lookup: %v", err)
+	}
+	mtime1 := stat1.ModTime()
+
+	_, _ = sm.Lookup("musl")
+	stat2, _ := os.Stat(cachePath)
+	if !stat2.ModTime().Equal(mtime1) {
+		t.Errorf("cache rewritten on second Lookup (mtime changed) — should hit in-memory cache instead")
+	}
+}

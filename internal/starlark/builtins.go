@@ -42,6 +42,13 @@ func (e *Engine) builtins() starlark.StringDict {
 		d[k] = v
 	}
 
+	// Merge extra builtins registered via WithBuiltin LoadOption.
+	// Materialized once (SetExtraBuiltins) so each factory runs against
+	// the live Engine without re-allocating per ExecFile call.
+	for k, v := range e.extraBuiltins {
+		d[k] = v
+	}
+
 	return d
 }
 

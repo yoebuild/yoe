@@ -59,7 +59,41 @@ type Engine struct {
 	// friends during MODULE.star evaluation. The loader pulls them after
 	// the real-module walk to assign Priority and attach to the project.
 	syntheticModules []*SyntheticModule
+
+	// extraBuiltins holds (name, *Builtin) pairs registered via
+	// WithBuiltin LoadOption. Materialized once when builtins() is first
+	// called so the factories execute against the live Engine.
+	extraBuiltins map[string]*starlark.Builtin
+
+	// activeArch carries the resolver's currently active architecture
+	// after machine evaluation. Read by lazy feed lookups (synthetic
+	// module Lookup callbacks) so an alpine_feed Lookup serves entries
+	// matching the project's arch without needing the arch passed in
+	// through every call site.
+	activeArch string
 }
+
+// SetExtraBuiltins materializes the WithBuiltin factories. Called by the
+// loader after the Engine is constructed but before any .star file is
+// evaluated.
+func (e *Engine) SetExtraBuiltins(specs map[string]BuiltinFactory) {
+	if e.extraBuiltins == nil {
+		e.extraBuiltins = make(map[string]*starlark.Builtin, len(specs))
+	}
+	for name, factory := range specs {
+		e.extraBuiltins[name] = factory(e)
+	}
+}
+
+// SetActiveArch records the arch the loader has settled on for this
+// evaluation pass. Lazy feed lookups (alpine_feed, debian_feed) consult
+// this when materializing units so per-arch APKINDEX entries can be
+// filtered without threading arch through every call.
+func (e *Engine) SetActiveArch(arch string) { e.activeArch = arch }
+
+// ActiveArch returns the active architecture set by the loader. Empty
+// before SetActiveArch is called.
+func (e *Engine) ActiveArch() string { return e.activeArch }
 
 func NewEngine() *Engine {
 	return &Engine{
@@ -88,6 +122,12 @@ func (e *Engine) SetCurrentModule(name string, index int) {
 	e.currentModule = name
 	e.currentModuleIndex = index
 }
+
+// CurrentModule returns the name of the module currently being
+// evaluated, or "" when running at the project root. Used by feed
+// builtins (alpine_feed, debian_feed) to compose synthetic module
+// names like "alpine.main".
+func (e *Engine) CurrentModule() string { return e.currentModule }
 
 // SetShowShadows toggles emission of stderr notices about cross-module unit
 // shadowing and intra-module `provides` overrides. Default is off.
