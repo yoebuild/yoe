@@ -788,7 +788,7 @@ visible. Press `P` to capture the new HEAD as the new pin.
 | `r`         | Run an image unit (boot in QEMU)                             |
 | `f`         | Flash a built image to a removable device                    |
 | `D`         | Deploy a non-image unit to a host over SSH                   |
-| `e`         | Open unit's `.star` file in `$EDITOR`                        |
+| `e`         | Open unit's `.star` file in `$EDITOR` (hidden for feed units)|
 | `$`         | Open `$SHELL` in the unit's checked-out source dir           |
 | `u`         | Toggle the unit's source between pin and dev mode            |
 | `l`         | Open unit's build log in `$EDITOR`                           |
