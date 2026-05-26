@@ -10,16 +10,26 @@ origin: docs/specs/2026-05-25-module-debian.md
 
 ## Summary
 
-Implement the Debian backend as 20 units across 6 phases: format-named Go
+Implement the Debian backend as 19 units across 6 phases: format-named Go
 internals (`internal/dpkg`, `internal/deb`, `internal/repo/deb_emitter.go`), a
-parallel `toolchain-glibc` container unit, the shared synthetic-module
-infrastructure that lets `debian_feed()` materialize one unit per `Packages`
-entry (closes most of feeds-as-modules along the way), a Debian-format
-signed-repo emitter via `apt-ftparchive` + `gpg` shell-out, image assembly that
-runs `dpkg --configure -a` under binfmt with policy-rc.d / ischroot stubs,
-on-device trust via `signed-by=` to `/etc/apt/keyrings/<project>.gpg` with
-HTTPS-only sources, and a separate `module-debian` git repo holding the
-bootstrap Debian keyring + committed `Packages` snapshots.
+parallel `toolchain-glibc` container unit, a `debian_feed()` Starlark builtin
+that materializes synthetic units against the existing feeds-as-modules
+infrastructure, a Debian-format signed-repo emitter via `apt-ftparchive` +
+`gpg` shell-out, image assembly that runs `dpkg --configure -a` under binfmt
+with policy-rc.d / ischroot stubs, on-device trust via `signed-by=` to
+`/etc/apt/keyrings/<project>.gpg` with HTTPS-only sources, and a separate
+`module-debian` git repo holding the bootstrap Debian keyring + committed
+`Packages` snapshots.
+
+**Hard prerequisite: feeds-as-modules ships first.** The synthetic-module
+infrastructure (loader integration, lazy synthesis, on-disk parsed-index
+cache, TUI filter-first, format-agnostic `Module`/`Unit` types) lives in
+`docs/specs/2026-05-13-feeds-as-modules.md` and its forthcoming plan. This
+plan consumes that machinery; it does not rebuild it. The one-mechanism
+commitment (alpine_pkg.star deleted, `*_feed` is the only path for distro
+package consumption) means feeds-as-modules and the Debian backend share the
+same resolver/loader/cache path from day one. Implementation order:
+feeds-as-modules lands first, then this plan starts.
 
 ---
 
@@ -42,7 +52,9 @@ attributes each unit to the specific R-IDs it satisfies. See origin for full
 requirement text.
 
 - R1–R5 (module surface, `debian_feed`, synthetic modules, `module-debian` repo,
-  format-agnostic internals) → Phases 2, 6
+  format-agnostic internals) → Phases 2, 6. **R3 (synthetic-module mechanism)
+  and the loader integration are delivered by feeds-as-modules upstream; this
+  plan consumes the existing machinery for `debian_feed` materialization.**
 - R6–R7 (internal dpkg/apt machinery, resolver dep-syntax) → Phase 1, Phase 2
 - R8–R9 (`toolchain-glibc` container, class toolchain selection) → Phase 1
 - R10–R11 (in-tree `Packages` storage, `yoe update-feeds`) → Phase 5
@@ -66,9 +78,15 @@ publish), F5 (target install/upgrade). **Origin acceptance examples:** AE1–AE1
 
 ## Scope Boundaries
 
-- Full `alpine_feed()` end-to-end (covered by
-  `docs/specs/2026-05-13-feeds-as-modules.md`; this plan implements only the
-  **shared synthetic-module infrastructure** both feeds need).
+- Synthetic-module infrastructure itself: loader integration, lazy synthesis,
+  on-disk parsed-index cache, TUI filter-first, format-agnostic
+  `Module`/`Unit` types. All of this is delivered by feeds-as-modules upstream
+  (`docs/specs/2026-05-13-feeds-as-modules.md`, R3 + R5 + R20-R23). This plan
+  consumes that machinery via `debian_feed`; U5 is a fixture-driven
+  integration check, not new infrastructure.
+- `alpine_feed()` and the `module-alpine` migration off `alpine_pkg.star`
+  (covered by feeds-as-modules' implementation plan; ships before this plan
+  starts Phase 2).
 - `module-ubuntu` and `ubuntu_feed()` (design accommodates; separate spec/plan).
 - Migrating `module-alpine`'s 1000+ `alpine_pkg.star` files to synthetic modules
   (covered by feeds-as-modules rollout).
@@ -853,83 +871,88 @@ anything).
 
 ---
 
-### Phase 2 — Synthetic modules and the `debian_feed` builtin
+### Phase 2 — `debian_feed` builtin on top of feeds-as-modules infrastructure
 
-#### U5. Synthetic-module infrastructure in the loader
+#### U5. Feeds-as-modules integration validation
 
-**Goal:** Extend the module loader so a Starlark builtin call
-(`debian_feed(...)` or future `alpine_feed(...)`) can materialize a synthetic
-module that participates in resolver priority. This unit implements the shared
-infrastructure that both feeds use.
+**Goal:** Confirm that feeds-as-modules' synthetic-module infrastructure
+(`internal/starlark/synthetic_module.go`, loader hooks, on-disk parsed-index
+cache, TUI filter-first behavior, format-agnostic `Module`/`Unit` types) is
+sufficient for `debian_feed`'s needs before building U6 on top of it. This is
+not new code — it's a fixture-driven smoke test against the existing
+feeds-as-modules API that catches API gaps before they bite during U6.
 
-**Requirements:** R3, R5 (origin spec); R5, R7 (feeds-as-modules spec).
+**Requirements:** R3, R5 (origin spec). Note: R3 is delivered by
+feeds-as-modules upstream; this unit verifies the integration.
 
-**Dependencies:** U1 (the dpkg parser is the input for the Debian-flavored
-materializer that lands in U6).
+**Dependencies:** feeds-as-modules has shipped. U1 (dpkg parser available for
+the fixture).
 
 **Files:**
 
-- Create: `internal/starlark/synthetic_module.go` — `SyntheticModule` struct
-  (`Name string`, `Units []*Unit`, `Priority int`); registration via
-  `(e *Engine) registerSyntheticModule(mod *SyntheticModule)`.
-- Modify: `internal/starlark/loader.go:137-460` — at end of phase 1 (after
-  `modules` walk), inject synthetic modules at the bottom of the priority list
-  per origin spec R3 ("synthetic modules rank below non-feed modules by
-  default").
-- Modify: `internal/starlark/loader.go:486-512` — `locateModulePath`
-  short-circuits to return the synthetic module's composed name (e.g.
-  `debian.bookworm.main`) when the module ref matches a synthetic module that's
-  already registered.
-- Modify: `internal/starlark/builtins.go:596-802` — `registerUnit` accepts a
-  `synthetic` flag so synthetic units get the right `Module` attribution.
-- Test: `internal/starlark/synthetic_module_test.go`, integration test in
-  `loader_test.go`.
+- Create: `internal/starlark/synthetic_module_debian_test.go` — table-driven
+  fixture test that calls feeds-as-modules' synthetic-module API with
+  debian-shaped inputs (one fake `Packages` entry per row, multi-arch, virtual
+  providers, alt-bar deps). Exercises:
+  - Composed name `debian.<suite>.<component>` works as a synthetic module
+    name (e.g. `debian.bookworm.main`).
+  - `prefer_modules = {"openssl": "debian.bookworm.main"}` resolves to the
+    synthetic unit.
+  - Lazy materialization: requesting one unit by name materializes only that
+    unit; the unmaterialized siblings stay deferred (assertion via internal
+    instrumentation counter or memory measurement).
+  - On-disk parsed-index cache: second load against same fixture is faster
+    than first; cache file exists in the expected location.
 
 **Approach:**
 
-- Synthetic modules are not on disk — they exist only in-memory at evaluation
-  time and are emitted by the `debian_feed` / `alpine_feed` builtins (U6 and
-  feeds-as-modules respectively).
-- The composed name (`<distro>.<suite>.<component>` for Debian,
-  `<distro>.<component>` for Alpine) is set by the emitting builtin; the loader
-  treats the name as opaque.
-- `prefer_modules` matches synthetic module names directly — no resolver change
-  needed (the existing `registerUnit` path does string-equality matching on
-  `r.Module`).
-- Synthetic units carry a `Module` attribution back to the synthetic module
-  name; TUI display follows automatically.
+- Reuses feeds-as-modules' loader and types verbatim. No yoe-core changes
+  beyond a fixture-only `debian_feed_test_only(...)` builtin if needed for the
+  test (preferable: register the synthetic module directly via the Go API
+  exposed by feeds-as-modules, no Starlark surface).
+- If the test surfaces an API gap (something `debian_feed` needs that
+  feeds-as-modules didn't anticipate), the fix lives in feeds-as-modules, not
+  here. Treat U5 as the integration gate: if it can't pass, U6 doesn't start.
 
 **Patterns to follow:**
 
-- `internal/starlark/loader.go:264-404` — phase boundaries; the synthetic-module
-  injection point.
+- The synthetic-module test fixtures introduced by feeds-as-modules.
 
 **Test scenarios:**
 
-- Happy path: a test registers one synthetic module with two synthetic units;
-  `LoadProjectFromRoot` produces a project with those units listed and
-  attributed correctly. Covers AE1 setup.
-- Happy path: a real `module-core` unit `openssl` plus a synthetic module
-  containing `openssl` → the source-built one wins (synthetic ranks below).
-  Covers AE1.
+- Happy path: register a fixture debian synthetic module with two synthetic
+  units; resolver produces a closure containing them when artifacts reference
+  them.
+- Happy path: same setup with a non-feed module also declaring `openssl` →
+  source-built wins (synthetic ranks below). Covers AE1.
 - Happy path: same setup with
   `prefer_modules = {"openssl": "debian.bookworm.main"}` → synthetic wins.
   Covers AE2.
-- Edge case: a synthetic module name collides with a real module's
-  `module_info(name=...)` → evaluation error.
-- Edge case: a synthetic unit whose name collides with a project-built unit at
-  the same priority → existing collision rules apply (error).
-- Integration: a project that registers two synthetic modules
-  (`debian.bookworm.main` and `debian.bookworm-security.main`) and one real
-  module (`module-core`); resolution order is `module-core` >
-  `debian.bookworm-security.main` > `debian.bookworm.main` (later debian_feed
-  call wins among feeds; non-feed beats feed). Covers AE3.
+- Lazy materialization assertion: register a synthetic module with 1000
+  fixture entries; reference only 3; instrumented counter shows only 3 `*Unit`
+  values were constructed. Catches a feeds-as-modules regression early.
+- Cache assertion: load the fixture twice within the test; second load
+  bypasses re-parse and is observably faster (timer or counter check).
 
 **Verification:**
 
-- `go test ./internal/starlark/...` passes.
-- A small e2e fixture: a hand-written PROJECT.star calling a no-op
-  `_synthetic_module(...)` test-only builtin produces a resolvable unit graph.
+- `go test ./internal/starlark/...` passes including the new fixture.
+- No new code in `internal/starlark/synthetic_module.go` or `loader.go` —
+  feeds-as-modules' implementation is consumed unchanged. If U5 needs core
+  changes, they file upstream against feeds-as-modules and ship there.
+
+<!--
+Original U5 (build synthetic-module infrastructure in the loader) moved
+upstream to docs/specs/2026-05-13-feeds-as-modules.md (R3, R5, R20-R23) and
+its forthcoming plan. The Debian backend now consumes that infrastructure
+verbatim. The feeds-as-modules planner should pick up the original U5's test
+scenarios (synthetic-module-vs-real-module precedence, prefer_modules
+matching, collision detection, multi-feed priority ordering) — they apply
+equally to alpine_feed and debian_feed.
+
+References to U5 in later units' Dependencies sections should be read as
+"feeds-as-modules has shipped AND U5's integration check has passed."
+-->
 
 ---
 
@@ -2309,7 +2332,8 @@ R13, R15, R17, R18, R19, R20, R21, R22, R24, R26.
 | Phased updates on `bookworm-updates` could cause divergent fleet behavior                                                       | `APT::Get::Never-Include-Phased-Updates "true";` baked into images (U16) neutralizes this.                                                                                                                                                                                                                                                      |
 | `apt-ftparchive` shell-out is slow on large repos                                                                               | The project repo is typically small (project debs + curated mirrored debs, not the full Debian archive). If footprint grows, revisit the Go-native `apt-ftparchive` replacement (Scope Boundaries).                                                                                                                                             |
 | `module-debian` and `yoe core` versions need to stay in lockstep across Debian release bumps                                    | `yoe init` template + `testdata/e2e-project/PROJECT.star` pin a specific module-debian ref. Bumping is a coordinated change across both repos; rolling-deploy story documented in `docs/module-debian.md`.                                                                                                                                      |
-| `feeds-as-modules` spec is a prerequisite but is "Not started" today                                                            | This plan implements the shared infrastructure (U5) as a side effect; coordinate with the feeds-as-modules author to ensure the alpine_feed work consumes the same machinery. If the two efforts land out of order, the synthetic-module infrastructure ships first as part of this plan and feeds-as-modules' alpine_feed builtin lands later. |
+| `feeds-as-modules` is a hard prerequisite; this plan does not start until it ships                                              | Sequencing is committed: feeds-as-modules implements the synthetic-module loader, lazy synthesis, on-disk parsed-index cache, TUI filter-first, and migrates module-alpine off `alpine_pkg.star`. Debian backend starts after. If a customer ask forces parallel work, the only safely parallelizable units in this plan are U1, U2, U3, U4 (foundation work with no synthetic-module touch points) — everything in Phase 2+ blocks on feeds-as-modules. |
+| Big-bang `alpine_pkg.star` migration in feeds-as-modules could regress existing alpine projects                                 | Out of scope of *this* plan but worth flagging upstream: the migration's e2e coverage in `testdata/e2e-project` must build byte-identical (or behavior-identical) alpine images before and after cutover. If the migration regresses, this plan blocks until it's resolved.                                                                                                                                                                                                |
 | `internal/image/disk.go`'s 7 hardcoded `toolchain-musl:15` strings indicate a wider hardcoding pattern that may exist elsewhere | U14 fixes this specific instance; broader audit is in "Deferred to Follow-Up Work". If other hardcoded references are discovered during U14, expand the scope of U14 to fix them in the same change.                                                                                                                                            |
 
 ---
@@ -2319,16 +2343,25 @@ R13, R15, R17, R18, R19, R20, R21, R22, R24, R26.
 Each phase is a ship milestone with its own CHANGELOG entry. Phases ship in
 order; later phases depend on earlier ones.
 
+**Prerequisite (not part of this plan): feeds-as-modules ships first.** That
+work delivers the synthetic-module loader, lazy synthesis, on-disk
+parsed-index cache, TUI filter-first, and migrates `module-alpine` off
+`alpine_pkg.star`. This plan starts after.
+
 ### Phase 1 — Foundation (U1, U2, U3, U4)
 
 Internal dpkg/deb libraries, toolchain-glibc container, `distro` image field. No
-user-visible Debian capability yet. CI passes; alpine builds unchanged.
+user-visible Debian capability yet. CI passes; alpine builds unchanged. This
+phase has no dependency on feeds-as-modules and may run in parallel with it if
+schedule demands; everything from Phase 2 onward blocks.
 
-### Phase 2 — Synthetic modules + debian_feed (U5, U6, U7)
+### Phase 2 — debian_feed on feeds-as-modules infrastructure (U5, U6, U7)
 
-`debian_feed()` works in Starlark; resolver can produce a unit graph from a
-fixture `module-debian` with one mirrored deb. No image build yet; resolver-only
-smoke test.
+U5 is a fixture-driven integration check confirming feeds-as-modules' API is
+sufficient for `debian_feed`. U6 implements `debian_feed()` on top. U7 wires
+the dpkg dep resolver. `debian_feed()` works in Starlark; resolver can produce
+a unit graph from a fixture `module-debian` with one mirrored deb. No image
+build yet; resolver-only smoke test.
 
 ### Phase 3 — Repo emission (U8, U9, U10)
 
