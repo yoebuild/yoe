@@ -116,6 +116,43 @@ func TestRenderQueryCompletions_EmptyReturnsNothing(t *testing.T) {
 // order: the completion candidates land between the Query line and
 // the column header, not above the Query line nor at the bottom of
 // the screen.
+func TestViewModulesTab_RendersSyntheticModules(t *testing.T) {
+	m := model{
+		proj: &yoestar.Project{
+			Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
+			Units:    map[string]*yoestar.Unit{},
+			ResolvedModules: []yoestar.ResolvedModule{
+				{Name: "module-core", URL: "https://example.com/core.git"},
+			},
+			SyntheticModules: []*yoestar.SyntheticModule{
+				{
+					Name:   "alpine.main",
+					Parent: "alpine",
+					Names:  func() []string { return []string{"musl", "openssh", "zlib"} },
+					Lookup: func(string) (*yoestar.Unit, error) { return nil, nil },
+				},
+				{
+					Name:   "alpine.community",
+					Parent: "alpine",
+					Names:  func() []string { return []string{"docker", "nginx"} },
+					Lookup: func(string) (*yoestar.Unit, error) { return nil, nil },
+				},
+			},
+		},
+		width: 120, height: 40,
+	}
+	got := m.viewModulesTab()
+	for _, want := range []string{"FEEDS", "alpine.main", "alpine.community", "feed", "alpine", "3", "2"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("modules tab missing %q in:\n%s", want, got)
+		}
+	}
+	// Should keep showing the real module too.
+	if !strings.Contains(got, "module-core") {
+		t.Errorf("modules tab dropped real module-core:\n%s", got)
+	}
+}
+
 func TestViewUnitsTab_CompletionsRenderUnderQueryLine(t *testing.T) {
 	m := model{
 		proj: &yoestar.Project{

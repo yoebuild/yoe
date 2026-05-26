@@ -3148,6 +3148,33 @@ func (m model) viewModulesTab() string {
 		b.WriteString(dimStyle.Render("  (no modules declared in PROJECT.star)\n"))
 	}
 
+	// Synthetic modules (alpine_feed, debian_feed) listed separately
+	// after the navigable real-module rows. They're informational —
+	// the user can't sync / dev-mode them, only consult what they
+	// expose. Showing them here makes feeds discoverable from the
+	// Modules tab; package-name discovery still goes through search.
+	if len(m.proj.SyntheticModules) > 0 {
+		b.WriteString("\n  ")
+		b.WriteString(headerStyle.Render("FEEDS"))
+		b.WriteString("\n")
+		b.WriteString("  ")
+		b.WriteString(headerStyle.Render(fmt.Sprintf("%-22s %-10s %-9s %-32s %s",
+			"NAME", "TYPE", "", "PARENT", "PACKAGES")))
+		b.WriteString("\n")
+		for _, sm := range m.proj.SyntheticModules {
+			count := "?"
+			if names := sm.Names(); names != nil {
+				count = fmt.Sprintf("%d", len(names))
+			}
+			b.WriteString(fmt.Sprintf("  %s %s %s %s %s\n",
+				classUnitStyle.Render(clipFixed(sm.Name, 22)),
+				dimStyle.Render(clipFixed("feed", 10)),
+				dimStyle.Render(clipFixed("", 9)),
+				dimStyle.Render(clipFixed(sm.Parent, 32)),
+				dimStyle.Render(count)))
+		}
+	}
+
 	// Detail strip for the cursor row — useful when fields are clipped.
 	if m.modulesCursor >= 0 && m.modulesCursor < len(mods) {
 		rm := mods[m.modulesCursor]
