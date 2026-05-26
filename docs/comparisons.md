@@ -319,9 +319,9 @@ unlikely base for a sealed consumer appliance. Valve's SteamOS 3 ("holo"), the
 OS on the Steam Deck, is exactly that, and a useful existence proof for choices
 `[yoe]` is making.
 
-SteamOS 1 and 2 were Debian-based; SteamOS 3, shipped with the Steam Deck
-in 2022, switched to an Arch foundation. The device a user actually runs,
-though, looks nothing like a hands-on Arch install:
+SteamOS 1 and 2 were Debian-based; SteamOS 3, shipped with the Steam Deck in
+2022, switched to an Arch foundation. The device a user actually runs, though,
+looks nothing like a hands-on Arch install:
 
 - **Immutable, read-only root.** The system partition is mounted read-only.
   `pacman` is not the update path; the rootfs is sealed, and

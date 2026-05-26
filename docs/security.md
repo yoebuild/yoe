@@ -257,25 +257,24 @@ These are explicit gaps, not unintentional bugs. PRs welcome.
   `docs/specs/2026-05-13-feeds-as-modules.md` R21), each module's parsed
   APKINDEX is serialized to `feeds/<section>/<arch>/APKINDEX.cache` alongside
   the source index. The cache is gitignored and trusted on load (after header
-  + source-hash check). An attacker with filesystem write access to the
-  module checkout can plant a cache file with a matching header and arbitrary
-  body, bypassing the source-index parse. Mitigations to consider when this
-  becomes load-bearing: (a) move the cache to a process-owned location
-  (`$XDG_CACHE_HOME/yoe/`) separate from the module checkout; (b) HMAC the
-  cache body keyed to a per-install secret; (c) accept the equivalence
-  ("cache trust = module-checkout filesystem-write trust") and document.
-  Today's threat model already assumes module-checkout filesystem access
-  implies trust, so (c) is the de-facto state — but the cache makes the
-  attack mechanic cheap (no source-file edit needed), so worth revisiting.
+  - source-hash check). An attacker with filesystem write access to the module
+    checkout can plant a cache file with a matching header and arbitrary body,
+    bypassing the source-index parse. Mitigations to consider when this becomes
+    load-bearing: (a) move the cache to a process-owned location
+    (`$XDG_CACHE_HOME/yoe/`) separate from the module checkout; (b) HMAC the
+    cache body keyed to a per-install secret; (c) accept the equivalence ("cache
+    trust = module-checkout filesystem-write trust") and document. Today's
+    threat model already assumes module-checkout filesystem access implies
+    trust, so (c) is the de-facto state — but the cache makes the attack
+    mechanic cheap (no source-file edit needed), so worth revisiting.
 - **In-tree signing keys + APKINDEX share the same access-control gate.**
-  `module-alpine`'s `keys/` directory and `feeds/*/APKINDEX` live in the
-  same git repo under the same maintainer write access. A compromised
-  maintainer account can add a new trusted key + an APKINDEX signed by it in
-  one commit, with no second factor. The maintainer playbook
-  (`docs/module-alpine.md`, when feeds-as-modules lands) should flag key
-  additions as higher-trust than routine APKINDEX refresh; longer-term
-  mitigations include consuming-project-level key declarations or a
-  signed-off-by CI gate on key-file changes.
+  `module-alpine`'s `keys/` directory and `feeds/*/APKINDEX` live in the same
+  git repo under the same maintainer write access. A compromised maintainer
+  account can add a new trusted key + an APKINDEX signed by it in one commit,
+  with no second factor. The maintainer playbook (`docs/module-alpine.md`, when
+  feeds-as-modules lands) should flag key additions as higher-trust than routine
+  APKINDEX refresh; longer-term mitigations include consuming-project-level key
+  declarations or a signed-off-by CI gate on key-file changes.
 
 ## Where to look in the source
 

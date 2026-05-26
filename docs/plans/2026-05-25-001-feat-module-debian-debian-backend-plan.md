@@ -14,22 +14,22 @@ Implement the Debian backend as 19 units across 6 phases: format-named Go
 internals (`internal/dpkg`, `internal/deb`, `internal/repo/deb_emitter.go`), a
 parallel `toolchain-glibc` container unit, a `debian_feed()` Starlark builtin
 that materializes synthetic units against the existing feeds-as-modules
-infrastructure, a Debian-format signed-repo emitter via `apt-ftparchive` +
-`gpg` shell-out, image assembly that runs `dpkg --configure -a` under binfmt
-with policy-rc.d / ischroot stubs, on-device trust via `signed-by=` to
+infrastructure, a Debian-format signed-repo emitter via `apt-ftparchive` + `gpg`
+shell-out, image assembly that runs `dpkg --configure -a` under binfmt with
+policy-rc.d / ischroot stubs, on-device trust via `signed-by=` to
 `/etc/apt/keyrings/<project>.gpg` with HTTPS-only sources, and a separate
 `module-debian` git repo holding the bootstrap Debian keyring + committed
 `Packages` snapshots.
 
 **Hard prerequisite: feeds-as-modules ships first.** The synthetic-module
-infrastructure (loader integration, lazy synthesis, on-disk parsed-index
-cache, TUI filter-first, format-agnostic `Module`/`Unit` types) lives in
-`docs/specs/2026-05-13-feeds-as-modules.md` and its forthcoming plan. This
-plan consumes that machinery; it does not rebuild it. The one-mechanism
-commitment (alpine_pkg.star deleted, `*_feed` is the only path for distro
-package consumption) means feeds-as-modules and the Debian backend share the
-same resolver/loader/cache path from day one. Implementation order:
-feeds-as-modules lands first, then this plan starts.
+infrastructure (loader integration, lazy synthesis, on-disk parsed-index cache,
+TUI filter-first, format-agnostic `Module`/`Unit` types) lives in
+`docs/specs/2026-05-13-feeds-as-modules.md` and its forthcoming plan. This plan
+consumes that machinery; it does not rebuild it. The one-mechanism commitment
+(alpine_pkg.star deleted, `*_feed` is the only path for distro package
+consumption) means feeds-as-modules and the Debian backend share the same
+resolver/loader/cache path from day one. Implementation order: feeds-as-modules
+lands first, then this plan starts.
 
 ---
 
@@ -79,11 +79,11 @@ publish), F5 (target install/upgrade). **Origin acceptance examples:** AE1–AE1
 ## Scope Boundaries
 
 - Synthetic-module infrastructure itself: loader integration, lazy synthesis,
-  on-disk parsed-index cache, TUI filter-first, format-agnostic
-  `Module`/`Unit` types. All of this is delivered by feeds-as-modules upstream
+  on-disk parsed-index cache, TUI filter-first, format-agnostic `Module`/`Unit`
+  types. All of this is delivered by feeds-as-modules upstream
   (`docs/specs/2026-05-13-feeds-as-modules.md`, R3 + R5 + R20-R23). This plan
-  consumes that machinery via `debian_feed`; U5 is a fixture-driven
-  integration check, not new infrastructure.
+  consumes that machinery via `debian_feed`; U5 is a fixture-driven integration
+  check, not new infrastructure.
 - `alpine_feed()` and the `module-alpine` migration off `alpine_pkg.star`
   (covered by feeds-as-modules' implementation plan; ships before this plan
   starts Phase 2).
@@ -250,19 +250,19 @@ Highest-leverage files for "I'm stuck, what does isar do":
 - `meta/recipes-core/isar-mmdebstrap/files/chroot-setup.sh` — canonical
   divert-based stub setup/cleanup. The reference for U12's chroot hygiene.
 - `meta/classes-recipe/rootfs.bbclass` — mount discipline, rootfs cleanup
-  postprocess steps (`ROOTFS_POSTPROCESS_COMMAND` chain), apt config baked
-  into the image. The reference for U12 + U16.
+  postprocess steps (`ROOTFS_POSTPROCESS_COMMAND` chain), apt config baked into
+  the image. The reference for U12 + U16.
 - `meta/classes-recipe/image.bbclass` — `ROOTFS_FEATURES` defaults
   (clean-package-cache, clean-pycache, generate-manifest); image-level
   composition.
-- `meta/classes-recipe/dpkg-raw.bbclass` — the destdir-to-deb path (closest
-  isar analog to yoe's project-deb build model). Reference for U2.
-- `meta/classes-recipe/multiarch.bbclass` — `Multi-Arch: foreign|same`
-  handling in dep resolution. Reference for U7.
-- `meta/classes-recipe/repository.bbclass` — apt-ftparchive shell-out
-  patterns. Reference for U8.
-- `scripts/mount_chroot.sh`, `scripts/umount_chroot.sh` — mount/unmount
-  ordering with idempotency. Reference for U12 mount discipline.
+- `meta/classes-recipe/dpkg-raw.bbclass` — the destdir-to-deb path (closest isar
+  analog to yoe's project-deb build model). Reference for U2.
+- `meta/classes-recipe/multiarch.bbclass` — `Multi-Arch: foreign|same` handling
+  in dep resolution. Reference for U7.
+- `meta/classes-recipe/repository.bbclass` — apt-ftparchive shell-out patterns.
+  Reference for U8.
+- `scripts/mount_chroot.sh`, `scripts/umount_chroot.sh` — mount/unmount ordering
+  with idempotency. Reference for U12 mount discipline.
 
 Caveats: do NOT copy isar's architecture (BitBake recipes, layers, BBCLASSEXTEND
 machinery, `debootstrap`-based bootstrap, schroot-based package builds). Those
@@ -296,14 +296,14 @@ metadata model**.
   Every image-bearing artifact declares its own `distro = "alpine" | "debian"`:
   host disk images today, deployable container images
   (`docs/specs/2026-05-25-deployable-containers.md`) tomorrow. The constraint
-  enforced at evaluation time is single-distro *per artifact* (no apks and debs
-  mixed in one rootfs); multi-distro *projects* are explicitly supported and
+  enforced at evaluation time is single-distro _per artifact_ (no apks and debs
+  mixed in one rootfs); multi-distro _projects_ are explicitly supported and
   expected — a Debian host baking in an Alpine container workload (or the
   reverse) is the canonical case. Module includes are therefore not mutually
   exclusive: a project may include `module-alpine` and `module-debian` together
-  to feed its respective artifacts. Unit-level `distro` would multiply the
-  cache surface needlessly (per CLAUDE.md "one unit, one .apk; resolve variation
-  at runtime"). Per-artifact `distro` instead propagates through
+  to feed its respective artifacts. Unit-level `distro` would multiply the cache
+  surface needlessly (per CLAUDE.md "one unit, one .apk; resolve variation at
+  runtime"). Per-artifact `distro` instead propagates through
   `ctx.machine_config` to classes (toolchain choice) and to the packager
   dispatch (`.apk` vs `.deb`), with the build target tuple `(arch, distro)`
   doing the cache-key disambiguation the same way `arch` does today. A source
@@ -371,16 +371,15 @@ metadata model**.
 
 ### Resolved During Planning
 
-- `distro` field scope (per-project vs per-image-artifact) → **per
-  image-bearing artifact**. Each host image and each deployable container image
-  carries its own `distro`. Multi-distro *projects* are supported and expected
-  (e.g. Debian host with Alpine container payload, or the reverse); module
-  includes are not mutually exclusive. The constraint enforced at evaluation
-  is single-distro per artifact, not per project. The build target tuple
-  `(arch, distro)` keys the cache so a unit consumed by artifacts of different
-  distros builds once per target without collision. Classes and the packager
-  dispatch share the same signal — no parallel field for libc or package
-  format.
+- `distro` field scope (per-project vs per-image-artifact) → **per image-bearing
+  artifact**. Each host image and each deployable container image carries its
+  own `distro`. Multi-distro _projects_ are supported and expected (e.g. Debian
+  host with Alpine container payload, or the reverse); module includes are not
+  mutually exclusive. The constraint enforced at evaluation is single-distro per
+  artifact, not per project. The build target tuple `(arch, distro)` keys the
+  cache so a unit consumed by artifacts of different distros builds once per
+  target without collision. Classes and the packager dispatch share the same
+  signal — no parallel field for libc or package format.
 - `pault.ag/go/debian` vs hand-rolled Debian parsers → use the library.
 - Shell out to `dpkg-deb -b` for `.deb` building vs pure-Go (`xor-gate/debpkg`
   etc.) → shell out; pure-Go libraries are immature and gzip-only.
@@ -747,14 +746,14 @@ staged destdir plus a control file.
 #### U4. `distro` field on image-bearing artifacts + class-level toolchain/packager dispatch
 
 **Goal:** Make `distro = "alpine" | "debian"` a typed field on every
-image-bearing artifact (host disk images today; deployable container images
-when that spec lands — same dispatch shape applies to both). Classes
-(`autotools`, `cmake`, `go`) read it from the consuming artifact's
-machine_config and pick `toolchain-musl` vs `toolchain-glibc`; the packager
-dispatch reads the same signal to pick `.apk` vs `.deb`. A project may declare
-multiple image-bearing artifacts of different distros; the build target tuple
-`(arch, distro)` keys the cache so a unit consumed by both an alpine artifact
-and a debian artifact builds twice with no collision.
+image-bearing artifact (host disk images today; deployable container images when
+that spec lands — same dispatch shape applies to both). Classes (`autotools`,
+`cmake`, `go`) read it from the consuming artifact's machine_config and pick
+`toolchain-musl` vs `toolchain-glibc`; the packager dispatch reads the same
+signal to pick `.apk` vs `.deb`. A project may declare multiple image-bearing
+artifacts of different distros; the build target tuple `(arch, distro)` keys the
+cache so a unit consumed by both an alpine artifact and a debian artifact builds
+twice with no collision.
 
 **Requirements:** R8, R9, R21.
 
@@ -786,29 +785,29 @@ anything).
 
 - The `distro` field is per image-bearing artifact (host disk images today;
   deployable container images when that spec lands); classes read it from
-  context at unit-evaluation time, where the context reflects which artifact
-  is consuming the unit.
+  context at unit-evaluation time, where the context reflects which artifact is
+  consuming the unit.
 - Libc selector is derived from distro (alpine→musl, debian→glibc), not declared
   separately. Origin spec R21 + Key Decision.
 - Validation: enforce single-distro-per-artifact (no apks-and-debs mix in one
-  rootfs) and canonical libc pairing (`(alpine, musl)` and `(debian, glibc)`
-  the only v1 combinations). Both surface as evaluation errors against the
-  offending artifact. Multi-distro *projects* (different artifacts with
-  different distros) are explicitly supported and not flagged.
+  rootfs) and canonical libc pairing (`(alpine, musl)` and `(debian, glibc)` the
+  only v1 combinations). Both surface as evaluation errors against the offending
+  artifact. Multi-distro _projects_ (different artifacts with different distros)
+  are explicitly supported and not flagged.
 - Packager dispatch (`.apk` for alpine, `.deb` for debian) reads the same
   `distro` signal at the build-target boundary — the executor threads
-  `(arch, distro)` everywhere it currently threads `arch`, and the artifact
-  step branches on `distro`. The toolchain selection and the packager
-  selection consume one field; no parallel knob.
+  `(arch, distro)` everywhere it currently threads `arch`, and the artifact step
+  branches on `distro`. The toolchain selection and the packager selection
+  consume one field; no parallel knob.
 - Represent the build target as a `BuildTarget` struct (`{Arch, Distro}`), not
-  as a naked tuple or paired positional args. Mechanical insurance: if a
-  future axis lands (e.g., heterogeneous compute units — MCU/DSP firmware
-  alongside the Linux AP — flagged as out-of-scope and deferred to its own
-  spec), it's a field-add, not a refactor of every signature in
-  `internal/build/` and `internal/image/`.
+  as a naked tuple or paired positional args. Mechanical insurance: if a future
+  axis lands (e.g., heterogeneous compute units — MCU/DSP firmware alongside the
+  Linux AP — flagged as out-of-scope and deferred to its own spec), it's a
+  field-add, not a refactor of every signature in `internal/build/` and
+  `internal/image/`.
 - `yoe build` scope stays at the currently-selected machine (unchanged from
-  today). `distro` joins `arch` as part of the machine's target tuple, not as
-  a new cross-project enumeration axis. To build the same unit for a different
+  today). `distro` joins `arch` as part of the machine's target tuple, not as a
+  new cross-project enumeration axis. To build the same unit for a different
   distro, select the corresponding machine first — same UX as today's
   multi-machine projects. Within a single selected machine that owns multiple
   image-bearing artifacts of different distros (e.g., a Debian host whose
@@ -844,20 +843,20 @@ anything).
   schema-aware artifacts, not for legacy.)
 - Integration (multi-distro project, parallel machines): a project with an
   alpine-host machine and a debian-host machine, including `module-alpine` and
-  `module-debian` respectively. Selecting the alpine machine + building a
-  shared source unit produces the `.apk` via `toolchain-musl`; switching the
-  selected machine to the debian one + rebuilding the same unit produces the
-  `.deb` via `toolchain-glibc`. Two unit hashes, two cached artifacts, no
-  collision. Validates the multi-distro-project shape under the existing
-  current-machine scope.
+  `module-debian` respectively. Selecting the alpine machine + building a shared
+  source unit produces the `.apk` via `toolchain-musl`; switching the selected
+  machine to the debian one + rebuilding the same unit produces the `.deb` via
+  `toolchain-glibc`. Two unit hashes, two cached artifacts, no collision.
+  Validates the multi-distro-project shape under the existing current-machine
+  scope.
 - Integration (single machine, host + container): one selected machine is a
-  debian host whose payload includes a deployable alpine container artifact
-  (per `docs/specs/2026-05-25-deployable-containers.md`). Building the machine
-  triggers both artifact assemblies; a source unit consumed by both builds
-  twice in a single invocation — once through `toolchain-glibc` emitting
-  `.deb` for the host, once through `toolchain-musl` emitting `.apk` for the
-  container. Covers the canonical multi-distro use case and the within-machine
-  artifact multiplicity.
+  debian host whose payload includes a deployable alpine container artifact (per
+  `docs/specs/2026-05-25-deployable-containers.md`). Building the machine
+  triggers both artifact assemblies; a source unit consumed by both builds twice
+  in a single invocation — once through `toolchain-glibc` emitting `.deb` for
+  the host, once through `toolchain-musl` emitting `.apk` for the container.
+  Covers the canonical multi-distro use case and the within-machine artifact
+  multiplicity.
 - Cache: when `distro` is empty (transitional), unit hashes are unchanged from
   the pre-U4 baseline. Confirmed by hash-stability test against a golden hash
   from before the change.
@@ -894,22 +893,22 @@ the fixture).
   fixture test that calls feeds-as-modules' synthetic-module API with
   debian-shaped inputs (one fake `Packages` entry per row, multi-arch, virtual
   providers, alt-bar deps). Exercises:
-  - Composed name `debian.<suite>.<component>` works as a synthetic module
-    name (e.g. `debian.bookworm.main`).
+  - Composed name `debian.<suite>.<component>` works as a synthetic module name
+    (e.g. `debian.bookworm.main`).
   - `prefer_modules = {"openssl": "debian.bookworm.main"}` resolves to the
     synthetic unit.
   - Lazy materialization: requesting one unit by name materializes only that
     unit; the unmaterialized siblings stay deferred (assertion via internal
     instrumentation counter or memory measurement).
-  - On-disk parsed-index cache: second load against same fixture is faster
-    than first; cache file exists in the expected location.
+  - On-disk parsed-index cache: second load against same fixture is faster than
+    first; cache file exists in the expected location.
 
 **Approach:**
 
-- Reuses feeds-as-modules' loader and types verbatim. No yoe-core changes
-  beyond a fixture-only `debian_feed_test_only(...)` builtin if needed for the
-  test (preferable: register the synthetic module directly via the Go API
-  exposed by feeds-as-modules, no Starlark surface).
+- Reuses feeds-as-modules' loader and types verbatim. No yoe-core changes beyond
+  a fixture-only `debian_feed_test_only(...)` builtin if needed for the test
+  (preferable: register the synthetic module directly via the Go API exposed by
+  feeds-as-modules, no Starlark surface).
 - If the test surfaces an API gap (something `debian_feed` needs that
   feeds-as-modules didn't anticipate), the fix lives in feeds-as-modules, not
   here. Treat U5 as the integration gate: if it can't pass, U6 doesn't start.
@@ -928,11 +927,11 @@ the fixture).
 - Happy path: same setup with
   `prefer_modules = {"openssl": "debian.bookworm.main"}` → synthetic wins.
   Covers AE2.
-- Lazy materialization assertion: register a synthetic module with 1000
-  fixture entries; reference only 3; instrumented counter shows only 3 `*Unit`
-  values were constructed. Catches a feeds-as-modules regression early.
-- Cache assertion: load the fixture twice within the test; second load
-  bypasses re-parse and is observably faster (timer or counter check).
+- Lazy materialization assertion: register a synthetic module with 1000 fixture
+  entries; reference only 3; instrumented counter shows only 3 `*Unit` values
+  were constructed. Catches a feeds-as-modules regression early.
+- Cache assertion: load the fixture twice within the test; second load bypasses
+  re-parse and is observably faster (timer or counter check).
 
 **Verification:**
 
@@ -1116,9 +1115,9 @@ the alternative-bar handled and version constraints checked.
   historically; fixture test mirrors a small slice of the real bookworm
   `libc6` + a dependent.
 - Edge case: `Multi-Arch: same` package — same package may legitimately be
-  installed for multiple arches simultaneously (co-installable). v1 image
-  builds always target a single arch so this case degenerates to "pick the
-  match"; document the limitation and error if a multi-arch image surfaces.
+  installed for multiple arches simultaneously (co-installable). v1 image builds
+  always target a single arch so this case degenerates to "pick the match";
+  document the limitation and error if a multi-arch image surfaces.
 - Edge case: `Pre-Depends:` resolved identically to `Depends:` for v1 (no
   separate ordering; dpkg `--configure -a` handles ordering at install time).
 - Error path: no provider for a required dep → clear error with the dep text and
@@ -1381,11 +1380,10 @@ identical.
   `archive/tar`.
 - Thread `SOURCE_DATE_EPOCH` through extraction: every tar entry's mtime/atime
   is clamped to `SOURCE_DATE_EPOCH` if set (matching the value U2's `BuildDeb`
-  uses for project debs). isar discipline: the entire build pipeline runs
-  under one fixed `SOURCE_DATE_EPOCH` per image (derived from the project's
-  highest pinned source timestamp) so two builds of the same input produce
-  byte-identical rootfs trees. Same clamp applies in U12's chroot
-  invocations.
+  uses for project debs). isar discipline: the entire build pipeline runs under
+  one fixed `SOURCE_DATE_EPOCH` per image (derived from the project's highest
+  pinned source timestamp) so two builds of the same input produce
+  byte-identical rootfs trees. Same clamp applies in U12's chroot invocations.
 
 **Patterns to follow:**
 
@@ -1439,52 +1437,51 @@ them at image finalize.
      - bind `/sys` → `<rootfs>/sys` + `mount --make-rslave`
      - tmpfs on `<rootfs>/sys/firmware` (prevents host hardware data leaking
        into postinsts — real isar-shaken hygiene point)
-  2. Install build-time hygiene stubs using `dpkg-divert` (the canonical
-     Debian mechanism — tracks the diversion in dpkg's database so a deb
-     being configured that ships the same path won't clobber the stub):
+  2. Install build-time hygiene stubs using `dpkg-divert` (the canonical Debian
+     mechanism — tracks the diversion in dpkg's database so a deb being
+     configured that ships the same path won't clobber the stub):
      - Divert `/usr/sbin/policy-rc.d` (if present) and write a stub script
        returning 101 (blocks `invoke-rc.d start`).
-     - Divert `/sbin/start-stop-daemon` and write a no-op wrapper that warns
-       and exits 0.
-     - If `/sbin/initctl` exists (upstart leftovers — uncommon but real
-       on some bookworm derivatives), divert it and write a stub returning 0
+     - Divert `/sbin/start-stop-daemon` and write a no-op wrapper that warns and
+       exits 0.
+     - If `/sbin/initctl` exists (upstart leftovers — uncommon but real on some
+       bookworm derivatives), divert it and write a stub returning 0
        (passthrough `initctl version` to the original).
      - Note: yoe's earlier draft listed `runlevel`, `systemd-detect-virt`,
        `ischroot`, and `invoke-rc.d` wrappers as stubs. Actual isar
        `chroot-setup.sh` does NOT stub these; the divert-based 3-stub set
-       (policy-rc.d, start-stop-daemon, initctl) is sufficient for real
-       Debian postinst behavior. Don't over-engineer.
+       (policy-rc.d, start-stop-daemon, initctl) is sufficient for real Debian
+       postinst behavior. Don't over-engineer.
   3. Run `eatmydata chroot <rootfs> dpkg --configure -a --no-triggers` inside
      the toolchain-glibc container with binfmt active. `eatmydata` LD_PRELOAD
      no-ops `fsync`/`fdatasync` for the duration; the image is archived
-     wholesale so build-time fsync is wasted work. Empirically ~10x speedup
-     on 200-400 deb images (isar reports same range). Chroot env carries
+     wholesale so build-time fsync is wasted work. Empirically ~10x speedup on
+     200-400 deb images (isar reports same range). Chroot env carries
      `DEBIAN_FRONTEND=noninteractive`, `LANG=C`, `LC_ALL=C`,
      `SOURCE_DATE_EPOCH=<image's pinned epoch>`.
-  4. Run `eatmydata chroot <rootfs> dpkg --triggers-only -a` once with the
-     same env.
+  4. Run `eatmydata chroot <rootfs> dpkg --triggers-only -a` once with the same
+     env.
   5. Run `chroot <rootfs> systemctl preset-all --preset-mode="enable-only"` if
      systemd is installed (`dpkg-query --show systemd`). This is the canonical
      Debian-native service-enable mechanism — upstream debs ship preset files
      declaring enable/disable, and `preset-all` resolves them. U13's per-unit
-     `services=[...]` baking continues to apply to project debs (which can
-     ship a preset file in `data.tar` or bake symlinks directly); preset-all
-     covers the mirrored-upstream-deb case that yoe's per-unit model doesn't.
+     `services=[...]` baking continues to apply to project debs (which can ship
+     a preset file in `data.tar` or bake symlinks directly); preset-all covers
+     the mirrored-upstream-deb case that yoe's per-unit model doesn't.
   6. Reproducibility + size cleanup (each step a separate post-configure call):
      - `rm -f <rootfs>/var/cache/ldconfig/aux-cache` (Debian bug 845034 — the
        aux-cache is not portable and breaks reproducibility).
      - `rm -rf <rootfs>/var/cache/debconf/*` (debconf state).
-     - `find <rootfs>/usr -type f -name '*.pyc' -delete; find <rootfs>/usr
-       -type d -name __pycache__ -delete` (pycache).
+     - `find <rootfs>/usr -type f -name '*.pyc' -delete; find <rootfs>/usr -type d -name __pycache__ -delete`
+       (pycache).
      - `rm -rf <rootfs>/tmp/*` (/tmp is non-persistent by definition).
-     - `apt-get clean; rm -rf <rootfs>/var/lib/apt/lists/*; rm -rf
-       <rootfs>/var/cache/apt/archives` (image-size).
+     - `apt-get clean; rm -rf <rootfs>/var/lib/apt/lists/*; rm -rf <rootfs>/var/cache/apt/archives`
+       (image-size).
   7. Restore diverted stubs: for each diverted path, remove the stub and run
-     `dpkg-divert --remove --rename` to restore the real binary in dpkg's
-     view.
-  8. Unmount in reverse order (tmpfs on /sys/firmware → sys → proc → dev/pts
-     → dev/shm → dev). Idempotent — checks `mountpoint -q` before each
-     umount so a partial earlier failure doesn't compound.
+     `dpkg-divert --remove --rename` to restore the real binary in dpkg's view.
+  8. Unmount in reverse order (tmpfs on /sys/firmware → sys → proc → dev/pts →
+     dev/shm → dev). Idempotent — checks `mountpoint -q` before each umount so a
+     partial earlier failure doesn't compound.
 - Modify: `internal/image/rootfs.go:16-53` — `Assemble` calls
   `ConfigureDebianRootfs` between `installPackages` and `applyConfig` for
   `distro="debian"` images.
@@ -1501,12 +1498,12 @@ them at image finalize.
   Postinsts run under emulation.
 - The build-time stubs prevent: services starting (`policy-rc.d` returning 101
   blocks `invoke-rc.d start`), `start-stop-daemon` actually launching daemons,
-  and (when upstart leftovers exist) `initctl` interacting with init. The
-  divert mechanism is canonical Debian: the real binary remains addressable as
-  `<path>.distrib` for any postinst that wants the original, and cleanup
-  cleanly restores via `dpkg-divert --remove --rename`.
-- After configure + triggers + preset-all, all stubs are reverted via divert,
-  so the image's first boot has the real binaries.
+  and (when upstart leftovers exist) `initctl` interacting with init. The divert
+  mechanism is canonical Debian: the real binary remains addressable as
+  `<path>.distrib` for any postinst that wants the original, and cleanup cleanly
+  restores via `dpkg-divert --remove --rename`.
+- After configure + triggers + preset-all, all stubs are reverted via divert, so
+  the image's first boot has the real binaries.
 - `eatmydata` is bundled in `toolchain-glibc` (U3) and invoked as the chroot
   command prefix. It does not modify the rootfs content — it only suppresses
   fsync during the build's chroot operations. Confirmed safe by isar's
@@ -1540,19 +1537,20 @@ them at image finalize.
   (`/etc/systemd/system/multi-user.target.wants/ssh.service` exists),
   `chronyd.service` is NOT enabled (preset=disable respected). Covers AE8.
 - Happy path: all stubs are reverted by the end of `ConfigureDebianRootfs` —
-  `dpkg-divert --list` shows no yoe-installed diversions; `/usr/sbin/policy-rc.d`
-  does not exist in the final rootfs; `/sbin/start-stop-daemon` is the real
-  binary (verify via `file` or by running it); if `initctl` was diverted, the
-  real `/sbin/initctl` is restored.
+  `dpkg-divert --list` shows no yoe-installed diversions;
+  `/usr/sbin/policy-rc.d` does not exist in the final rootfs;
+  `/sbin/start-stop-daemon` is the real binary (verify via `file` or by running
+  it); if `initctl` was diverted, the real `/sbin/initctl` is restored.
 - Happy path (systemd preset): an image with `openssh-server` installed via
-  upstream-mirrored deb (which ships a preset file declaring `enable
-  ssh.service`) ends up with `/etc/systemd/system/multi-user.target.wants/
-  ssh.service` symlinked, courtesy of `systemctl preset-all`. yoe's unit did
-  not have to declare `services=["ssh"]`.
+  upstream-mirrored deb (which ships a preset file declaring
+  `enable ssh.service`) ends up with
+  `/etc/systemd/system/multi-user.target.wants/ ssh.service` symlinked, courtesy
+  of `systemctl preset-all`. yoe's unit did not have to declare
+  `services=["ssh"]`.
 - Happy path (cleanups): after `ConfigureDebianRootfs` completes, none of
   `/var/cache/ldconfig/aux-cache`, `/var/cache/debconf/*`, `*.pyc` files,
-  `__pycache__` dirs, or `/var/lib/apt/lists/*` exist in the rootfs. Image
-  size after configure is materially smaller than before cleanup.
+  `__pycache__` dirs, or `/var/lib/apt/lists/*` exist in the rootfs. Image size
+  after configure is materially smaller than before cleanup.
 - Performance: a 300-deb image configures under `eatmydata` in &lt;2 minutes on
   a typical dev machine; without `eatmydata`, the same configure runs ~10x
   longer. Spot-check during U12 implementation; if speedup is &lt;3x, audit
@@ -1588,14 +1586,14 @@ them at image finalize.
 
 #### U13. Move service enablement from image-level scan to per-unit baking; extend `materializeServiceSymlinks` to handle systemd
 
-**Coordination with systemd preset (U12):** U12 runs `systemctl preset-all
---preset-mode="enable-only"` after configure, which is the canonical Debian
-mechanism for service enablement. Upstream-mirrored debs ship preset files
-(`/lib/systemd/system-preset/*.preset`) declaring `enable` or `disable`;
-`preset-all` resolves them. yoe's per-unit `services=[...]` model (this unit)
-remains correct for **project-built debs** where the unit author wants
-explicit control. Two compatible options for how a project-built deb expresses
-that intent:
+**Coordination with systemd preset (U12):** U12 runs
+`systemctl preset-all --preset-mode="enable-only"` after configure, which is the
+canonical Debian mechanism for service enablement. Upstream-mirrored debs ship
+preset files (`/lib/systemd/system-preset/*.preset`) declaring `enable` or
+`disable`; `preset-all` resolves them. yoe's per-unit `services=[...]` model
+(this unit) remains correct for **project-built debs** where the unit author
+wants explicit control. Two compatible options for how a project-built deb
+expresses that intent:
 
 - **Bake symlinks directly** (the path this unit implements) — concrete and
   explicit; works even if preset-all is skipped.
@@ -1907,9 +1905,9 @@ retry policy).
     `Types: deb`, `URIs: <project repo URL>/debian`, `Suites: <suite>`,
     `Components: main`, `Architectures: <arch>`,
     `Signed-By: /etc/apt/keyrings/<project>.gpg`.
-  - `/etc/apt/apt.conf.d/99-yoe-defaults.conf` (0644) bundling the apt
-    defaults yoe wants on every embedded image (isar's `50isar` template
-    is the reference shape; renamed and trimmed for yoe):
+  - `/etc/apt/apt.conf.d/99-yoe-defaults.conf` (0644) bundling the apt defaults
+    yoe wants on every embedded image (isar's `50isar` template is the reference
+    shape; renamed and trimmed for yoe):
 
     ```
     APT::Get::Never-Include-Phased-Updates "true";
@@ -1919,12 +1917,13 @@ retry policy).
     Acquire::Retries::Delay::Maximum "30";
     ```
 
-    Rationale: phased updates would cause divergent fleet behavior on
-    embedded devices that roll atomically (R26 already commits to disabling
-    them). Recommends/Suggests off prevents `apt-get install <pkg>` from
-    pulling in tens of MB of optional packages on a constrained device.
-    Retry policy survives a flaky cellular/wifi link without manual
-    intervention. All four are isar-proven defaults for embedded use.
+    Rationale: phased updates would cause divergent fleet behavior on embedded
+    devices that roll atomically (R26 already commits to disabling them).
+    Recommends/Suggests off prevents `apt-get install <pkg>` from pulling in
+    tens of MB of optional packages on a constrained device. Retry policy
+    survives a flaky cellular/wifi link without manual intervention. All four
+    are isar-proven defaults for embedded use.
+
 - No `/etc/apt/trusted.gpg.d/` writes — per Key Decisions, `signed-by=` scoping
   is the v1 posture.
 - The Debian release keyring is NOT staged on the device (mirror-trust runs
@@ -1938,9 +1937,9 @@ retry policy).
 
 **Test scenarios:**
 
-- Happy path: `StageAptConfig` writes the keyring, the `.sources` file, and
-  the `99-yoe-defaults.conf` at correct paths with correct content;
-  permissions are 0644 on all three.
+- Happy path: `StageAptConfig` writes the keyring, the `.sources` file, and the
+  `99-yoe-defaults.conf` at correct paths with correct content; permissions are
+  0644 on all three.
 - Happy path (apt behavior on device): `apt-get install <pkg-with-recommends>`
   installs ONLY `<pkg>`, not its `Recommends:` list — confirms the
   `Install-Recommends "0"` default takes effect. Spot-check during U20 e2e.
@@ -2232,14 +2231,14 @@ R13, R15, R17, R18, R19, R20, R21, R22, R24, R26.
 - QEMU boot test: boot the image with QEMU + cloud-init equivalent (or just a
   raw boot if init handles things); SSH in; run smoke commands; assert each
   succeeds.
-- **CI matrix:** v1 commits to one suite (`bookworm`) × two arches
-  (`amd64`, `arm64`). The primary e2e exercises `bookworm × arm64` because
-  that path covers binfmt + QEMU user-mode + foreign-arch postinsts under
-  emulation — the highest-risk part of the implementation. A faster
-  `bookworm × amd64` native run lands alongside as hygiene coverage (no
-  binfmt, fast feedback for non-cross-arch regressions). Both run on every
-  PR; `arm64` is the gate. Inspired by isar's matrix structure but trimmed
-  to one suite for v1 (per Open Questions: cross-suite is out of scope).
+- **CI matrix:** v1 commits to one suite (`bookworm`) × two arches (`amd64`,
+  `arm64`). The primary e2e exercises `bookworm × arm64` because that path
+  covers binfmt + QEMU user-mode + foreign-arch postinsts under emulation — the
+  highest-risk part of the implementation. A faster `bookworm × amd64` native
+  run lands alongside as hygiene coverage (no binfmt, fast feedback for
+  non-cross-arch regressions). Both run on every PR; `arm64` is the gate.
+  Inspired by isar's matrix structure but trimmed to one suite for v1 (per Open
+  Questions: cross-suite is out of scope).
 - This is the canonical proof point that the Debian backend works end-to-end.
   Covers AE5-AE10.
 
@@ -2273,8 +2272,8 @@ R13, R15, R17, R18, R19, R20, R21, R22, R24, R26.
 
 **Verification:**
 
-- `go test ./internal/build/...` passes including the e2e debian image build
-  for both `bookworm × arm64` (gate) and `bookworm × amd64` (hygiene).
+- `go test ./internal/build/...` passes including the e2e debian image build for
+  both `bookworm × arm64` (gate) and `bookworm × amd64` (hygiene).
 - CI pipeline includes both debian image builds and reports success.
 - Manual: `yoe build qemu-arm64-debian` + QEMU boot reproduces the e2e smoke
   tests interactively.
@@ -2321,20 +2320,20 @@ R13, R15, R17, R18, R19, R20, R21, R22, R24, R26.
 
 ## Risks & Dependencies
 
-| Risk                                                                                                                            | Mitigation                                                                                                                                                                                                                                                                                                                                      |
-| ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pault.ag/go/debian` is pre-1.0 (latest v0.19, 2025); API may change                                                            | The library has been stable in practice for years; pin via `go.mod` semver constraint; if breaking changes land, wrap the library's surface in `internal/dpkg` so external callers don't see the churn.                                                                                                                                         |
-| `dpkg --configure -a` under binfmt is slow (postinsts spawn many shells under emulation)                                        | Use `--no-triggers` to deduplicate trigger work; profile during U12; if a customer image takes >10 minutes to assemble, investigate per-postinst slowness and consider deferring specific slow triggers.                                                                                                                                        |
-| Maintainer scripts have undocumented failure modes (debconf prompts, packages that probe `/proc/1`)                             | Build-time hygiene stubs (policy-rc.d=101, ischroot=/bin/true, start-stop-daemon=no-op) cover the worst offenders; document the pattern in U12; rely on debconf's non-interactive default. Real-world maintainer-script breakage is rare for the embedded package set; if a specific package breaks, ship a per-image stub.                     |
-| GPG key generation requires a running gpg-agent (interactive prompts in some environments)                                      | `gpg --batch --quick-generate-key` is fully non-interactive; verify in CI. If a developer's environment lacks gpg-agent entirely, surface a clear error pointing them at the install.                                                                                                                                                           |
-| Foreign-arch binfmt registration is host-specific and may not be set up                                                         | `internal/container.go:CheckBinfmt` already errors early; document in `docs/module-debian.md` that binfmt setup is a host prerequisite; `yoe container binfmt` exists for one-shot registration via `tonistiigi/binfmt`.                                                                                                                        |
-| `module-debian`'s committed `Packages` snapshots are large (5-10 MB per arch decompressed)                                      | Git deltas handle this well across snapshot updates; the diff-readability benefit of decompressed storage outweighs the size cost (~30 MB for full bookworm main+contrib+arm64+amd64).                                                                                                                                                          |
-| Phased updates on `bookworm-updates` could cause divergent fleet behavior                                                       | `APT::Get::Never-Include-Phased-Updates "true";` baked into images (U16) neutralizes this.                                                                                                                                                                                                                                                      |
-| `apt-ftparchive` shell-out is slow on large repos                                                                               | The project repo is typically small (project debs + curated mirrored debs, not the full Debian archive). If footprint grows, revisit the Go-native `apt-ftparchive` replacement (Scope Boundaries).                                                                                                                                             |
-| `module-debian` and `yoe core` versions need to stay in lockstep across Debian release bumps                                    | `yoe init` template + `testdata/e2e-project/PROJECT.star` pin a specific module-debian ref. Bumping is a coordinated change across both repos; rolling-deploy story documented in `docs/module-debian.md`.                                                                                                                                      |
+| Risk                                                                                                                            | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pault.ag/go/debian` is pre-1.0 (latest v0.19, 2025); API may change                                                            | The library has been stable in practice for years; pin via `go.mod` semver constraint; if breaking changes land, wrap the library's surface in `internal/dpkg` so external callers don't see the churn.                                                                                                                                                                                                                                                  |
+| `dpkg --configure -a` under binfmt is slow (postinsts spawn many shells under emulation)                                        | Use `--no-triggers` to deduplicate trigger work; profile during U12; if a customer image takes >10 minutes to assemble, investigate per-postinst slowness and consider deferring specific slow triggers.                                                                                                                                                                                                                                                 |
+| Maintainer scripts have undocumented failure modes (debconf prompts, packages that probe `/proc/1`)                             | Build-time hygiene stubs (policy-rc.d=101, ischroot=/bin/true, start-stop-daemon=no-op) cover the worst offenders; document the pattern in U12; rely on debconf's non-interactive default. Real-world maintainer-script breakage is rare for the embedded package set; if a specific package breaks, ship a per-image stub.                                                                                                                              |
+| GPG key generation requires a running gpg-agent (interactive prompts in some environments)                                      | `gpg --batch --quick-generate-key` is fully non-interactive; verify in CI. If a developer's environment lacks gpg-agent entirely, surface a clear error pointing them at the install.                                                                                                                                                                                                                                                                    |
+| Foreign-arch binfmt registration is host-specific and may not be set up                                                         | `internal/container.go:CheckBinfmt` already errors early; document in `docs/module-debian.md` that binfmt setup is a host prerequisite; `yoe container binfmt` exists for one-shot registration via `tonistiigi/binfmt`.                                                                                                                                                                                                                                 |
+| `module-debian`'s committed `Packages` snapshots are large (5-10 MB per arch decompressed)                                      | Git deltas handle this well across snapshot updates; the diff-readability benefit of decompressed storage outweighs the size cost (~30 MB for full bookworm main+contrib+arm64+amd64).                                                                                                                                                                                                                                                                   |
+| Phased updates on `bookworm-updates` could cause divergent fleet behavior                                                       | `APT::Get::Never-Include-Phased-Updates "true";` baked into images (U16) neutralizes this.                                                                                                                                                                                                                                                                                                                                                               |
+| `apt-ftparchive` shell-out is slow on large repos                                                                               | The project repo is typically small (project debs + curated mirrored debs, not the full Debian archive). If footprint grows, revisit the Go-native `apt-ftparchive` replacement (Scope Boundaries).                                                                                                                                                                                                                                                      |
+| `module-debian` and `yoe core` versions need to stay in lockstep across Debian release bumps                                    | `yoe init` template + `testdata/e2e-project/PROJECT.star` pin a specific module-debian ref. Bumping is a coordinated change across both repos; rolling-deploy story documented in `docs/module-debian.md`.                                                                                                                                                                                                                                               |
 | `feeds-as-modules` is a hard prerequisite; this plan does not start until it ships                                              | Sequencing is committed: feeds-as-modules implements the synthetic-module loader, lazy synthesis, on-disk parsed-index cache, TUI filter-first, and migrates module-alpine off `alpine_pkg.star`. Debian backend starts after. If a customer ask forces parallel work, the only safely parallelizable units in this plan are U1, U2, U3, U4 (foundation work with no synthetic-module touch points) — everything in Phase 2+ blocks on feeds-as-modules. |
-| Big-bang `alpine_pkg.star` migration in feeds-as-modules could regress existing alpine projects                                 | Out of scope of *this* plan but worth flagging upstream: the migration's e2e coverage in `testdata/e2e-project` must build byte-identical (or behavior-identical) alpine images before and after cutover. If the migration regresses, this plan blocks until it's resolved.                                                                                                                                                                                                |
-| `internal/image/disk.go`'s 7 hardcoded `toolchain-musl:15` strings indicate a wider hardcoding pattern that may exist elsewhere | U14 fixes this specific instance; broader audit is in "Deferred to Follow-Up Work". If other hardcoded references are discovered during U14, expand the scope of U14 to fix them in the same change.                                                                                                                                            |
+| Big-bang `alpine_pkg.star` migration in feeds-as-modules could regress existing alpine projects                                 | Out of scope of _this_ plan but worth flagging upstream: the migration's e2e coverage in `testdata/e2e-project` must build byte-identical (or behavior-identical) alpine images before and after cutover. If the migration regresses, this plan blocks until it's resolved.                                                                                                                                                                              |
+| `internal/image/disk.go`'s 7 hardcoded `toolchain-musl:15` strings indicate a wider hardcoding pattern that may exist elsewhere | U14 fixes this specific instance; broader audit is in "Deferred to Follow-Up Work". If other hardcoded references are discovered during U14, expand the scope of U14 to fix them in the same change.                                                                                                                                                                                                                                                     |
 
 ---
 
@@ -2344,9 +2343,9 @@ Each phase is a ship milestone with its own CHANGELOG entry. Phases ship in
 order; later phases depend on earlier ones.
 
 **Prerequisite (not part of this plan): feeds-as-modules ships first.** That
-work delivers the synthetic-module loader, lazy synthesis, on-disk
-parsed-index cache, TUI filter-first, and migrates `module-alpine` off
-`alpine_pkg.star`. This plan starts after.
+work delivers the synthetic-module loader, lazy synthesis, on-disk parsed-index
+cache, TUI filter-first, and migrates `module-alpine` off `alpine_pkg.star`.
+This plan starts after.
 
 ### Phase 1 — Foundation (U1, U2, U3, U4)
 
@@ -2358,10 +2357,10 @@ schedule demands; everything from Phase 2 onward blocks.
 ### Phase 2 — debian_feed on feeds-as-modules infrastructure (U5, U6, U7)
 
 U5 is a fixture-driven integration check confirming feeds-as-modules' API is
-sufficient for `debian_feed`. U6 implements `debian_feed()` on top. U7 wires
-the dpkg dep resolver. `debian_feed()` works in Starlark; resolver can produce
-a unit graph from a fixture `module-debian` with one mirrored deb. No image
-build yet; resolver-only smoke test.
+sufficient for `debian_feed`. U6 implements `debian_feed()` on top. U7 wires the
+dpkg dep resolver. `debian_feed()` works in Starlark; resolver can produce a
+unit graph from a fixture `module-debian` with one mirrored deb. No image build
+yet; resolver-only smoke test.
 
 ### Phase 3 — Repo emission (U8, U9, U10)
 

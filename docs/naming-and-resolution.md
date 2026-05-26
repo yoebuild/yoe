@@ -61,8 +61,8 @@ Module names are used in `load()` statements:
 
    The closure walk that used to live in Starlark — and that needed
    `ctx.runtime_deps`, a dict pre-populated with every unit's deps — is now a
-   Go-side `resolve_closure(artifacts)` builtin. It walks the runtime-dep
-   graph on demand and materializes synthetic-module units (see
+   Go-side `resolve_closure(artifacts)` builtin. It walks the runtime-dep graph
+   on demand and materializes synthetic-module units (see
    [Feeds as synthetic modules](#feeds-as-synthetic-modules)) lazily, so the
    working set stays bounded by closure size rather than catalog size. Image
    classes call it directly: `resolved = resolve_closure(explicit_artifacts)`.
@@ -409,9 +409,9 @@ traceable — `grep` for the function call to find all extensions. See
 
 ## Recursive module dependencies
 
-A module's `MODULE.star` can declare its own `deps = [...]` list of modules.
-The loader walks this transitively — each declared module is synced, peeked
-for its own deps, synced again, and so on until the dep set stabilizes:
+A module's `MODULE.star` can declare its own `deps = [...]` list of modules. The
+loader walks this transitively — each declared module is synced, peeked for its
+own deps, synced again, and so on until the dep set stabilizes:
 
 ```python
 # module-bsp-imx8/MODULE.star
@@ -440,16 +440,16 @@ Two declarations of the same module collapse to one:
 ### Same-name conflicts
 
 When two declarations name the same module (`module_info(name = "shared")`) but
-resolve to different identities, the project-level declaration always wins —
-the transitive declaration is silently overridden. Two transitive declarations
-at incompatible refs error with both reference paths and a hint to pin one
+resolve to different identities, the project-level declaration always wins — the
+transitive declaration is silently overridden. Two transitive declarations at
+incompatible refs error with both reference paths and a hint to pin one
 explicitly at the project level.
 
 ### Cycle detection
 
-The loader runs DFS over the dep graph and surfaces any cycle as a clear path
-in the error: `module dep cycle: A → B → C → A`. Self-loops report the same
-way (`A → A`).
+The loader runs DFS over the dep graph and surfaces any cycle as a clear path in
+the error: `module dep cycle: A → B → C → A`. Self-loops report the same way
+(`A → A`).
 
 ---
 
@@ -477,16 +477,16 @@ alpine_feed(
 ```
 
 Each call registers a **synthetic module** named `<parent>.<feed>` (e.g.,
-`alpine.main`, `alpine.community`). The resolver consults synthetics in
-priority order alongside real modules, but synthetics always rank below every
-non-feed module — a from-source override in `module-core` wins against the
-feed automatically without `prefer_modules`.
+`alpine.main`, `alpine.community`). The resolver consults synthetics in priority
+order alongside real modules, but synthetics always rank below every non-feed
+module — a from-source override in `module-core` wins against the feed
+automatically without `prefer_modules`.
 
 The on-disk APKINDEX is checked into the module repo. `yoe update-feeds`
 refreshes it from upstream, verifying the RSA-SHA1 signature against
 `alpine_feed(keys=[...])` before writing. See
-[module-alpine.md](module-alpine.md#maintainer-playbook-yoe-update-feeds)
-for the maintainer workflow.
+[module-alpine.md](module-alpine.md#maintainer-playbook-yoe-update-feeds) for
+the maintainer workflow.
 
 ### Lazy materialization
 
@@ -499,9 +499,9 @@ APKINDEX cache (header-versioned, content-keyed) keeps re-parse times under
 ### Companion units (the enable-service pattern)
 
 A feed gives you every package's `.apk` but doesn't enable services — Alpine
-ships init scripts disabled (apk's `setup-<pkg>` is a human helper, and yoe
-has no humans on the image-assembly path). The convention is one tiny
-companion unit per service the maintainer wants to expose:
+ships init scripts disabled (apk's `setup-<pkg>` is a human helper, and yoe has
+no humans on the image-assembly path). The convention is one tiny companion unit
+per service the maintainer wants to expose:
 
 ```python
 # module-alpine/units/docker-enable.star
@@ -515,12 +515,12 @@ unit(
 
 The companion has no tasks. The build executor falls through to the apk-build
 path when `services = [...]` is non-empty so the runlevel symlink lands in the
-package's data tar. A project that wants Docker running adds `docker-enable`
-to its image's `artifacts` list (alongside `docker` itself, which the unit's
+package's data tar. A project that wants Docker running adds `docker-enable` to
+its image's `artifacts` list (alongside `docker` itself, which the unit's
 `runtime_deps` will pull in).
 
-This keeps the policy where it belongs: the package author — not the image,
-not the project — decides whether installing the package also enables it. See
+This keeps the policy where it belongs: the package author — not the image, not
+the project — decides whether installing the package also enables it. See
 [CLAUDE.md](../CLAUDE.md) "Key Design Decisions" → "Units declare their own
 services" for the rationale.
 

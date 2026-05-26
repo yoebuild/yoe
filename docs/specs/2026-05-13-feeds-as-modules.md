@@ -308,17 +308,16 @@ mechanism scales to Debian-class catalogs while staying snappy at alpine scale.
   first build parses; subsequent builds load in &lt;300 ms even at Debian-class
   catalog size. Cache files are not committed (`.gitignore`d inside the module's
   feed directory).
-- R22. **TUI shows project closure only; discovery via search.** Module-list
-  and unit-list TUI surfaces show ONLY the project's closure (units actually
-  referenced by the active machine's artifacts). There is no full-catalog
-  pane mode. For "I want to find package X" workflows, the existing
-  `tui-unit-query` search extends to query the synthetic-module catalog
-  (read-only via `Names()`) without materializing units; results group by
-  "in closure" vs "available in feed Y." For "I want to browse a section of
-  the catalog" workflows, the idiom is a **virtual image** — a regular
-  `image(name="catalog", artifacts=[...])` whose role is to pull a chosen
-  subset into the closure. No toggle gestures, no mode multiplexing, no
-  ~60k-entry pane renders.
+- R22. **TUI shows project closure only; discovery via search.** Module-list and
+  unit-list TUI surfaces show ONLY the project's closure (units actually
+  referenced by the active machine's artifacts). There is no full-catalog pane
+  mode. For "I want to find package X" workflows, the existing `tui-unit-query`
+  search extends to query the synthetic-module catalog (read-only via `Names()`)
+  without materializing units; results group by "in closure" vs "available in
+  feed Y." For "I want to browse a section of the catalog" workflows, the idiom
+  is a **virtual image** — a regular `image(name="catalog", artifacts=[...])`
+  whose role is to pull a chosen subset into the closure. No toggle gestures, no
+  mode multiplexing, no ~60k-entry pane renders.
 - R23. **Format-agnostic infrastructure.** The resolver, the in-memory module
   and unit representations, and the TUI surfaces contain no format-specific
   (APKINDEX or deb822) logic. Adding `debian_feed` (Debian backend plan) or a
@@ -371,9 +370,9 @@ ship.
 
 - AE5. **Covers R13, R14, R15.** Given an image with `init = "openrc"` lists
   `docker`, `docker-openrc`, and `docker-enable` in its artifacts, image
-  assembly installs the docker binary (from `alpine.community`), the OpenRC
-  init script (from `alpine.community`), and the tiny `docker-enable.apk`
-  (built from `module-alpine/units/docker-enable.star`) whose only content is
+  assembly installs the docker binary (from `alpine.community`), the OpenRC init
+  script (from `alpine.community`), and the tiny `docker-enable.apk` (built from
+  `module-alpine/units/docker-enable.star`) whose only content is
   `/etc/runlevels/default/docker → /etc/init.d/docker`. The service starts at
   boot. A sibling image that omits `docker-enable` ships the binary and init
   script but does not auto-start docker.
@@ -387,8 +386,8 @@ ship.
 
 ## Example
 
-The shape after migration, illustrated against a realistic edge-gateway
-project consuming both `alpine.main` and `alpine.community`.
+The shape after migration, illustrated against a realistic edge-gateway project
+consuming both `alpine.main` and `alpine.community`.
 
 ### `module-alpine/MODULE.star` — feed declarations
 
@@ -417,10 +416,10 @@ alpine_feed(
 )
 ```
 
-These materialize as the synthetic modules `alpine.main` and
-`alpine.community`. Hand-written companion units in `module-alpine/units/`
-(such as `docker-enable.star`, `openssh-enable.star`) rank above the synthetic
-feeds per R5.
+These materialize as the synthetic modules `alpine.main` and `alpine.community`.
+Hand-written companion units in `module-alpine/units/` (such as
+`docker-enable.star`, `openssh-enable.star`) rank above the synthetic feeds per
+R5.
 
 ### `module-alpine/units/docker-enable.star` — companion enable unit
 
@@ -434,9 +433,9 @@ unit(
 ```
 
 No source, no build steps. The build pipeline produces a tiny apk whose only
-content is the runlevel symlink `/etc/runlevels/default/docker →
-/etc/init.d/docker`, materialized via the existing `services = [...]`
-mechanism on `Unit{}`.
+content is the runlevel symlink
+`/etc/runlevels/default/docker → /etc/init.d/docker`, materialized via the
+existing `services = [...]` mechanism on `Unit{}`.
 
 ### `PROJECT.star` — consuming both feeds
 
@@ -491,22 +490,22 @@ image(
 
 The image lists unit names directly. The resolver walks `module-core` first
 (matches `kernel-rpi5`, `busybox`, `edge-agent`), then `module-alpine`'s
-companion units (matches `openssh-enable`, `docker-enable`), then
-`alpine.main` (matches `openssh`, `openssh-openrc`, `chrony`, `chrony-openrc`,
-`python3`), then `alpine.community` (matches `docker`, `docker-openrc`,
-`python3-cryptography`). The user never says "from alpine.community" — the
-name resolves wherever it lives.
+companion units (matches `openssh-enable`, `docker-enable`), then `alpine.main`
+(matches `openssh`, `openssh-openrc`, `chrony`, `chrony-openrc`, `python3`),
+then `alpine.community` (matches `docker`, `docker-openrc`,
+`python3-cryptography`). The user never says "from alpine.community" — the name
+resolves wherever it lives.
 
 Auto-start is opt-in via the three-unit pattern (`docker`, `docker-openrc`,
 `docker-enable`). To get docker available but not auto-starting, drop
 `docker-enable`. To get only the docker CLI without dockerd, drop
 `docker-openrc` too.
 
-The same shape will carry to Debian when that lands: `debian_feed("bookworm",
-"main")` and `debian_feed("bookworm-security", "main")` declared in
-`module-debian/MODULE.star`, with companion `*-enable.star` units in
-`module-debian/units/` for project-controlled service auto-start. Same
-resolver, same project surface.
+The same shape will carry to Debian when that lands:
+`debian_feed("bookworm", "main")` and `debian_feed("bookworm-security", "main")`
+declared in `module-debian/MODULE.star`, with companion `*-enable.star` units in
+`module-debian/units/` for project-controlled service auto-start. Same resolver,
+same project surface.
 
 ---
 
@@ -625,13 +624,12 @@ resolver, same project surface.
   one-time per module and git-deltas well.
 - **Feed + companion module pattern.** A module that declares one or more
   `*_feed(...)` calls also ships hand-written companion units in `units/`.
-  Companions serve three roles: service-enabler units (`*-enable.star`) that
-  opt projects into auto-start, overrides that shadow synthetic feed entries
-  to correct a field, and custom additions. Companions rank at the parent
-  module's normal priority (above synthetics per R5) — so they shadow the
-  feed's entries by name with no `prefer_modules` ceremony. This is the
-  canonical shape for distro modules going forward (alpine today, debian and
-  ubuntu when they land).
+  Companions serve three roles: service-enabler units (`*-enable.star`) that opt
+  projects into auto-start, overrides that shadow synthetic feed entries to
+  correct a field, and custom additions. Companions rank at the parent module's
+  normal priority (above synthetics per R5) — so they shadow the feed's entries
+  by name with no `prefer_modules` ceremony. This is the canonical shape for
+  distro modules going forward (alpine today, debian and ubuntu when they land).
 - **Service enablement stays unit-author-declared.** yoe's existing
   `services = [...]` field on `Unit{}` continues to bake the runlevel/target
   symlinks into the apk/deb at package time, exactly as it does today
