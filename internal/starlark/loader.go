@@ -21,7 +21,25 @@ type loadConfig struct {
 	projectFile            string // alternative project file (instead of PROJECT.star)
 	showShadows            bool   // emit shadow / provides-override notices (default off)
 	allowDuplicateProvides bool   // accept multiple intra-module providers of the same virtual
+	extraBuiltins          []extraBuiltin
 }
+
+// extraBuiltin pairs a Starlark name with a factory that produces the
+// builtin once the Engine exists. The factory is called from
+// Engine.builtins() with the Engine instance so closures (like
+// alpine_feed) can hold a reference to it without an import cycle
+// between internal/starlark and the package that defines the builtin.
+type extraBuiltin struct {
+	name    string
+	factory BuiltinFactory
+}
+
+// BuiltinFactory produces a Starlark builtin closed over the loading
+// Engine. External packages (internal/feeds/alpine, etc.) use this to
+// register their own builtins via WithBuiltin without forcing
+// internal/starlark to import the heavy parser packages those builtins
+// pull in (apkindex, dpkg, etc.).
+type BuiltinFactory func(*Engine) *starlark.Builtin
 
 // WithModuleSync provides a callback that is invoked after PROJECT.star is
 // evaluated to ensure all declared modules are available (e.g. cloned).
@@ -56,6 +74,18 @@ func WithShowShadows(v bool) LoadOption {
 // apk's "any of these satisfies the dep" semantics.
 func WithAllowDuplicateProvides(v bool) LoadOption {
 	return func(c *loadConfig) { c.allowDuplicateProvides = v }
+}
+
+// WithBuiltin adds an extra Starlark builtin to the engine's predeclared
+// set before evaluation. The factory is invoked from inside builtins()
+// with the Engine instance so the builtin can hold a closure over it —
+// alpine_feed (internal/feeds/alpine) uses this to call
+// Engine.RegisterSyntheticModule without internal/starlark importing
+// internal/apkindex.
+func WithBuiltin(name string, factory BuiltinFactory) LoadOption {
+	return func(c *loadConfig) {
+		c.extraBuiltins = append(c.extraBuiltins, extraBuiltin{name: name, factory: factory})
+	}
 }
 
 // LoadProject finds the project root, evaluates all .star files, and returns
@@ -145,6 +175,16 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	eng.SetShowShadows(cfg.showShadows)
 	eng.SetAllowDuplicateProvides(cfg.allowDuplicateProvides)
 
+	// Materialize any caller-supplied builtins (alpine_feed, etc.) so
+	// they're predeclared before any .star file evaluates.
+	if len(cfg.extraBuiltins) > 0 {
+		specs := make(map[string]BuiltinFactory, len(cfg.extraBuiltins))
+		for _, b := range cfg.extraBuiltins {
+			specs[b.name] = b.factory
+		}
+		eng.SetExtraBuiltins(specs)
+	}
+
 	// Evaluate project file (PROJECT.star or --project override)
 	projFile := filepath.Join(root, "PROJECT.star")
 	if cfg.projectFile != "" {
@@ -157,13 +197,20 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		return nil, fmt.Errorf("evaluating %s: %w", projFile, err)
 	}
 
-	// Sync modules if a sync callback was provided (auto-clone missing modules).
-	if cfg.moduleSync != nil {
-		if proj := eng.Project(); proj != nil && len(proj.Modules) > 0 {
-			if err := cfg.moduleSync(proj.Modules, os.Stderr); err != nil {
-				return nil, fmt.Errorf("syncing modules: %w", err)
-			}
+	// Sync modules + walk their MODULE.star for transitive deps in an
+	// iterated sync↔peek fixpoint. Each round: (1) sync the current set,
+	// (2) peek each module for its declared `module_info(deps=...)`,
+	// (3) accumulate new deps, (4) repeat until no new deps appear.
+	//
+	// Cycle detection runs on the final dep graph; same-name + different
+	// ref collisions raise a clear error (project-level always wins
+	// against transitive collisions).
+	if proj := eng.Project(); proj != nil {
+		expanded, err := expandTransitiveDeps(proj.Modules, root, cfg.moduleSync, os.Stderr)
+		if err != nil {
+			return nil, err
 		}
+		proj.Modules = expanded
 	}
 
 	// Resolve each declared module to a canonical name and on-disk path.
@@ -236,18 +283,22 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	}
 
 	// Build ctx — a single Starlark struct exposing the active machine /
-	// project context to unit and image definitions. Replaces what used to
-	// be five separate globals (ARCH, MACHINE, PROJECT_VERSION,
-	// MACHINE_CONFIG, PROVIDES, RUNTIME_DEPS) with one named entry point.
-	// Defaults: arch = x86_64 if no machine is configured; machine and
-	// project_version are empty strings; machine_config is absent if no
-	// machine is configured.
+	// project context to unit and image definitions. Defaults: arch =
+	// x86_64 if no machine is configured; machine and project_version
+	// are empty strings; machine_config is absent if no machine is
+	// configured.
 	//
-	// ctx.provides and ctx.runtime_deps are mutable *starlark.Dict
-	// instances. We keep local Go references (`provides`, `runtimeDeps`)
-	// and embed the same pointers in the struct. Phase 2 mutations on the
-	// Go side flow through to image-time lookups because the struct holds
-	// dict identity, not a snapshot.
+	// ctx.provides is a mutable *starlark.Dict; the Go-side `provides`
+	// reference embedded in the struct lets Phase 2 mutations flow
+	// through to image-time lookups because the struct holds dict
+	// identity, not a snapshot.
+	//
+	// ctx.runtime_deps was removed in the feeds-as-modules cutover —
+	// the Starlark-side dict required eagerly materializing every
+	// registered unit's deps, which defeats R20's "closure size bounds
+	// memory" promise at Debian-class scale. Image classes now call
+	// the resolve_closure(artifacts) builtin instead, which walks the
+	// dep graph in Go and materializes only the units it reaches.
 	arch := "x86_64"
 	machine := ""
 	projectVersion := ""
@@ -268,19 +319,58 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 			starlark.String(activeMachine.Kernel.Unit),
 		)
 	}
-	runtimeDeps := starlark.NewDict(0)
 
 	ctxFields := starlark.StringDict{
 		"arch":            starlark.String(arch),
 		"machine":         starlark.String(machine),
 		"project_version": starlark.String(projectVersion),
 		"provides":        provides,
-		"runtime_deps":    runtimeDeps,
 	}
 	if activeMachine != nil {
 		ctxFields["machine_config"] = buildMachineConfigStruct(activeMachine)
 	}
 	eng.SetVar("ctx", starlarkstruct.FromStringDict(starlark.String("ctx"), ctxFields))
+
+	// Phase 1c: Evaluate each module's MODULE.star fully (not just the
+	// module_info peek used for the dep walk). This is where alpine_feed,
+	// debian_feed, and other feed-declaring builtins run — they register
+	// SyntheticModules against the engine. Runs after machines + ctx
+	// build so the feed builtins see the active arch.
+	//
+	// The project itself doesn't have a MODULE.star; only declared
+	// modules do. Set arch on the engine so lazy feed lookups can filter
+	// per-arch entries without arch threading.
+	eng.SetActiveArch(arch)
+	for i, rm := range resolvedModules {
+		modFile := filepath.Join(rm.path, "MODULE.star")
+		if _, statErr := os.Stat(modFile); statErr != nil {
+			continue // module without a MODULE.star — rare, but tolerated
+		}
+		eng.SetCurrentModule(rm.name, i+1)
+		if err := eng.ExecFile(modFile); err != nil {
+			return nil, fmt.Errorf("evaluating %s: %w", modFile, err)
+		}
+	}
+
+	// Preflight prefer_modules pins now that real + synthetic module
+	// names are known. Running before the unit/image phases means a
+	// stale pin (e.g., "alpine" → "alpine.main" after a
+	// feeds-as-modules cutover) surfaces with the helpful fixit
+	// message instead of the cryptic "unresolved name X" the closure
+	// walk would emit when it discovers the pinned-but-not-registered
+	// unit is missing.
+	if proj := eng.Project(); proj != nil && len(proj.PreferModules) > 0 {
+		known := make(map[string]struct{}, len(resolvedModules)+len(eng.SyntheticModules()))
+		for _, rm := range resolvedModules {
+			known[rm.name] = struct{}{}
+		}
+		for _, sm := range eng.SyntheticModules() {
+			known[sm.Name] = struct{}{}
+		}
+		if err := preflightPreferModules(proj.PreferModules, known); err != nil {
+			return nil, err
+		}
+	}
 
 	// Phase 1b: Evaluate container definitions (project + modules).
 	// Containers must be loaded before units so that units can reference them.
@@ -361,11 +451,23 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		}
 	}
 
-	// Populate ctx.runtime_deps: unit name → list of runtime dep names.
-	// Mutates the dict in place; ctx already references it.
-	for _, u := range eng.Units() {
-		if len(u.RuntimeDeps) > 0 {
-			_ = runtimeDeps.SetKey(starlark.String(u.Name), toStarlarkStringList(u.RuntimeDeps))
+	// (Pre-feeds-as-modules this block populated ctx.runtime_deps —
+	// removed; image classes call resolve_closure(artifacts) instead.)
+
+	// Mirror the Starlark provides dict onto proj.Provides before the
+	// image phase so the closure walk (resolve_closure / Engine.closure)
+	// can consult it. This used to happen later, after the image phase,
+	// which worked because the Starlark-side closure walk read provides
+	// directly off ctx; the Go-side walk reads from proj.Provides and
+	// runs during image() evaluation, so the mirror must move earlier.
+	if proj := eng.Project(); proj != nil {
+		proj.Provides = map[string]string{}
+		for _, item := range provides.Items() {
+			k, kok := item[0].(starlark.String)
+			v, vok := item[1].(starlark.String)
+			if kok && vok {
+				proj.Provides[string(k)] = string(v)
+			}
 		}
 	}
 
@@ -391,9 +493,32 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	proj.ResolvedModules = resolvedForProject
 	proj.Diagnostics.Shadows = eng.Shadows()
 
-	// Mirror the Starlark ctx.provides dict onto the Go side so callers that
-	// don't run inside a Starlark thread (the build executor, deploy path,
-	// describe command) can route virtual deps to concrete units.
+	// Synthetic modules (alpine_feed, debian_feed): rank strictly below
+	// every real module per R5. Assign Priority in registration order so
+	// the first-registered synthetic outranks later ones, mirroring the
+	// real-module "last-wins among modules" convention (1..N): synthetic
+	// indices live below 1 (0, -1, -2, ...) so the existing higher-wins
+	// comparison still routes correctly. Priorities are negative because
+	// the lowest valid real-module index is 1; using zero or negative
+	// values keeps the relative ordering "any real module wins over any
+	// synthetic" trivially true without coupling to the project-root
+	// index value.
+	synths := eng.SyntheticModules()
+	if len(synths) > 0 {
+		for i, sm := range synths {
+			// First-registered gets the highest synthetic priority (0),
+			// last-registered the lowest. This matches the existing
+			// real-module "later-declared wins" tiebreak but keeps every
+			// synthetic strictly below every real module.
+			sm.Priority = -i
+		}
+		proj.SyntheticModules = synths
+	}
+
+	// Re-mirror the Starlark ctx.provides dict onto the Go side. The
+	// pre-image-phase mirror above seeded proj.Provides so the closure
+	// walk could resolve virtuals; image() definitions can declare
+	// `provides` too, so re-sync here to capture any late additions.
 	proj.Provides = map[string]string{}
 	for _, item := range provides.Items() {
 		k, kok := item[0].(starlark.String)
@@ -456,7 +581,131 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		}
 	}
 
+	// Materialize build-time deps that reference synthetic units. The
+	// image-phase closure walk pulls in runtime_deps; build-time deps
+	// (`deps = [...]` on source-built units) are separate. A
+	// source-built unit may declare a build-time dep on a name now
+	// served only by alpine_feed / debian_feed, and BuildDAG below
+	// would fail with "depends on X, which does not exist" unless we
+	// materialize those names here. Iterate to fixpoint in case a
+	// newly-materialized unit pulls in further synthetic deps.
+	for {
+		added := 0
+		for name, unit := range eng.Units() {
+			for _, dep := range unit.Deps {
+				resolved := eng.resolveProvides(dep)
+				if _, ok := eng.Units()[resolved]; ok {
+					continue
+				}
+				u, err := eng.lookupOrMaterialize(resolved)
+				if err != nil {
+					return nil, fmt.Errorf("materializing build-time dep %q of unit %q: %w", dep, name, err)
+				}
+				if u != nil {
+					added++
+				}
+			}
+		}
+		if added == 0 {
+			break
+		}
+	}
+
+	// Validate prefer_modules: every value must name a known module
+	// (real or synthetic). Surfaces a fixit message with the closest
+	// candidates when a pin lands on a name no module advertises —
+	// catches the common "alpine" → "alpine.main" / "alpine.community"
+	// confusion after the feeds-as-modules cutover, where the parent
+	// module-alpine no longer registers units directly.
+	if err := validatePreferModules(proj); err != nil {
+		return nil, err
+	}
+
 	return proj, nil
+}
+
+// validatePreferModules walks proj.PreferModules and errors when a
+// pin's value doesn't match any known module name. The error includes
+// up to three nearest-match suggestions (substring or prefix matches
+// against the union of real-module + synthetic-module names) so the
+// user can see immediately whether they meant a feed name they
+// forgot to qualify.
+func validatePreferModules(proj *Project) error {
+	if proj == nil || len(proj.PreferModules) == 0 {
+		return nil
+	}
+	known := make(map[string]struct{}, len(proj.ResolvedModules)+len(proj.SyntheticModules))
+	for _, rm := range proj.ResolvedModules {
+		if rm.Name != "" {
+			known[rm.Name] = struct{}{}
+		}
+	}
+	for _, sm := range proj.SyntheticModules {
+		if sm.Name != "" {
+			known[sm.Name] = struct{}{}
+		}
+	}
+	return preflightPreferModules(proj.PreferModules, known)
+}
+
+// preflightPreferModules is the core check used by both
+// validatePreferModules (at end of load) and the early preflight in
+// LoadProjectFromRoot (before resolve_closure runs, so the user sees
+// the helpful fixit instead of a confusing "unresolved name" from
+// the closure walk).
+func preflightPreferModules(prefer map[string]string, known map[string]struct{}) error {
+	for unit, modName := range prefer {
+		if modName == "" {
+			continue
+		}
+		if _, ok := known[modName]; ok {
+			continue
+		}
+		suggestions := suggestModuleNames(modName, known)
+		hint := ""
+		switch len(suggestions) {
+		case 0:
+			// nothing to suggest
+		case 1:
+			hint = fmt.Sprintf(" Did you mean %q?", suggestions[0])
+		default:
+			quoted := make([]string, len(suggestions))
+			for i, s := range suggestions {
+				quoted[i] = fmt.Sprintf("%q", s)
+			}
+			hint = fmt.Sprintf(" Did you mean one of: %s?", strings.Join(quoted, ", "))
+		}
+		return fmt.Errorf(
+			`prefer_modules entry %q: %q — module %q not found.%s See docs/module-alpine.md "alpine_feed: declaring a whole repo as one module entry" for the alpine → alpine.main/alpine.community migration.`,
+			unit, modName, modName, hint)
+	}
+	return nil
+}
+
+// suggestModuleNames picks up to three module names that are close
+// to `target` — prefix match wins, then substring match. Empty
+// suggestions returned when nothing matches.
+func suggestModuleNames(target string, known map[string]struct{}) []string {
+	var prefixed, contained []string
+	for name := range known {
+		switch {
+		case name == target:
+			continue
+		case strings.HasPrefix(name, target+"."):
+			// Exact qualifier promotion ("alpine" → "alpine.main"):
+			// always rank these first.
+			prefixed = append(prefixed, name)
+		case strings.Contains(name, target):
+			contained = append(contained, name)
+		}
+	}
+	sort.Strings(prefixed)
+	sort.Strings(contained)
+	out := append(prefixed, contained...)
+	if len(out) > 3 {
+		out = out[:3]
+	}
+	return out
 }
 
 func toStarlarkStringList(ss []string) *starlark.List {
@@ -516,34 +765,142 @@ func locateModulePath(m ModuleRef, projectRoot string) (modulePath, cloneDir str
 // MODULE.star is missing, fails to parse, or doesn't call module_info.
 // This is intentionally separate from the main engine eval so the canonical
 // name is known before any registration happens.
+//
+// Use peekModuleInfo when you also need the declared transitive deps (the
+// recursive-module walking path in LoadProjectFromRoot).
 func peekModuleName(modulePath string) string {
+	info := peekModuleInfo(modulePath)
+	if info == nil {
+		return ""
+	}
+	return info.Name
+}
+
+// peekModuleInfo evaluates MODULE.star in an isolated thread and returns
+// the declared name + transitive deps. Returns nil when MODULE.star is
+// missing or fails to parse. Errors inside module_info or module() are
+// swallowed — peek is a best-effort pre-evaluation pass and the real
+// evaluation later surfaces any syntax issues with proper error context.
+//
+// The captured Deps slice is what the recursive-module walker (U4)
+// uses to extend the project's module list to its transitive closure.
+func peekModuleInfo(modulePath string) *ModuleInfo {
 	file := filepath.Join(modulePath, "MODULE.star")
 	src, err := os.ReadFile(file)
 	if err != nil {
-		return ""
+		return nil
 	}
-	var captured string
+	info := &ModuleInfo{}
 	moduleInfo := starlark.NewBuiltin("module_info",
 		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 			for _, kv := range kwargs {
-				if k, ok := kv[0].(starlark.String); ok && string(k) == "name" {
+				key, ok := kv[0].(starlark.String)
+				if !ok {
+					continue
+				}
+				switch string(key) {
+				case "name":
 					if v, ok := kv[1].(starlark.String); ok {
-						captured = string(v)
+						info.Name = string(v)
 					}
+				case "description":
+					if v, ok := kv[1].(starlark.String); ok {
+						info.Description = string(v)
+					}
+				case "deps":
+					info.Deps = parsePeekDeps(kv[1])
 				}
 			}
 			return starlark.None, nil
 		})
-	moduleStub := starlark.NewBuiltin("module",
+	// `module(url=..., ref=..., path=..., local=...)` is the builder
+	// invoked inside module_info(deps=[module(...), ...]). The deps
+	// list captures ModuleRef structs; the builtin records them via a
+	// closure-shared slot so module_info's `deps=` arm can pick them
+	// up after evaluation.
+	moduleBuiltin := starlark.NewBuiltin("module",
+		func(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			ref := ModuleRef{}
+			if len(args) >= 1 {
+				if v, ok := args[0].(starlark.String); ok {
+					ref.URL = string(v)
+				}
+			}
+			for _, kv := range kwargs {
+				key, ok := kv[0].(starlark.String)
+				if !ok {
+					continue
+				}
+				switch string(key) {
+				case "url":
+					if v, ok := kv[1].(starlark.String); ok {
+						ref.URL = string(v)
+					}
+				case "ref":
+					if v, ok := kv[1].(starlark.String); ok {
+						ref.Ref = string(v)
+					}
+				case "path":
+					if v, ok := kv[1].(starlark.String); ok {
+						ref.Path = string(v)
+					}
+				case "local":
+					if v, ok := kv[1].(starlark.String); ok {
+						ref.Local = string(v)
+					}
+				}
+			}
+			return moduleRefValue{ref: ref}, nil
+		})
+	// alpine_feed / debian_feed / etc. are no-ops during the peek —
+	// we only need to capture module_info(). Without these stubs
+	// Starlark's compile-time resolver aborts before module_info()
+	// runs, falling back to the basename and breaking synthetic
+	// module names (alpine_feed registers under <parent>.<feed>,
+	// where parent comes from this peek).
+	noop := starlark.NewBuiltin("noop",
 		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
 			return starlark.None, nil
 		})
 	thread := &starlark.Thread{Name: file}
 	_, _ = starlark.ExecFileOptions(fileOpts, thread, file, src, starlark.StringDict{
 		"module_info": moduleInfo,
-		"module":      moduleStub,
+		"module":      moduleBuiltin,
+		"alpine_feed": noop,
 	})
-	return captured
+	return info
+}
+
+// moduleRefValue carries a ModuleRef through Starlark evaluation. It
+// satisfies starlark.Value so module_info(deps=[module(...), ...]) can
+// store it in a list without Starlark complaining about an unknown type.
+type moduleRefValue struct{ ref ModuleRef }
+
+func (moduleRefValue) String() string        { return "module_ref" }
+func (moduleRefValue) Type() string          { return "module_ref" }
+func (moduleRefValue) Freeze()               {}
+func (moduleRefValue) Truth() starlark.Bool  { return starlark.True }
+func (moduleRefValue) Hash() (uint32, error) { return 0, fmt.Errorf("module_ref is not hashable") }
+
+// parsePeekDeps unwraps a Starlark list of module() values into a Go
+// slice of ModuleRef. Anything that isn't a moduleRefValue is silently
+// skipped — the peek pass is best-effort and the real evaluation will
+// catch malformed entries with a proper error.
+func parsePeekDeps(v starlark.Value) []ModuleRef {
+	list, ok := v.(*starlark.List)
+	if !ok {
+		return nil
+	}
+	out := make([]ModuleRef, 0, list.Len())
+	iter := list.Iterate()
+	defer iter.Done()
+	var item starlark.Value
+	for iter.Next(&item) {
+		if mr, ok := item.(moduleRefValue); ok {
+			out = append(out, mr.ref)
+		}
+	}
+	return out
 }
 
 // buildMachineConfigStruct produces the ctx.machine_config struct from a

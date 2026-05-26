@@ -70,6 +70,19 @@ architecture description live under `docs/` (start with `docs/intro.md` and
   across projects, and pushes policy to the wrong place. If a project genuinely
   needs a package installed but a service disabled, that's an explicit per-image
   opt-out (not an opt-in), and the bar for adding one is high.
+- **Distro modules ship a feed + a companion enable layer.** A module that wraps
+  an upstream distro (Alpine, Debian, …) declares its packages via one
+  `alpine_feed(...)` / `debian_feed(...)` call per repo section, not via
+  thousands of per-package `.star` files. Each feed registers a synthetic module
+  (`alpine.main`, `alpine.community`) whose units materialize lazily — working
+  memory tracks closure size, not catalog size. Service-enable units
+  (`<svc>-enable.star`) are hand-curated companions that depend on the upstream
+  `-openrc` package and set `services = [...]` to bake the runlevel symlink. Do
+  not write a from-source unit for a package the feed already exposes; pulling
+  from `module-alpine` via the feed is the default for the cases listed in
+  [docs/module-alpine.md](docs/module-alpine.md). Do not scan the rootfs for
+  init scripts as an enable mechanism — explicit companion units are how a
+  package's services become enabled.
 - **No backward compatibility concerns.** The project is pre-1.0. Do not add
   compatibility shims, legacy conversion paths, or deprecated-but-still- working
   code. When a design changes, update everything to the new design and delete

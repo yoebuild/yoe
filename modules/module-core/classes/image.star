@@ -30,7 +30,12 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
     # `explicit` (above) is preserved separately for UX surfaces like the
     # TUI tree, where seeing the user's pre-closure list rather than the
     # flattened set is much less misleading.
-    resolved = _resolve_runtime_deps(explicit)
+    #
+    # resolve_closure() is a Go-side builtin that walks the runtime-dep
+    # graph and materializes synthetic units (alpine_feed entries) on
+    # demand, so the working set stays bounded by closure size rather
+    # than catalog size.
+    resolved = resolve_closure(explicit)
 
     # Use machine partitions if image doesn't specify its own
     all_partitions = partitions if partitions else list(ctx.machine_config.partitions)
@@ -66,7 +71,7 @@ def _assemble_rootfs(packages, hostname, timezone, locale):
     apk handles dependency resolution from APKINDEX, enforces file-conflict
     detection, and populates /lib/apk/db/installed automatically. The
     `packages` list still includes transitive runtime deps from
-    `_resolve_runtime_deps` so the build-time DAG schedules everything,
+    `resolve_closure()` so the build-time DAG schedules everything,
     but apk will re-resolve install order itself.
 
     Flags:
@@ -269,59 +274,6 @@ mkdir -p /mnt/extlinux
 mount -t ext4 $LOOP /mnt/extlinux
 extlinux --install /mnt/extlinux/boot/extlinux
 """ % (offset_bytes, size_bytes, img), privileged=True)
-
-def _resolve_runtime_deps(packages):
-    """Expand a package list to include all transitive runtime dependencies.
-    Starlark has no recursion or while loops, so we use iterative BFS
-    with a for loop over a generous upper bound.
-    """
-    # BFS: discover all transitive runtime deps
-    seen = {}
-    queue = list(packages)
-    for _i in range(1000):  # upper bound on iterations
-        if not queue:
-            break
-        name = queue[0]
-        queue = queue[1:]
-        if name in seen:
-            continue
-        seen[name] = True
-        deps = ctx.runtime_deps.get(name, None)
-        if deps != None:
-            for dep in deps:
-                resolved = ctx.provides.get(dep, None)
-                d = resolved if resolved != None else dep
-                if d not in seen:
-                    queue = queue + [d]
-
-    # Topological sort: emit packages whose deps are all emitted
-    remaining = list(seen.keys())
-    ordered = []
-    emitted = {}
-    for _round in range(len(remaining) + 1):
-        next_remaining = []
-        for name in remaining:
-            deps = ctx.runtime_deps.get(name, None)
-            ready = True
-            if deps != None:
-                for dep in deps:
-                    resolved = ctx.provides.get(dep, None)
-                    d = resolved if resolved != None else dep
-                    if d in seen and d not in emitted:
-                        ready = False
-                        break
-            if ready:
-                ordered.append(name)
-                emitted[name] = True
-            else:
-                next_remaining.append(name)
-        remaining = next_remaining
-        if not remaining:
-            break
-    # Append any remaining (circular deps)
-    for name in remaining:
-        ordered.append(name)
-    return ordered
 
 def _parse_size_mb(size_str, default=256):
     """Parse a size string like '64M', '1G', or 'fill' into megabytes."""

@@ -17,6 +17,7 @@ import (
 	"github.com/yoebuild/yoe/internal/bootstrap"
 	"github.com/yoebuild/yoe/internal/build"
 	"github.com/yoebuild/yoe/internal/device"
+	"github.com/yoebuild/yoe/internal/feeds/alpine"
 	"github.com/yoebuild/yoe/internal/module"
 	"github.com/yoebuild/yoe/internal/repo"
 	"github.com/yoebuild/yoe/internal/resolve"
@@ -87,6 +88,8 @@ func main() {
 		cmdContainer(cmdArgs)
 	case "module":
 		cmdModule(cmdArgs)
+	case "update-feeds":
+		cmdUpdateFeeds(cmdArgs)
 	case "build":
 		cmdBuild(cmdArgs)
 	case "bootstrap":
@@ -154,6 +157,8 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  device repo             Manage apk repos on a target device (add, remove, list)\n")
 	fmt.Fprintf(os.Stderr, "  deploy <unit> <host>    Build and install a unit on a running yoe device\n")
 	fmt.Fprintf(os.Stderr, "  module                  Manage external modules (fetch, sync, list)\n")
+	fmt.Fprintf(os.Stderr, "  update-feeds            Refresh APKINDEX files for the alpine_feed declarations\n")
+	fmt.Fprintf(os.Stderr, "                          in the current module (run inside a module repo)\n")
 	fmt.Fprintf(os.Stderr, "  repo                    Manage the local apk package repository\n")
 	fmt.Fprintf(os.Stderr, "  cache                   Manage the build cache (local and remote)\n")
 	fmt.Fprintf(os.Stderr, "  source                  Download and manage source archives/repos\n")
@@ -178,6 +183,55 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  YOE_CACHE               Cache directory (default: cache/ in project dir)\n")
 	fmt.Fprintf(os.Stderr, "  YOE_LOG                 Log level: debug, info, warn, error (default: info)\n")
 	fmt.Fprintf(os.Stderr, "\n")
+}
+
+// cmdUpdateFeeds is the entry point for the `yoe update-feeds`
+// subcommand. Runs inside a module repo, finds every alpine_feed()
+// call in MODULE.star, fetches each declared feed's APKINDEX from
+// upstream, verifies the signature against the feed's declared
+// `keys=[...]`, and atomically writes the decompressed index to
+// disk. The maintainer reviews `git diff` and commits manually.
+func cmdUpdateFeeds(args []string) {
+	fs := flag.NewFlagSet("update-feeds", flag.ExitOnError)
+	var (
+		archCSV    = fs.String("arch", "", "comma-separated arches to fetch (default: every arch with an existing on-disk feed dir, falling back to all supported)")
+		moduleDir  = fs.String("module-dir", "", "module directory holding MODULE.star (default: cwd)")
+	)
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s update-feeds [--arch x86_64,arm64] [--module-dir DIR]\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Fetch APKINDEX files for every alpine_feed() declared in the current\n")
+		fmt.Fprintf(os.Stderr, "module's MODULE.star. Verifies each feed's signature against its\n")
+		fmt.Fprintf(os.Stderr, "declared keys=[...] using the in-tree trust list. Writes only;\n")
+		fmt.Fprintf(os.Stderr, "review the diff and commit manually.\n")
+	}
+	_ = fs.Parse(args)
+
+	dir := *moduleDir
+	if dir == "" {
+		var err error
+		dir, err = os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "update-feeds: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "MODULE.star")); err != nil {
+		fmt.Fprintf(os.Stderr, "update-feeds: %s: no MODULE.star here (run inside the module repo)\n", dir)
+		os.Exit(1)
+	}
+	opts := alpine.UpdateOptions{ModuleDir: dir, Out: os.Stdout}
+	if *archCSV != "" {
+		for _, a := range strings.Split(*archCSV, ",") {
+			a = strings.TrimSpace(a)
+			if a != "" {
+				opts.Arches = append(opts.Arches, a)
+			}
+		}
+	}
+	if err := alpine.UpdateFeeds(opts); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func cmdModule(args []string) {
@@ -537,6 +591,7 @@ func projectLoadOpts() []yoestar.LoadOption {
 		yoestar.WithModuleSync(module.SyncIfNeeded),
 		yoestar.WithShowShadows(globalShowShadows),
 		yoestar.WithAllowDuplicateProvides(globalAllowDuplicateProvides),
+		yoestar.WithBuiltin("alpine_feed", alpine.Builtin),
 	}
 	if globalProjectFile != "" {
 		opts = append(opts, yoestar.WithProjectFile(globalProjectFile))

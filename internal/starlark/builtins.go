@@ -33,12 +33,20 @@ func (e *Engine) builtins() starlark.StringDict {
 		"dir_size_mb":    starlark.NewBuiltin("dir_size_mb", fnDirSizeMBPlaceholder),
 		"install_file":     starlark.NewBuiltin("install_file", fnInstallFile),
 		"install_template": starlark.NewBuiltin("install_template", fnInstallTemplate),
+		"resolve_closure":  starlark.NewBuiltin("resolve_closure", e.fnResolveClosure),
 		"True":        starlark.True,
 		"False":       starlark.False,
 	}
 
 	// Merge engine variables (e.g., ARCH set after machine loading).
 	for k, v := range e.vars {
+		d[k] = v
+	}
+
+	// Merge extra builtins registered via WithBuiltin LoadOption.
+	// Materialized once (SetExtraBuiltins) so each factory runs against
+	// the live Engine without re-allocating per ExecFile call.
+	for k, v := range e.extraBuiltins {
 		d[k] = v
 	}
 

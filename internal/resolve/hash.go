@@ -58,7 +58,16 @@ func UnitHash(unit *yoestar.Unit, arch string, depHashes map[string]string, srcI
 	// Source
 	fmt.Fprintf(h, "source:%s\n", unit.Source)
 	fmt.Fprintf(h, "sha256:%s\n", unit.SHA256)
-	fmt.Fprintf(h, "apk_checksum:%s\n", unit.APKChecksum)
+	// Gate on non-empty per the CLAUDE.md hash-gating rule. Units
+	// without an upstream APKINDEX checksum (i.e., everything that
+	// isn't an alpine_pkg or feed-materialized synthetic) stays
+	// cache-neutral when the field is absent — adding the write
+	// unconditionally would invalidate every unit's hash. The cutover
+	// to feeds-as-modules (U13) starts from `yoe clean` anyway, so
+	// the one-time invalidation cost of gating this line is moot.
+	if unit.APKChecksum != "" {
+		fmt.Fprintf(h, "apk_checksum:%s\n", unit.APKChecksum)
+	}
 	fmt.Fprintf(h, "passthrough_apk:%s\n", unit.PassthroughAPK)
 	fmt.Fprintf(h, "tag:%s\n", unit.Tag)
 	fmt.Fprintf(h, "branch:%s\n", unit.Branch)

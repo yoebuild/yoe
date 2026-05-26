@@ -135,6 +135,74 @@ func TestCreateAPK_EmptyDestDir(t *testing.T) {
 	}
 }
 
+func TestCreateAPK_ServiceOnlyCompanion(t *testing.T) {
+	// Companion *-enable.star units have no tasks and an empty
+	// destDir but declare services=[...]. CreateAPK must produce an
+	// apk whose data tar contains the runlevel symlink for each
+	// declared service, with the init-script target satisfied by the
+	// sysroot (i.e., the upstream -openrc package the companion
+	// declares as a runtime_deps).
+	destDir := t.TempDir()
+	sysroot := t.TempDir()
+	outputDir := filepath.Join(t.TempDir(), "output")
+
+	// Stage the init script in the sysroot, as if a depended-on
+	// docker-openrc package had shipped it.
+	initDir := filepath.Join(sysroot, "etc", "init.d")
+	if err := os.MkdirAll(initDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(initDir, "docker"), []byte("#!/sbin/openrc-run\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	unit := &yoestar.Unit{
+		Name:     "docker-enable",
+		Version:  "1.0.0",
+		Services: []string{"docker"},
+	}
+
+	apkPath, err := CreateAPK(unit, destDir, sysroot, outputDir, "x86_64", "", nil)
+	if err != nil {
+		t.Fatalf("CreateAPK: %v", err)
+	}
+	if _, err := os.Stat(apkPath); err != nil {
+		t.Fatalf("apk not created: %v", err)
+	}
+
+	// destDir should now have the runlevel symlink the apk packaged.
+	link := filepath.Join(destDir, "etc", "runlevels", "default", "docker")
+	target, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("expected runlevel symlink at %s: %v", link, err)
+	}
+	if target != "/etc/init.d/docker" {
+		t.Errorf("symlink target = %q, want /etc/init.d/docker", target)
+	}
+}
+
+func TestCreateAPK_ServiceMissingInitScript(t *testing.T) {
+	// A companion unit declares a service but no package in the
+	// closure ships the init script. CreateAPK must fail loudly so
+	// the bug surfaces at build time, not on boot.
+	destDir := t.TempDir()
+	outputDir := filepath.Join(t.TempDir(), "output")
+
+	unit := &yoestar.Unit{
+		Name:     "ghost-enable",
+		Version:  "1.0.0",
+		Services: []string{"ghost"},
+	}
+
+	_, err := CreateAPK(unit, destDir, "", outputDir, "x86_64", "", nil)
+	if err == nil {
+		t.Fatal("want error for service with no init script")
+	}
+	if !strings.Contains(err.Error(), "ghost") {
+		t.Errorf("err = %v, want service name in message", err)
+	}
+}
+
 func TestAPKHash(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.apk")

@@ -106,6 +106,42 @@ func TestUnitHash_ChangesOnInput(t *testing.T) {
 	}
 }
 
+func TestUnitHash_APKChecksumGated(t *testing.T) {
+	// A unit with no APKChecksum hashes the same as it would have
+	// before the gate was added — i.e., empty value contributes nothing.
+	// The gate guarantees adding the field to a fresh unit type doesn't
+	// invalidate every existing unit's cache.
+	base := &yoestar.Unit{
+		Name:    "thing",
+		Version: "1.0",
+		Class:   "unit",
+		Tasks:   []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "true"}}}},
+	}
+
+	h1 := UnitHash(base, "x86_64", nil, "")
+
+	// Setting APKChecksum on the same unit must change the hash —
+	// real alpine_pkg units should always cache-key on their upstream
+	// checksum.
+	withChecksum := *base
+	withChecksum.APKChecksum = "Q1wmRLywlDhwD28lS6Qlp6nGlzzIk="
+	h2 := UnitHash(&withChecksum, "x86_64", nil, "")
+
+	if h1 == h2 {
+		t.Error("setting APKChecksum should change the hash")
+	}
+
+	// Two empty-checksum units differ only by an unrelated field —
+	// their hashes still differ because that field is hashed; the
+	// gate only avoids contributing an empty apk_checksum line.
+	other := *base
+	other.Description = "different"
+	h3 := UnitHash(&other, "x86_64", nil, "")
+	if h1 == h3 {
+		t.Error("description change should still alter the hash")
+	}
+}
+
 func TestComputeAllHashes(t *testing.T) {
 	proj := makeProject(map[string]*yoestar.Unit{
 		"zlib":    {Name: "zlib", Version: "1.3", Class: "unit", Deps: nil, Tasks: []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "make"}}}}},

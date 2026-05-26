@@ -47,6 +47,15 @@ type Project struct {
 	// module's unit is being overridden by another module or the project
 	// root, or when multiple units claim the same virtual.
 	Diagnostics Diagnostics
+
+	// SyntheticModules carries the entries registered via `alpine_feed(...)`
+	// (and the eventual debian_feed) during MODULE.star evaluation. Each
+	// is a deferred-materialization source for the resolver — the closure
+	// walk (U7) calls Lookup on these when a referenced name isn't already
+	// in proj.Units. Ordered by Priority ascending (lowest first); within
+	// the priority ladder synthetic modules always rank below every real
+	// module per R5.
+	SyntheticModules []*SyntheticModule
 }
 
 // ResolvedModule is one entry from project.modules after the loader has

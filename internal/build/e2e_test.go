@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/yoebuild/yoe/internal/feeds/alpine"
 	"github.com/yoebuild/yoe/internal/module"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
@@ -26,6 +27,7 @@ func TestE2E_DryRun(t *testing.T) {
 	proj, err := yoestar.LoadProject(projectDir,
 		yoestar.WithModuleSync(module.SyncIfNeeded),
 		yoestar.WithAllowDuplicateProvides(true),
+		yoestar.WithBuiltin("alpine_feed", alpine.Builtin),
 	)
 	if err != nil {
 		t.Fatalf("LoadProject: %v", err)

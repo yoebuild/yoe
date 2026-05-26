@@ -8,6 +8,26 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.13] - 2026-05-26
+
+- **`alpine_feed()` declares a feed directly in a module's MODULE.star.** A
+  module can now expose thousands of upstream Alpine packages as yoe units with
+  a single declaration — point `alpine_feed()` at a checked-in directory of
+  APKINDEX files and the named packages become available to image artifacts with
+  no per-package `.star` file. Package units materialize lazily as the image's
+  runtime closure needs them, so working memory stays bounded by the closure
+  size rather than the catalog size.
+- **The Modules tab shows declared feeds.** Each `alpine_feed()` call appears in
+  a FEEDS section under the regular module list with its parent module and the
+  total package count.
+- **`yoe update-feeds` refreshes feed APKINDEX files from upstream.** Run inside
+  a module repo, the new subcommand fetches every `alpine_feed()`'s APKINDEX for
+  every active arch, verifies the upstream RSA signature against the keys the
+  module declared, and writes the new indices to disk for the maintainer to
+  review with `git diff` and commit. Signature verification is pure-Go and never
+  consults the host's `/etc/apk/keys/` — the trust list the feed declares is the
+  one that's actually enforced.
+
 ## [0.10.12] - 2026-05-22
 
 - **CI builds `base-image` from source on every push to `main`.** A full
