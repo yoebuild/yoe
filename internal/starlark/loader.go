@@ -352,6 +352,26 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		}
 	}
 
+	// Preflight prefer_modules pins now that real + synthetic module
+	// names are known. Running before the unit/image phases means a
+	// stale pin (e.g., "alpine" → "alpine.main" after a
+	// feeds-as-modules cutover) surfaces with the helpful fixit
+	// message instead of the cryptic "unresolved name X" the closure
+	// walk would emit when it discovers the pinned-but-not-registered
+	// unit is missing.
+	if proj := eng.Project(); proj != nil && len(proj.PreferModules) > 0 {
+		known := make(map[string]struct{}, len(resolvedModules)+len(eng.SyntheticModules()))
+		for _, rm := range resolvedModules {
+			known[rm.name] = struct{}{}
+		}
+		for _, sm := range eng.SyntheticModules() {
+			known[sm.Name] = struct{}{}
+		}
+		if err := preflightPreferModules(proj.PreferModules, known); err != nil {
+			return nil, err
+		}
+	}
+
 	// Phase 1b: Evaluate container definitions (project + modules).
 	// Containers must be loaded before units so that units can reference them.
 	eng.SetCurrentModule("", projectIdx)
@@ -625,7 +645,16 @@ func validatePreferModules(proj *Project) error {
 			known[sm.Name] = struct{}{}
 		}
 	}
-	for unit, modName := range proj.PreferModules {
+	return preflightPreferModules(proj.PreferModules, known)
+}
+
+// preflightPreferModules is the core check used by both
+// validatePreferModules (at end of load) and the early preflight in
+// LoadProjectFromRoot (before resolve_closure runs, so the user sees
+// the helpful fixit instead of a confusing "unresolved name" from
+// the closure walk).
+func preflightPreferModules(prefer map[string]string, known map[string]struct{}) error {
+	for unit, modName := range prefer {
 		if modName == "" {
 			continue
 		}
