@@ -1,0 +1,71 @@
+#!/sbin/openrc-run
+
+description="Qt 6 Quick framebuffer demo (Hello from yoe)"
+
+command="/usr/lib/qt6/bin/qmlscene"
+command_args="/usr/share/qt-demo/demo.qml"
+command_background="yes"
+pidfile="/run/qt-demo.pid"
+output_log="/var/log/qt-demo.log"
+error_log="/var/log/qt-demo.log"
+
+# QPA platform is finalised in start_pre() once /dev/fb0 is up — see
+# the comment there for the mmsize override that pins device-pixel
+# ratio to 1.0.
+export QT_QPA_FB_TTY=/dev/tty1
+
+# Qt Quick defaults to an OpenGL-accelerated scene-graph backend.
+# `software` switches to the CPU rasteriser, which is what we want on
+# top of linuxfb — no GLX, no EGL, no GPU acceleration needed.
+export QSG_RHI_BACKEND=software
+# Older Qt fallback name — harmless on Qt 6.8 but covers older builds.
+export QT_QUICK_BACKEND=software
+
+# Qt's fontconfig lookup wants a writable cache dir under $HOME. /root
+# exists on the base image; pointing $HOME at it keeps the cache out of
+# /tmp where openrc-run wouldn't preserve it across reboots.
+export HOME=/root
+
+depend() {
+    # localmount provides /var/log and the real /tmp. Start after net so
+    # boot logs interleave with the rest of the image's services in a
+    # predictable order; the demo itself doesn't need the network.
+    need localmount
+    after net
+}
+
+start_pre() {
+    # Pin the linuxfb plugin to /dev/fb0's visible geometry AND a
+    # physical millimetre size that yields a 96-DPI screen (i.e.,
+    # devicePixelRatio = 1).
+    #
+    # Without the mmsize override, the linuxfb plugin computes DPR from
+    # the kernel's EDID-derived physical size. QEMU's virtio-gpu
+    # advertises a tiny screen (16 cm × 12 cm at 1280 × 800), which
+    # yields a physical DPI of ~203 — Qt rounds the ratio to 2, doubles
+    # the logical canvas, and the QQuickView ends up twice the size of
+    # the actual framebuffer. The centred greeting then lands at the
+    # bottom-right corner of the visible area while the other three
+    # quadrants are drawn off-screen.
+    #
+    # QT_SCALE_FACTOR / QT_SCREEN_SCALE_FACTORS don't help here —
+    # they're per-app multipliers layered ON TOP of the screen's DPR,
+    # not overrides for the platform plugin's auto-detected DPR. The
+    # plugin's mmsize argument is the right knob.
+    #
+    # mm = px × 25.4 / 96 ≈ px × 264 / 1000 (integer-safe). The result
+    # holds across resolutions, so the same start_pre handles 800×600,
+    # 1024×768, 1280×800, 1920×1080, etc.
+    if [ -e /sys/class/graphics/fb0/virtual_size ]; then
+        IFS=',' read FB_W FB_H < /sys/class/graphics/fb0/virtual_size
+        if [ -n "$FB_W" ] && [ -n "$FB_H" ]; then
+            MM_W=$((FB_W * 264 / 1000))
+            MM_H=$((FB_H * 264 / 1000))
+            export QT_QPA_PLATFORM="linuxfb:fb=/dev/fb0:size=${FB_W}x${FB_H}:mmsize=${MM_W}x${MM_H}"
+            einfo "qt-demo: linuxfb size=${FB_W}x${FB_H} mmsize=${MM_W}x${MM_H}mm (DPR=1)"
+            return 0
+        fi
+    fi
+    export QT_QPA_PLATFORM=linuxfb
+    ewarn "qt-demo: could not read /sys/class/graphics/fb0/virtual_size; using auto-detect"
+}

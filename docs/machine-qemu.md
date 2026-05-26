@@ -36,6 +36,15 @@ serial to the controlling terminal. 4 GB is the floor for memory-heavy unit
 builds inside the guest — the kernel link step alone needs well over 1 GB, so a
 self-hosted `yoe build` of `linux` is OOM-killed on a smaller VM.
 
+Pass `--display` to `yoe run` (e.g. `yoe run qt-image --display`) to drop
+`-nographic` and let QEMU open its native window for the guest framebuffer. The
+launcher attaches a virtio-vga adapter for the DRM virtio-gpu driver and keeps
+serial multiplexed onto host stdio so kernel logs still appear in the terminal
+that started the run. The kernel's `graphics.cfg` fragment turns on the relevant
+FB/DRM bits (`DRM_VIRTIO_GPU`, `DRM_BOCHS`, `FB_VESA`, `FB_EFI`,
+`DRM_FBDEV_EMULATION`), so `/dev/fb0` is present from the first boot — needed by
+linuxfb-backed UIs like the `qt-image` demo.
+
 ## qemu-arm64
 
 ```python
@@ -159,9 +168,12 @@ The launcher in `internal/device/qemu.go`:
 
 1. Picks the binary by arch: `qemu-system-aarch64`, `qemu-system-x86_64`, or
    `qemu-system-riscv64`.
-2. Builds the arg list: `-machine`, `-cpu`, `-m`, `-nographic` (if
-   `display = "none"`), the virtio-blk drive, the virtio-net device with port
-   forwards, and `-bios` if a firmware (OVMF/AAVMF) is set. On a same-arch host
+2. Builds the arg list: `-machine`, `-cpu`, `-m`, `-nographic` by default (or
+   `-device virtio-vga -serial mon:stdio` when `yoe run --display` is set,
+   which lets QEMU open its native window and still leaves the serial console
+   muxed onto host stdio), the virtio-blk drive, the virtio-net device with
+   port forwards, and `-bios` if a firmware (OVMF/AAVMF) is set. On a
+   same-arch host
    it adds `-enable-kvm` when `/dev/kvm` is present; when it is not (notably
    qemu-in-qemu without nested virtualization) it drops KVM, downgrades a `host`
    CPU to `max`, and runs under TCG software emulation instead — slower, but it

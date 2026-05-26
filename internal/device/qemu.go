@@ -460,7 +460,26 @@ func baseQEMUArgs(machine *yoestar.Machine, opts QEMUOptions) []string {
 	args = append(args, "-m", mem)
 
 	// Display
-	if !opts.Display {
+	//
+	// Default (`-nographic`): no QEMU window; the guest's serial console
+	// is multiplexed onto host stdio so `yoe run` is a plain terminal
+	// session. This matches the embedded-board workflow where the image's
+	// console is `ttyS0`.
+	//
+	// With `--display`: open a QEMU window so the guest's framebuffer is
+	// visible — what the qt-image and other graphical demos need. Add a
+	// virtio-vga adapter (DRM-driven virtio-gpu plus VGA for early boot)
+	// so the kernel's framebuffer console renders into that window.
+	// Leaving the `-display` backend unspecified lets QEMU pick GTK on
+	// Linux, Cocoa on macOS, SDL otherwise — robust across hosts and
+	// honoring DISPLAY/Wayland the same way every other QEMU invocation
+	// would. `-serial mon:stdio` keeps the serial console attached to
+	// host stdio (the default without `-nographic` is the in-window
+	// virtual console, which would hide kernel logs from the terminal).
+	if opts.Display {
+		args = append(args, "-device", "virtio-vga")
+		args = append(args, "-serial", "mon:stdio")
+	} else {
 		args = append(args, "-nographic")
 	}
 

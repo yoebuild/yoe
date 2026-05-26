@@ -268,8 +268,11 @@ yoe run --port 9000:9000
 # Allocate more memory — also saved to local.star and reused next time
 yoe run --memory 8G
 
-# Run with graphical output (default is serial console)
-yoe run --display
+# Run with graphical output (default is serial console). Opens QEMU's
+# native window with a virtio-vga adapter; serial stays multiplexed onto
+# this terminal via `-serial mon:stdio`, so kernel logs are still
+# visible alongside the framebuffer.
+yoe run qt-image --display
 
 # Run headless in the background
 yoe run --daemon

@@ -19,6 +19,26 @@ and this project adheres to
   `qemu-system-*` invocation `yoe run` would emit with the current Memory /
   Display / Ports values, so you can confirm what each tweak changes
   before launching — and copy-paste the line to drive QEMU directly.
+- **New `qt-image` boots straight into a Qt 6 Quick demo on the
+  framebuffer.** Build with `yoe build qt-image` and run with
+  `yoe run qt-image --display`; QEMU opens a window showing the demo
+  scene (a "Hello from yoe!" message rendered through the linuxfb
+  platform plugin and the software scene graph). Useful as a quick
+  end-to-end check that a yoe-built image's graphical stack works on
+  hardware that ships virtio-gpu, Bochs, or a plain VESA/EFI
+  framebuffer.
+- **`yoe run --display` now actually opens a QEMU window.** Previously
+  the flag dropped `-nographic` but didn't tell QEMU what to display
+  with; running an image showed only an empty terminal. The launcher
+  now attaches a virtio-vga adapter and keeps the serial console muxed
+  onto host stdio (`-serial mon:stdio`) so kernel logs stay visible
+  alongside the framebuffer window. Headless `yoe run` (no `--display`)
+  is unchanged.
+- **The kernel ships framebuffer and DRM drivers for QEMU and common
+  PC GPUs out of the box.** `linux` now merges a `graphics.cfg`
+  fragment that enables virtio-gpu, Bochs, vesafb, efifb, and DRM fbdev
+  emulation, so every yoe image exposes `/dev/fb0` on first boot
+  without per-image configuration.
 
 ## [0.10.14] - 2026-05-26
 
