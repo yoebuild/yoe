@@ -54,6 +54,11 @@ type Engine struct {
 	// shadows accumulates cross-module unit name collisions in registration
 	// order. Surfaced via Project.Diagnostics for the TUI's Diagnostics tab.
 	shadows []ShadowEvent
+
+	// syntheticModules holds entries registered by `alpine_feed(...)` and
+	// friends during MODULE.star evaluation. The loader pulls them after
+	// the real-module walk to assign Priority and attach to the project.
+	syntheticModules []*SyntheticModule
 }
 
 func NewEngine() *Engine {

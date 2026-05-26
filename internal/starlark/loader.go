@@ -391,6 +391,28 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	proj.ResolvedModules = resolvedForProject
 	proj.Diagnostics.Shadows = eng.Shadows()
 
+	// Synthetic modules (alpine_feed, debian_feed): rank strictly below
+	// every real module per R5. Assign Priority in registration order so
+	// the first-registered synthetic outranks later ones, mirroring the
+	// real-module "last-wins among modules" convention (1..N): synthetic
+	// indices live below 1 (0, -1, -2, ...) so the existing higher-wins
+	// comparison still routes correctly. Priorities are negative because
+	// the lowest valid real-module index is 1; using zero or negative
+	// values keeps the relative ordering "any real module wins over any
+	// synthetic" trivially true without coupling to the project-root
+	// index value.
+	synths := eng.SyntheticModules()
+	if len(synths) > 0 {
+		for i, sm := range synths {
+			// First-registered gets the highest synthetic priority (0),
+			// last-registered the lowest. This matches the existing
+			// real-module "later-declared wins" tiebreak but keeps every
+			// synthetic strictly below every real module.
+			sm.Priority = -i
+		}
+		proj.SyntheticModules = synths
+	}
+
 	// Mirror the Starlark ctx.provides dict onto the Go side so callers that
 	// don't run inside a Starlark thread (the build executor, deploy path,
 	// describe command) can route virtual deps to concrete units.
