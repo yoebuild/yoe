@@ -117,6 +117,26 @@ func TestAlpineFeed_LookupMaterializes(t *testing.T) {
 	if len(u.RuntimeDeps) != 1 || u.RuntimeDeps[0] != "musl" {
 		t.Errorf("RuntimeDeps: got %v, want [musl]", u.RuntimeDeps)
 	}
+	// Build-transport fields the executor reads to fetch + repack the
+	// upstream apk. Without these the build runs but produces no
+	// destdir contents, and downstream units' sysroots are empty for
+	// this dep.
+	wantAsset := "openssh-server-9.9_p2-r0.apk"
+	if u.PassthroughAPK != wantAsset {
+		t.Errorf("PassthroughAPK: got %q, want %q", u.PassthroughAPK, wantAsset)
+	}
+	if !strings.HasSuffix(u.Source, "/main/x86_64/"+wantAsset) {
+		t.Errorf("Source: got %q, want suffix /main/x86_64/%s", u.Source, wantAsset)
+	}
+	if u.Container != "toolchain-musl" {
+		t.Errorf("Container: got %q, want toolchain-musl", u.Container)
+	}
+	if u.ContainerArch != "target" {
+		t.Errorf("ContainerArch: got %q, want target", u.ContainerArch)
+	}
+	if len(u.Tasks) != 1 || u.Tasks[0].Name != "install" {
+		t.Errorf("Tasks: got %+v, want one install task", u.Tasks)
+	}
 
 	musl, err := sm.Lookup("musl")
 	if err != nil {

@@ -118,7 +118,7 @@ func makeAlpineFeed(eng *yoestar.Engine) func(*starlark.Thread, *starlark.Builti
 			indexRoot = filepath.Join(moduleDir, indexRoot)
 		}
 
-		sm := buildSyntheticModule(eng, composedName, parent, indexRoot)
+		sm := buildSyntheticModule(eng, composedName, parent, indexRoot, args)
 		if err := eng.RegisterSyntheticModule(sm); err != nil {
 			return nil, fmt.Errorf("alpine_feed %q: %w", composedName, err)
 		}
@@ -135,11 +135,12 @@ func makeAlpineFeed(eng *yoestar.Engine) func(*starlark.Thread, *starlark.Builti
 // and provides table, cached across calls. The first Lookup or Names
 // call for a given arch triggers ParseIndexWithCache; subsequent calls
 // hit the in-memory state directly.
-func buildSyntheticModule(eng *yoestar.Engine, composedName, parent, indexRoot string) *yoestar.SyntheticModule {
+func buildSyntheticModule(eng *yoestar.Engine, composedName, parent, indexRoot string, args alpineFeedArgs) *yoestar.SyntheticModule {
 	s := &archState{
 		indexRoot: indexRoot,
 		eng:       eng,
 		byArch:    make(map[string]*archCache),
+		feedArgs:  args,
 	}
 	registerFeedState(eng, s)
 
@@ -163,6 +164,7 @@ type archState struct {
 	indexRoot string
 	eng       *yoestar.Engine
 	byArch    map[string]*archCache
+	feedArgs  alpineFeedArgs // mirror url/branch/section needed to build per-unit apk Source URLs
 }
 
 type archCache struct {
@@ -212,7 +214,56 @@ func (s *archState) lookup(moduleName, name string) (*yoestar.Unit, error) {
 	// Closes the cross-feed gap (community openssh-server depends on
 	// so:libcrypto.so.3 which lives in main's openssl-libs).
 	providers := newMultiFeedProviders(s.eng, arch, c.provides)
-	return apkindex.MaterializeUnit(*entry, providers, moduleName)
+	u, err := apkindex.MaterializeUnit(*entry, providers, moduleName)
+	if err != nil {
+		return nil, err
+	}
+	s.populateBuildFields(u, entry, arch)
+	return u, nil
+}
+
+// populateBuildFields adds the transport metadata the build executor
+// needs to fetch + repack an upstream apk: Source URL, PassthroughAPK
+// filename, container + install task. Mirrors what
+// classes/alpine_pkg.star sets in the per-package wrapper — keeping
+// the same shape means the executor's existing apk-passthrough path
+// (internal/build/executor.go:709) handles synthetic units without
+// special-case branching.
+func (s *archState) populateBuildFields(u *yoestar.Unit, entry *apkindex.Entry, arch string) {
+	alpineArch := archMap[arch]
+	// Asset filename uses upstream's combined pkgver (including -rN)
+	// so the URL matches what Alpine's mirror serves.
+	asset := fmt.Sprintf("%s-%s.apk", entry.Name, entry.Version)
+	u.Source = fmt.Sprintf("%s/%s/%s/%s/%s",
+		strings.TrimSuffix(s.feedArgs.url, "/"),
+		s.feedArgs.branch,
+		s.feedArgs.section,
+		alpineArch,
+		asset)
+	u.PassthroughAPK = asset
+	u.Container = "toolchain-musl"
+	u.ContainerArch = "target"
+	u.Sandbox = false
+	u.Tasks = []yoestar.Task{
+		{
+			Name: "install",
+			Steps: []yoestar.Step{
+				{Command: "mkdir -p $DESTDIR"},
+				// Extract the apk's data segment into DESTDIR while
+				// excluding apk control files (.PKGINFO, install
+				// scripts, .SIGN.*) — they ride through to on-target
+				// install via RepackAPK and shouldn't pollute the
+				// downstream per-unit sysroot.
+				{Command: "tar -xzpf ./" + asset + " -C $DESTDIR " +
+					"--exclude=.PKGINFO " +
+					"--exclude=.pre-install --exclude=.post-install " +
+					"--exclude=.pre-upgrade --exclude=.post-upgrade " +
+					"--exclude=.pre-deinstall --exclude=.post-deinstall " +
+					"--exclude=.trigger " +
+					"--exclude=.SIGN.*"},
+			},
+		},
+	}
 }
 
 // multiFeedProviders implements apkindex.Providers across every
