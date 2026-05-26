@@ -519,7 +519,11 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		EnsureDir(srcDir)
 	}
 
-	if len(unit.Tasks) == 0 {
+	// Skip only when there's genuinely nothing to produce. Companion
+	// units with no tasks but services=[...] need to fall through to
+	// CreateAPK so materializeServiceSymlinks bakes the runlevel
+	// symlinks; the task loop below tolerates an empty Tasks slice.
+	if len(unit.Tasks) == 0 && len(unit.Services) == 0 {
 		fmt.Fprintf(w, "  (no tasks for %s class %q)\n", unit.Name, unit.Class)
 		return nil
 	}
