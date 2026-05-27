@@ -7,6 +7,8 @@ project(
     modules = [
         module("https://github.com/yoebuild/module-alpine.git",
               ref = "main"),
+        module("https://github.com/yoebuild/module-debian.git",
+              ref = "main"),
         module("https://github.com/yoebuild/module-jetson.git",
               ref = "main"),
         module("github.com/yoebuild/yoe",
