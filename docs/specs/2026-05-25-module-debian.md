@@ -8,7 +8,7 @@ topic: module-debian
 ## Summary
 
 Add a Debian backend to yoe — `module-debian` with a `debian_feed()`
-synthetic-module builtin, a `toolchain-glibc` build container, a `.deb` artifact
+synthetic module builtin, a `toolchain-glibc` build container, a `.deb` artifact
 path for project-built units, a signed Debian-format project repo, and
 apt-on-target served from that mirror — written so the internal dpkg/apt
 machinery is general enough that `module-ubuntu` later is a thin add rather than
@@ -18,12 +18,15 @@ a parallel implementation.
 
 ## Problem Frame
 
-A real customer project wants embedded images on a Debian base, and the broader
-industry expectation in this segment skews Debian/Ubuntu rather than Alpine. The
-customer requires that deployed devices install and upgrade packages via `apt`
-from the project repo after deployment, not only at flash time — so
-apt-on-target (offline-capable, project-key-signed mirror) is load-bearing, not
-a nice-to-have.
+yoe's dev deployment workflow centers on the iterate-deploy-update loop: build a
+project, sign a repo, point devices at it, push updates via the device's native
+package manager. The APK side of this already ships
+(`docs/specs/2026-04-30-feed-server-and-deploy.md`, `internal/feed/server.go`).
+A Debian backend needs the same shape: deployed devices fetch and upgrade
+packages via `apt` from the project repo after deployment, not only at flash
+time. Apt-on-target (offline-capable, project-key-signed mirror) is therefore
+load-bearing for the workflow, not a deployment-shape nice-to-have specific to
+any single project.
 
 yoe today is Alpine-anchored end to end: the only build container is
 `toolchain-musl` on `alpine:3.21`, all classes assume musl headers and Alpine
@@ -105,7 +108,7 @@ of a small one.
   - **Outcome:** A single unit graph keyed by name, every unit traceable to its
     source module; the build container the resolver hands to each unit is
     `toolchain-glibc`.
-  - **Covered by:** R1, R2, R3, R7, R8.
+  - **Covered by:** R1, R2, R3, R7, R8, R9.
 
 - F2. Module maintainer refreshes the Debian feed
   - **Trigger:** New Debian point release, security update, or routine refresh.
@@ -183,7 +186,7 @@ of a small one.
   `debian.bookworm.main`, `debian.bookworm.contrib`,
   `debian.bookworm-security.main`). A project that needs `bookworm-security` or
   `bookworm-updates` declares one `debian_feed` call per suite explicitly; the
-  synthetic-module names do not encode snapshot timestamps — reproducibility
+  synthetic module names do not encode snapshot timestamps — reproducibility
   comes entirely from the module repo's git SHA. Alpine's parallel decision is
   `<distro>.<component>` (e.g., `alpine.main`) — Debian inherits the dot-style
   separator with a suite axis inserted.
@@ -235,17 +238,53 @@ of a small one.
 
 **Toolchain split**
 
-- R8. A new container unit `toolchain-glibc` is added alongside
-  `toolchain-musl`, based on a pinned Debian release. It carries the equivalent
-  native toolchain (gcc, binutils, headers) sourced from Debian rather than
-  Alpine, plus the same yoe-side build helpers (`bwrap`, `dpkg`, `mkfs` tooling,
+- R8. A new container unit `toolchain-glibc` is added, based on a pinned
+  Debian release. It lives in `module-debian` (parallel to `toolchain-musl`'s
+  relocation to `module-alpine` per R9). It carries the equivalent native
+  toolchain (gcc, binutils, headers) sourced from Debian rather than Alpine,
+  plus the same yoe-side build helpers (`bwrap`, `dpkg`, `mkfs` tooling,
   etc.) that `toolchain-musl` ships. It also includes the binfmt machinery
-  needed to run `dpkg --configure -a` against a foreign-arch staging rootfs (see
-  R18).
-- R9. Build classes (`autotools`, `cmake`, `go`, language-specific helpers) pick
-  their toolchain from the consuming image's `distro`: `distro = "alpine"` →
-  `toolchain-musl`, `distro = "debian"` → `toolchain-glibc`. The libc family is
-  derived from `distro` in v1; no separate field on the image.
+  needed to run `dpkg --configure -a` against a foreign-arch staging rootfs
+  (see R18).
+- R9. Toolchain selection works through the combination of the per-unit
+  `distro` compatibility tag (R21a) and the existing `provides` virtual-name
+  field. `toolchain-musl` declares `distro = "alpine"` and
+  `provides = ["toolchain"]`; `toolchain-glibc` declares `distro = "debian"`
+  and `provides = ["toolchain"]`. Build classes (`autotools`, `cmake`, `go`,
+  language-specific helpers) declare `deps = [..., "toolchain"]` instead of
+  hard-coding `container = "toolchain-musl"`. The resolver follows the
+  provides table to find candidates of the virtual name; R21a's visibility
+  filter narrows to the candidate matching the consuming image's effective
+  distro. By construction exactly one candidate is visible per closure
+  (alpine images see only `toolchain-musl`, debian images see only
+  `toolchain-glibc`), so the standard priority mechanism does not enter —
+  distro-keyed dispatch happens via the visibility filter, not via
+  `prefer_modules`. Classes are distro-agnostic at the Starlark level.
+
+  `Unit.Container` becomes a virtual reference for distro-aware classes: the
+  field can name a virtual (e.g. `container = "toolchain"`) which the
+  executor dereferences through the closure to the resolved concrete unit's
+  container image, rather than reading the field as a literal container
+  name. Container units themselves (the `container()` class) keep
+  `Container` as a literal, since they ARE the toolchains being referenced.
+  Today's all-Alpine projects continue to work: classes depending on
+  `toolchain` resolve to `toolchain-musl` because it is the only candidate
+  visible.
+
+  **Toolchain relocation.** `toolchain-musl` (currently at
+  `modules/module-core/containers/toolchain-musl/`) moves to `module-alpine`
+  in the same commit set as this work, since it is Alpine-side build
+  infrastructure conceptually — the same shape `toolchain-glibc` lands in
+  `module-debian`. The `CLAUDE.md` "Key Design Decisions" entry citing the
+  current location updates accordingly. Existing references to the
+  toolchain unit by name (`toolchain-musl`) continue to resolve since the
+  unit name is unchanged — only its module home shifts.
+
+  The libc family is derived from the effective distro (alpine → musl,
+  debian → glibc); no separate `libc` field is required in v1. A future
+  hybrid case (gcompat shim, mixed-libc rootfs) becomes a targeted
+  extension via a `libc` override field — the v1 design does not foreclose
+  it.
 
 **Module index storage and refresh**
 
@@ -294,8 +333,16 @@ of a small one.
   `build/debian/openssl.x86_64/`). `internal/build/sandbox.go`'s
   `UnitBuildDir(projectDir, scopeDir, unitName)` grows a `distro` parameter and
   emits the per-distro prefix; every caller (executor, sysroot stage,
-  meta read/write, dry-run printer, TUI build view, clean) threads the value
-  through. Existing on-disk `build/<unit>.<scope>/` directories are not
+  meta read/write, dry-run printer, TUI build view, plus
+  `internal/dev.go`'s `devSrcDir()` which manually mirrors the path
+  construction to avoid importing the build package) threads the value
+  through. `RunClean` in `internal/clean.go` requires a structural fix
+  before threading — it currently constructs the per-unit build path
+  manually (`filepath.Join(buildDir, arch, r)`) rather than calling
+  `UnitBuildDir`, and the manual shape (`build/<arch>/<unit>`) does not match
+  today's layout either, suggesting per-unit clean may already be broken;
+  route it through `UnitBuildDir` and verify the pre-existing behavior at the
+  same time. Existing on-disk `build/<unit>.<scope>/` directories are not
   preserved across the rename; the next `yoe build` after the migration
   rebuilds units the first time they're referenced under each distro.
 
@@ -312,8 +359,13 @@ of a small one.
   project simply gets scheduled and built twice — once into
   `build/alpine/<unit>.<scope>/`, once into `build/debian/<unit>.<scope>/` —
   because the toolchain (and therefore the hash) differs. The build-dir
-  split does not try to deduplicate those; the cost is a per-distro rebuild
-  of those units, paid once per cache lifetime. Tagged units (R21a) are
+  split does not try to deduplicate those. On a developer machine where the
+  build cache persists, the per-distro rebuild is paid once per cache
+  invalidation. In CI / cleanroom workflows where the cache rebuilds per
+  run, mixed-distro projects pay the per-distro rebuild on every run for
+  every shared heavyweight unit (kernel, openssl, qtwebengine, ffmpeg,
+  mesa) — structural 2x build wall-clock for the shared closure, not a
+  one-time cost. Tagged units (R21a) are
   invisible to the wrong distro's closure and so only ever land in their
   matching subtree. Genuinely libc-neutral units (a `task`-class unit whose
   only work is `install_file` of a config and that emits a `noarch` apk/deb)
@@ -325,7 +377,18 @@ of a small one.
 
 - R15. Mirrored upstream debs are copied byte-for-byte into the project repo (no
   re-archive, no re-sign). Their hashes in the project's `Packages` match
-  upstream byte-for-byte.
+  upstream byte-for-byte. When yoe materializes a `.deb` into the project repo
+  (lazily, at unit-build / mirror-publish time), it verifies the computed
+  SHA256 of the fetched bytes against the hash listed in the upstream-signed
+  `Packages` and refuses to publish a project `InRelease` if any mirrored
+  `.deb`'s computed SHA256 does not match. The verification rides on the
+  hash yoe already computes for source-cache addressing — no extra download
+  pass — and closes the window between Packages fetch and `.deb` mirror where
+  in-transit substitution or storage corruption could produce a project repo
+  whose signed `InRelease` addresses bytes apt then rejects. This does NOT
+  defend against a debian.org-side compromise that produces both a malicious
+  `.deb` and a corrupt-but-valid-signed upstream `InRelease`; that class of
+  attack is outside the trust model.
 - R16. The project's per-suite `Release`/`InRelease` is signed with the project
   key. The project-key-signed `InRelease` plus the per-package SHA256 in
   `Packages` is the **sole** runtime trust chain on the device for installed
@@ -431,11 +494,24 @@ of a small one.
 **Replay protection and index validity**
 
 - R24. The project-emitted `InRelease` carries both `Date` and `Valid-Until`
-  fields. The staleness window between them is a project-configurable value with
-  a sensible default (e.g., 30 days, suitable for typical fleet update
-  cadences). `yoe update-feeds` rejects any upstream `InRelease` where
-  `Valid-Until` is absent or has passed, logging both field values and refusing
-  to rewrite in-tree `Packages` until the operator confirms or the upstream feed
+  fields. The staleness window between them is a project-configurable value.
+
+  The window sits between two opposing pressures the project should pick
+  between explicitly: a shorter window forces fresh indices and shrinks the
+  security-update lag (a device installing from a 30-day-old index can miss a
+  patch that landed mid-window), but bricks devices that go offline longer
+  than the window since apt refuses an expired `InRelease`; a longer window
+  tolerates intermittent connectivity but lets stale indices live longer than
+  the security cadence permits. The default leans toward yoe's dev
+  iterate-deploy-update workflow — frequently-online devices — at **30 days**;
+  flash-once-and-occasionally-update fleets should configure a shorter window,
+  and long-disconnection deployments (vehicles, satellites, seasonally-shut
+  facilities) should configure a longer window or stage offline-refresh
+  tooling outside apt's `Valid-Until` enforcement.
+
+  `yoe update-feeds` rejects any upstream `InRelease` where `Valid-Until` is
+  absent or has passed, logging both field values and refusing to rewrite
+  in-tree `Packages` until the operator confirms or the upstream feed
   publishes a fresh index. Target-side `Valid-Until` enforcement by apt is
   standard apt behavior and is documented as a Dependencies/Assumptions item —
   yoe relies on it rather than reimplementing it.
@@ -480,7 +556,7 @@ of a small one.
   `debian.bookworm.main`, `debian.bookworm-security.main`,
   `debian.bookworm-updates.main` — and the project lists those module names in
   `prefer_modules` for the packages where it wants the security/updates variant.
-  The synthetic-module name does not include the snapshot date; pinning the
+  The synthetic module name does not include the snapshot date; pinning the
   module repo's git SHA pins the snapshot.
 
 - AE4. **Covers R7.** Given a `Packages` entry whose `Depends` line includes
@@ -489,7 +565,7 @@ of a small one.
   the requested version, falls back to `libssl1.1` only if `libssl3` is not
   present in the resolved module set.
 
-- AE5. **Covers R8, R21.** Given an image declares `distro = "debian"` and
+- AE5. **Covers R8, R9, R21.** Given an image declares `distro = "debian"` and
   includes a unit built via the `autotools` class, when yoe schedules that
   unit's build, it runs in `toolchain-glibc` (not `toolchain-musl`). No `libc`
   field is required on the image.
@@ -765,6 +841,26 @@ of a small one.
   follows `toolchain-musl`'s pattern from
   `docs/specs/2026-04-04-container-units.md`: a `container()` unit with a
   Dockerfile in `containers/toolchain-glibc/`. No bypass, no special-case.
+  Both toolchains live in their distro's module — `toolchain-musl` moves to
+  `module-alpine`, `toolchain-glibc` lands in `module-debian` — per R9's
+  toolchain-relocation decision.
+- **Toolchain selection via `distro` + `provides`, not via resolver context
+  injection.** R9's mechanism uses two existing fields in combination:
+  `provides = ["toolchain"]` on each concrete toolchain unit, and R21a's
+  per-unit `distro` compatibility tag for visibility filtering. Classes
+  depend on the virtual name `toolchain` rather than hard-coding
+  `container = "toolchain-musl"`; the resolver follows the provides table to
+  find candidates and R21a filters to the one matching the consuming
+  image's effective distro. Considered and rejected: thread the effective
+  distro through a new resolver build-context object that classes consult
+  at evaluation time — would have added a new mechanism (a `ctx.distro`-
+  style lookup) just for distro-aware classes. The combination shape reuses
+  machinery the spec already requires (R7 dpkg provides, R21a visibility),
+  so adding distro-aware toolchain dispatch costs zero new resolver
+  concepts. It also generalizes: any unit with per-distro variants (helper
+  scripts, distro-specific base-files, init-system shims) uses the same
+  shape — declare a virtual in `provides`, scope visibility with `distro`,
+  done.
 - **Trust roots through `InRelease` + per-package SHA256 — no per-deb GPG
   verification on the device.** Debian `.deb` files are not GPG-signed
   per-package by upstream, so the runtime trust chain on the device runs
@@ -808,7 +904,7 @@ of a small one.
   parallel to Alpine and consistent with CLAUDE.md's "units declare their own
   services" rule.
 - **systemd is the only init system for Debian images in v1.** Debian's default.
-- **Dot-style synthetic-module names with a suite axis for Debian.**
+- **Dot-style synthetic module names with a suite axis for Debian.**
   `<distro>.<suite>.<component>` (e.g. `debian.bookworm.main`). Alpine uses the
   simpler `<distro>.<component>` (`alpine.main`). Resolves the open separator
   question in `feeds-as-modules` in the same direction; matches Python/Starlark
@@ -832,21 +928,19 @@ of a small one.
 
 ## Dependencies / Assumptions
 
-- The `feeds-as-modules` spec (`docs/specs/2026-05-13-feeds-as-modules.md`) has
-  substantially landed on the yoe-core side as of 2026-05-26 — see
-  `docs/SPEC_PLAN_INDEX.md` for the row marked
-  "Partial — yoe-core done, awaiting module-alpine cutover". The pieces
-  `module-debian` depends on (synthetic-module type and registration hooks,
-  recursive module walking with cycle detection, closure walk in Go, lazy
-  materialization, `prefer_modules` preflight, `yoe update-feeds` dispatch,
-  TUI feed display, cross-feed providers, companion service-only apk
-  emission, build-transport fields on synthetic units) are all in place.
-  What is still outstanding on the Alpine side is the in-place `module-alpine`
-  cutover (U13: replace generated per-package `.star` files with two
-  `alpine_feed()` calls plus `*-enable.star` companions) and the e2e validation
-  pass that follows it (U15). Implementing `debian_feed` independently of
-  `alpine_feed` would duplicate the synthetic-module plumbing; this design
-  assumes they share it, and as of today they can.
+- The `feeds-as-modules` spec (`docs/specs/2026-05-13-feeds-as-modules.md`)
+  and its full implementation — including the in-place `module-alpine`
+  cutover — landed 2026-05-26 (see `docs/SPEC_PLAN_INDEX.md` for the row
+  marked Done). The pieces `module-debian` depends on (synthetic module
+  type and registration hooks, recursive module walking with cycle
+  detection, closure walk in Go, lazy materialization, `prefer_modules`
+  preflight, `yoe update-feeds` dispatch, TUI feed display, cross-feed
+  providers, companion service-only apk emission, build-transport fields on
+  synthetic units) are all in place, and `module-alpine`'s `MODULE.star` is
+  now two `alpine_feed()` calls plus a small `units/*-enable.star`
+  companion set in place of the ~3,751 generated per-package files.
+  Implementing `debian_feed` independently of `alpine_feed` would duplicate
+  the synthetic module plumbing; this design assumes they share it.
 - The `mirror-alpine-keep-keys` spec
   (`docs/specs/2026-05-18-mirror-alpine-keep-keys.md`) lands before or alongside
   this work — the verbatim-mirror posture is the same on both sides, even though
@@ -882,10 +976,33 @@ of a small one.
   `dpkg --configure -a` (R18) DOES execute postinsts under binfmt against the
   foreign-arch rootfs, which is a real runtime dependency on QEMU user-mode +
   binfmt_misc for the build host.
+- R18's binfmt container runs with **no network access**, with the **staging
+  rootfs as its only writable mount**, and with capabilities scoped to what
+  `dpkg --configure -a` and `deb-systemd-helper` need. The no-network stance
+  is a reproducibility property — postinsts that reach out to the network
+  produce different output depending on what's reachable when, which breaks
+  the content-addressed cache and undermines CI determinism. In practice
+  almost no Debian `main` postinsts need network (they do local
+  filesystem-scan work: `fc-cache`, `update-ca-certificates`,
+  `systemctl daemon-reload`, `update-initramfs`, etc.); the narrow set that
+  does (cloud-init, telemetry agents, license-prompt downloaders) is not
+  appropriate for embedded images and is excluded from the project's
+  `artifacts` list, replaced by a source-built unit in `module-core` if
+  needed.
 - TLS certificate trust for the project repo URL is operator-managed (root CA
   store, certificate pinning, or `verify-peer=no` for closed networks at
   operator discretion). It is orthogonal to GPG trust on the repo metadata. yoe
   does not bundle or manage TLS certificates.
+- Project key rotation procedure currently lives in `docs/signing.md`, written
+  for the APK side. It must be verified or extended to cover the Debian
+  apt-on-target case where the project key is baked into deployed device
+  rootfs via `/etc/apt/keyrings/<project>.gpg` (R17). Two open planning
+  questions: whether OpenPGP key-expiry should be required so a compromised
+  project key becomes invalid on-device after a bounded window, and whether a
+  key-update mechanism (key-only update package, OTA channel, periodic
+  re-flash) is in scope for the apt-on-target deployment model. Without a
+  device-side recovery path, project-key compromise requires re-flashing every
+  device — which contradicts the load-bearing apt-on-target premise (R16).
 
 ---
 
@@ -917,7 +1034,7 @@ round-1 doc review.)_
   (`pool/<component>/<initial>/<pkg>/` vs flat). R14/R14a already pin the
   top-level path split.
 - [Affects R7][Technical, Needs research] Virtual package handling: how Debian's
-  `Provides:` interacts with the synthetic-module's provides table, particularly
+  `Provides:` interacts with the synthetic module's provides table, particularly
   for multi-provider virtual packages where apt's resolver has heuristics yoe
   must either replicate or pin via `prefer_modules`.
 - [Affects R8, R22][Technical] `toolchain-glibc` arch matrix: which arches the
@@ -953,8 +1070,3 @@ round-1 doc review.)_
   fleet update cadences (security advisories, point releases) should inform the
   default. 30 days is a reasonable starting guess but worth validating against
   the customer's deployment shape.
-- [Affects ongoing maintenance][User decision] Maintenance ownership of
-  `module-debian`, `toolchain-glibc`, and the Debian keyring lifecycle was
-  raised by round-1 review and explicitly skipped in this spec. Planning should
-  revisit once customer engagement clarifies whether the customer or the yoe
-  team carries the ongoing load.

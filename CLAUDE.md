@@ -50,7 +50,10 @@ architecture description live under `docs/` (start with `docs/intro.md` and
   last resort: it multiplies the cache surface, breaks binary reuse across
   projects, and pushes complexity from a few clean conditionals into N parallel
   build configurations. Reach for it only when runtime resolution is genuinely
-  impossible (e.g., kernel defconfig, bootloader target).
+  impossible — kernel defconfig, bootloader target, and libc family
+  (musl-built and glibc-built binaries cannot share at the ABI level, so a
+  unit consumed by both Alpine and Debian images builds twice along the
+  distro axis; see `docs/specs/2026-05-25-module-debian.md` R14a).
 - **Explicit over implicit.** Values in Starlark units and configuration should
   not have hidden defaults. Require fields to be set explicitly — this makes it
   easier for AI to reason about the system and for humans to understand what a
