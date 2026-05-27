@@ -6,25 +6,14 @@ import (
 	"go.starlark.net/starlark"
 )
 
-// fnResolveClosure implements the resolve_closure(artifacts) Starlark
-// builtin. Replaces the old Starlark-side BFS in
-// module-core/classes/image.star:_resolve_runtime_deps, which iterated
-// `ctx.runtime_deps` (a pre-populated dict spanning every registered
-// unit). That eager dict defeated R20: with 60k+ synthetic units in
-// scope it would have allocated 60k *Unit pointers just to drive a
-// 300-unit closure.
+// fnResolveClosure implements the resolve_closure(artifacts, distro=...)
+// Starlark builtin. The image class computes the consuming image's
+// effective distro from the R20a/R21 cascade and passes it as a kwarg;
+// the walker uses it to filter R21a-tagged units that don't match.
 //
-// The Go-side walk uses Engine.Lookup so each referenced name
-// materializes once on demand. Synthetic units (materialized via
-// SyntheticModule.Lookup) get registered into the engine's units map
-// as a side effect, so the build executor's DAG sees them through
-// proj.Units exactly like real units.
-//
-// Returns a topologically sorted list of unit names. Cycles in
-// runtime_deps fall through to the tail in arbitrary order — yoe
-// surfaces nothing today on dep cycles; if R20's test scenarios call
-// for it we can add explicit cycle detection later.
-func (e *Engine) fnResolveClosure(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
+// Replaces the old Starlark-side BFS in module-core/classes/image.star;
+// see the long-form rationale below in closure().
+func (e *Engine) fnResolveClosure(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("resolve_closure: takes exactly one positional argument (the list of root names)")
 	}
@@ -43,8 +32,12 @@ func (e *Engine) fnResolveClosure(_ *starlark.Thread, _ *starlark.Builtin, args 
 		}
 		roots = append(roots, string(s))
 	}
+	effectiveDistro := kwString(kwargs, "distro")
+	if effectiveDistro == "" {
+		return nil, fmt.Errorf("resolve_closure: distro kwarg required (the consuming image's effective distro from the R20a/R21 cascade)")
+	}
 
-	ordered, err := e.closure(roots)
+	ordered, err := e.closure(roots, effectiveDistro)
 	if err != nil {
 		return nil, fmt.Errorf("resolve_closure: %w", err)
 	}
@@ -66,12 +59,25 @@ func (e *Engine) fnResolveClosure(_ *starlark.Thread, _ *starlark.Builtin, args 
 //     isn't in e.units but is exposed by one of the engine's
 //     SyntheticModules, the Lookup callback runs and the result is
 //     registered into e.units so subsequent BuildDAG sees it.
+//   - Filters per R21a: a unit whose Distro is set and != effectiveDistro
+//     is invisible to this walk. Synthetic units still register into
+//     e.units (so other walks can find them) but the per-walk filter
+//     drops them from this closure.
 //
 // Missing names (no real unit, no provides match, no synthetic
-// provider) error with the offending name in the message — apk would
-// have failed at install time otherwise; surfacing here makes the
-// build's failure mode obvious.
-func (e *Engine) closure(roots []string) ([]string, error) {
+// provider, or filtered out by distro) error with the offending name
+// in the message — apk/dpkg would have failed at install time
+// otherwise; surfacing here makes the build's failure mode obvious.
+//
+// effectiveDistro panics when empty — every closure walk happens in
+// the context of an image, and the image's effective distro must
+// resolve via the R20a/R21 cascade before the walker runs. The only
+// caller without an image scope is `yoe init`-style bootstrap, which
+// never walks a closure.
+func (e *Engine) closure(roots []string, effectiveDistro string) ([]string, error) {
+	if effectiveDistro == "" {
+		panic("starlark: closure walker called with empty effectiveDistro (programmer error — R21a requires per-image scope)")
+	}
 	// First pass: BFS to materialize every reachable unit.
 	seen := make(map[string]bool, len(roots)*4)
 	queue := append([]string(nil), roots...)
@@ -81,12 +87,12 @@ func (e *Engine) closure(roots []string) ([]string, error) {
 		if seen[name] {
 			continue
 		}
-		u, err := e.lookupOrMaterialize(name)
+		u, err := e.lookupOrMaterialize(name, effectiveDistro)
 		if err != nil {
 			return nil, err
 		}
 		if u == nil {
-			return nil, fmt.Errorf("unresolved name %q (not in any module, no provider)", name)
+			return nil, fmt.Errorf("unresolved name %q (not in any module, no provider, or filtered by distro=%q)", name, effectiveDistro)
 		}
 		seen[u.Name] = true
 		for _, dep := range u.RuntimeDeps {
@@ -109,7 +115,7 @@ func (e *Engine) closure(roots []string) ([]string, error) {
 	for range len(remaining) + 1 {
 		next := remaining[:0]
 		for _, name := range remaining {
-			u, _ := e.lookupOrMaterialize(name)
+			u, _ := e.lookupOrMaterialize(name, effectiveDistro)
 			ready := true
 			if u != nil {
 				for _, dep := range u.RuntimeDeps {
@@ -147,14 +153,31 @@ func (e *Engine) closure(roots []string) ([]string, error) {
 // register the materialized *Unit into e.units so subsequent calls hit
 // the catalog and BuildDAG sees them.
 //
+// Per R21a, a unit whose Distro is set and doesn't match effectiveDistro
+// is invisible to this walk — the walker keeps searching synthetic
+// modules for a same-name unit that does match. When two real units of
+// the same name but different distros register (rare; usually one is
+// synthetic), only the last-registered wins; that's a recognized
+// limitation of the single-keyed catalog — real/synthetic and
+// synthetic/synthetic collisions across distros are the common shape
+// and are handled here.
+//
 // Returns (nil, nil) when no provider has the name; the caller decides
 // whether that's an error or a search miss.
-func (e *Engine) lookupOrMaterialize(rawName string) (*Unit, error) {
+func (e *Engine) lookupOrMaterialize(rawName, effectiveDistro string) (*Unit, error) {
 	name := e.resolveProvides(rawName)
 	if u, ok := e.units[name]; ok {
-		return u, nil
+		if visibleToDistro(u, effectiveDistro) {
+			return u, nil
+		}
+		// A real unit exists but is tagged for a different distro;
+		// fall through so a same-name unit in a synthetic module can
+		// still satisfy this walk if one exists.
 	}
-	// Walk synthetics in priority order.
+	// Walk synthetics in priority order. A synthetic module that
+	// returns a unit matching the effective distro wins even if
+	// e.units already has a same-name registration for a different
+	// distro.
 	for _, sm := range e.syntheticModules {
 		u, err := sm.Lookup(name)
 		if err != nil {
@@ -163,15 +186,26 @@ func (e *Engine) lookupOrMaterialize(rawName string) (*Unit, error) {
 		if u == nil {
 			continue
 		}
+		if !visibleToDistro(u, effectiveDistro) {
+			// Wrong distro for this walk; keep searching siblings.
+			continue
+		}
 		// Register into the catalog so BuildDAG sees it. Use a
 		// minimal subset of registerUnit's logic — synthetic units
 		// don't compete for `prefer_modules` pins (those name real
 		// modules) and they always rank below real modules, so the
-		// shadow logic doesn't apply.
+		// shadow logic doesn't apply. Skip the registration when a
+		// same-name unit (for a different distro) is already in the
+		// catalog to avoid clobbering the prior registration.
 		e.mu.Lock()
 		if existing, ok := e.units[name]; ok {
 			e.mu.Unlock()
-			return existing, nil
+			if visibleToDistro(existing, effectiveDistro) {
+				return existing, nil
+			}
+			// Existing entry is for a different distro; return the
+			// synthetic-side match without overwriting the catalog.
+			return u, nil
 		}
 		u.ModuleIndex = sm.Priority
 		e.units[name] = u
@@ -179,6 +213,25 @@ func (e *Engine) lookupOrMaterialize(rawName string) (*Unit, error) {
 		return u, nil
 	}
 	return nil, nil
+}
+
+// visibleToDistro returns true when u is visible to a closure walk
+// whose consuming image's effective distro is effectiveDistro. A unit
+// with empty Distro is visible to every distro (the common case for
+// untagged units like openssh-server source builds); a tagged unit is
+// visible only to its matching distro.
+//
+// effectiveDistro == "" means "no filter" — used by build-time
+// dep materialization at load time (loader.go), which has no image
+// scope. The R21a filter applies only to runtime closure walks.
+func visibleToDistro(u *Unit, effectiveDistro string) bool {
+	if u == nil {
+		return false
+	}
+	if effectiveDistro == "" {
+		return true
+	}
+	return u.Distro == "" || u.Distro == effectiveDistro
 }
 
 // resolveProvides walks the engine's provides map once: if `name` is

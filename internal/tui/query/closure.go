@@ -51,7 +51,16 @@ func BuildInClosure(proj *yoestar.Project, root string) map[string]bool {
 
 	// Union runtime-dep closure rooted at the same unit. RuntimeClosure
 	// already routes through proj.Provides.
-	for _, name := range resolve.RuntimeClosure(proj, []string{root}) {
+	//
+	// The TUI query has no image scope, so use the project's effective
+	// distro fallback. If neither default_distro nor an override is set
+	// the walker would panic; surface that as "no closure" since the
+	// caller's UX (search filter) is best-effort.
+	distro, err := proj.EffectiveDistro()
+	if err != nil {
+		return seen
+	}
+	for _, name := range resolve.RuntimeClosure(proj, []string{root}, distro) {
 		seen[name] = true
 	}
 	return seen

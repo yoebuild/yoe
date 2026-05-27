@@ -23,7 +23,20 @@ func toContainerPath(projectDir, hostPath string) (string, error) {
 // GenerateDiskImage creates a partitioned disk image from a rootfs directory.
 // Disk tools (sfdisk, mkfs, dd, etc.) run inside the container via
 // RunInContainer; pure file operations stay on the host.
-func GenerateDiskImage(rootfs, imgPath string, unit *yoestar.Unit, projectDir, arch string, w io.Writer) error {
+//
+// proj is required so the toolchain container can be resolved per the
+// consuming image's effective distro (R9 / R21a) — debian images run
+// disk tools inside toolchain-glibc, alpine images inside toolchain-musl.
+func GenerateDiskImage(rootfs, imgPath string, unit *yoestar.Unit, proj *yoestar.Project, projectDir, arch string, w io.Writer) error {
+	effectiveDistro, err := proj.EffectiveDistroForImage(unit.Name)
+	if err != nil {
+		return fmt.Errorf("disk: %w", err)
+	}
+	toolchainImage, err := ResolveToolchainImage(proj, effectiveDistro, arch)
+	if err != nil {
+		return fmt.Errorf("disk: %w", err)
+	}
+
 	partitions := unit.Partitions
 	if len(partitions) == 0 {
 		partitions = []yoestar.Partition{
@@ -49,7 +62,7 @@ func GenerateDiskImage(rootfs, imgPath string, unit *yoestar.Unit, projectDir, a
 	}
 
 	// Partition with sfdisk via container
-	if err := partitionImage(imgPath, partitions, projectDir, w); err != nil {
+	if err := partitionImage(imgPath, partitions, projectDir, toolchainImage, w); err != nil {
 		return fmt.Errorf("partitioning: %w", err)
 	}
 
@@ -69,11 +82,11 @@ func GenerateDiskImage(rootfs, imgPath string, unit *yoestar.Unit, projectDir, a
 
 		switch p.Type {
 		case "vfat":
-			if err := createVfatPartition(partImg, sizeMB, rootfs, p, projectDir, w); err != nil {
+			if err := createVfatPartition(partImg, sizeMB, rootfs, p, projectDir, toolchainImage, w); err != nil {
 				return fmt.Errorf("vfat %s: %w", p.Label, err)
 			}
 		case "ext4":
-			if err := createExt4Partition(partImg, sizeMB, rootfs, p, projectDir, w); err != nil {
+			if err := createExt4Partition(partImg, sizeMB, rootfs, p, projectDir, toolchainImage, w); err != nil {
 				return fmt.Errorf("ext4 %s: %w", p.Label, err)
 			}
 		}
@@ -91,7 +104,7 @@ func GenerateDiskImage(rootfs, imgPath string, unit *yoestar.Unit, projectDir, a
 			ddCmd := fmt.Sprintf("dd if=%s of=%s bs=1M seek=%d conv=notrunc",
 				cPartImg, cImgPath, offsetMB)
 			if err := yoe.RunInContainer(yoe.ContainerRunConfig{
-				Image:      "yoe/toolchain-musl:15",
+				Image:      toolchainImage,
 				Command:    ddCmd,
 				ProjectDir: projectDir,
 				Stdout:     w,
@@ -106,7 +119,7 @@ func GenerateDiskImage(rootfs, imgPath string, unit *yoestar.Unit, projectDir, a
 
 	// Install syslinux bootloader (x86 only — arm64/riscv64 use direct kernel boot)
 	if arch == "x86_64" {
-		if err := installBootloader(imgPath, rootfs, unit, projectDir, w); err != nil {
+		if err := installBootloader(imgPath, rootfs, unit, projectDir, toolchainImage, w); err != nil {
 			fmt.Fprintf(w, "  Warning: could not install bootloader: %v\n", err)
 		}
 	}
@@ -128,7 +141,7 @@ func createSparseImage(path string, sizeMB int) error {
 	return f.Truncate(int64(sizeMB) * 1024 * 1024)
 }
 
-func partitionImage(imgPath string, partitions []yoestar.Partition, projectDir string, w io.Writer) error {
+func partitionImage(imgPath string, partitions []yoestar.Partition, projectDir, toolchainImage string, w io.Writer) error {
 	script := "label: dos\n"
 	for i, p := range partitions {
 		size := ""
@@ -162,7 +175,7 @@ func partitionImage(imgPath string, partitions []yoestar.Partition, projectDir s
 	// Use printf to pipe the sfdisk script via stdin inside the container
 	cmd := fmt.Sprintf("printf '%s' | sfdisk --quiet %s", strings.ReplaceAll(script, "'", "'\\''"), cImgPath)
 	return yoe.RunInContainer(yoe.ContainerRunConfig{
-		Image:      "yoe/toolchain-musl:15",
+		Image:      toolchainImage,
 		Command:    cmd,
 		ProjectDir: projectDir,
 		Stdout:     w,
@@ -172,7 +185,7 @@ func partitionImage(imgPath string, partitions []yoestar.Partition, projectDir s
 
 // createVfatPartition creates a FAT32 filesystem image and copies boot files.
 // Uses mkfs.vfat + mcopy (mtools) via RunInContainer.
-func createVfatPartition(partImg string, sizeMB int, rootfs string, p yoestar.Partition, projectDir string, w io.Writer) error {
+func createVfatPartition(partImg string, sizeMB int, rootfs string, p yoestar.Partition, projectDir, toolchainImage string, w io.Writer) error {
 	// Create the partition image file (pure Go — no container needed)
 	if err := createSparseImage(partImg, sizeMB); err != nil {
 		return err
@@ -186,7 +199,7 @@ func createVfatPartition(partImg string, sizeMB int, rootfs string, p yoestar.Pa
 	// Format as FAT32 via container
 	mkfsCmd := fmt.Sprintf("mkfs.vfat -n %s %s", strings.ToUpper(p.Label), cPartImg)
 	if err := yoe.RunInContainer(yoe.ContainerRunConfig{
-		Image:      "yoe/toolchain-musl:15",
+		Image:      toolchainImage,
 		Command:    mkfsCmd,
 		ProjectDir: projectDir,
 		Stdout:     w,
@@ -206,7 +219,7 @@ func createVfatPartition(partImg string, sizeMB int, rootfs string, p yoestar.Pa
 			}
 			mcopyCmd := fmt.Sprintf("mcopy -i %s %s ::/%s", cPartImg, cFile, filepath.Base(f))
 			if err := yoe.RunInContainer(yoe.ContainerRunConfig{
-				Image:      "yoe/toolchain-musl:15",
+				Image:      toolchainImage,
 				Command:    mcopyCmd,
 				ProjectDir: projectDir,
 				Stdout:     w,
@@ -224,7 +237,7 @@ func createVfatPartition(partImg string, sizeMB int, rootfs string, p yoestar.Pa
 
 // createExt4Partition creates an ext4 filesystem image populated from rootfs.
 // Uses mkfs.ext4 via RunInContainer.
-func createExt4Partition(partImg string, sizeMB int, rootfs string, p yoestar.Partition, projectDir string, w io.Writer) error {
+func createExt4Partition(partImg string, sizeMB int, rootfs string, p yoestar.Partition, projectDir, toolchainImage string, w io.Writer) error {
 	// Create the partition image file (pure Go — no container needed)
 	if err := createSparseImage(partImg, sizeMB); err != nil {
 		return err
@@ -239,7 +252,7 @@ func createExt4Partition(partImg string, sizeMB int, rootfs string, p yoestar.Pa
 		// Non-root ext4 partition — just format empty
 		mkfsCmd := fmt.Sprintf("mkfs.ext4 -q -L %s %s", p.Label, cPartImg)
 		if err := yoe.RunInContainer(yoe.ContainerRunConfig{
-			Image:      "yoe/toolchain-musl:15",
+			Image:      toolchainImage,
 			Command:    mkfsCmd,
 			ProjectDir: projectDir,
 			Stdout:     w,
@@ -260,7 +273,7 @@ func createExt4Partition(partImg string, sizeMB int, rootfs string, p yoestar.Pa
 	// 64bit, metadata_csum, extent tree. Use classic indirect blocks.
 	mkfsCmd := fmt.Sprintf("mkfs.ext4 -q -L %s -O ^64bit,^metadata_csum,^extent -d %s %s", p.Label, cRootfs, cPartImg)
 	if err := yoe.RunInContainer(yoe.ContainerRunConfig{
-		Image:      "yoe/toolchain-musl:15",
+		Image:      toolchainImage,
 		Command:    mkfsCmd,
 		ProjectDir: projectDir,
 		Stdout:     w,
@@ -275,7 +288,7 @@ func createExt4Partition(partImg string, sizeMB int, rootfs string, p yoestar.Pa
 // installBootloader writes syslinux MBR code and runs extlinux --install
 // on the root partition to set up the VBR and ldlinux.sys.
 // MBR byte writing is pure Go (host); losetup/mount/extlinux run in the container.
-func installBootloader(imgPath, rootfs string, unit *yoestar.Unit, projectDir string, w io.Writer) error {
+func installBootloader(imgPath, rootfs string, unit *yoestar.Unit, projectDir, toolchainImage string, w io.Writer) error {
 	// Write MBR boot code (pure Go — reads mbr.bin from rootfs on host)
 	mbrBin := filepath.Join(rootfs, "usr", "share", "syslinux", "mbr.bin")
 	if _, err := os.Stat(mbrBin); os.IsNotExist(err) {
@@ -342,7 +355,7 @@ extlinux --install /mnt/extlinux/boot/extlinux`,
 		offsetBytes, int64(rootSizeMB)*1024*1024, cImgPath)
 
 	if err := yoe.RunInContainer(yoe.ContainerRunConfig{
-		Image:      "yoe/toolchain-musl:15",
+		Image:      toolchainImage,
 		Command:    extlinuxScript,
 		ProjectDir: projectDir,
 		NoUser:     true,

@@ -245,6 +245,10 @@ func (s *archState) populateBuildFields(u *yoestar.Unit, entry *apkindex.Entry, 
 	u.Container = "toolchain-musl"
 	u.ContainerArch = "target"
 	u.Sandbox = false
+	// Synthesized units carry their feed's distro automatically so the
+	// closure-walk visibility filter (R21a) keeps them inside alpine
+	// closures only.
+	u.Distro = "alpine"
 	u.Tasks = []yoestar.Task{
 		{
 			Name: "install",

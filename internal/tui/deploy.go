@@ -87,7 +87,11 @@ func (m model) startDeployCmd() tea.Cmd {
 		defer cancel()
 		// Build the runtime closure, not just the leaf unit, so the device's
 		// apk add can resolve every dep against the feed.
-		closure := resolve.RuntimeClosure(proj, []string{unitName})
+		distro, err := proj.EffectiveDistro()
+		if err != nil {
+			return deployDoneMsg{err: fmt.Errorf("deploy: %w", err)}
+		}
+		closure := resolve.RuntimeClosure(proj, []string{unitName}, distro)
 		if err := build.BuildUnits(proj, closure, build.Options{
 			Ctx:        ctx,
 			ProjectDir: projectDir,

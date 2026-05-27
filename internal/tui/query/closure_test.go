@@ -8,6 +8,10 @@ import (
 
 func depProject() *yoestar.Project {
 	return &yoestar.Project{
+		// DefaultDistro must be set so the runtime-closure walker has
+		// a distro to filter against (R21a). All test units are
+		// untagged, so the filter is a no-op here.
+		DefaultDistro: "alpine",
 		Units: map[string]*yoestar.Unit{
 			"toolchain-musl": {Name: "toolchain-musl", Class: "container"},
 			"zlib":           {Name: "zlib", Class: "unit", Deps: []string{"toolchain-musl"}},

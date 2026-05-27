@@ -222,7 +222,8 @@ func kwStringMap(kwargs []starlark.Tuple, key string) map[string]string {
 // too so it isn't double-captured into Extra.
 var reservedUnitKwargs = map[string]bool{
 	"name": true, "version": true, "release": true, "scope": true,
-	"description": true, "license": true, "source": true, "sha256": true,
+	"description": true, "license": true, "distro": true,
+	"source": true, "sha256": true,
 	"apk_checksum": true,
 	"passthrough_apk": true,
 	"tag": true, "branch": true, "patches": true, "deps": true,
@@ -453,7 +454,8 @@ func (e *Engine) fnProject(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.T
 		Cache: CacheConfig{
 			Path: structString(cacheS, "path"),
 		},
-		SigningKey: kwString(kwargs, "signing_key"),
+		SigningKey:    kwString(kwargs, "signing_key"),
+		DefaultDistro: kwString(kwargs, "default_distro"),
 	}
 
 	// Parse modules list
@@ -621,6 +623,7 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 		Scope:       kwString(kwargs, "scope"),
 		Description: kwString(kwargs, "description"),
 		License:     kwString(kwargs, "license"),
+		Distro:      kwString(kwargs, "distro"),
 		Source:      kwString(kwargs, "source"),
 		SHA256:      kwString(kwargs, "sha256"),
 		APKChecksum: kwString(kwargs, "apk_checksum"),

@@ -320,11 +320,21 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		)
 	}
 
+	var (
+		defaultDistro         string
+		defaultDistroOverride string
+	)
+	if proj := eng.Project(); proj != nil {
+		defaultDistro = proj.DefaultDistro
+		defaultDistroOverride = proj.DefaultDistroOverride
+	}
 	ctxFields := starlark.StringDict{
-		"arch":            starlark.String(arch),
-		"machine":         starlark.String(machine),
-		"project_version": starlark.String(projectVersion),
-		"provides":        provides,
+		"arch":                    starlark.String(arch),
+		"machine":                 starlark.String(machine),
+		"project_version":         starlark.String(projectVersion),
+		"provides":                provides,
+		"default_distro":          starlark.String(defaultDistro),
+		"default_distro_override": starlark.String(defaultDistroOverride),
 	}
 	if activeMachine != nil {
 		ctxFields["machine_config"] = buildMachineConfigStruct(activeMachine)
@@ -597,7 +607,11 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 				if _, ok := eng.Units()[resolved]; ok {
 					continue
 				}
-				u, err := eng.lookupOrMaterialize(resolved)
+				// "" means "no R21a filter" — this is the build-time
+				// dep materialization pass, which has no image scope.
+				// Build-time deps land in the unit's hash via depHashes;
+				// R21a is a runtime-closure rule.
+				u, err := eng.lookupOrMaterialize(resolved, "")
 				if err != nil {
 					return nil, fmt.Errorf("materializing build-time dep %q of unit %q: %w", dep, name, err)
 				}

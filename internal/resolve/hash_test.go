@@ -22,6 +22,7 @@ var hashSkipFields = map[string]string{
 	"ModuleIndex":       "registration order — informational, no output impact",
 	"CacheDirs":         "host-side mount points; doesn't affect built artifact contents",
 	"ArtifactsExplicit": "UX-only metadata; the resolved Artifacts list (which IS hashed) drives the actual rootfs",
+	"Distro":            "visibility-only tag; the consuming image's effective_distro IS hashed (separately) — the per-unit tag has no output impact",
 }
 
 // TestUnitHash_CoversAllFields fails when a new field is added to Unit
@@ -62,8 +63,8 @@ func TestUnitHash_Deterministic(t *testing.T) {
 		Tasks: []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "make"}}}},
 	}
 
-	h1 := UnitHash(unit, "arm64", map[string]string{"zlib": "deadbeef"}, "")
-	h2 := UnitHash(unit, "arm64", map[string]string{"zlib": "deadbeef"}, "")
+	h1 := UnitHash(unit, "arm64", map[string]string{"zlib": "deadbeef"}, "", "")
+	h2 := UnitHash(unit, "arm64", map[string]string{"zlib": "deadbeef"}, "", "")
 
 	if h1 != h2 {
 		t.Errorf("hash not deterministic: %s != %s", h1, h2)
@@ -83,16 +84,16 @@ func TestUnitHash_ChangesOnInput(t *testing.T) {
 		Tasks: []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "make"}}}},
 	}
 
-	h1 := UnitHash(unit, "arm64", map[string]string{"zlib": "aaa"}, "")
+	h1 := UnitHash(unit, "arm64", map[string]string{"zlib": "aaa"}, "", "")
 
 	// Change dep hash
-	h2 := UnitHash(unit, "arm64", map[string]string{"zlib": "bbb"}, "")
+	h2 := UnitHash(unit, "arm64", map[string]string{"zlib": "bbb"}, "", "")
 	if h1 == h2 {
 		t.Error("hash should change when dependency hash changes")
 	}
 
 	// Change arch
-	h3 := UnitHash(unit, "x86_64", map[string]string{"zlib": "aaa"}, "")
+	h3 := UnitHash(unit, "x86_64", map[string]string{"zlib": "aaa"}, "", "")
 	if h1 == h3 {
 		t.Error("hash should change when arch changes")
 	}
@@ -100,7 +101,7 @@ func TestUnitHash_ChangesOnInput(t *testing.T) {
 	// Change version
 	unit2 := *unit
 	unit2.Version = "9.7p1"
-	h4 := UnitHash(&unit2, "arm64", map[string]string{"zlib": "aaa"}, "")
+	h4 := UnitHash(&unit2, "arm64", map[string]string{"zlib": "aaa"}, "", "")
 	if h1 == h4 {
 		t.Error("hash should change when version changes")
 	}
@@ -118,14 +119,14 @@ func TestUnitHash_APKChecksumGated(t *testing.T) {
 		Tasks:   []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "true"}}}},
 	}
 
-	h1 := UnitHash(base, "x86_64", nil, "")
+	h1 := UnitHash(base, "x86_64", nil, "", "")
 
 	// Setting APKChecksum on the same unit must change the hash —
 	// real alpine_pkg units should always cache-key on their upstream
 	// checksum.
 	withChecksum := *base
 	withChecksum.APKChecksum = "Q1wmRLywlDhwD28lS6Qlp6nGlzzIk="
-	h2 := UnitHash(&withChecksum, "x86_64", nil, "")
+	h2 := UnitHash(&withChecksum, "x86_64", nil, "", "")
 
 	if h1 == h2 {
 		t.Error("setting APKChecksum should change the hash")
@@ -136,7 +137,7 @@ func TestUnitHash_APKChecksumGated(t *testing.T) {
 	// gate only avoids contributing an empty apk_checksum line.
 	other := *base
 	other.Description = "different"
-	h3 := UnitHash(&other, "x86_64", nil, "")
+	h3 := UnitHash(&other, "x86_64", nil, "", "")
 	if h1 == h3 {
 		t.Error("description change should still alter the hash")
 	}
@@ -154,7 +155,7 @@ func TestComputeAllHashes(t *testing.T) {
 		t.Fatalf("BuildDAG: %v", err)
 	}
 
-	hashes, err := ComputeAllHashes(dag, "arm64", "", nil)
+	hashes, err := ComputeAllHashes(dag, "arm64", "", nil, "")
 	if err != nil {
 		t.Fatalf("ComputeAllHashes: %v", err)
 	}
@@ -175,7 +176,7 @@ func TestComputeAllHashes(t *testing.T) {
 	// Changing zlib should cascade
 	proj.Units["zlib"].Version = "1.4"
 	dag2, _ := BuildDAG(proj)
-	hashes2, _ := ComputeAllHashes(dag2, "arm64", "", nil)
+	hashes2, _ := ComputeAllHashes(dag2, "arm64", "", nil, "")
 
 	if hashes["zlib"] == hashes2["zlib"] {
 		t.Error("zlib hash should change after version bump")
@@ -194,11 +195,11 @@ func TestUnitHash_ExtraAffectsHash(t *testing.T) {
 			Extra:   map[string]any{"port": int64(8080)},
 		}
 	}
-	h1 := UnitHash(base(), "x86_64", nil, "")
+	h1 := UnitHash(base(), "x86_64", nil, "", "")
 
 	u2 := base()
 	u2.Extra["port"] = int64(9000)
-	h2 := UnitHash(u2, "x86_64", nil, "")
+	h2 := UnitHash(u2, "x86_64", nil, "", "")
 
 	if h1 == h2 {
 		t.Error("hash did not change when Extra changed")
@@ -214,7 +215,7 @@ func TestUnitHash_ExtraKeyOrderStable(t *testing.T) {
 		Name: "u", Version: "1", Class: "unit",
 		Extra: map[string]any{"c": int64(3), "b": int64(2), "a": int64(1)},
 	}
-	if UnitHash(u1, "x86_64", nil, "") != UnitHash(u2, "x86_64", nil, "") {
+	if UnitHash(u1, "x86_64", nil, "", "") != UnitHash(u2, "x86_64", nil, "", "") {
 		t.Error("hash depends on Extra map iteration order")
 	}
 }
@@ -232,12 +233,12 @@ func TestUnitHash_FilesDirectoryAffectsHash(t *testing.T) {
 		Name: "u", Version: "1", Class: "unit",
 		DefinedIn: filepath.Join(tmp, "unit-src"),
 	}
-	h1 := UnitHash(u, "x86_64", nil, "")
+	h1 := UnitHash(u, "x86_64", nil, "", "")
 
 	if err := os.WriteFile(filepath.Join(unitDir, "a.tmpl"), []byte("two"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	h2 := UnitHash(u, "x86_64", nil, "")
+	h2 := UnitHash(u, "x86_64", nil, "", "")
 
 	if h1 == h2 {
 		t.Error("hash did not change when file in unit files dir changed")
@@ -255,11 +256,11 @@ func TestUnitHash_SrcInputsCacheNeutral(t *testing.T) {
 		Name: "openssl", Version: "3.4.1", Class: "unit",
 		Tasks: []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "make"}}}},
 	}
-	withEmpty := UnitHash(u, "x86_64", nil, "")
+	withEmpty := UnitHash(u, "x86_64", nil, "", "")
 	// Construct a hash by directly calling the function with the
 	// same args; if we ever change the gating logic, this test still
 	// holds because both calls take the same path.
-	withEmpty2 := UnitHash(u, "x86_64", nil, "")
+	withEmpty2 := UnitHash(u, "x86_64", nil, "", "")
 	if withEmpty != withEmpty2 {
 		t.Fatalf("hash not deterministic with empty srcInputs: %s vs %s", withEmpty, withEmpty2)
 	}
@@ -273,16 +274,16 @@ func TestUnitHash_SrcInputsChangesHash(t *testing.T) {
 		Name: "openssl", Version: "3.4.1", Class: "unit",
 		Tasks: []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "make"}}}},
 	}
-	pinHash := UnitHash(u, "x86_64", nil, "")
-	devHash := UnitHash(u, "x86_64", nil, "head:abc123")
+	pinHash := UnitHash(u, "x86_64", nil, "", "")
+	devHash := UnitHash(u, "x86_64", nil, "head:abc123", "")
 	if pinHash == devHash {
 		t.Error("non-empty srcInputs should change the hash")
 	}
-	devHash2 := UnitHash(u, "x86_64", nil, "head:abc123")
+	devHash2 := UnitHash(u, "x86_64", nil, "head:abc123", "")
 	if devHash != devHash2 {
 		t.Error("same srcInputs should produce identical hashes")
 	}
-	devHashEdited := UnitHash(u, "x86_64", nil, "head:abc123:dirty:deadbeef")
+	devHashEdited := UnitHash(u, "x86_64", nil, "head:abc123:dirty:deadbeef", "")
 	if devHash == devHashEdited {
 		t.Error("hash should differ between clean dev and dev-dirty for the same HEAD")
 	}

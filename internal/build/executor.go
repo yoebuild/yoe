@@ -167,7 +167,12 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 	// the hash and the build was served from cache, silently
 	// dropping the user's edits.
 	srcInputs := SrcInputsFn(opts.ProjectDir, opts.Arch, opts.Machine)
-	hashes, err := resolve.ComputeAllHashes(dag, opts.Arch, opts.Machine, srcInputs)
+	// effectiveDistro is "" today — the build executor walks every unit
+	// in the project closure regardless of image scope. U4b plus the
+	// per-image build orchestration will thread the consuming image's
+	// effective distro through here so distro-aware units hash
+	// differently between alpine and debian closures.
+	hashes, err := resolve.ComputeAllHashes(dag, opts.Arch, opts.Machine, srcInputs, "")
 	if err != nil {
 		return err
 	}
@@ -820,6 +825,14 @@ func hasTask(unit *yoestar.Unit, name string) bool {
 // resolveContainerImage returns the Docker image tag for a unit's container.
 // For container units (referenced by name), the tag is yoe/<name>:<version>-<arch>.
 // For external images (containing ":" or "/"), the value is used directly.
+//
+// Per R9 (toolchain dispatch via provides + distro), a virtual reference
+// like Container="toolchain" is dereferenced through the project's
+// Provides table to a concrete container unit. effectiveDistro narrows
+// the candidate set: R21a's visibility filter already ensures exactly
+// one toolchain candidate is visible per closure, but if the caller is
+// outside an image walk (the BuildUnits hot path is, today), the
+// dereference still favors the first concrete container unit found.
 func resolveContainerImage(proj *yoestar.Project, unit *yoestar.Unit, arch string) string {
 	container := unit.Container
 	if container == "" {
@@ -829,6 +842,15 @@ func resolveContainerImage(proj *yoestar.Project, unit *yoestar.Unit, arch strin
 	// External image reference (e.g., "golang:1.23")
 	if strings.Contains(container, ":") || strings.Contains(container, "/") {
 		return container
+	}
+
+	// Virtual reference — dereference through Provides to the concrete
+	// container unit. Looks like Container="toolchain" -> "toolchain-glibc"
+	// (debian) or "toolchain-musl" (alpine). Falls through to literal
+	// interpretation when no provider exists, preserving back-compat for
+	// Container="toolchain-musl" literal references.
+	if real, ok := proj.Provides[container]; ok && real != "" {
+		container = real
 	}
 
 	// Container unit — look up version and build tag.

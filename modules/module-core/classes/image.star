@@ -1,7 +1,7 @@
 def image(name, artifacts=[], hostname=None, timezone="", locale="",
           partitions=[], scope="machine",
           container="toolchain-musl", container_arch="target", deps=[],
-          version=None, **kwargs):
+          version=None, distro=None, **kwargs):
     """Create a bootable disk image from packages.
 
     `version` defaults to ctx.project_version (from PROJECT.star) so the TUI's
@@ -12,11 +12,30 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
     is distinguishable on the LAN by board (raspberrypi4.local,
     qemu-x86_64.local, etc.). Pass an explicit string to override (e.g. a kiosk
     image that wants its own brand).
+
+    `distro` selects the distro this image targets. When unset, the project's
+    `default_distro` (overridable per-developer via `local.star`'s
+    `default_distro_override`) supplies the fallback. With nothing set in
+    either, image evaluation errors — every image must resolve to a distro.
     """
     if version == None:
         version = ctx.project_version
     if hostname == None:
         hostname = ctx.machine
+
+    # Effective-distro cascade: image's own distro -> local override ->
+    # project default -> error. Matches Project.EffectiveDistroForImage
+    # on the Go side. resolve_closure() requires the effective distro so
+    # the R21a per-unit visibility filter can drop tagged units that
+    # don't match this image's distro.
+    effective_distro = distro
+    if not effective_distro:
+        effective_distro = ctx.default_distro_override
+    if not effective_distro:
+        effective_distro = ctx.default_distro
+    if not effective_distro:
+        fail("image %s: no distro set and project has no default_distro" % name)
+
     # Merge machine packages
     all_artifacts = list(artifacts) + list(ctx.machine_config.packages)
 
@@ -35,7 +54,7 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
     # graph and materializes synthetic units (alpine_feed entries) on
     # demand, so the working set stays bounded by closure size rather
     # than catalog size.
-    resolved = resolve_closure(explicit)
+    resolved = resolve_closure(explicit, distro = effective_distro)
 
     # Use machine partitions if image doesn't specify its own
     all_partitions = partitions if partitions else list(ctx.machine_config.partitions)
@@ -50,6 +69,7 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
         version = version,
         scope = scope,
         unit_class = "image",
+        distro = effective_distro,
         artifacts = resolved,
         artifacts_explicit = explicit,
         partitions = all_partitions,

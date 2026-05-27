@@ -19,7 +19,7 @@ func TestRuntimeClosure_Sqlite(t *testing.T) {
 		},
 		Provides: map[string]string{},
 	}
-	got := resolve.RuntimeClosure(proj, []string{"sqlite"})
+	got := resolve.RuntimeClosure(proj, []string{"sqlite"}, "alpine")
 	sort.Strings(got)
 	want := []string{"musl", "ncurses", "readline", "sqlite"}
 	if len(got) != len(want) {
@@ -41,7 +41,7 @@ func TestRuntimeClosure_RoutesProvides(t *testing.T) {
 		},
 		Provides: map[string]string{"linux": "linux-rpi4"},
 	}
-	got := resolve.RuntimeClosure(proj, []string{"app"})
+	got := resolve.RuntimeClosure(proj, []string{"app"}, "alpine")
 	sort.Strings(got)
 	want := []string{"app", "linux-rpi4", "musl"}
 	if len(got) != len(want) {

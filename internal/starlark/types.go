@@ -1,6 +1,10 @@
 package starlark
 
-import "go.starlark.net/starlark"
+import (
+	"fmt"
+
+	"go.starlark.net/starlark"
+)
 
 // Project represents an evaluated PROJECT.star.
 type Project struct {
@@ -12,6 +16,19 @@ type Project struct {
 	Modules   []ModuleRef
 	Machines  map[string]*Machine
 	Units     map[string]*Unit
+
+	// DefaultDistro is the project-wide effective-distro fallback used by
+	// image units that don't set their own `distro` field. The cascade
+	// resolves an image's effective distro as:
+	//     image.distro -> DefaultDistroOverride -> DefaultDistro -> error
+	// See EffectiveDistroForImage.
+	DefaultDistro string
+
+	// DefaultDistroOverride is the per-developer default-distro override
+	// from local.star (not committed). Wins over DefaultDistro but loses
+	// to an explicit image-level `distro`. Empty means "no override".
+	// Surfaced via the TUI Default Distro picker.
+	DefaultDistroOverride string
 
 	// PreferModules pins a unit name to a specific module, overriding the
 	// default last-module-wins shadow resolution. Set in PROJECT.star via
@@ -185,6 +202,57 @@ type QEMUConfig struct {
 	Ports    []string // host:guest port mappings for user-mode networking
 }
 
+// EffectiveDistroForImage returns the effective distro for the named
+// image after applying the cascade:
+//
+//	image.distro -> DefaultDistroOverride -> DefaultDistro -> error
+//
+// Error: the named image isn't an image-class unit, isn't in the
+// project, or has no resolvable distro after the cascade.
+func (p *Project) EffectiveDistroForImage(imageName string) (string, error) {
+	if p == nil {
+		return "", fmt.Errorf("EffectiveDistroForImage: nil project")
+	}
+	u, ok := p.Units[imageName]
+	if !ok {
+		return "", fmt.Errorf("EffectiveDistroForImage: unit %q not found", imageName)
+	}
+	if u.Class != "image" {
+		return "", fmt.Errorf("EffectiveDistroForImage: unit %q is not an image (class=%q)", imageName, u.Class)
+	}
+	if u.Distro != "" {
+		return u.Distro, nil
+	}
+	if p.DefaultDistroOverride != "" {
+		return p.DefaultDistroOverride, nil
+	}
+	if p.DefaultDistro != "" {
+		return p.DefaultDistro, nil
+	}
+	return "", fmt.Errorf("image %q has no distro and project has no default_distro (set distro on the image or default_distro on project)", imageName)
+}
+
+// EffectiveDistro returns the project's effective distro without an
+// image scope: DefaultDistroOverride -> DefaultDistro -> error.
+//
+// Used by callers that operate on a single unit rather than an image
+// (`yoe deploy <unit>`, TUI single-unit deploy) — they still need a
+// distro to filter the runtime closure walk per R21a, but the unit
+// itself doesn't carry a distro driver. The project's default is the
+// best the caller can do.
+func (p *Project) EffectiveDistro() (string, error) {
+	if p == nil {
+		return "", fmt.Errorf("EffectiveDistro: nil project")
+	}
+	if p.DefaultDistroOverride != "" {
+		return p.DefaultDistroOverride, nil
+	}
+	if p.DefaultDistro != "" {
+		return p.DefaultDistro, nil
+	}
+	return "", fmt.Errorf("project has no default_distro (set default_distro on project)")
+}
+
 // QEMUPorts returns the port mappings from the machine's QEMU config, or nil.
 func (m *Machine) QEMUPorts() []string {
 	if m.QEMU == nil {
@@ -202,6 +270,18 @@ type Unit struct {
 	Scope       string // "arch" (default), "machine", or "noarch"
 	Description string
 	License     string
+
+	// Distro carries two semantics by class:
+	//   - On a class=="image" unit it drives toolchain selection,
+	//     packaging format, repo subtree, and build-dir prefix.
+	//   - On any other class it is a compatibility tag: the closure
+	//     walker filters out units whose Distro is set and !=
+	//     consuming-image effective distro. An empty Distro means
+	//     "visible to every distro" (the common case).
+	// The hash key includes the image's effective distro (driven by the
+	// image), NOT the unit's compatibility tag — adding a tag to an
+	// existing unit must stay cache-neutral.
+	Distro string
 
 	// Source
 	Source  string // URL or git repo

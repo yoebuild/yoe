@@ -596,7 +596,7 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	if m, ok := proj.Machines[proj.Defaults.Machine]; ok {
 		arch = m.Arch
 	}
-	hashes, err := resolve.ComputeAllHashes(dag, arch, proj.Defaults.Machine, build.SrcInputsFn(projectDir, arch, proj.Defaults.Machine))
+	hashes, err := resolve.ComputeAllHashes(dag, arch, proj.Defaults.Machine, build.SrcInputsFn(projectDir, arch, proj.Defaults.Machine), "")
 	if err != nil {
 		return fmt.Errorf("computing hashes: %w", err)
 	}
@@ -5100,7 +5100,26 @@ func (m *model) recomputeMetrics() {
 		} else {
 			roots = []string{name}
 		}
-		closure := resolve.RuntimeClosure(m.proj, roots)
+		// For image units use the image's own effective distro; for
+		// non-image units (single deploy contexts) fall back to the
+		// project default.
+		var distro string
+		if u.Class == "image" {
+			d, err := m.proj.EffectiveDistroForImage(name)
+			if err != nil {
+				deps[name] = 0
+				continue
+			}
+			distro = d
+		} else {
+			d, err := m.proj.EffectiveDistro()
+			if err != nil {
+				deps[name] = 0
+				continue
+			}
+			distro = d
+		}
+		closure := resolve.RuntimeClosure(m.proj, roots, distro)
 		count := len(closure)
 		if u.Class != "image" && count > 0 {
 			count-- // don't count the unit itself for non-image units
@@ -5424,7 +5443,7 @@ func (m *model) recomputeStatuses() {
 	// m.visible would carry stale indices into the old slice.
 	m.applyQuery()
 
-	hashes, err := resolve.ComputeAllHashes(m.dag, m.arch, m.proj.Defaults.Machine, build.SrcInputsFn(m.projectDir, m.arch, m.proj.Defaults.Machine))
+	hashes, err := resolve.ComputeAllHashes(m.dag, m.arch, m.proj.Defaults.Machine, build.SrcInputsFn(m.projectDir, m.arch, m.proj.Defaults.Machine), "")
 	if err != nil {
 		return
 	}

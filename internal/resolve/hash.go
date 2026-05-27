@@ -37,10 +37,14 @@ func hashStringMap(h io.Writer, label string, m map[string]string) {
 //   - Source-state inputs (only for units in dev mode — pin units stay
 //     cache-neutral; the line is gated on non-empty so adding the field
 //     doesn't invalidate every unit's hash).
+//   - Effective distro of the consuming image (only when non-empty, so
+//     units built in a pre-distro context stay cache-neutral; once a
+//     closure walk supplies an effective distro the same source unit
+//     hashes differently for alpine vs debian builds).
 //
 // This ensures any change to a unit, its source, or any of its dependencies
 // produces a new hash and triggers a rebuild.
-func UnitHash(unit *yoestar.Unit, arch string, depHashes map[string]string, srcInputs string) string {
+func UnitHash(unit *yoestar.Unit, arch string, depHashes map[string]string, srcInputs, effectiveDistro string) string {
 	h := sha256.New()
 
 	// Unit identity
@@ -81,6 +85,16 @@ func UnitHash(unit *yoestar.Unit, arch string, depHashes map[string]string, srcI
 	// in-place edits invalidate the cache.
 	if srcInputs != "" {
 		fmt.Fprintf(h, "src_state:%s\n", srcInputs)
+	}
+	// Effective distro of the consuming image. Gated on non-empty per
+	// the CLAUDE.md hash-gating rule: a unit hashed without effective
+	// distro (pre-walker-threading) stays cache-neutral, and the line
+	// flips on once a closure walk supplies the value. Drives toolchain
+	// selection through U5's virtual-container resolution; the cache
+	// key must reflect it so alpine-built and debian-built versions of
+	// the same source unit don't collide.
+	if effectiveDistro != "" {
+		fmt.Fprintf(h, "effective_distro:%s\n", effectiveDistro)
 	}
 
 	// Tasks — hash command text, callable name, and install-step payload so
@@ -174,7 +188,13 @@ func UnitHash(unit *yoestar.Unit, arch string, depHashes map[string]string, srcI
 // preserving pre-dev-mode hashing behaviour. Production callers
 // (the build executor) supply a function that reads BuildMeta and
 // runs source.SrcHashInputs against the unit's src dir.
-func ComputeAllHashes(dag *DAG, arch, machine string, srcInputs func(*yoestar.Unit) string) (map[string]string, error) {
+//
+// `effectiveDistro` is the distro driving the closure (an image's
+// effective distro). Pass "" when the caller has no image scope —
+// the hash line is gated on non-empty, so passing "" leaves every
+// unit cache-neutral. Production callers walking from an image
+// supply the image's effective distro per R20a/R21.
+func ComputeAllHashes(dag *DAG, arch, machine string, srcInputs func(*yoestar.Unit) string, effectiveDistro string) (map[string]string, error) {
 	order, err := dag.TopologicalSort()
 	if err != nil {
 		return nil, err
@@ -193,7 +213,7 @@ func ComputeAllHashes(dag *DAG, arch, machine string, srcInputs func(*yoestar.Un
 		if srcInputs != nil {
 			src = srcInputs(node.Unit)
 		}
-		hashes[name] = UnitHash(node.Unit, unitArch, hashes, src)
+		hashes[name] = UnitHash(node.Unit, unitArch, hashes, src, effectiveDistro)
 	}
 
 	return hashes, nil

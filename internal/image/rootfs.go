@@ -44,7 +44,7 @@ func Assemble(unit *yoestar.Unit, proj *yoestar.Project, projectDir, outputDir, 
 
 	// Step 4: Generate disk image
 	imgPath := filepath.Join(outputDir, unit.Name+".img")
-	if err := generateImage(rootfs, imgPath, unit, projectDir, arch, w); err != nil {
+	if err := generateImage(rootfs, imgPath, unit, proj, projectDir, arch, w); err != nil {
 		return fmt.Errorf("generating image: %w", err)
 	}
 
@@ -204,7 +204,7 @@ func applyOverlays(rootfs, overlayDir string, w io.Writer) error {
 	})
 }
 
-func generateImage(rootfs, imgPath string, unit *yoestar.Unit, projectDir, arch string, w io.Writer) error {
+func generateImage(rootfs, imgPath string, unit *yoestar.Unit, proj *yoestar.Project, projectDir, arch string, w io.Writer) error {
 	fmt.Fprintln(w, "  Generating disk image...")
-	return GenerateDiskImage(rootfs, imgPath, unit, projectDir, arch, w)
+	return GenerateDiskImage(rootfs, imgPath, unit, proj, projectDir, arch, w)
 }

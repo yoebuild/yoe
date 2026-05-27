@@ -100,7 +100,11 @@ func buildUnitForDeploy(proj *yoestar.Project, unit, machineName string) error {
 		Arch:       targetArch,
 		Machine:    resolvedMachine,
 	}
-	closure := resolve.RuntimeClosure(proj, []string{unit})
+	distro, err := proj.EffectiveDistro()
+	if err != nil {
+		return fmt.Errorf("deploy: %w", err)
+	}
+	closure := resolve.RuntimeClosure(proj, []string{unit}, distro)
 	return build.BuildUnits(proj, closure, opts, os.Stdout)
 }
 
