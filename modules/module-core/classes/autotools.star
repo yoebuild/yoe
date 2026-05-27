@@ -3,7 +3,7 @@ load("//classes/tasks.star", "merge_tasks")
 def autotools(name, version, source, sha256="", deps=[], runtime_deps=[],
               configure_args=[], patches=[], services=[], conffiles=[],
               license="", description="", tasks=[], scope="",
-              container="toolchain-musl", container_arch="target", **kwargs):
+              container="toolchain", container_arch="target", **kwargs):
     base_tasks = [
         task("build", steps=[
             # Run autoreconf if configure.ac exists: git doesn't preserve

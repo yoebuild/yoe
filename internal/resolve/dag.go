@@ -43,9 +43,15 @@ func BuildDAG(proj *yoestar.Project) (*DAG, error) {
 			deps = append(deps, unit.Artifacts...)
 		}
 		deps = appendContainerDeps(deps, proj, unit)
+		// Resolve virtual names in deps through the distro-aware
+		// provides table. For images, the image's own Distro drives
+		// the lookup; for other units, the global provides fallback
+		// applies (an untagged unit picks whichever toolchain the
+		// project default winds up routing to).
+		resolveDistro := unit.Distro
 		dag.Nodes[name] = &Node{
 			Unit: unit,
-			Deps:   deps,
+			Deps: resolveDeps(deps, proj, resolveDistro),
 		}
 	}
 
@@ -66,6 +72,28 @@ func BuildDAG(proj *yoestar.Project) (*DAG, error) {
 	}
 
 	return dag, nil
+}
+
+// resolveDeps walks a deps list and replaces any virtual names with the
+// concrete unit providing them. Per R9, the resolution is distro-aware
+// — when distro is set, ResolveProvidesForDistro picks the candidate
+// whose Distro matches. When distro is "", falls back to the global
+// proj.Provides table.
+func resolveDeps(deps []string, proj *yoestar.Project, distro string) []string {
+	out := make([]string, 0, len(deps))
+	seen := make(map[string]bool, len(deps))
+	for _, d := range deps {
+		resolved := proj.ResolveProvidesForDistro(d, distro)
+		if resolved == "" {
+			resolved = d
+		}
+		if seen[resolved] {
+			continue
+		}
+		seen[resolved] = true
+		out = append(out, resolved)
+	}
+	return out
 }
 
 // appendContainerDeps adds the unit's container (and any per-task container

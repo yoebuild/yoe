@@ -1,6 +1,6 @@
 def image(name, artifacts=[], hostname=None, timezone="", locale="",
           partitions=[], scope="machine",
-          container="toolchain-musl", container_arch="target", deps=[],
+          container="toolchain", container_arch="target", deps=[],
           version=None, distro=None, **kwargs):
     """Create a bootable disk image from packages.
 

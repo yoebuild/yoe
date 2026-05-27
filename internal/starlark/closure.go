@@ -165,7 +165,11 @@ func (e *Engine) closure(roots []string, effectiveDistro string) ([]string, erro
 // Returns (nil, nil) when no provider has the name; the caller decides
 // whether that's an error or a search miss.
 func (e *Engine) lookupOrMaterialize(rawName, effectiveDistro string) (*Unit, error) {
-	name := e.resolveProvides(rawName)
+	// Distro-aware provides resolution: a virtual like "toolchain"
+	// maps to different concrete units across distros. The R9
+	// dispatch reads off proj.Provides plus the per-distro index
+	// computed from unit metadata.
+	name := e.resolveProvidesForDistro(rawName, effectiveDistro)
 	if u, ok := e.units[name]; ok {
 		if visibleToDistro(u, effectiveDistro) {
 			return u, nil
@@ -247,6 +251,22 @@ func (e *Engine) resolveProvides(name string) string {
 		return name
 	}
 	if mapped, ok := e.project.Provides[name]; ok && mapped != "" {
+		return mapped
+	}
+	return name
+}
+
+// resolveProvidesForDistro is the distro-aware sibling of
+// resolveProvides. When a virtual has multiple candidates across
+// distros (e.g. "toolchain" provided by both toolchain-musl with
+// distro=alpine and toolchain-glibc with distro=debian), picks the
+// candidate whose Distro matches effectiveDistro. Falls back to
+// proj.Provides when no distro-specific match exists.
+func (e *Engine) resolveProvidesForDistro(name, effectiveDistro string) string {
+	if e.project == nil {
+		return name
+	}
+	if mapped := e.project.ResolveProvidesForDistro(name, effectiveDistro); mapped != "" {
 		return mapped
 	}
 	return name

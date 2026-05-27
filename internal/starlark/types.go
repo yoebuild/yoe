@@ -232,6 +232,43 @@ func (p *Project) EffectiveDistroForImage(imageName string) (string, error) {
 	return "", fmt.Errorf("image %q has no distro and project has no default_distro (set distro on the image or default_distro on project)", imageName)
 }
 
+// ResolveProvidesForDistro finds the unit that provides `virtual` whose
+// Distro matches `effectiveDistro`. Falls back to proj.Provides[virtual]
+// when no exact distro match exists (a unit with no distro tag is
+// visible to every distro, so its presence in proj.Provides is the
+// global fallback).
+//
+// Used by the closure walker to dispatch a virtual reference like
+// Container="toolchain" to the concrete container unit matching the
+// consuming image's effective distro — R9 dispatch via the provides
+// table plus R21a's per-unit visibility filter.
+//
+// Returns "" when no provider exists. Empty effectiveDistro mirrors
+// the global table (no distro filtering).
+func (p *Project) ResolveProvidesForDistro(virtual, effectiveDistro string) string {
+	if p == nil || virtual == "" {
+		return ""
+	}
+	// Walk every unit for a matching-distro provider. Linear is fine —
+	// provides tables hold at most a few dozen entries per project.
+	if effectiveDistro != "" {
+		for _, u := range p.Units {
+			if u.Distro != effectiveDistro {
+				continue
+			}
+			for _, v := range u.Provides {
+				if v == virtual {
+					return u.Name
+				}
+			}
+		}
+	}
+	// Fall back to the global mapping (built by the loader from the
+	// Starlark ctx.provides dict). A unit with no distro tag will be
+	// reached here.
+	return p.Provides[virtual]
+}
+
 // EffectiveDistro returns the project's effective distro without an
 // image scope: DefaultDistroOverride -> DefaultDistro -> error.
 //

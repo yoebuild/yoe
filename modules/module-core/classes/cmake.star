@@ -3,7 +3,7 @@ load("//classes/tasks.star", "merge_tasks")
 def cmake(name, version, source, sha256="", deps=[], runtime_deps=[],
           cmake_args=[], patches=[], services=[], conffiles=[],
           license="", description="", tasks=[], scope="",
-          container="toolchain-musl", container_arch="target", **kwargs):
+          container="toolchain", container_arch="target", **kwargs):
     base_tasks = [
         task("build", steps=[
             "cmake -B build -S . -DCMAKE_INSTALL_PREFIX=$PREFIX " +

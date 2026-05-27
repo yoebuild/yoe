@@ -439,6 +439,16 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 				existingName := string(existing.(starlark.String))
 				// Look up the existing unit to compare module priority.
 				existingUnit := eng.Units()[existingName]
+				// Two units providing the same virtual but with different
+				// Distro tags are not a collision per R21a — each is
+				// visible only to its own distro's closure, and the
+				// closure walker dispatches via ResolveProvidesForDistro.
+				// The single-keyed proj.Provides table picks one as the
+				// global default; the distro-aware lookup overrides it
+				// per-walk.
+				if existingUnit != nil && u.Distro != "" && existingUnit.Distro != "" && u.Distro != existingUnit.Distro {
+					continue
+				}
 				if existingUnit == nil || u.ModuleIndex == existingUnit.ModuleIndex {
 					if !eng.allowDuplicateProvides {
 						return nil, fmt.Errorf("virtual package %q provided by both %q and %q",
