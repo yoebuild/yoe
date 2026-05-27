@@ -29,6 +29,11 @@ func RunInit(projectDir string, machine string) error {
     version = "0.1.0",
     defaults = defaults(machine = %q, image = "base-image"),
     sources = sources(go_proxy = "https://proxy.golang.org"),
+    # default_distro selects the effective distro for any image that
+    # doesn't set its own ` + "`distro`" + ` field. Today every base image
+    # ships through Alpine; change to "debian" or set distro on
+    # individual images to mix in the Debian backend.
+    default_distro = "alpine",
     # modules listed in priority order: later entries shadow earlier ones,
     # so module-core wins over module-bsp and the Alpine/Jetson prebuilts.
     modules = [
