@@ -149,18 +149,18 @@ below.
 Three knobs override the machine descriptor for a given developer without
 editing checked-in `.star` files:
 
-| Knob       | Local override         | CLI flag        | Persisted by                |
-| ---------- | ---------------------- | --------------- | --------------------------- |
-| RAM        | `qemu_memory = "8G"`   | `--memory 8G`   | `--memory` and TUI          |
-| Display    | `qemu_display = "on"`  | `--display`     | TUI                         |
-| Forwards   | `qemu_ports = [...]`   | `--port h:g`    | TUI                         |
+| Knob     | Local override        | CLI flag      | Persisted by       |
+| -------- | --------------------- | ------------- | ------------------ |
+| RAM      | `qemu_memory = "8G"`  | `--memory 8G` | `--memory` and TUI |
+| Display  | `qemu_display = "on"` | `--display`   | TUI                |
+| Forwards | `qemu_ports = [...]`  | `--port h:g`  | TUI                |
 
 All three live in `local.star` and apply the next time you run the same image.
-The TUI editor is on **Setup → QEMU settings** (press `s`, move down to
-**QEMU settings**, press Enter). Local-override forwards layer over the
-machine's defaults with the same replace-on-guest-port rule that `--port`
-uses; the order at run time is machine ← `local.star` ← CLI, so a one-off
-`--port` still beats a saved entry for the same guest port.
+The TUI editor is on **Setup → QEMU settings** (press `s`, move down to **QEMU
+settings**, press Enter). Local-override forwards layer over the machine's
+defaults with the same replace-on-guest-port rule that `--port` uses; the order
+at run time is machine ← `local.star` ← CLI, so a one-off `--port` still beats a
+saved entry for the same guest port.
 
 ## How `yoe qemu` runs
 
@@ -169,11 +169,10 @@ The launcher in `internal/device/qemu.go`:
 1. Picks the binary by arch: `qemu-system-aarch64`, `qemu-system-x86_64`, or
    `qemu-system-riscv64`.
 2. Builds the arg list: `-machine`, `-cpu`, `-m`, `-nographic` by default (or
-   `-device virtio-vga -serial mon:stdio` when `yoe run --display` is set,
-   which lets QEMU open its native window and still leaves the serial console
-   muxed onto host stdio), the virtio-blk drive, the virtio-net device with
-   port forwards, and `-bios` if a firmware (OVMF/AAVMF) is set. On a
-   same-arch host
+   `-device virtio-vga -serial mon:stdio` when `yoe run --display` is set, which
+   lets QEMU open its native window and still leaves the serial console muxed
+   onto host stdio), the virtio-blk drive, the virtio-net device with port
+   forwards, and `-bios` if a firmware (OVMF/AAVMF) is set. On a same-arch host
    it adds `-enable-kvm` when `/dev/kvm` is present; when it is not (notably
    qemu-in-qemu without nested virtualization) it drops KVM, downgrades a `host`
    CPU to `max`, and runs under TCG software emulation instead — slower, but it

@@ -340,20 +340,20 @@ is the editor for the persisted value.
 
 **Port forwards** layer over the machine's declared `qemu.ports` like this:
 local-overrides (`qemu_ports` in `local.star`) come first, then `--port` flags
-on the command line. In both lists, an entry whose guest port matches one in
-the machine's defaults *replaces* that default instead of adding a duplicate —
-the same rule `--port` already follows for qemu-in-qemu.
+on the command line. In both lists, an entry whose guest port matches one in the
+machine's defaults _replaces_ that default instead of adding a duplicate — the
+same rule `--port` already follows for qemu-in-qemu.
 
 **QEMU settings sub-screen.** Open Setup with `s`, move to **QEMU settings**,
 press Enter. The sub-screen lays out three sections:
 
-- **Memory** — ←/→ steps a preset ladder (machine default, then 128M doubling
-  up to 16G).
+- **Memory** — ←/→ steps a preset ladder (machine default, then 128M doubling up
+  to 16G).
 - **Display** — ←/→ cycles `default (off)` / `off` / `on`.
 - **Ports** — read-only rows show the machine's declared forwards; below them,
   each row is a local override. Press Enter (or `a` / `+`) on the trailing
-  `[+] add port` row to type a new `host:guest` mapping; press `d` (or `-`)
-  on a local row to remove it. Every change writes through to `local.star`.
+  `[+] add port` row to type a new `host:guest` mapping; press `d` (or `-`) on a
+  local row to remove it. Every change writes through to `local.star`.
 
 ### `yoe serve`
 
@@ -803,31 +803,31 @@ visible. Press `P` to capture the new HEAD as the new pin.
 
 #### Key bindings (unit list)
 
-| Key         | Action                                                        |
-| ----------- | ------------------------------------------------------------- |
-| `b`         | Build selected unit in background                             |
-| `B`         | Build all visible units in background                         |
-| `x`         | Cancel an in-progress build for the selected unit             |
-| `r`         | Run an image unit (boot in QEMU)                              |
-| `f`         | Flash a built image to a removable device                     |
-| `D`         | Deploy a non-image unit to a host over SSH                    |
-| `e`         | Open unit's `.star` file in `$EDITOR` (hidden for feed units) |
-| `$`         | Open `$SHELL` in the unit's checked-out source dir            |
-| `u`         | Toggle the unit's source between pin and dev mode             |
-| `l`         | Open unit's build log in `$EDITOR`                            |
-| `d`         | Launch `claude diagnose` for the unit                         |
-| `a`         | Launch `claude /new-unit`                                     |
+| Key         | Action                                                         |
+| ----------- | -------------------------------------------------------------- |
+| `b`         | Build selected unit in background                              |
+| `B`         | Build all visible units in background                          |
+| `x`         | Cancel an in-progress build for the selected unit              |
+| `r`         | Run an image unit (boot in QEMU)                               |
+| `f`         | Flash a built image to a removable device                      |
+| `D`         | Deploy a non-image unit to a host over SSH                     |
+| `e`         | Open unit's `.star` file in `$EDITOR` (hidden for feed units)  |
+| `$`         | Open `$SHELL` in the unit's checked-out source dir             |
+| `u`         | Toggle the unit's source between pin and dev mode              |
+| `l`         | Open unit's build log in `$EDITOR`                             |
+| `d`         | Launch `claude diagnose` for the unit                          |
+| `a`         | Launch `claude /new-unit`                                      |
 | `s`         | Open Setup (machine / image / parallel builds / QEMU settings) |
-| `/`         | Edit the active query (substring + `type:` `module:` `in:`)   |
-| `\`         | Snap query back to the saved default in `local.star`          |
-| `S`         | Save the current query as the new default                     |
-| `o` / `O`   | Cycle sort column / toggle direction                          |
-| `tab`       | Switch to the next home-screen tab (Units → Modules → …)      |
-| `Enter`     | Open detail view for the selected unit                        |
-| `j/k` `↑/↓` | Navigate up/down                                              |
-| `g/G`       | Jump to top / bottom                                          |
-| `?`         | Show the keyboard cheat sheet for this page                   |
-| `q`         | Quit                                                          |
+| `/`         | Edit the active query (substring + `type:` `module:` `in:`)    |
+| `\`         | Snap query back to the saved default in `local.star`           |
+| `S`         | Save the current query as the new default                      |
+| `o` / `O`   | Cycle sort column / toggle direction                           |
+| `tab`       | Switch to the next home-screen tab (Units → Modules → …)       |
+| `Enter`     | Open detail view for the selected unit                         |
+| `j/k` `↑/↓` | Navigate up/down                                               |
+| `g/G`       | Jump to top / bottom                                           |
+| `?`         | Show the keyboard cheat sheet for this page                    |
+| `q`         | Quit                                                           |
 
 The cursor auto-follows whatever unit is actively building, but only when you've
 been idle for a couple of seconds — pressing `j/k` or typing into the query bar
