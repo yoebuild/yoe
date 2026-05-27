@@ -43,16 +43,18 @@ Three north stars guide the experiment — everything else is in service of thes
 
 ## Is `[yoe]` Right for You?
 
-`[yoe]` is not for everyone. If you are building a mission-critical system that
-requires bit-for-bit reproducible builds, long-term release freezes, or
-extensive compliance certification, use [Yocto](https://www.yoctoproject.org/) —
-it is battle-tested for those requirements.
+`[yoe]` build is not for everyone. If you are building a mission-critical system
+that requires bit-for-bit reproducible builds, long-term release freezes, or
+extensive compliance certification, use the current generation [Yoe
+Distribution](https://yoedistro.org/ based on
+[Yocto](https://www.yoctoproject.org/) - it is battle-tested for those
+requirements.
 
-`[yoe]` is designed for edge systems that behave more like cloud systems — AI
-workloads and modern-language applications — and for teams that track upstream
-closely and prioritize fast iteration over strict reproducibility. If your
-product ships frequent updates, runs containerized services, or depends heavily
-on Go/Rust/Python ecosystems, `[yoe]` may be a better fit.
+`[yoe]` build is designed for edge systems that behave more like cloud systems —
+AI workloads and modern-language applications — and for teams that track
+upstream closely and prioritize fast iteration over strict reproducibility. If
+your product ships frequent updates, runs containerized services, or depends
+heavily on Go/Rust/Python ecosystems, `[yoe]` may be a better fit.
 
 More fundamentally, `[yoe]` assumes a small-team problem set, not a scaled-down
 enterprise one. A startup or ten-person product team doesn't have smaller
