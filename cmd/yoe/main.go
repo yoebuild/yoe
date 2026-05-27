@@ -18,6 +18,7 @@ import (
 	"github.com/yoebuild/yoe/internal/build"
 	"github.com/yoebuild/yoe/internal/device"
 	"github.com/yoebuild/yoe/internal/feeds/alpine"
+	"github.com/yoebuild/yoe/internal/feeds/debian"
 	"github.com/yoebuild/yoe/internal/module"
 	"github.com/yoebuild/yoe/internal/repo"
 	"github.com/yoebuild/yoe/internal/resolve"
@@ -186,23 +187,25 @@ func printUsage() {
 }
 
 // cmdUpdateFeeds is the entry point for the `yoe update-feeds`
-// subcommand. Runs inside a module repo, finds every alpine_feed()
-// call in MODULE.star, fetches each declared feed's APKINDEX from
-// upstream, verifies the signature against the feed's declared
-// `keys=[...]`, and atomically writes the decompressed index to
-// disk. The maintainer reviews `git diff` and commits manually.
+// subcommand. Runs inside a module repo, peeks MODULE.star for
+// alpine_feed() and debian_feed() calls, then runs the matching
+// updater(s) in sequence. A module declaring both runs both.
+// Verifies each feed's signature against its declared keys/keyring;
+// writes only — the maintainer reviews `git diff` and commits
+// manually.
 func cmdUpdateFeeds(args []string) {
 	fs := flag.NewFlagSet("update-feeds", flag.ExitOnError)
 	var (
-		archCSV    = fs.String("arch", "", "comma-separated arches to fetch (default: every arch with an existing on-disk feed dir, falling back to all supported)")
-		moduleDir  = fs.String("module-dir", "", "module directory holding MODULE.star (default: cwd)")
+		archCSV          = fs.String("arch", "", "comma-separated arches to fetch (default: every arch with an existing on-disk feed dir, falling back to all supported)")
+		moduleDir        = fs.String("module-dir", "", "module directory holding MODULE.star (default: cwd)")
+		allowKeyUpdate   = fs.String("allow-key-update", "", "append a fingerprint to keys/allowed-fingerprints before verifying (Debian only)")
 	)
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s update-feeds [--arch x86_64,arm64] [--module-dir DIR]\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "Fetch APKINDEX files for every alpine_feed() declared in the current\n")
-		fmt.Fprintf(os.Stderr, "module's MODULE.star. Verifies each feed's signature against its\n")
-		fmt.Fprintf(os.Stderr, "declared keys=[...] using the in-tree trust list. Writes only;\n")
-		fmt.Fprintf(os.Stderr, "review the diff and commit manually.\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s update-feeds [--arch x86_64,arm64] [--module-dir DIR] [--allow-key-update FPR]\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Fetch upstream index files for every alpine_feed()/debian_feed()\n")
+		fmt.Fprintf(os.Stderr, "declared in the current module's MODULE.star. Verifies each feed's\n")
+		fmt.Fprintf(os.Stderr, "signature against the in-tree trust list. Writes only; review the\n")
+		fmt.Fprintf(os.Stderr, "diff and commit manually.\n")
 	}
 	_ = fs.Parse(args)
 
@@ -219,17 +222,48 @@ func cmdUpdateFeeds(args []string) {
 		fmt.Fprintf(os.Stderr, "update-feeds: %s: no MODULE.star here (run inside the module repo)\n", dir)
 		os.Exit(1)
 	}
-	opts := alpine.UpdateOptions{ModuleDir: dir, Out: os.Stdout}
+
+	var arches []string
 	if *archCSV != "" {
 		for _, a := range strings.Split(*archCSV, ",") {
 			a = strings.TrimSpace(a)
 			if a != "" {
-				opts.Arches = append(opts.Arches, a)
+				arches = append(arches, a)
 			}
 		}
 	}
-	if err := alpine.UpdateFeeds(opts); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+
+	alpineDecls, alpineErr := alpine.PeekFeedDecls(dir)
+	debianDecls, debianErr := debian.PeekFeedDecls(dir)
+	if alpineErr != nil && debianErr != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", alpineErr)
+		os.Exit(1)
+	}
+
+	ran := false
+	if len(alpineDecls) > 0 {
+		ran = true
+		opts := alpine.UpdateOptions{ModuleDir: dir, Out: os.Stdout, Arches: arches}
+		if err := alpine.UpdateFeeds(opts); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	if len(debianDecls) > 0 {
+		ran = true
+		opts := debian.UpdateOptions{
+			ModuleDir:      dir,
+			Out:            os.Stdout,
+			Arches:         arches,
+			AllowKeyUpdate: *allowKeyUpdate,
+		}
+		if err := debian.UpdateFeeds(opts); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	if !ran {
+		fmt.Fprintf(os.Stderr, "update-feeds: no alpine_feed() or debian_feed() in %s/MODULE.star\n", dir)
 		os.Exit(1)
 	}
 }
@@ -592,6 +626,7 @@ func projectLoadOpts() []yoestar.LoadOption {
 		yoestar.WithShowShadows(globalShowShadows),
 		yoestar.WithAllowDuplicateProvides(globalAllowDuplicateProvides),
 		yoestar.WithBuiltin("alpine_feed", alpine.Builtin),
+		yoestar.WithBuiltin("debian_feed", debian.Builtin),
 	}
 	if globalProjectFile != "" {
 		opts = append(opts, yoestar.WithProjectFile(globalProjectFile))
