@@ -960,12 +960,13 @@ func resolveContainerImage(proj *yoestar.Project, unit *yoestar.Unit, arch strin
 	}
 
 	// Virtual reference — dereference through Provides to the concrete
-	// container unit. Looks like Container="toolchain" -> "toolchain-glibc"
-	// (debian) or "toolchain-musl" (alpine). Falls through to literal
-	// interpretation when no provider exists, preserving back-compat for
-	// Container="toolchain-musl" literal references.
-	if real, ok := proj.Provides[container]; ok && real != "" {
-		container = real
+	// container unit, distro-aware per R9. Looks like Container="toolchain"
+	// -> "toolchain-glibc" (debian) or "toolchain-musl" (alpine). Falls
+	// through to literal interpretation when no provider exists,
+	// preserving back-compat for Container="toolchain-musl" literal
+	// references.
+	if resolved := proj.ResolveProvidesForDistro(container, unit.Distro); resolved != "" {
+		container = resolved
 	}
 
 	// Container unit — look up version and build tag.

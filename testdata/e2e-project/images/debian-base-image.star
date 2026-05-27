@@ -12,11 +12,11 @@ load("@core//classes/image.star", "image")
 image(
     name = "debian-base-image",
     distro = "debian",
+    # Only leaf artifacts named here. The transitive runtime closure
+    # pulls in coreutils, bash, dpkg, libc6, and friends from the
+    # debian feed; naming them explicitly would collide with the
+    # same-named untagged source units in module-core.
     artifacts = [
-        "libc6",
-        "coreutils",
-        "bash",
-        "dpkg",
         "apt",
         "openssh-server",
     ],

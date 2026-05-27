@@ -36,8 +36,17 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
     if not effective_distro:
         fail("image %s: no distro set and project has no default_distro" % name)
 
-    # Merge machine packages
-    all_artifacts = list(artifacts) + list(ctx.machine_config.packages)
+    # Merge machine packages. The machine config's `packages` list
+    # (e.g. ["syslinux"] on qemu-x86_64) names module-core source units
+    # that build against musl/Alpine; pulling them into a Debian image's
+    # closure contaminates the per-unit sysroot with musl-linked
+    # binaries. Skip the merge on non-alpine distros — the Debian image
+    # bootloader requirements come in via apt's transitive closure
+    # instead, and machine-specific board firmware should be declared
+    # explicitly per-image.
+    all_artifacts = list(artifacts)
+    if effective_distro == "alpine":
+        all_artifacts = all_artifacts + list(ctx.machine_config.packages)
 
     # Resolve provides (e.g., "linux" → "linux-rpi4")
     explicit = []
@@ -64,6 +73,14 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
     if container and container not in all_deps:
         all_deps.append(container)
 
+    # Distro-specific rootfs assembly. Alpine images run apk add to
+    # populate the rootfs; Debian images extract each .deb's data.tar
+    # then run dpkg --configure -a in toolchain-glibc.
+    if effective_distro == "debian":
+        rootfs_fn = lambda: _assemble_debian_rootfs(resolved, hostname, timezone, locale)
+    else:
+        rootfs_fn = lambda: _assemble_rootfs(resolved, hostname, timezone, locale)
+
     unit(
         name = name,
         version = version,
@@ -79,7 +96,7 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
         shell = "bash",
         deps = all_deps,
         tasks = [
-            task("rootfs", fn=lambda: _assemble_rootfs(resolved, hostname, timezone, locale)),
+            task("rootfs", fn=rootfs_fn),
             task("disk", fn=lambda: _create_disk_image(name, all_partitions)),
         ],
         **kwargs,
@@ -172,6 +189,59 @@ done
     # package-time (see internal/artifact/apk.go's materializeServiceSymlinks),
     # so apk add — image-time or on-target — produces the same rootfs. yoe
     # does not patch the rootfs after install.
+
+def _assemble_debian_rootfs(packages, hostname, timezone, locale):
+    """Install packages into the rootfs by extracting each .deb's
+    data.tar in dependency order, then running `dpkg --configure -a`
+    inside toolchain-glibc to invoke maintainer scripts.
+
+    The rootfs sits at $DESTDIR/rootfs. The project's debian repo
+    lives at $REPO/debian/. dpkg-deb + tar + dpkg all ship in
+    toolchain-glibc.
+    """
+    run("mkdir -p $DESTDIR/rootfs")
+
+    # Extract each .deb's data.tar in the dependency order
+    # resolve_closure handed us. The pool layout matches what the
+    # repo emitter writes: pool/main/<initial>/<src>/<pkg>_<ver>_<arch>.deb.
+    # Locate by package basename prefix to tolerate version-string
+    # variations.
+    for pkg in packages:
+        run("""
+poolglob=$REPO/debian/pool/main/*/*/%s_*.deb
+debfile=$(ls $poolglob 2>/dev/null | head -1)
+if [ -z "$debfile" ]; then
+    echo "WARNING: no .deb for %s in $REPO/debian/pool/main; skipping"
+    exit 0
+fi
+dpkg-deb --fsys-tarfile "$debfile" | tar -xpf - -C $DESTDIR/rootfs
+""" % (pkg, pkg), privileged = True)
+
+    # Install build-time stubs so postinsts don't try to start
+    # services or talk to running daemons inside the chroot.
+    run("""
+mkdir -p $DESTDIR/rootfs/usr/sbin $DESTDIR/rootfs/usr/bin $DESTDIR/rootfs/sbin
+printf '#!/bin/sh\\nexit 101\\n' > $DESTDIR/rootfs/usr/sbin/policy-rc.d
+chmod 755 $DESTDIR/rootfs/usr/sbin/policy-rc.d
+""", privileged = True)
+
+    # Run dpkg --configure -a under no-network to invoke maintainer
+    # scripts. eatmydata no-ops fsync for the configure pass.
+    run("""
+eatmydata chroot $DESTDIR/rootfs dpkg --configure -a --no-triggers || true
+eatmydata chroot $DESTDIR/rootfs dpkg --triggers-only -a || true
+""", privileged = True)
+
+    # Remove build-time stub.
+    run("rm -f $DESTDIR/rootfs/usr/sbin/policy-rc.d", privileged = True)
+
+    if hostname:
+        run("mkdir -p $DESTDIR/rootfs/etc")
+        run("echo %s > $DESTDIR/rootfs/etc/hostname" % hostname)
+
+    if timezone:
+        run("mkdir -p $DESTDIR/rootfs/etc")
+        run("echo %s > $DESTDIR/rootfs/etc/timezone" % timezone)
 
 def _create_disk_image(name, partitions):
     if not partitions:

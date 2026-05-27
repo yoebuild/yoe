@@ -71,6 +71,7 @@ type Engine struct {
 	// matching the project's arch without needing the arch passed in
 	// through every call site.
 	activeArch string
+
 }
 
 // SetExtraBuiltins materializes the WithBuiltin factories. Called by the

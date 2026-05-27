@@ -165,10 +165,6 @@ func (e *Engine) closure(roots []string, effectiveDistro string) ([]string, erro
 // Returns (nil, nil) when no provider has the name; the caller decides
 // whether that's an error or a search miss.
 func (e *Engine) lookupOrMaterialize(rawName, effectiveDistro string) (*Unit, error) {
-	// Distro-aware provides resolution: a virtual like "toolchain"
-	// maps to different concrete units across distros. The R9
-	// dispatch reads off proj.Provides plus the per-distro index
-	// computed from unit metadata.
 	name := e.resolveProvidesForDistro(rawName, effectiveDistro)
 	if u, ok := e.units[name]; ok {
 		if visibleToDistro(u, effectiveDistro) {
@@ -191,24 +187,14 @@ func (e *Engine) lookupOrMaterialize(rawName, effectiveDistro string) (*Unit, er
 			continue
 		}
 		if !visibleToDistro(u, effectiveDistro) {
-			// Wrong distro for this walk; keep searching siblings.
 			continue
 		}
-		// Register into the catalog so BuildDAG sees it. Use a
-		// minimal subset of registerUnit's logic — synthetic units
-		// don't compete for `prefer_modules` pins (those name real
-		// modules) and they always rank below real modules, so the
-		// shadow logic doesn't apply. Skip the registration when a
-		// same-name unit (for a different distro) is already in the
-		// catalog to avoid clobbering the prior registration.
 		e.mu.Lock()
 		if existing, ok := e.units[name]; ok {
 			e.mu.Unlock()
 			if visibleToDistro(existing, effectiveDistro) {
 				return existing, nil
 			}
-			// Existing entry is for a different distro; return the
-			// synthetic-side match without overwriting the catalog.
 			return u, nil
 		}
 		u.ModuleIndex = sm.Priority

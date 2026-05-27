@@ -237,6 +237,12 @@ func prepareNonGitSource(cachedPath, destDir, sourceURL string) error {
 		// passing it through extractTarball here would only see the
 		// signature segment.
 		return copyBareSource(cachedPath, destDir, urlBasename(sourceURL))
+	case strings.HasSuffix(cachedPath, ".deb"):
+		// .deb files are ar archives carrying control.tar + data.tar (gz /
+		// xz / zst). Bare-copy so the install task can shell to
+		// `dpkg-deb --fsys-tarfile <file>.deb | tar -xpf - -C $DESTDIR`,
+		// which knows how to unwrap the ar framing.
+		return copyBareSource(cachedPath, destDir, urlBasename(sourceURL))
 	}
 
 	// No recognised extension — sniff the first 4 bytes.

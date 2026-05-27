@@ -243,14 +243,30 @@ func (p *Project) EffectiveDistroForImage(imageName string) (string, error) {
 // consuming image's effective distro — R9 dispatch via the provides
 // table plus R21a's per-unit visibility filter.
 //
+// Also implements the R21a tagged-wins-over-untagged rule for direct
+// name lookups: if a unit named `virtual` exists with the matching
+// distro tag, return that unit's name even when no provides entry
+// exists. This lets a debian closure prefer a same-named tagged
+// synthetic over an untagged source unit in proj.Units.
+//
 // Returns "" when no provider exists. Empty effectiveDistro mirrors
 // the global table (no distro filtering).
 func (p *Project) ResolveProvidesForDistro(virtual, effectiveDistro string) string {
 	if p == nil || virtual == "" {
 		return ""
 	}
-	// Walk every unit for a matching-distro provider. Linear is fine —
-	// provides tables hold at most a few dozen entries per project.
+	// First: a unit with the same name AND matching distro wins (R21a
+	// tagged-wins). This catches the case where module-core has an
+	// untagged source unit named `coreutils` and a feed has a tagged
+	// debian `coreutils`.
+	if effectiveDistro != "" {
+		if u, ok := p.Units[virtual]; ok && u.Distro == effectiveDistro {
+			return u.Name
+		}
+	}
+	// Second: walk every unit for a matching-distro provider via the
+	// Provides list. Linear is fine — provides tables hold at most a
+	// few dozen entries per project.
 	if effectiveDistro != "" {
 		for _, u := range p.Units {
 			if u.Distro != effectiveDistro {
