@@ -34,7 +34,21 @@ prebuilt-package source the resolver knows about.
 The earlier roadmap thinking pointed at "virtual units" for Alpine package
 wrapping, but `docs/specs/2026-05-13-feeds-as-modules.md` landed on synthetic
 modules instead and explicitly names `debian_feed()` / `ubuntu_feed()` as future
-work that should follow the same shape.
+work that should follow the same shape. The yoe-core half of feeds-as-modules
+has now shipped (see `docs/SPEC_PLAN_INDEX.md` for the row, and v0.10.13 in
+`CHANGELOG.md` for the user-facing summary): `alpine_feed()` is a registered
+Starlark builtin, `yoe update-feeds` is a working subcommand, synthetic modules
+participate in resolver priority and `prefer_modules`, the TUI's Modules tab
+groups feeds under their parent, and the supporting Go packages
+(`internal/apkindex/`, `internal/feeds/alpine/`, `internal/starlark/synthetic_module.go`)
+are in place. What remains on the Alpine side is the big-bang `module-alpine`
+cutover (U13) replacing the generated per-package `.star` files with two
+`alpine_feed()` calls plus `*-enable.star` companions. **That landed
+infrastructure is the foundation `module-debian` builds on** — the synthetic-
+module type, the loader hooks, the resolver-priority machinery, the closure
+walk's lazy materialization, the `yoe update-feeds` command surface, and the
+TUI feed-display layer all work format-agnostically and do not need to be
+rebuilt for Debian.
 `docs/specs/2026-05-18-mirror-alpine-keep-keys.md` separately moved Alpine's
 trust model to "mirror verbatim, keep upstream signatures" — that posture
 extends to Debian, but Debian's `.deb` files are not GPG-signed per-package
@@ -199,6 +213,20 @@ of a small one.
   Debian-format repo (per-arch `Packages` plus suite-level
   `Release`/`InRelease`). This machinery is named and located by format (`dpkg`,
   `deb`), not by distro, so future Debian-family backends reuse it as a library.
+  The Alpine-side parallel has already landed and is the canonical reference for
+  shape and depth: `internal/apkindex/` exposes `parse.go` (text-format parser),
+  `deps.go` (dep tokens), `provides.go` (provides/virtuals table), `verify.go`
+  (pure-Go signature verification, never touching the host keyring), and
+  `materialize.go` (turn an index entry into a `*Unit` on first resolver
+  reference). `internal/feeds/alpine/` is the consumer layer:
+  `builtin.go` registers the Starlark builtin, `tarstream.go`/`peek.go` handle
+  fetch and decompress, `update.go` drives `yoe update-feeds`, and
+  `crossfeed_test.go` exercises the cross-feed providers wiring. Debian mirrors
+  that layout: `internal/dpkg/` for the format-level parser, dep syntax, and
+  `.deb` extract/build; `internal/feeds/debian/` for the `debian_feed` builtin,
+  `Packages` fetch, `InRelease` verification, and the `yoe update-feeds`
+  dispatch. `internal/repo/index.go`'s APK emitter gains a sibling Debian
+  emitter rather than a rewrite.
 - R7. The apt dependency resolver handles `Depends`, `Pre-Depends`, virtual
   `Provides`, `Conflicts`, `Replaces`, and the alternative-bar (`|`) syntax.
   `Recommends` and `Suggests` are not auto-installed at image build time
@@ -229,7 +257,13 @@ of a small one.
   the module's trusted release keyring committed in-tree (see R25), rejects
   `InRelease` whose `Valid-Until` is absent or expired (see R24), fetches and
   decompresses the referenced `Packages` files, and rewrites the in-tree files.
-  The command writes changes but does not commit or push.
+  The command writes changes but does not commit or push. The subcommand
+  already exists for Alpine (`cmd/yoe/main.go` dispatches `case "update-feeds"`
+  to `internal/feeds/alpine.UpdateFeeds`); the Debian work adds a sibling
+  dispatch into `internal/feeds/debian.UpdateFeeds` keyed off which feed
+  builtins the loaded module declared. The maintainer-facing flag surface
+  (`--arch`, `--module-dir`) and the "write but do not stage/commit" contract
+  carry over unchanged.
 
 **Project-built debs and project repo**
 
@@ -528,7 +562,12 @@ of a small one.
   per package), but the integration shape is "synthetic module," reusing every
   existing piece of resolver and module machinery rather than introducing a
   parallel "virtual unit" type. Why: reuse existing resolver, no new concept in
-  the type system, `prefer_modules` works unchanged.
+  the type system, `prefer_modules` works unchanged. The
+  `internal/starlark/synthetic_module.go` type that backs this already shipped
+  with Alpine's work and explicitly calls out `debian_feed(...)` as a
+  registered consumer alongside `alpine_feed(...)` — `debian_feed` just calls
+  `Engine.RegisterSyntheticModule` with a Debian-shaped `Lookup`/`Names`
+  closure pair.
 - **Per-distro Starlark builtins (`debian_feed`), shared internal machinery.**
   Preserves the `feeds-as-modules` rejection of a generic `feed(format=…)`
   discriminator while keeping the internal code distro-agnostic. Each distro's
@@ -538,7 +577,12 @@ of a small one.
 - **Internal code named by format, not by distro.** `internal/dpkg`,
   `internal/deb`, `internal/repo`'s Debian emitter — not `internal/debian`. When
   `module-ubuntu` lands, it imports the same packages with no rename day. Cheap
-  insurance, easy to do correctly once.
+  insurance, easy to do correctly once. The Alpine half of feeds-as-modules
+  already adopted this convention: index parsing lives in `internal/apkindex/`
+  (not `internal/alpine/`), with `internal/feeds/alpine/` as the thin
+  Starlark-facing wrapper. Debian follows the same split: format work in
+  `internal/dpkg/` and `internal/deb/`, distro-facing wrapper in
+  `internal/feeds/debian/`.
 - **`distro` is the only image-level distro selector; libc is derived.** Image
   declares `distro = "alpine" | "debian"`. Classes pick the toolchain from
   `distro` (alpine→musl, debian→glibc). v1 does not require a separate `libc`
@@ -617,10 +661,21 @@ of a small one.
 
 ## Dependencies / Assumptions
 
-- The `feeds-as-modules` spec (`docs/specs/2026-05-13-feeds-as-modules.md`)
-  lands before, with, or as part of this work. Implementing `debian_feed`
-  independently of `alpine_feed` would duplicate the synthetic-module plumbing;
-  this design assumes they share it.
+- The `feeds-as-modules` spec (`docs/specs/2026-05-13-feeds-as-modules.md`) has
+  substantially landed on the yoe-core side as of 2026-05-26 — see
+  `docs/SPEC_PLAN_INDEX.md` for the row marked
+  "Partial — yoe-core done, awaiting module-alpine cutover". The pieces
+  `module-debian` depends on (synthetic-module type and registration hooks,
+  recursive module walking with cycle detection, closure walk in Go, lazy
+  materialization, `prefer_modules` preflight, `yoe update-feeds` dispatch,
+  TUI feed display, cross-feed providers, companion service-only apk
+  emission, build-transport fields on synthetic units) are all in place.
+  What is still outstanding on the Alpine side is the in-place `module-alpine`
+  cutover (U13: replace generated per-package `.star` files with two
+  `alpine_feed()` calls plus `*-enable.star` companions) and the e2e validation
+  pass that follows it (U15). Implementing `debian_feed` independently of
+  `alpine_feed` would duplicate the synthetic-module plumbing; this design
+  assumes they share it, and as of today they can.
 - The `mirror-alpine-keep-keys` spec
   (`docs/specs/2026-05-18-mirror-alpine-keep-keys.md`) lands before or alongside
   this work — the verbatim-mirror posture is the same on both sides, even though
