@@ -9,9 +9,19 @@ pidfile="/run/qt-demo.pid"
 output_log="/var/log/qt-demo.log"
 error_log="/var/log/qt-demo.log"
 
-# QPA platform is finalised in start_pre() once /dev/fb0 is up — see
-# the comment there for the mmsize override that pins device-pixel
-# ratio to 1.0.
+# Render to /dev/fb0 directly. The kernel exposes the framebuffer via
+# virtio-gpu (under `yoe run --display`) or vesafb/efifb on real
+# boards; either way Qt opens /dev/fb0 and writes pixels.
+#
+# The qemu-x86_64 launcher passes `-device virtio-vga,xres=1280,yres=800`
+# so virtio-gpu's preferred mode in the guest is 1280×800. Without that
+# the kernel picks the first connector mode (640×480), scans out only
+# that region of an otherwise-1280×800 framebuffer, and centred UI
+# lands at the bottom-right of the visible area.
+#
+# QT_QPA_FB_TTY parks the framebuffer console on tty1 so kernel log
+# spam from `console=ttyS0`'s cousin doesn't scribble over Qt's pixels.
+export QT_QPA_PLATFORM=linuxfb
 export QT_QPA_FB_TTY=/dev/tty1
 
 # Qt Quick defaults to an OpenGL-accelerated scene-graph backend.
@@ -32,40 +42,4 @@ depend() {
     # predictable order; the demo itself doesn't need the network.
     need localmount
     after net
-}
-
-start_pre() {
-    # Pin the linuxfb plugin to /dev/fb0's visible geometry AND a
-    # physical millimetre size that yields a 96-DPI screen (i.e.,
-    # devicePixelRatio = 1).
-    #
-    # Without the mmsize override, the linuxfb plugin computes DPR from
-    # the kernel's EDID-derived physical size. QEMU's virtio-gpu
-    # advertises a tiny screen (16 cm × 12 cm at 1280 × 800), which
-    # yields a physical DPI of ~203 — Qt rounds the ratio to 2, doubles
-    # the logical canvas, and the QQuickView ends up twice the size of
-    # the actual framebuffer. The centred greeting then lands at the
-    # bottom-right corner of the visible area while the other three
-    # quadrants are drawn off-screen.
-    #
-    # QT_SCALE_FACTOR / QT_SCREEN_SCALE_FACTORS don't help here —
-    # they're per-app multipliers layered ON TOP of the screen's DPR,
-    # not overrides for the platform plugin's auto-detected DPR. The
-    # plugin's mmsize argument is the right knob.
-    #
-    # mm = px × 25.4 / 96 ≈ px × 264 / 1000 (integer-safe). The result
-    # holds across resolutions, so the same start_pre handles 800×600,
-    # 1024×768, 1280×800, 1920×1080, etc.
-    if [ -e /sys/class/graphics/fb0/virtual_size ]; then
-        IFS=',' read FB_W FB_H < /sys/class/graphics/fb0/virtual_size
-        if [ -n "$FB_W" ] && [ -n "$FB_H" ]; then
-            MM_W=$((FB_W * 264 / 1000))
-            MM_H=$((FB_H * 264 / 1000))
-            export QT_QPA_PLATFORM="linuxfb:fb=/dev/fb0:size=${FB_W}x${FB_H}:mmsize=${MM_W}x${MM_H}"
-            einfo "qt-demo: linuxfb size=${FB_W}x${FB_H} mmsize=${MM_W}x${MM_H}mm (DPR=1)"
-            return 0
-        fi
-    fi
-    export QT_QPA_PLATFORM=linuxfb
-    ewarn "qt-demo: could not read /sys/class/graphics/fb0/virtual_size; using auto-detect"
 }

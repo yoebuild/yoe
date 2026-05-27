@@ -1,41 +1,22 @@
 // qt-demo / demo.qml — Qt Quick scene rendered to /dev/fb0 by qmlscene.
 //
-// Layout uses anchors.centerIn so the greeting always lands at the
-// middle of the root, no matter the framebuffer size. The four corner
-// rectangles are diagnostic: if the centred greeting drifts off-screen,
-// the visible corners tell us at a glance whether the QQuickView is
-// sized to match the framebuffer or whether Qt sees a larger logical
-// canvas. The "Screen WxH" readout below the title prints the root's
-// width/height so we can compare against /sys/class/graphics/fb0.
-
-// hi cliff
+// Root is a Rectangle (not a Window). qmlscene wraps a non-Window root
+// in a QQuickView whose default resizeMode is SizeRootObjectToView, so
+// the root is sized to the view — which on linuxfb is the framebuffer's
+// logical-pixel dimensions, fullscreen by default with no window
+// manager in the picture. `anchors.centerIn: parent` then lands the
+// column in the framebuffer's true centre.
+//
+// The companion qemu-x86_64 boot path adds `video=1280x768` to the
+// kernel cmdline so virtio-gpu's DRM driver sets a usable mode at boot
+// instead of falling back to 640×480 — without that the visible
+// scanout is only the top-left corner of the framebuffer and centred
+// UI lands off-screen.
 
 import QtQuick
 
 Rectangle {
-    id: root
     color: "#1e2a3a"
-
-    // Corner markers. If all four are visible inside the QEMU window,
-    // root.width/height matches the framebuffer. If only the top-left
-    // red square is visible, root is larger than the visible area and
-    // the centred greeting is being drawn off-screen.
-    Rectangle {
-        width: 60; height: 60; color: "#e74c3c"
-        anchors.left: parent.left; anchors.top: parent.top
-    }
-    Rectangle {
-        width: 60; height: 60; color: "#2ecc71"
-        anchors.right: parent.right; anchors.top: parent.top
-    }
-    Rectangle {
-        width: 60; height: 60; color: "#f1c40f"
-        anchors.left: parent.left; anchors.bottom: parent.bottom
-    }
-    Rectangle {
-        width: 60; height: 60; color: "#9b59b6"
-        anchors.right: parent.right; anchors.bottom: parent.bottom
-    }
 
     Column {
         anchors.centerIn: parent
@@ -54,14 +35,6 @@ Rectangle {
             text: "Qt 6 Quick · linuxfb · software scene graph"
             color: "#9fb1c7"
             font.pixelSize: 22
-            horizontalAlignment: Text.AlignHCenter
-            anchors.horizontalCenter: parent.horizontalCenter
-        }
-
-        Text {
-            text: "Root size: " + root.width + " × " + root.height
-            color: "#9fb1c7"
-            font.pixelSize: 18
             horizontalAlignment: Text.AlignHCenter
             anchors.horizontalCenter: parent.horizontalCenter
         }

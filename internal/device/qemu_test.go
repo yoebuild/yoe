@@ -3,6 +3,7 @@ package device
 import (
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
@@ -102,7 +103,16 @@ func TestBaseQEMUArgsDisplay(t *testing.T) {
 	if slices.Contains(graphical, "-nographic") {
 		t.Errorf("Display=true: expected no -nographic, got %v", graphical)
 	}
-	if !slices.Contains(graphical, "virtio-vga") {
+	// virtio-vga is passed with xres/yres preferred-mode hints, so look
+	// for any arg that starts with "virtio-vga".
+	hasVirtioVga := false
+	for _, a := range graphical {
+		if strings.HasPrefix(a, "virtio-vga") {
+			hasVirtioVga = true
+			break
+		}
+	}
+	if !hasVirtioVga {
 		t.Errorf("Display=true: expected virtio-vga device, got %v", graphical)
 	}
 	if !containsPair(graphical, "-serial", "mon:stdio") {

@@ -477,7 +477,15 @@ func baseQEMUArgs(machine *yoestar.Machine, opts QEMUOptions) []string {
 	// host stdio (the default without `-nographic` is the in-window
 	// virtual console, which would hide kernel logs from the terminal).
 	if opts.Display {
-		args = append(args, "-device", "virtio-vga")
+		// xres/yres set virtio-vga's *preferred* mode in the EDID it
+		// advertises to the guest. Without them the kernel's virtio_gpu
+		// driver picks the first connector mode (640×480 on QEMU 9.x),
+		// scans out only that region of an otherwise-1280×800
+		// framebuffer, and any UI that centres in the framebuffer
+		// (e.g. the qt-image demo) lands at the bottom-right corner of
+		// the visible area. 1280×800 fits a 16:10 demo nicely and stays
+		// well inside virtio-vga's default 16 MiB of vgamem.
+		args = append(args, "-device", "virtio-vga,xres=1280,yres=800")
 		args = append(args, "-serial", "mon:stdio")
 	} else {
 		args = append(args, "-nographic")
