@@ -13,6 +13,7 @@ import (
 
 	yoe "github.com/yoebuild/yoe/internal"
 	"github.com/yoebuild/yoe/internal/artifact"
+	"github.com/yoebuild/yoe/internal/deb"
 	"github.com/yoebuild/yoe/internal/repo"
 	"github.com/yoebuild/yoe/internal/resolve"
 	"github.com/yoebuild/yoe/internal/source"
@@ -707,43 +708,25 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		}
 	}
 
-	// Package the output into an .apk and publish to the local repo.
-	// Then stage destdir for downstream units' per-unit sysroots.
+	// Package the output and publish to the local repo. Then stage
+	// destdir for downstream units' per-unit sysroots.
+	//
+	// Branch by Unit.Distro: debian-tagged units land in the Debian
+	// pool as .deb; everything else goes through the APK path. Source
+	// units that need to ship to both alpine and debian images (R14a
+	// build-twice) are not yet wired — for v1 they'd need a separate
+	// per-distro unit entry. Most synthetic feed units are tagged by
+	// the feed, and project units typically target one distro.
 	if unit.Class != "image" && unit.Class != "container" {
-		archDir := RepoArchDir(unit, opts.Arch)
-		var (
-			apkPath string
-			err     error
-		)
-		if unit.PassthroughAPK != "" {
-			// Re-sign the upstream apk verbatim — keeps Alpine's PKGINFO
-			// and install scripts intact. The tasks above still run so
-			// destdir is populated for downstream units' sysroots.
-			srcAPK := filepath.Join(srcDir, unit.PassthroughAPK)
-			apkPath, err = artifact.RepackAPK(unit, srcAPK, filepath.Join(buildDir, "pkg"), opts.Signer)
-			if err != nil {
-				return fmt.Errorf("repacking upstream apk: %w", err)
+		switch unit.Distro {
+		case "debian":
+			if err := packageDeb(unit, destDir, srcDir, buildDir, opts, proj, w); err != nil {
+				return fmt.Errorf("packaging deb: %w", err)
 			}
-			// Honor upstream PKGINFO's arch when publishing. apk-tools
-			// constructs fetch URLs as `<repo>/<pkg.arch>/<file>.apk`
-			// using the package's own arch — so a noarch apk physically
-			// has to live in `<repo>/noarch/` regardless of which arch's
-			// build invoked us. Each per-arch APKINDEX picks up noarch
-			// entries via GenerateIndex's sibling-dir scan.
-			if a, aerr := artifact.ReadAPKArch(srcAPK); aerr == nil && a != "" {
-				archDir = a
+		default:
+			if err := packageAPK(unit, destDir, sysroot, srcDir, buildDir, opts, proj, w); err != nil {
+				return err
 			}
-		} else {
-			apkPath, err = artifact.CreateAPK(unit, destDir, sysroot, filepath.Join(buildDir, "pkg"), archDir, opts.ProjectCommit, opts.Signer)
-			if err != nil {
-				return fmt.Errorf("creating apk: %w", err)
-			}
-		}
-		fmt.Fprintf(w, "  → %s\n", filepath.Base(apkPath))
-
-		repoDir := repo.RepoDir(proj, opts.ProjectDir)
-		if err := repo.Publish(apkPath, repoDir, archDir, opts.Signer); err != nil {
-			return fmt.Errorf("publishing to repo: %w", err)
 		}
 
 		if err := StageSysroot(destDir, buildDir); err != nil {
@@ -752,6 +735,138 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	}
 
 	return nil
+}
+
+// packageAPK is the alpine-side packaging branch — extracted from the
+// inline body when the deb branch was added. Repacks the upstream apk
+// when PassthroughAPK is set, else builds a fresh apk from destdir.
+func packageAPK(unit *yoestar.Unit, destDir, sysroot, srcDir, buildDir string, opts Options, proj *yoestar.Project, w io.Writer) error {
+	archDir := RepoArchDir(unit, opts.Arch)
+	var (
+		apkPath string
+		err     error
+	)
+	if unit.PassthroughAPK != "" {
+		srcAPK := filepath.Join(srcDir, unit.PassthroughAPK)
+		apkPath, err = artifact.RepackAPK(unit, srcAPK, filepath.Join(buildDir, "pkg"), opts.Signer)
+		if err != nil {
+			return fmt.Errorf("repacking upstream apk: %w", err)
+		}
+		if a, aerr := artifact.ReadAPKArch(srcAPK); aerr == nil && a != "" {
+			archDir = a
+		}
+	} else {
+		apkPath, err = artifact.CreateAPK(unit, destDir, sysroot, filepath.Join(buildDir, "pkg"), archDir, opts.ProjectCommit, opts.Signer)
+		if err != nil {
+			return fmt.Errorf("creating apk: %w", err)
+		}
+	}
+	fmt.Fprintf(w, "  → %s\n", filepath.Base(apkPath))
+
+	repoDir := repo.RepoDir(proj, opts.ProjectDir)
+	if err := repo.Publish(apkPath, repoDir, archDir, opts.Signer); err != nil {
+		return fmt.Errorf("publishing to repo: %w", err)
+	}
+	return nil
+}
+
+// packageDeb is the debian-side packaging branch. PassthroughDeb units
+// (mirror-verbatim from a debian_feed) copy the upstream .deb into the
+// project pool. Project source units run dpkg-deb --build over destDir.
+func packageDeb(unit *yoestar.Unit, destDir, srcDir, buildDir string, opts Options, proj *yoestar.Project, w io.Writer) error {
+	pkgDir := filepath.Join(buildDir, "pkg")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir pkg: %w", err)
+	}
+
+	var debPath string
+	if unit.PassthroughDeb != "" {
+		// Mirror-verbatim: copy the upstream .deb out of srcDir to
+		// the project pool. R15 SHA256 verification fires here.
+		src := filepath.Join(srcDir, unit.PassthroughDeb)
+		if unit.SHA256 != "" {
+			if err := repo.VerifyMirrorSHA256(src, unit.SHA256); err != nil {
+				return err
+			}
+		}
+		debPath = filepath.Join(pkgDir, unit.PassthroughDeb)
+		if err := copyDebFile(src, debPath); err != nil {
+			return fmt.Errorf("copy passthrough deb: %w", err)
+		}
+	} else {
+		// Build from destDir. Derive control fields from the unit's
+		// metadata; for v1 we use the unit name, version, runtime
+		// deps, and project maintainer.
+		debArch := debArchForYoe(opts.Arch)
+		fname := fmt.Sprintf("%s_%s_%s.deb", unit.Name, unit.Version, debArch)
+		debPath = filepath.Join(pkgDir, fname)
+
+		c := deb.Control{
+			Package:      unit.Name,
+			Version:      unit.Version,
+			Architecture: debArch,
+			Maintainer:   "Yoe <build@yoe.local>",
+			Description:  unit.Description,
+			Depends:      strings.Join(unit.RuntimeDeps, ", "),
+			Provides:     strings.Join(unit.Provides, ", "),
+		}
+		if c.Description == "" {
+			c.Description = unit.Name
+		}
+		// Bake systemd service wants symlinks before dpkg-deb sees
+		// destDir (yoe's "services follow packages" pattern).
+		if err := deb.MaterializeSystemdServiceSymlinks(destDir, "", unit.Services); err != nil {
+			return fmt.Errorf("service symlinks: %w", err)
+		}
+		if err := deb.BuildDeb(destDir, c, debPath, ""); err != nil {
+			return fmt.Errorf("BuildDeb: %w", err)
+		}
+	}
+	fmt.Fprintf(w, "  → %s\n", filepath.Base(debPath))
+
+	// Publish into the project pool and regenerate the per-arch
+	// Packages + Release + InRelease. The repo lives at
+	// repo/<project>/debian/ for now (full per-distro layout split
+	// arrives with U7).
+	repoDir := filepath.Join(repo.RepoDir(proj, opts.ProjectDir), "debian")
+	publishOpts := repo.DebRepoOptions{
+		RepoDir:    repoDir,
+		Suite:      "bookworm",
+		Components: []string{"main"},
+		Arches:     []string{"amd64", "arm64"},
+	}
+	if err := repo.PublishDeb(debPath, publishOpts, "main"); err != nil {
+		return fmt.Errorf("PublishDeb: %w", err)
+	}
+	return nil
+}
+
+func debArchForYoe(yoeArch string) string {
+	switch yoeArch {
+	case "x86_64":
+		return "amd64"
+	case "arm64":
+		return "arm64"
+	default:
+		return yoeArch
+	}
+}
+
+func copyDebFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 func filterBuildOrder(dag *resolve.DAG, fullOrder []string, names []string) ([]string, error) {

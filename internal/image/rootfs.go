@@ -8,11 +8,15 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/yoebuild/yoe/internal/deb"
 	"github.com/yoebuild/yoe/internal/repo"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
-// Assemble creates a root filesystem image from an image unit.
+// Assemble creates a root filesystem image from an image unit. The
+// image's effective distro drives whether the rootfs is populated via
+// apk (alpine path) or by extracting .deb data tars + running
+// dpkg --configure -a (debian path).
 func Assemble(unit *yoestar.Unit, proj *yoestar.Project, projectDir, outputDir, arch, machine string, w io.Writer) error {
 	rootfs := filepath.Join(outputDir, "rootfs")
 	os.RemoveAll(rootfs)
@@ -20,13 +24,30 @@ func Assemble(unit *yoestar.Unit, proj *yoestar.Project, projectDir, outputDir, 
 		return fmt.Errorf("creating rootfs dir: %w", err)
 	}
 
-	// Step 1: Install packages into rootfs — resolve deps so libraries
-	// are included automatically (e.g., openssh pulls in openssl, zlib).
-	// The repo follows Alpine layout (<repo>/<arch>/<pkg>.apk).
-	repoDir := repo.RepoDir(proj, projectDir)
-	allPackages := resolvePackageDeps(unit.Artifacts, proj)
-	if err := installPackages(rootfs, repoDir, allPackages, w); err != nil {
-		return fmt.Errorf("installing packages: %w", err)
+	effectiveDistro, err := proj.EffectiveDistroForImage(unit.Name)
+	if err != nil {
+		return fmt.Errorf("Assemble: %w", err)
+	}
+
+	switch effectiveDistro {
+	case "debian":
+		if err := assembleDebian(rootfs, unit, proj, projectDir, arch, w); err != nil {
+			return fmt.Errorf("assembling debian rootfs: %w", err)
+		}
+		toolchainImage, err := ResolveToolchainImage(proj, effectiveDistro, arch)
+		if err != nil {
+			return fmt.Errorf("toolchain for dpkg configure: %w", err)
+		}
+		if err := ConfigureDebianRootfs(rootfs, toolchainImage, projectDir, w); err != nil {
+			return fmt.Errorf("configuring debian rootfs: %w", err)
+		}
+	default:
+		// alpine path (current behavior)
+		repoDir := repo.RepoDir(proj, projectDir)
+		allPackages := resolvePackageDeps(unit.Artifacts, proj)
+		if err := installPackages(rootfs, repoDir, allPackages, w); err != nil {
+			return fmt.Errorf("installing packages: %w", err)
+		}
 	}
 
 	// Step 2: Apply configuration (hostname, timezone, locale, services)
@@ -50,6 +71,67 @@ func Assemble(unit *yoestar.Unit, proj *yoestar.Project, projectDir, outputDir, 
 
 	fmt.Fprintf(w, "  → %s\n", imgPath)
 	return nil
+}
+
+// assembleDebian populates rootfs by extracting each resolved deb from
+// the project pool under repo/<project>/debian/pool/. Per R18, after
+// all extracts the caller runs dpkg --configure -a under a binfmt
+// sandbox to invoke maintainer scripts (U17 wires that step).
+func assembleDebian(rootfs string, unit *yoestar.Unit, proj *yoestar.Project, projectDir, arch string, w io.Writer) error {
+	debianPoolDir := filepath.Join(repo.RepoDir(proj, projectDir), "debian", "pool", "main")
+	if _, err := os.Stat(debianPoolDir); err != nil {
+		return fmt.Errorf("debian pool missing at %s — build the project's debian artifacts first", debianPoolDir)
+	}
+	allPackages := resolvePackageDeps(unit.Artifacts, proj)
+	fmt.Fprintf(w, "  Installing %d debs into rootfs...\n", len(allPackages))
+	for _, pkg := range allPackages {
+		debFile, err := findDebInPool(debianPoolDir, pkg)
+		if err != nil {
+			return fmt.Errorf("locate %s.deb: %w", pkg, err)
+		}
+		if debFile == "" {
+			fmt.Fprintf(w, "  (warning: no .deb for %s under pool; skipped)\n", pkg)
+			continue
+		}
+		d, err := deb.ReadDeb(debFile)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", debFile, err)
+		}
+		if err := deb.ExtractDataTar(d, rootfs); err != nil {
+			d.Close()
+			return fmt.Errorf("extract %s: %w", debFile, err)
+		}
+		d.Close()
+	}
+	return nil
+}
+
+// findDebInPool walks a Debian pool/<component> tree and returns the
+// first .deb whose basename starts with "<pkg>_". Multiple matches
+// (different versions) take the lexically last one — Debian filenames
+// embed version strings that sort sensibly.
+func findDebInPool(poolRoot, pkg string) (string, error) {
+	var best string
+	prefix := pkg + "_"
+	err := filepath.WalkDir(poolRoot, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(p, ".deb") {
+			return nil
+		}
+		if !strings.HasPrefix(filepath.Base(p), prefix) {
+			return nil
+		}
+		if best == "" || p > best {
+			best = p
+		}
+		return nil
+	})
+	return best, err
 }
 
 // resolvePackageDeps expands a list of package names to include all transitive

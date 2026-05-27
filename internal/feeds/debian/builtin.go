@@ -217,7 +217,8 @@ func (s *archState) populateBuildFields(u *yoestar.Unit, entry *dpkg.Entry, _ st
 		entry.Filename,
 	)
 	u.SHA256 = entry.SHA256
-	u.PassthroughAPK = "" // not an apk — see PassthroughDeb when wired
+	u.PassthroughAPK = ""    // not an apk
+	u.PassthroughDeb = asset // mirror the upstream .deb into the project pool verbatim
 	u.Container = "toolchain-glibc"
 	u.ContainerArch = "target"
 	u.Sandbox = false

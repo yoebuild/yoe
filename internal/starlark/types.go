@@ -339,6 +339,13 @@ type Unit struct {
 	// The path is relative to the unit's srcDir.
 	PassthroughAPK string
 
+	// PassthroughDeb is the Debian sibling of PassthroughAPK: a .deb
+	// file fetched as the unit's source whose bytes flow into the
+	// project's pool/ verbatim (mirror-verbatim per R15). When set,
+	// the build executor skips dpkg-deb --build and just copies the
+	// upstream .deb into the project repo's pool/.
+	PassthroughDeb string
+
 	// Dependencies
 	Deps        []string
 	RuntimeDeps []string

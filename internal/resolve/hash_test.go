@@ -23,6 +23,7 @@ var hashSkipFields = map[string]string{
 	"CacheDirs":         "host-side mount points; doesn't affect built artifact contents",
 	"ArtifactsExplicit": "UX-only metadata; the resolved Artifacts list (which IS hashed) drives the actual rootfs",
 	"Distro":            "visibility-only tag; the consuming image's effective_distro IS hashed (separately) — the per-unit tag has no output impact",
+	"PassthroughDeb":    "transport metadata for mirror-verbatim deb publish; the bytes themselves are hashed via SHA256 (which IS in the hash), so this filename doesn't add information",
 }
 
 // TestUnitHash_CoversAllFields fails when a new field is added to Unit
