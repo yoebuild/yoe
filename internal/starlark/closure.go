@@ -87,6 +87,13 @@ func (e *Engine) closure(roots []string, effectiveDistro string) ([]string, erro
 		if seen[name] {
 			continue
 		}
+		// Mark the as-queued name to short-circuit duplicate entries
+		// even when lookupOrMaterialize resolves through provides to
+		// a different concrete unit name. Without this, a virtual
+		// queued multiple times re-runs the lookup and re-queues
+		// every dep, producing quadratic work for synthetic-heavy
+		// feeds like the Debian bookworm catalog.
+		seen[name] = true
 		u, err := e.lookupOrMaterialize(name, effectiveDistro)
 		if err != nil {
 			return nil, err
@@ -166,6 +173,37 @@ func (e *Engine) closure(roots []string, effectiveDistro string) ([]string, erro
 // whether that's an error or a search miss.
 func (e *Engine) lookupOrMaterialize(rawName, effectiveDistro string) (*Unit, error) {
 	name := e.resolveProvidesForDistro(rawName, effectiveDistro)
+
+	// R21a tagged-wins: when e.units holds an untagged entry for this
+	// name AND the walk has a concrete distro AND a synthetic module
+	// provides a tagged variant for that distro, the tagged variant
+	// wins. Without this, a debian closure looking up "openssl"
+	// satisfies from module-core's untagged source unit and never
+	// materializes the debian feed's tagged openssl, contaminating
+	// the per-unit sysroot with musl-linked binaries.
+	//
+	// The neg cache makes this O(1) on subsequent lookups for the
+	// same (name, distro) — the synthetic-walk only runs once per
+	// pair, then short-circuits.
+	if effectiveDistro != "" {
+		if existing, ok := e.units[name]; ok && existing.Distro == "" {
+			negKey := name + "@" + effectiveDistro
+			if e.distroTagCache == nil {
+				e.distroTagCache = make(map[string]*Unit)
+			}
+			cached, hit := e.distroTagCache[negKey]
+			if !hit {
+				cached = e.lookupTaggedSynthetic(name, effectiveDistro)
+				e.distroTagCache[negKey] = cached // may cache nil
+			}
+			if cached != nil {
+				return cached, nil
+			}
+			// No tagged variant — fall through to the untagged entry.
+			_ = existing
+		}
+	}
+
 	if u, ok := e.units[name]; ok {
 		if visibleToDistro(u, effectiveDistro) {
 			return u, nil
@@ -203,6 +241,37 @@ func (e *Engine) lookupOrMaterialize(rawName, effectiveDistro string) (*Unit, er
 		return u, nil
 	}
 	return nil, nil
+}
+
+// lookupTaggedSynthetic walks every synthetic module looking for a
+// same-name unit whose Distro matches effectiveDistro. On match,
+// REPLACES e.units[name] with the tagged synthetic unit so downstream
+// consumers (BuildDAG, executor, deploy walker) see the right
+// distro-tagged version. The single-keyed e.units catalog means an
+// alpine-then-debian build sequence in the same engine would race;
+// see project_debian_backend_landed memory for the known limitation.
+//
+// Returns nil if no tagged variant exists. Caller memoizes via
+// distroTagCache so the synthetic walk happens once per (name, distro).
+func (e *Engine) lookupTaggedSynthetic(name, effectiveDistro string) *Unit {
+	if effectiveDistro == "" {
+		return nil
+	}
+	for _, sm := range e.syntheticModules {
+		u, err := sm.Lookup(name)
+		if err != nil || u == nil {
+			continue
+		}
+		if u.Distro != effectiveDistro {
+			continue
+		}
+		u.ModuleIndex = sm.Priority
+		e.mu.Lock()
+		e.units[name] = u
+		e.mu.Unlock()
+		return u
+	}
+	return nil
 }
 
 // visibleToDistro returns true when u is visible to a closure walk

@@ -235,13 +235,13 @@ eatmydata chroot $DESTDIR/rootfs dpkg --triggers-only -a || true
     # Remove build-time stub.
     run("rm -f $DESTDIR/rootfs/usr/sbin/policy-rc.d", privileged = True)
 
+    # Run as root inside the container because the extracted rootfs is
+    # owned by root after dpkg --configure -a chowned per-file ownership
+    # to match what the Debian packages declare.
     if hostname:
-        run("mkdir -p $DESTDIR/rootfs/etc")
-        run("echo %s > $DESTDIR/rootfs/etc/hostname" % hostname)
-
+        run("mkdir -p $DESTDIR/rootfs/etc && echo %s > $DESTDIR/rootfs/etc/hostname" % hostname, privileged = True)
     if timezone:
-        run("mkdir -p $DESTDIR/rootfs/etc")
-        run("echo %s > $DESTDIR/rootfs/etc/timezone" % timezone)
+        run("mkdir -p $DESTDIR/rootfs/etc && echo %s > $DESTDIR/rootfs/etc/timezone" % timezone, privileged = True)
 
 def _create_disk_image(name, partitions):
     if not partitions:
