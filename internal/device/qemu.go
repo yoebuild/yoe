@@ -154,35 +154,12 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 
 	// Build common QEMU args (without image path — that differs host vs container)
 	buildArgs := func(imgFile string) []string {
-		a := baseQEMUArgs(machine, opts)
-		a = append(a, "-drive", fmt.Sprintf("file=%s,format=raw,if=virtio", imgFile))
-
-		// Merge machine-defined ports with CLI ports. A CLI --port entry
-		// whose guest port matches a machine forward replaces it.
-		ports := mergeQEMUPorts(machine.QEMUPorts(), opts.Ports)
-
-		netdev := "user,id=net0"
-		for _, port := range ports {
-			// port format is "host:guest", QEMU wants "hostfwd=tcp::host-:guest"
-			netdev += fmt.Sprintf(",hostfwd=tcp::%s", strings.Replace(port, ":", "-:", 1))
-		}
-		a = append(a, "-netdev", netdev)
-		a = append(a, "-device", "virtio-net-pci,netdev=net0")
-
-		// Direct kernel boot: when no firmware is configured, pass
-		// -kernel and -append for architectures that need it (arm64, riscv64).
+		kernelPath := ""
 		needsDirectBoot := machine.QEMU == nil || machine.QEMU.Firmware == ""
 		if needsDirectBoot && machine.Kernel.Unit != "" {
-			kernelPath := findKernelImage(projectDir, machine.Arch, machine.Kernel.Unit)
-			if kernelPath != "" {
-				a = append(a, "-kernel", kernelPath)
-				if machine.Kernel.Cmdline != "" {
-					a = append(a, "-append", machine.Kernel.Cmdline)
-				}
-			}
+			kernelPath = findKernelImage(projectDir, machine.Arch, machine.Kernel.Unit)
 		}
-
-		return a
+		return BuildQEMUArgs(machine, opts, imgFile, kernelPath)
 	}
 
 	// Try host QEMU first
@@ -364,6 +341,47 @@ func qemuBinary(arch string) string {
 	}
 }
 
+// QEMUBinary returns the qemu-system-* executable that yoe would launch for
+// the given target arch. Exported so callers outside this package (the TUI
+// command preview, in particular) can render the full invocation.
+func QEMUBinary(arch string) string { return qemuBinary(arch) }
+
+// BuildQEMUArgs assembles the qemu-system-* argv (excluding the binary
+// itself) that yoe would pass for the given machine + options + concrete
+// on-disk paths. Both `RunQEMU` and the TUI's "equivalent command line"
+// preview go through here so the two stay in lock-step.
+//
+// imgPath is required; kernelPath may be empty (no `-kernel` argument is
+// emitted) or a placeholder string when the image hasn't been built yet
+// — the caller picks the placeholder.
+func BuildQEMUArgs(machine *yoestar.Machine, opts QEMUOptions, imgPath, kernelPath string) []string {
+	a := baseQEMUArgs(machine, opts)
+	a = append(a, "-drive", fmt.Sprintf("file=%s,format=raw,if=virtio", imgPath))
+
+	// Merge machine-defined ports with extra ports. An extra entry whose
+	// guest port matches a machine forward replaces it (qemu-in-qemu).
+	ports := mergeQEMUPorts(machine.QEMUPorts(), opts.Ports)
+	netdev := "user,id=net0"
+	for _, port := range ports {
+		// port format is "host:guest", QEMU wants "hostfwd=tcp::host-:guest"
+		netdev += fmt.Sprintf(",hostfwd=tcp::%s", strings.Replace(port, ":", "-:", 1))
+	}
+	a = append(a, "-netdev", netdev)
+	a = append(a, "-device", "virtio-net-pci,netdev=net0")
+
+	// Direct kernel boot: when no firmware is configured, pass -kernel and
+	// -append for architectures that need it (arm64, riscv64). Skipped if
+	// the caller couldn't resolve a kernel path.
+	needsDirectBoot := machine.QEMU == nil || machine.QEMU.Firmware == ""
+	if needsDirectBoot && machine.Kernel.Unit != "" && kernelPath != "" {
+		a = append(a, "-kernel", kernelPath)
+		if machine.Kernel.Cmdline != "" {
+			a = append(a, "-append", machine.Kernel.Cmdline)
+		}
+	}
+	return a
+}
+
 func detectHostArch() string {
 	out, err := exec.Command("uname", "-m").Output()
 	if err != nil {
@@ -442,7 +460,34 @@ func baseQEMUArgs(machine *yoestar.Machine, opts QEMUOptions) []string {
 	args = append(args, "-m", mem)
 
 	// Display
-	if !opts.Display {
+	//
+	// Default (`-nographic`): no QEMU window; the guest's serial console
+	// is multiplexed onto host stdio so `yoe run` is a plain terminal
+	// session. This matches the embedded-board workflow where the image's
+	// console is `ttyS0`.
+	//
+	// With `--display`: open a QEMU window so the guest's framebuffer is
+	// visible — what the qt-image and other graphical demos need. Add a
+	// virtio-vga adapter (DRM-driven virtio-gpu plus VGA for early boot)
+	// so the kernel's framebuffer console renders into that window.
+	// Leaving the `-display` backend unspecified lets QEMU pick GTK on
+	// Linux, Cocoa on macOS, SDL otherwise — robust across hosts and
+	// honoring DISPLAY/Wayland the same way every other QEMU invocation
+	// would. `-serial mon:stdio` keeps the serial console attached to
+	// host stdio (the default without `-nographic` is the in-window
+	// virtual console, which would hide kernel logs from the terminal).
+	if opts.Display {
+		// xres/yres set virtio-vga's *preferred* mode in the EDID it
+		// advertises to the guest. Without them the kernel's virtio_gpu
+		// driver picks the first connector mode (640×480 on QEMU 9.x),
+		// scans out only that region of an otherwise-1280×800
+		// framebuffer, and any UI that centres in the framebuffer
+		// (e.g. the qt-image demo) lands at the bottom-right corner of
+		// the visible area. 1280×800 fits a 16:10 demo nicely and stays
+		// well inside virtio-vga's default 16 MiB of vgamem.
+		args = append(args, "-device", "virtio-vga,xres=1280,yres=800")
+		args = append(args, "-serial", "mon:stdio")
+	} else {
 		args = append(args, "-nographic")
 	}
 

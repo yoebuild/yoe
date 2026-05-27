@@ -2,7 +2,11 @@ package device
 
 import (
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
+
+	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
 func TestMergeQEMUPorts(t *testing.T) {
@@ -76,4 +80,51 @@ func TestMergeQEMUPortsDoesNotMutateMachine(t *testing.T) {
 	if machine[1] != "8118:8118" {
 		t.Errorf("machine slice was mutated: %v", machine)
 	}
+}
+
+// TestBaseQEMUArgsDisplay covers the headless-vs-graphical fork of the
+// QEMU command line. `--display` (Display=true) must open a window AND
+// keep serial on host stdio so the user can see kernel logs alongside
+// the framebuffer; `--no-display` (Display=false) keeps the legacy
+// `-nographic` behavior so SSH sessions and the existing TUI workflow
+// stay unchanged.
+func TestBaseQEMUArgsDisplay(t *testing.T) {
+	machine := &yoestar.Machine{Arch: "x86_64"}
+
+	headless := baseQEMUArgs(machine, QEMUOptions{})
+	if !slices.Contains(headless, "-nographic") {
+		t.Errorf("Display=false: expected -nographic, got %v", headless)
+	}
+	if slices.Contains(headless, "virtio-vga") {
+		t.Errorf("Display=false: expected no virtio-vga, got %v", headless)
+	}
+
+	graphical := baseQEMUArgs(machine, QEMUOptions{Display: true})
+	if slices.Contains(graphical, "-nographic") {
+		t.Errorf("Display=true: expected no -nographic, got %v", graphical)
+	}
+	// virtio-vga is passed with xres/yres preferred-mode hints, so look
+	// for any arg that starts with "virtio-vga".
+	hasVirtioVga := false
+	for _, a := range graphical {
+		if strings.HasPrefix(a, "virtio-vga") {
+			hasVirtioVga = true
+			break
+		}
+	}
+	if !hasVirtioVga {
+		t.Errorf("Display=true: expected virtio-vga device, got %v", graphical)
+	}
+	if !containsPair(graphical, "-serial", "mon:stdio") {
+		t.Errorf("Display=true: expected -serial mon:stdio, got %v", graphical)
+	}
+}
+
+func containsPair(args []string, flag, value string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == value {
+			return true
+		}
+	}
+	return false
 }

@@ -1,0 +1,45 @@
+#!/sbin/openrc-run
+
+description="Qt 6 Quick framebuffer demo (Hello from yoe)"
+
+command="/usr/lib/qt6/bin/qmlscene"
+command_args="/usr/share/qt-demo/demo.qml"
+command_background="yes"
+pidfile="/run/qt-demo.pid"
+output_log="/var/log/qt-demo.log"
+error_log="/var/log/qt-demo.log"
+
+# Render to /dev/fb0 directly. The kernel exposes the framebuffer via
+# virtio-gpu (under `yoe run --display`) or vesafb/efifb on real
+# boards; either way Qt opens /dev/fb0 and writes pixels.
+#
+# The qemu-x86_64 launcher passes `-device virtio-vga,xres=1280,yres=800`
+# so virtio-gpu's preferred mode in the guest is 1280×800. Without that
+# the kernel picks the first connector mode (640×480), scans out only
+# that region of an otherwise-1280×800 framebuffer, and centred UI
+# lands at the bottom-right of the visible area.
+#
+# QT_QPA_FB_TTY parks the framebuffer console on tty1 so kernel log
+# spam from `console=ttyS0`'s cousin doesn't scribble over Qt's pixels.
+export QT_QPA_PLATFORM=linuxfb
+export QT_QPA_FB_TTY=/dev/tty1
+
+# Qt Quick defaults to an OpenGL-accelerated scene-graph backend.
+# `software` switches to the CPU rasteriser, which is what we want on
+# top of linuxfb — no GLX, no EGL, no GPU acceleration needed.
+export QSG_RHI_BACKEND=software
+# Older Qt fallback name — harmless on Qt 6.8 but covers older builds.
+export QT_QUICK_BACKEND=software
+
+# Qt's fontconfig lookup wants a writable cache dir under $HOME. /root
+# exists on the base image; pointing $HOME at it keeps the cache out of
+# /tmp where openrc-run wouldn't preserve it across reboots.
+export HOME=/root
+
+depend() {
+    # localmount provides /var/log and the real /tmp. Start after net so
+    # boot logs interleave with the rest of the image's services in a
+    # predictable order; the demo itself doesn't need the network.
+    need localmount
+    after net
+}

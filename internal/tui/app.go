@@ -478,11 +478,18 @@ type model struct {
 	// Setup view
 	machines       []string // sorted machine names
 	setupCursor    int      // cursor within setup options
-	setupField     string   // "" = top-level, "machine" / "image" = picker active
+	setupField     string   // "" = top-level, "machine" / "image" / "qemu" = sub-screen active
 	machineCursor  int      // cursor within machine list
 	imageCursor    int      // cursor within image list
 	parallelBuilds int      // effective `yoe build` concurrency (adjusted on the Setup page)
 	qemuMemory     string   // local.star qemu_memory ("" = machine default; adjusted on the Setup page)
+
+	// QEMU settings sub-screen
+	qemuDisplay    string   // local.star qemu_display ("on" / "off" / "" = run-time default)
+	qemuPorts      []string // local.star qemu_ports (extras layered on top of the machine's declared forwards)
+	qemuCursor     int      // cursor within the qemu-settings rows
+	qemuEditing    bool     // true while typing a new port mapping in the add field
+	qemuEditBuffer string   // in-progress "host:guest" text
 
 	// Flash view
 	flashUnit       string
@@ -641,6 +648,8 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 		deployHost:      ov.DeployHost,
 		parallelBuilds:  parallelBuilds,
 		qemuMemory:      ov.QEMUMemory,
+		qemuDisplay:     ov.QEMUDisplay,
+		qemuPorts:       append([]string(nil), ov.QEMUPorts...),
 		loadOpts:        cfg.LoadOpts,
 		globalFlagArgs:  cfg.GlobalFlagArgs,
 	}
@@ -1903,7 +1912,66 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // Setup option names — add new options here.
-var setupOptions = []string{"Machine", "Image", "Parallel builds", "QEMU memory"}
+var setupOptions = []string{"Machine", "Image", "Parallel builds", "QEMU settings"}
+
+// QEMU settings sub-screen rows. Memory and Display occupy fixed positions
+// at the top; below them is the Ports section (each local port row + one
+// trailing "add port" prompt) whose length grows with the override list.
+const (
+	qemuRowMemory = iota
+	qemuRowDisplay
+	numFixedQEMURows
+)
+
+// qemuRowCount returns the total row count of the QEMU settings sub-screen
+// — two fixed rows plus one per local port plus the "[+] add port" prompt.
+func (m model) qemuRowCount() int {
+	return numFixedQEMURows + len(m.qemuPorts) + 1
+}
+
+// qemuPortRowIndex translates a row index in the qemu-settings sub-screen
+// into a port-list index. Returns -1 for non-port rows (Memory / Display /
+// the trailing add-port prompt).
+func (m model) qemuPortRowIndex(row int) int {
+	if row < numFixedQEMURows {
+		return -1
+	}
+	idx := row - numFixedQEMURows
+	if idx >= len(m.qemuPorts) {
+		return -1
+	}
+	return idx
+}
+
+// qemuIsAddRow reports whether the given row is the "[+] add port" prompt
+// at the bottom of the sub-screen.
+func (m model) qemuIsAddRow(row int) bool {
+	return row == numFixedQEMURows+len(m.qemuPorts)
+}
+
+// qemuDisplayLadder steps "" (run-time default) → "off" → "on" → "off" → ...
+// when adjusted with ←/→.
+var qemuDisplayLadder = []string{"", "off", "on"}
+
+func qemuDisplayLadderIndex(v string) int {
+	for i, s := range qemuDisplayLadder {
+		if s == v {
+			return i
+		}
+	}
+	return 0
+}
+
+// qemuDisplayLabel turns the tri-state into a human-readable token.
+func qemuDisplayLabel(v string) string {
+	switch v {
+	case "on":
+		return "on"
+	case "off":
+		return "off"
+	}
+	return "default (off)"
+}
 
 // qemuMemoryLadder is the ←/→ preset ladder for the Setup page's QEMU
 // memory row. The empty-string value (machine default) sits one step
@@ -1937,6 +2005,8 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateSetupMachine(msg)
 	case "image":
 		return m.updateSetupImage(msg)
+	case "qemu":
+		return m.updateSetupQEMU(msg)
 	}
 
 	switch msg.String() {
@@ -1958,8 +2028,7 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "left", "h", "right", "l":
 		left := msg.String() == "left" || msg.String() == "h"
-		switch setupOptions[m.setupCursor] {
-		case "Parallel builds":
+		if setupOptions[m.setupCursor] == "Parallel builds" {
 			if left {
 				if m.parallelBuilds > 1 {
 					m.parallelBuilds--
@@ -1973,29 +2042,6 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.message = fmt.Sprintf("Parallel builds set to %d (warning: failed to save local.star: %v)", m.parallelBuilds, err)
 			} else {
 				m.message = fmt.Sprintf("Parallel builds set to %d (saved to local.star)", m.parallelBuilds)
-			}
-		case "QEMU memory":
-			idx := qemuMemoryLadderIndex(m.qemuMemory)
-			if left {
-				if idx >= 0 {
-					idx-- // -1 lands on the machine default
-				}
-			} else if idx < len(qemuMemoryLadder)-1 {
-				idx++
-			}
-			if idx < 0 {
-				m.qemuMemory = ""
-			} else {
-				m.qemuMemory = qemuMemoryLadder[idx]
-			}
-			ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
-			ov.QEMUMemory = m.qemuMemory
-			if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
-				m.message = fmt.Sprintf("QEMU memory (warning: failed to save local.star: %v)", err)
-			} else if m.qemuMemory == "" {
-				m.message = "QEMU memory set to machine default (saved to local.star)"
-			} else {
-				m.message = fmt.Sprintf("QEMU memory set to %s (saved to local.star)", m.qemuMemory)
 			}
 		}
 		return m, nil
@@ -2021,10 +2067,184 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					break
 				}
 			}
+		case "QEMU settings":
+			m.setupField = "qemu"
+			m.qemuCursor = qemuRowMemory
+			m.qemuEditing = false
+			m.qemuEditBuffer = ""
 		}
 		return m, nil
 	}
 	return m, nil
+}
+
+// updateSetupQEMU handles the QEMU settings sub-screen: Memory ladder,
+// Display tri-state, and the editable Ports list.
+func (m model) updateSetupQEMU(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// While the add-port text field is active, every key feeds it.
+	if m.qemuEditing {
+		return m.updateSetupQEMUPortInput(msg)
+	}
+
+	rows := m.qemuRowCount()
+
+	switch msg.String() {
+	case "esc", "q":
+		m.setupField = ""
+		m.message = ""
+		return m, nil
+
+	case "up", "k":
+		if m.qemuCursor > 0 {
+			m.qemuCursor--
+		}
+		return m, nil
+
+	case "down", "j":
+		if m.qemuCursor < rows-1 {
+			m.qemuCursor++
+		}
+		return m, nil
+
+	case "left", "h", "right", "l":
+		left := msg.String() == "left" || msg.String() == "h"
+		switch m.qemuCursor {
+		case qemuRowMemory:
+			idx := qemuMemoryLadderIndex(m.qemuMemory)
+			if left {
+				if idx >= 0 {
+					idx-- // -1 lands on the machine default
+				}
+			} else if idx < len(qemuMemoryLadder)-1 {
+				idx++
+			}
+			if idx < 0 {
+				m.qemuMemory = ""
+			} else {
+				m.qemuMemory = qemuMemoryLadder[idx]
+			}
+			m.saveQEMUSettings("QEMU memory")
+		case qemuRowDisplay:
+			idx := qemuDisplayLadderIndex(m.qemuDisplay)
+			if left {
+				if idx > 0 {
+					idx--
+				}
+			} else if idx < len(qemuDisplayLadder)-1 {
+				idx++
+			}
+			m.qemuDisplay = qemuDisplayLadder[idx]
+			m.saveQEMUSettings("QEMU display")
+		}
+		return m, nil
+
+	case "enter":
+		// Enter on the trailing "[+] add port" row opens the input field.
+		if m.qemuIsAddRow(m.qemuCursor) {
+			m.qemuEditing = true
+			m.qemuEditBuffer = ""
+			m.message = ""
+		}
+		return m, nil
+
+	case "a", "+":
+		// Shortcut: jump straight to the add field from any row.
+		m.qemuCursor = numFixedQEMURows + len(m.qemuPorts) // the add row
+		m.qemuEditing = true
+		m.qemuEditBuffer = ""
+		m.message = ""
+		return m, nil
+
+	case "d", "-", "delete", "backspace":
+		if idx := m.qemuPortRowIndex(m.qemuCursor); idx >= 0 {
+			removed := m.qemuPorts[idx]
+			m.qemuPorts = append(m.qemuPorts[:idx], m.qemuPorts[idx+1:]...)
+			if m.qemuCursor >= m.qemuRowCount() {
+				m.qemuCursor = m.qemuRowCount() - 1
+			}
+			m.saveQEMUSettings(fmt.Sprintf("removed port %s", removed))
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+// updateSetupQEMUPortInput drives the inline text field used to add a new
+// host:guest forward. Enter commits, Esc cancels.
+func (m model) updateSetupQEMUPortInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.qemuEditing = false
+		m.qemuEditBuffer = ""
+		m.message = ""
+		return m, nil
+	case "enter":
+		entry := strings.TrimSpace(m.qemuEditBuffer)
+		if entry == "" {
+			m.qemuEditing = false
+			return m, nil
+		}
+		if err := validatePortMapping(entry); err != nil {
+			m.message = fmt.Sprintf("invalid port mapping: %v", err)
+			return m, nil
+		}
+		m.qemuPorts = append(m.qemuPorts, entry)
+		m.qemuEditing = false
+		m.qemuEditBuffer = ""
+		m.qemuCursor = numFixedQEMURows + len(m.qemuPorts) // back to the add row
+		m.saveQEMUSettings(fmt.Sprintf("added port %s", entry))
+		return m, nil
+	case "backspace", "ctrl+h":
+		if n := len(m.qemuEditBuffer); n > 0 {
+			m.qemuEditBuffer = m.qemuEditBuffer[:n-1]
+		}
+		return m, nil
+	}
+	// Accept literal characters typed into the field. tea.KeyMsg.Runes is
+	// non-empty for printable input; control keys fall through silently.
+	if len(msg.Runes) > 0 {
+		m.qemuEditBuffer += string(msg.Runes)
+	}
+	return m, nil
+}
+
+// validatePortMapping checks that s parses as a host:guest forward — two
+// non-empty numeric parts separated by a single colon, each within the TCP
+// range. Mirrors what `--port` accepts on the command line.
+func validatePortMapping(s string) error {
+	host, guest, ok := strings.Cut(s, ":")
+	if !ok {
+		return fmt.Errorf("expected host:guest, got %q", s)
+	}
+	for _, p := range []struct{ name, val string }{{"host", host}, {"guest", guest}} {
+		n, err := strconv.Atoi(p.val)
+		if err != nil {
+			return fmt.Errorf("%s port %q is not numeric", p.name, p.val)
+		}
+		if n < 1 || n > 65535 {
+			return fmt.Errorf("%s port %d out of range 1..65535", p.name, n)
+		}
+	}
+	return nil
+}
+
+// saveQEMUSettings persists the current qemuMemory / qemuDisplay / qemuPorts
+// state to local.star and updates the status line with the user-facing
+// label of what just changed.
+func (m *model) saveQEMUSettings(label string) {
+	ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+	ov.QEMUMemory = m.qemuMemory
+	ov.QEMUDisplay = m.qemuDisplay
+	if len(m.qemuPorts) == 0 {
+		ov.QEMUPorts = nil
+	} else {
+		ov.QEMUPorts = append([]string(nil), m.qemuPorts...)
+	}
+	if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
+		m.message = fmt.Sprintf("%s (warning: failed to save local.star: %v)", label, err)
+		return
+	}
+	m.message = fmt.Sprintf("%s (saved to local.star)", label)
 }
 
 // imageUnits returns the sorted names of all image-class units in the project.
@@ -2879,18 +3099,25 @@ func (m model) helpSections() (string, []helpSection) {
 		}
 
 	case viewSetup:
-		return "Setup — machine, default image, parallel builds, QEMU memory", []helpSection{
+		return "Setup — machine, default image, parallel builds, QEMU settings", []helpSection{
 			{title: "Navigate", entries: []helpEntry{
-				{"↑  ·  k", "move up (Machine / Image / Parallel builds / QEMU memory)"},
+				{"↑  ·  k", "move up (Machine / Image / Parallel builds / QEMU settings)"},
 				{"↓  ·  j", "move down"},
-				{"Enter", "open the picker for the selected option"},
-				{"←/→  ·  h/l", "adjust Parallel builds / QEMU memory"},
+				{"Enter", "open the picker / sub-screen for the selected option"},
+				{"←/→  ·  h/l", "adjust Parallel builds"},
 				{"Esc  ·  q", "back to the unit list"},
 			}},
-			{title: "In a picker", entries: []helpEntry{
+			{title: "In Machine / Image picker", entries: []helpEntry{
 				{"↑  ·  ↓", "choose a machine / image"},
 				{"Enter", "select and save to local.star"},
 				{"Esc", "close the picker without changing"},
+			}},
+			{title: "In QEMU settings", entries: []helpEntry{
+				{"↑  ·  ↓", "move between Memory / Display / ports"},
+				{"←/→", "adjust Memory or Display"},
+				{"Enter  ·  a  ·  +", "add a host:guest port forward"},
+				{"d  ·  -", "remove the highlighted local port"},
+				{"Esc", "back to the Setup menu"},
 			}},
 			helpGeneral(false),
 		}
@@ -3454,6 +3681,9 @@ func (m model) viewSetup() string {
 		b.WriteString(helpStyle.Render("  enter select  esc back  ? help"))
 		b.WriteString("\n")
 
+	case "qemu":
+		b.WriteString(m.viewSetupQEMU())
+
 	default:
 		// Top-level setup menu
 		for i, opt := range setupOptions {
@@ -3471,15 +3701,8 @@ func (m model) viewSetup() string {
 				value = headerStyle.Render(m.proj.Defaults.Image)
 			case "Parallel builds":
 				value = headerStyle.Render(fmt.Sprintf("%d", m.parallelBuilds))
-			case "QEMU memory":
-				disp := m.qemuMemory
-				if disp == "" {
-					disp = "machine default"
-					if md := m.machineDefaultMemory(); md != "" {
-						disp = "machine default (" + md + ")"
-					}
-				}
-				value = headerStyle.Render(disp)
+			case "QEMU settings":
+				value = dimStyle.Render(m.qemuSettingsSummary())
 			}
 			b.WriteString(fmt.Sprintf("%s%s  %s\n", cursor, style.Render(opt), value))
 		}
@@ -3495,6 +3718,222 @@ func (m model) viewSetup() string {
 		b.WriteString("\n")
 	}
 
+	return b.String()
+}
+
+// qemuSettingsSummary renders a compact one-line summary of the current
+// QEMU settings shown next to the "QEMU settings" row on the Setup screen.
+func (m model) qemuSettingsSummary() string {
+	mem := m.qemuMemory
+	if mem == "" {
+		mem = "machine default"
+		if md := m.machineDefaultMemory(); md != "" {
+			mem = "machine (" + md + ")"
+		}
+	}
+	disp := qemuDisplayLabel(m.qemuDisplay)
+	machinePorts := 0
+	if mc, ok := m.proj.Machines[m.proj.Defaults.Machine]; ok {
+		machinePorts = len(mc.QEMUPorts())
+	}
+	portTotal := machinePorts + len(m.qemuPorts)
+	return fmt.Sprintf("memory %s · display %s · %d port(s)", mem, disp, portTotal)
+}
+
+// viewSetupQEMU renders the QEMU settings sub-screen: Memory / Display rows
+// at the top, then a Ports section showing the machine's declared forwards
+// (info-only) followed by the editable local override list and the inline
+// add-port prompt.
+func (m model) viewSetupQEMU() string {
+	var b strings.Builder
+	b.WriteString(headerStyle.Render("  QEMU Settings"))
+	b.WriteString("\n\n")
+
+	// Helper that draws an arrow + selected styling for a given row.
+	rowPrefix := func(idx int) (string, lipgloss.Style) {
+		if idx == m.qemuCursor && !m.qemuEditing {
+			return "→ ", selectedStyle
+		}
+		return "  ", dimStyle
+	}
+
+	// Memory row
+	{
+		cursor, style := rowPrefix(qemuRowMemory)
+		memDisp := m.qemuMemory
+		if memDisp == "" {
+			memDisp = "machine default"
+			if md := m.machineDefaultMemory(); md != "" {
+				memDisp = "machine default (" + md + ")"
+			}
+		}
+		b.WriteString(fmt.Sprintf("%s%s  %s\n", cursor, style.Render("Memory "), headerStyle.Render(memDisp)))
+	}
+
+	// Display row
+	{
+		cursor, style := rowPrefix(qemuRowDisplay)
+		b.WriteString(fmt.Sprintf("%s%s  %s\n", cursor, style.Render("Display"), headerStyle.Render(qemuDisplayLabel(m.qemuDisplay))))
+	}
+
+	b.WriteString("\n")
+	b.WriteString(headerStyle.Render("  Ports"))
+	b.WriteString("\n")
+
+	// Machine-declared ports — informational, not editable.
+	machinePorts := []string{}
+	if mc, ok := m.proj.Machines[m.proj.Defaults.Machine]; ok {
+		machinePorts = mc.QEMUPorts()
+	}
+	if len(machinePorts) == 0 {
+		b.WriteString("    " + dimStyle.Render("(machine declares no forwards)") + "\n")
+	} else {
+		for _, p := range machinePorts {
+			b.WriteString("    " + dimStyle.Render(fmt.Sprintf("%-16s machine", p)) + "\n")
+		}
+	}
+
+	// Local override ports — editable rows, cursor lands here.
+	for i, p := range m.qemuPorts {
+		row := numFixedQEMURows + i
+		cursor, style := rowPrefix(row)
+		label := fmt.Sprintf("%-16s local", p)
+		b.WriteString(fmt.Sprintf("%s%s\n", cursor, style.Render(label)))
+	}
+
+	// Trailing "[+] add port" prompt — Enter (or `a`) opens the input field.
+	{
+		row := numFixedQEMURows + len(m.qemuPorts)
+		cursor, style := rowPrefix(row)
+		if m.qemuEditing {
+			cursor = "→ "
+			style = selectedStyle
+			caret := "_"
+			if m.tick {
+				caret = " "
+			}
+			b.WriteString(fmt.Sprintf("%s%s %s%s\n",
+				cursor,
+				style.Render("host:guest"),
+				headerStyle.Render(m.qemuEditBuffer),
+				caret))
+		} else {
+			b.WriteString(fmt.Sprintf("%s%s\n", cursor, style.Render("[+] add port")))
+		}
+	}
+
+	// Equivalent qemu-system-* command line — a live preview of what `yoe
+	// run` would invoke with the current settings, so the user can see the
+	// effect of each Memory / Display / Ports edit immediately.
+	b.WriteString("\n")
+	b.WriteString(headerStyle.Render("  Equivalent qemu command"))
+	b.WriteString("\n")
+	b.WriteString(m.renderQEMUCommandPreview())
+	b.WriteString("\n")
+
+	if m.qemuEditing {
+		b.WriteString(helpStyle.Render("  type host:guest  enter save  esc cancel"))
+	} else {
+		b.WriteString(helpStyle.Render("  ←/→ adjust  enter / a add port  d remove port  esc back  ? help"))
+	}
+	b.WriteString("\n")
+
+	return b.String()
+}
+
+// renderQEMUCommandPreview builds the qemu-system-* invocation that `yoe run`
+// would emit with the current Memory / Display / Ports values and renders it
+// indented and line-wrapped at argument boundaries so the full command stays
+// readable on narrow terminals.
+func (m model) renderQEMUCommandPreview() string {
+	machine, ok := m.proj.Machines[m.proj.Defaults.Machine]
+	if !ok {
+		return dimStyle.Render("    (no default machine — set one on the Setup page)") + "\n"
+	}
+
+	// Mirror RunQEMU's flag precedence: --memory > local.star > machine.
+	opts := device.QEMUOptions{
+		Memory:  m.qemuMemory,
+		Display: m.qemuDisplay == "on",
+		Ports:   append([]string(nil), m.qemuPorts...),
+	}
+
+	// Placeholders stand in for paths the launcher would resolve at run
+	// time — the user hasn't necessarily built the image yet, and dragging
+	// the build state into a settings preview would mis-represent what the
+	// command actually says.
+	imgPlaceholder := "<image.img>"
+	kernelPlaceholder := ""
+	needsDirectBoot := machine.QEMU == nil || machine.QEMU.Firmware == ""
+	if needsDirectBoot && machine.Kernel.Unit != "" {
+		kernelPlaceholder = "<" + machine.Kernel.Unit + "/vmlinuz>"
+	}
+
+	args := device.BuildQEMUArgs(machine, opts, imgPlaceholder, kernelPlaceholder)
+
+	// Width budget for the wrapper: subtract the 4-char indent so wrapped
+	// continuations align under the first arg. Fall back to 80 if we don't
+	// yet know the terminal size (the very first render before the
+	// WindowSizeMsg arrives).
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+	return wrapShellCommand(device.QEMUBinary(machine.Arch), args, width-4, "    ")
+}
+
+// wrapShellCommand renders a binary + argv as an indented, backslash-continued
+// shell command, then runs the whole block through dimStyle.
+func wrapShellCommand(bin string, args []string, width int, indent string) string {
+	return dimStyle.Render(wrapShellCommandText(bin, args, width, indent))
+}
+
+// wrapShellCommandText is the pure-text wrapper underneath wrapShellCommand.
+// Splitting them out lets tests assert on the raw layout without fighting
+// lipgloss's multi-line padding.
+func wrapShellCommandText(bin string, args []string, width int, indent string) string {
+	if width < 20 {
+		width = 20
+	}
+	quote := func(s string) string {
+		if s == "" {
+			return "''"
+		}
+		needsQuote := false
+		for _, r := range s {
+			if r == ' ' || r == '\t' || r == '"' || r == '\'' || r == '$' || r == '*' ||
+				r == '?' || r == '[' || r == ']' || r == '(' || r == ')' || r == '&' ||
+				r == ';' || r == '|' || r == '<' || r == '>' || r == '`' || r == '\\' {
+				needsQuote = true
+				break
+			}
+		}
+		if !needsQuote {
+			return s
+		}
+		// Single-quote and escape any embedded single quotes the bash way.
+		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	}
+
+	var b strings.Builder
+	b.WriteString(indent)
+	line := bin
+	for _, a := range args {
+		tok := quote(a)
+		// +1 for the leading space between tokens, +2 reserved for the
+		// trailing " \\" continuation.
+		if len(indent)+len(line)+1+len(tok) > width-2 {
+			b.WriteString(line)
+			b.WriteString(" \\\n")
+			b.WriteString(indent)
+			b.WriteString("  ")
+			line = tok
+			continue
+		}
+		line += " " + tok
+	}
+	b.WriteString(line)
+	b.WriteString("\n")
 	return b.String()
 }
 

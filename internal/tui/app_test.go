@@ -1247,3 +1247,55 @@ func TestStderrSummary(t *testing.T) {
 		})
 	}
 }
+
+func TestWrapShellCommandText(t *testing.T) {
+	// Wide enough — single line, no continuation.
+	got := wrapShellCommandText("qemu-system-x86_64",
+		[]string{"-m", "1G", "-nographic"},
+		200, "  ")
+	want := "  qemu-system-x86_64 -m 1G -nographic\n"
+	if got != want {
+		t.Fatalf("wide single line:\n got %q\nwant %q", got, want)
+	}
+
+	// Narrow width forces wrapping at argument boundaries with the standard
+	// backslash continuation; every line should end either in " \\" or be
+	// the terminating line.
+	got = wrapShellCommandText("qemu-system-x86_64",
+		[]string{"-m", "1G", "-nographic", "-enable-kvm"},
+		25, "  ")
+	lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
+	for i, ln := range lines {
+		if i < len(lines)-1 && !strings.HasSuffix(ln, " \\") {
+			t.Fatalf("non-final line %d not continued: %q (full output: %q)", i, ln, got)
+		}
+	}
+	if !strings.HasPrefix(lines[0], "  qemu-system-x86_64") {
+		t.Fatalf("first line should start with the indented bin name: %q", lines[0])
+	}
+	// Every continuation line must start with the indent + 2 extra spaces.
+	for i := 1; i < len(lines); i++ {
+		if !strings.HasPrefix(lines[i], "    ") {
+			t.Fatalf("continuation %d not indented: %q", i, lines[i])
+		}
+	}
+
+	// Arg containing a space must be single-quoted.
+	got = wrapShellCommandText("qemu-system-x86_64",
+		[]string{"-append", "console=ttyS0 root=/dev/vda2 rw"},
+		200, "  ")
+	if !strings.Contains(got, "'console=ttyS0 root=/dev/vda2 rw'") {
+		t.Fatalf("append arg not single-quoted: %q", got)
+	}
+
+	// Plain alphanumeric + comma args don't need quoting.
+	got = wrapShellCommandText("qemu-system-x86_64",
+		[]string{"-netdev", "user,id=net0,hostfwd=tcp::2222-:22"},
+		200, "  ")
+	if !strings.Contains(got, "user,id=net0,hostfwd=tcp::2222-:22") {
+		t.Fatalf("netdev arg missing from output: %q", got)
+	}
+	if strings.Contains(got, "'user") {
+		t.Fatalf("netdev arg unexpectedly quoted: %q", got)
+	}
+}
