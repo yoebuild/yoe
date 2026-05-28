@@ -86,6 +86,24 @@ func (e *Engine) RegisterSyntheticModule(sm *SyntheticModule) error {
 	return nil
 }
 
+// syntheticModuleDistro returns the distro tag of a registered
+// synthetic module. By convention every feed builtin (alpine_feed,
+// debian_feed) sets the synthetic module's Parent to the distro
+// name and tags every materialized unit with the same string.
+// Returns "" when the name doesn't match a registered synthetic
+// module (treat as not-distro-scoped — the caller should fall
+// through to whatever non-distro logic applies).
+func (e *Engine) syntheticModuleDistro(moduleName string) string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, sm := range e.syntheticModules {
+		if sm.Name == moduleName {
+			return sm.Parent
+		}
+	}
+	return ""
+}
+
 // SyntheticModules returns the registered synthetic modules in
 // registration order. The loader uses this after evaluating MODULE.star
 // files to assign Priority values and attach the list to the project.

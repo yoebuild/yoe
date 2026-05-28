@@ -718,6 +718,23 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 		preferred = e.project.PreferModules[name]
 	}
 
+	// Cross-distro coexistence: if the pinned module is distro-scoped
+	// (a synthetic feed module whose parent tags every unit with a
+	// specific distro) and the registering unit is distro-neutral
+	// (untagged, visible to every distro), keep r anyway. The pinned
+	// module's unit satisfies its own distro's closure via lazy
+	// materialization; r satisfies the same name in every other
+	// distro's closure where the pin's target is filtered out by R21a.
+	// Without this, the pin drops r and non-pinned-distro closures
+	// fail to resolve the name. The closure walker prefers the pinned
+	// module's unit within the pinned distro via lookupOrMaterialize's
+	// prefer_modules check below.
+	if preferred != "" && r.Module != preferred && r.Distro == "" {
+		if e.syntheticModuleDistro(preferred) != "" {
+			preferred = ""
+		}
+	}
+
 	e.mu.Lock()
 	if preferred != "" && r.Module != preferred {
 		// r is from the wrong module for this name. Record it as
