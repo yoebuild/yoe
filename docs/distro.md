@@ -51,22 +51,52 @@ cascade:
 If none of the three is set, image evaluation errors immediately. The
 distro choice is too consequential to pick silently.
 
-### Source-built units are distro-neutral
+### Source-built units are typically distro-neutral, but can be tagged
 
-A unit declared in `module-core` (or any module that calls
-`unit(...)` directly) has no fixed distro. The same `openssl` or
-`zlib` source unit builds against musl when consumed by an alpine
-image and against glibc when consumed by a debian image, producing
-two distinct binaries cached under two distinct hash keys. The unit's
-definition is the same; the build context (which toolchain, which
-libc) is different.
+A unit declared with `unit(...)` (in `module-core` or anywhere else)
+defaults to distro-neutral: leave `distro` unset and the unit is
+visible to every consuming image regardless of its distro. The same
+`openssl` or `zlib` source unit builds against musl when consumed by
+an alpine image and against glibc when consumed by a debian image,
+producing two distinct binaries cached under two distinct hash keys.
+The unit's definition is the same; the build context (which
+toolchain, which libc) is different.
 
 This is what lets a project share most of its source-built userland
-across distros while still producing libc-correct binaries. Only
-feed-materialized units (from `alpine_feed` / `debian_feed`) carry a
-hard distro affinity — an alpine `.apk` literally is not a debian
-`.deb`, and the synthetic module that produces them is scoped
-accordingly.
+across distros while still producing libc-correct binaries. It's the
+common case for `module-core`'s userland units.
+
+But the `distro` field is available on every `unit(...)` declaration,
+including source-built ones. Set it explicitly when the unit
+genuinely is distro-specific — when the build assumes alpine's
+patches or musl's headers, when it ships configuration that only
+makes sense on one libc family, when the upstream source is hard-
+coded to one userland's conventions:
+
+```python
+# A unit whose configure flags assume musl's nsswitch shape;
+# building it under glibc would produce a broken binary even if
+# the toolchain were available.
+unit(
+    name    = "some-musl-only-thing",
+    distro  = "alpine",
+    source  = "https://...",
+    tag     = "v1.2.3",
+    ...
+)
+```
+
+A tagged source unit becomes invisible to closures of other distros,
+exactly like a feed-materialized one. The same closure walker filter
+applies regardless of where the unit registered. The default is "no
+tag" because most source builds work fine against both libc families;
+the tag is an opt-in for the cases where they genuinely don't.
+
+Feed-materialized units (from `alpine_feed` / `debian_feed`) always
+carry a hard distro affinity automatically — an alpine `.apk`
+literally is not a debian `.deb`, and the synthetic module that
+produces them sets `distro` on every materialized `*Unit`. You don't
+write that tag; the feed builtin writes it for you.
 
 ## Choosing a distro
 
