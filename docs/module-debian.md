@@ -37,7 +37,7 @@ hard-to-build complexity — is identical.
 
 1. **Yoe builds the easy stuff in `module-core`** regardless of distro target.
    The same `zlib`, `xz`, `expat`, ... source units compile against either
-   toolchain via the `container = "toolchain"` virtual reference (U10).
+   toolchain via the `container = "toolchain"` virtual reference.
 2. **`module-debian` ships Debian-native and hard-to-build packages.**
    Debian-native means `dpkg`, `apt`, `debianutils`, `base-files`,
    `libc6`/`libc-bin`. Hard-to-build means packages where Debian's expertise
@@ -150,45 +150,45 @@ Multiple feeds compose: declaring `bookworm.main` plus
 priority resolution on the project side. The closure walker consults each in
 declaration order; first match wins.
 
-> **Naming convention change (planned, see plan unit U11-fix):** the suite
-> segment will be dropped from the module identity, making
+> **Naming convention change (planned):** the suite segment will be
+> dropped from the module identity, making
 > `debian_feed(name="main", suite="bookworm")` register as `debian.main`
 > (matching alpine's `alpine.main`). Suite stays as a feed configuration
 > parameter — it chooses which on-disk `Packages` file is parsed — but it
 > won't appear in the module name. Today the synthetic module is still
 > named `debian.bookworm.main`. Pins in `prefer_modules` written as
-> `debian.main` will start working as soon as U11-fix lands; until then,
+> `debian.main` will start working as soon as the rename lands; until then,
 > write the suite-embedded form.
 
 ## Known limitations
 
-These are user-visible behaviors today; the fix pipeline is tracked in
-plan unit U25 of the
-[Debian backend plan](plans/2026-05-27-001-feat-module-debian-debian-backend-plan.md).
+These are user-visible behaviors today. Each one names the workaround
+that bridges the gap until the underlying limitation is removed.
 
 - **End-to-end boot is unverified.** The image assembler produces a configured
   rootfs and the project repo emitter ships a valid InRelease, but a
   `yoe run debian-base-image` → `ssh root@localhost` round trip hasn't
   been demonstrated yet on a clean repo. Treat any production deployment
-  as untested until plan unit U24 closes. The expectation is that it will
-  work; the verification is pending.
+  as untested until the round trip has been verified on the version of
+  yoe you're running. The expectation is that it will work; the
+  verification is pending.
 - **Cross-distro multi-image projects collide on same-named units.** If
   your project defines both an alpine image and a debian image, and any
   unit name appears in both feeds (e.g. `libcap2` from `alpine.main` and
   from `debian.main`), the second-registered variant overwrites the first
   in the flat catalog. The closure of the losing image points at the
-  wrong variant. Workarounds until plan unit U6b lands:
+  wrong variant. Workarounds:
   - Pin the colliding name with `prefer_modules` to the module
     appropriate for the dominant image.
   - Build the alpine and debian images in separate `yoe build`
     invocations — each invocation resolves its own catalog without
     cross-contamination.
 - **Source-built units shared between alpine and debian closures produce
-  wrong-libc binaries.** Without plan unit U4a-fix, `module-core`'s
-  source-built `openssl` (and similar) caches under a single hash
-  regardless of consuming distro. If you build the alpine image first,
-  the cache holds a musl-linked binary; the subsequent debian build hits
-  that cache and gets a binary that won't run in a glibc rootfs.
+  wrong-libc binaries.** `module-core`'s source-built `openssl` (and
+  similar) currently caches under a single hash regardless of consuming
+  distro. If you build the alpine image first, the cache holds a
+  musl-linked binary; the subsequent debian build hits that cache and
+  gets a binary that won't run in a glibc rootfs.
   Workarounds:
   - Build alpine and debian images separately, running `yoe clean
     <unit>` between invocations to evict the wrong-libc binary.

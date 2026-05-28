@@ -89,7 +89,10 @@ sees, the loader runs a three-step resolution:
 3. **Priority** — pick the survivor from the highest-priority module.
    Project root outranks every external module; later-declared
    external modules outrank earlier-declared ones; every synthetic
-   (feed-materialized) module ranks below every real module per R5.
+   (feed-materialized) module ranks below every real module. The
+   "synthetics rank below reals" rule means a from-source override
+   in `module-core` automatically beats a same-named feed entry,
+   without needing a `prefer_modules` pin to make it so.
 
 The result is `DistroViews[distro][name] → *Unit`. Read-only after
 construction. The closure walker, build executor, and any other
@@ -236,18 +239,26 @@ addressed by a hash over (a) the unit's metadata, (b) the hashes of
 its build-time dependencies (recursively), (c) source inputs (commit
 sha / tarball digest), and (d) the consuming image's **effective
 distro**. The hash is computed in `internal/resolve/hash.go`'s
-`UnitHash`, called per-image with the image's effective distro from
-the R20a/R21 cascade.
+`UnitHash`, called per-image with the image's effective distro.
 
-The effective-distro term implements R14a's "build twice along the
-libc axis" property: a single source-declared unit
+An image's effective distro is resolved through a three-level cascade:
+the image's own `distro = "..."` field wins if set; otherwise the
+project's `local.star` `default_distro_override` (per-developer, not
+committed) wins if set; otherwise the project's `default_distro` in
+`PROJECT.star` is used; if none of the three is set the image errors at
+evaluation. The cascade lets a developer experiment with a different
+distro locally without editing committed configuration.
+
+Including effective distro in the hash gives every source-declared unit
+the **build-twice-along-the-libc-axis** property: a single source unit
 (`module-core/openssl`) builds once in `toolchain-musl` for an alpine
-image and once in `toolchain-glibc` for a debian image, producing
-two distinct binary outputs with two distinct cache entries. The
-catalog stores one `*Unit` (in `UnitsByModule["module-core"]
-["openssl"]`); the build artifacts live under per-distro paths on
-disk (`build/alpine/openssl.target/` vs `build/debian/openssl.target/`);
-the hash key disambiguates the cache entries.
+image and once in `toolchain-glibc` for a debian image, producing two
+distinct binary outputs with two distinct cache entries. The catalog
+stores one `*Unit` (in `UnitsByModule["module-core"]["openssl"]`); the
+build artifacts live under per-distro paths on disk
+(`build/alpine/openssl.target/` vs `build/debian/openssl.target/`); the
+hash key disambiguates the cache entries so a debian build never reads
+back a musl-linked binary the alpine build produced.
 
 For feed-materialized units, the `Distro` field on the materialized
 `*Unit` is set by the feed (`"alpine"` for `alpine_feed`,

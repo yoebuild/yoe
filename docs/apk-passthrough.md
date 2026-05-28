@@ -122,9 +122,10 @@ After passthrough, every unit has metadata in two places:
 - **The materialized `*Unit`** (`Name`, `Version`, `RuntimeDeps`, `Provides`,
   `Replaces`, `Distro`, …) drives yoe's _resolver_: build-order DAG,
   runtime-closure walk for image artifacts, virtual-package routing
-  (`linux` → `linux-rpi4`), TUI USED-BY/PULLS-IN trees, R21a distro
-  visibility filter. For feed-materialized units this view is constructed
-  from the APKINDEX entry at lookup time
+  (`linux` → `linux-rpi4`), TUI USED-BY/PULLS-IN trees, the per-image
+  distro visibility filter (an alpine image's closure doesn't see
+  debian-tagged units and vice versa). For feed-materialized units this
+  view is constructed from the APKINDEX entry at lookup time
   (`apkindex.MaterializeUnit` in `internal/apkindex/`); for source-built
   and companion units, it's whatever the `.star` file declared.
 - **Upstream `PKGINFO`** (inside the apk's control segment) drives apk-tools at
