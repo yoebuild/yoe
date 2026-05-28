@@ -627,24 +627,47 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	// would fail with "depends on X, which does not exist" unless we
 	// materialize those names here. Iterate to fixpoint in case a
 	// newly-materialized unit pulls in further synthetic deps.
+	//
+	// Distro-aware: an untagged unit consumed by both alpine and
+	// debian closures needs each dep materialized in each distro
+	// context, because the synthetic feed for that distro is the
+	// only thing that can satisfy alpine vs debian package names
+	// (e.g. py3-setuptools vs python3-setuptools). Without this, the
+	// first walk wins eng.units[name] for one distro and the other
+	// distro's BuildDAG silently drops the dep as missing.
+	distroSet := map[string]struct{}{}
+	if proj := eng.Project(); proj != nil {
+		if proj.DefaultDistro != "" {
+			distroSet[proj.DefaultDistro] = struct{}{}
+		}
+		if proj.DefaultDistroOverride != "" {
+			distroSet[proj.DefaultDistroOverride] = struct{}{}
+		}
+	}
+	for _, u := range eng.Units() {
+		if u.Class == "image" && u.Distro != "" {
+			distroSet[u.Distro] = struct{}{}
+		}
+	}
 	for {
 		added := 0
-		for name, unit := range eng.Units() {
-			for _, dep := range unit.Deps {
-				resolved := eng.resolveProvides(dep)
-				if _, ok := eng.Units()[resolved]; ok {
+		for d := range distroSet {
+			for name, unit := range eng.Units() {
+				if !visibleToDistro(unit, d) {
 					continue
 				}
-				// "" means "no R21a filter" — this is the build-time
-				// dep materialization pass, which has no image scope.
-				// Build-time deps land in the unit's hash via depHashes;
-				// R21a is a runtime-closure rule.
-				u, err := eng.lookupOrMaterialize(resolved, "")
-				if err != nil {
-					return nil, fmt.Errorf("materializing build-time dep %q of unit %q: %w", dep, name, err)
-				}
-				if u != nil {
-					added++
+				for _, dep := range unit.Deps {
+					resolved := eng.resolveProvidesForDistro(dep, d)
+					if eng.findVisibleByName(resolved, d) != nil {
+						continue
+					}
+					u, err := eng.lookupOrMaterialize(resolved, d)
+					if err != nil {
+						return nil, fmt.Errorf("materializing build-time dep %q of unit %q (distro %q): %w", dep, name, d, err)
+					}
+					if u != nil {
+						added++
+					}
 				}
 			}
 		}
