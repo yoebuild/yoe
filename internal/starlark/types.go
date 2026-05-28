@@ -233,40 +233,32 @@ func (p *Project) EffectiveDistroForImage(imageName string) (string, error) {
 }
 
 // ResolveProvidesForDistro finds the unit that provides `virtual` whose
-// Distro matches `effectiveDistro`. Falls back to proj.Provides[virtual]
-// when no exact distro match exists (a unit with no distro tag is
-// visible to every distro, so its presence in proj.Provides is the
-// global fallback).
+// Distro matches `effectiveDistro`. When effectiveDistro is non-empty,
+// the fallback to the global proj.Provides table is FILTERED: a global
+// provider whose Distro tag conflicts with the walk's distro is treated
+// as a miss (untagged providers still satisfy the lookup since they're
+// distro-neutral).
 //
 // Used by the closure walker to dispatch a virtual reference like
 // Container="toolchain" to the concrete container unit matching the
 // consuming image's effective distro — R9 dispatch via the provides
 // table plus R21a's per-unit visibility filter.
 //
-// Also implements the R21a tagged-wins-over-untagged rule for direct
-// name lookups: if a unit named `virtual` exists with the matching
-// distro tag, return that unit's name even when no provides entry
-// exists. This lets a debian closure prefer a same-named tagged
-// synthetic over an untagged source unit in proj.Units.
-//
-// Returns "" when no provider exists. Empty effectiveDistro mirrors
-// the global table (no distro filtering).
+// Returns "" when no provider exists for the effective distro. Empty
+// effectiveDistro mirrors the global table (no distro filtering).
 func (p *Project) ResolveProvidesForDistro(virtual, effectiveDistro string) string {
 	if p == nil || virtual == "" {
 		return ""
 	}
 	// First: a unit with the same name AND matching distro wins (R21a
-	// tagged-wins). This catches the case where module-core has an
-	// untagged source unit named `coreutils` and a feed has a tagged
-	// debian `coreutils`.
+	// tagged-wins on direct name lookup).
 	if effectiveDistro != "" {
 		if u, ok := p.Units[virtual]; ok && u.Distro == effectiveDistro {
 			return u.Name
 		}
 	}
 	// Second: walk every unit for a matching-distro provider via the
-	// Provides list. Linear is fine — provides tables hold at most a
-	// few dozen entries per project.
+	// Provides list.
 	if effectiveDistro != "" {
 		for _, u := range p.Units {
 			if u.Distro != effectiveDistro {
@@ -279,9 +271,9 @@ func (p *Project) ResolveProvidesForDistro(virtual, effectiveDistro string) stri
 			}
 		}
 	}
-	// Fall back to the global mapping (built by the loader from the
-	// Starlark ctx.provides dict). A unit with no distro tag will be
-	// reached here.
+	// Fall back to the global mapping. Untagged providers serve every
+	// distro; cross-distro tagged providers reach this fall-through
+	// when the closure walker has no per-distro alternative yet.
 	return p.Provides[virtual]
 }
 

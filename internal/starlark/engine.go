@@ -72,12 +72,6 @@ type Engine struct {
 	// through every call site.
 	activeArch string
 
-	// distroTagCache memoizes the R21a tagged-wins synthetic walk:
-	// for each (name, effectiveDistro) pair, the cached *Unit is the
-	// tagged-variant winner from the synthetic modules (or nil when
-	// no tagged variant exists). Prevents the closure walker from
-	// re-scanning every synthetic on each lookup.
-	distroTagCache map[string]*Unit
 }
 
 // SetExtraBuiltins materializes the WithBuiltin factories. Called by the

@@ -128,24 +128,13 @@ func TestClosure_PointerStability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// First closure call materializes (Lookup #1 — synthetic walk on
-	// empty e.units). Second call holds the untagged unit in e.units;
-	// the R21a tagged-wins probe walks synthetics once looking for a
-	// distro-tagged variant (Lookup #2), caches the negative result
-	// in distroTagCache, and returns the untagged unit. Subsequent
-	// closure walks hit the negative cache and avoid Lookup entirely.
-	if lookupCount > 2 {
-		t.Errorf("lookupCount = %d, want <= 2 (distroTagCache should serialize the tagged-wins probe)", lookupCount)
-	}
-
-	// Third call: distroTagCache hit, no Lookup.
-	before := lookupCount
-	_, err = e.closure([]string{"feed-pkg"}, "alpine")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if lookupCount != before {
-		t.Errorf("third closure called Lookup %d times; distroTagCache should have prevented it", lookupCount-before)
+	// First closure call materializes via the synthetic walk
+	// (Lookup #1 — e.units empty initially, synthetic returns the
+	// untagged feed-pkg, walker registers it under the bare name).
+	// Second call hits e.units[feed-pkg] on the fast path — no
+	// Lookup.
+	if lookupCount != 1 {
+		t.Errorf("lookupCount = %d, want 1 across two closure calls", lookupCount)
 	}
 }
 
