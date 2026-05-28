@@ -21,6 +21,7 @@
 
 # Distro
 
+- [Yoe and distributions](distro.md)
 - [module-alpine](module-alpine.md)
 - [Alpine apk Passthrough](apk-passthrough.md)
 - [apk Signing](signing.md)
