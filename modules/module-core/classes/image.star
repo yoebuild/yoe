@@ -78,8 +78,10 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
     # then run dpkg --configure -a in toolchain-glibc.
     if effective_distro == "debian":
         rootfs_fn = lambda: _assemble_debian_rootfs(resolved, hostname, timezone, locale)
+        disk_fn = lambda: _create_disk_image_debian(name, all_partitions)
     else:
         rootfs_fn = lambda: _assemble_rootfs(resolved, hostname, timezone, locale)
+        disk_fn = lambda: _create_disk_image(name, all_partitions)
 
     unit(
         name = name,
@@ -97,7 +99,7 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
         deps = all_deps,
         tasks = [
             task("rootfs", fn=rootfs_fn),
-            task("disk", fn=lambda: _create_disk_image(name, all_partitions)),
+            task("disk", fn=disk_fn),
         ],
         **kwargs,
     )
@@ -242,6 +244,145 @@ eatmydata chroot $DESTDIR/rootfs dpkg --triggers-only -a || true
         run("mkdir -p $DESTDIR/rootfs/etc && echo %s > $DESTDIR/rootfs/etc/hostname" % hostname, privileged = True)
     if timezone:
         run("mkdir -p $DESTDIR/rootfs/etc && echo %s > $DESTDIR/rootfs/etc/timezone" % timezone, privileged = True)
+
+def _create_disk_image_debian(name, partitions):
+    """Disk image creator for Debian rootfs.
+
+    Mirrors _create_disk_image's structure (sparse image, sfdisk MBR,
+    per-partition mkfs, dd into the disk image) but uses the syslinux
+    files shipped in the toolchain-glibc container at
+    /usr/lib/SYSLINUX/mbr.bin instead of the Alpine-style
+    /usr/share/syslinux/mbr.bin path. The Debian extlinux binary
+    (also in toolchain-glibc) writes /boot/extlinux/ldlinux.sys
+    onto the root partition.
+
+    Requires a kernel and /boot/extlinux/extlinux.conf in the rootfs.
+    The kernel needs to be in the artifact list (e.g. linux-image-amd64
+    on x86_64 bookworm); _write_debian_extlinux_conf generates the
+    .conf below.
+    """
+    if not partitions:
+        return
+
+    rootfs_mb = dir_size_mb("rootfs")
+    total_mb = 1
+    for p in partitions:
+        total_mb += _parse_size_mb(p.size)
+
+    img = "$DESTDIR/%s.img" % name
+    run("dd if=/dev/zero of=%s bs=1M count=0 seek=%d" % (img, total_mb))
+
+    sfdisk_lines = "label: dos\\n"
+    for i, p in enumerate(partitions):
+        size_mb = _parse_size_mb(p.size)
+        ptype = "c" if p.type == "vfat" else "83"
+        size_spec = "size=%dMiB, " % size_mb if i < len(partitions) - 1 else ""
+        bootable = ", bootable" if i == 0 else ""
+        sfdisk_lines += "%stype=%s%s\\n" % (size_spec, ptype, bootable)
+    run("printf '%s' | sfdisk %s" % (sfdisk_lines, img))
+
+    # Generate extlinux.conf in the rootfs before mkfs.ext4 -d snapshots it.
+    _write_debian_extlinux_conf()
+
+    offset = 1
+    for p in partitions:
+        size_mb = _parse_size_mb(p.size)
+        part_img = img + "." + p.label + ".part"
+        run("dd if=/dev/zero of=%s bs=1M count=0 seek=%d" % (part_img, size_mb))
+
+        if p.type == "vfat":
+            run("mkfs.vfat -n %s %s" % (p.label.upper(), part_img))
+            run("mcopy -sQi %s $DESTDIR/rootfs/boot/* ::/ 2>/dev/null || true" % part_img, privileged = True)
+        elif p.type == "ext4":
+            headroom_mb = 25
+            if rootfs_mb + headroom_mb > size_mb:
+                fail("\nrootfs (%d MB) won't fit in partition '%s' (%d MB) with %d MB headroom;\nincrease the partition size in your image definition" % (rootfs_mb, p.label, size_mb, headroom_mb))
+            # syslinux 6.04 (Debian bookworm) reads ext4 with extents
+            # enabled — no ^64bit/^extent stripping required.
+            run("mkfs.ext4 -d $DESTDIR/rootfs -L %s %s %dM" % (p.label, part_img, size_mb), privileged = True)
+
+        run("dd if=%s of=%s bs=1M seek=%d conv=notrunc" % (part_img, img, offset))
+        run("rm -f %s" % part_img)
+        offset += size_mb
+
+    if ctx.arch == "x86_64":
+        _install_syslinux_debian(img, partitions)
+
+def _write_debian_extlinux_conf():
+    """Generate /boot/extlinux/extlinux.conf inside the rootfs.
+
+    Walks /boot for vmlinuz-* and initrd.img-* files (named by Debian's
+    linux-image-amd64 maintainer scripts) and picks the highest version.
+    If no kernel is present, writes a placeholder that boots to a
+    rescue-style message; the build still completes so the disk image
+    is at least a valid bootable container that the user can populate.
+    """
+    cmdline = ctx.machine_config.kernel.cmdline if hasattr(ctx.machine_config, "kernel") else "console=ttyS0 root=/dev/sda1 rw"
+    run("""
+set -e
+mkdir -p $DESTDIR/rootfs/boot/extlinux
+vmlinuz=$(ls $DESTDIR/rootfs/boot/vmlinuz-* 2>/dev/null | sort -V | tail -1 | xargs -n1 basename || true)
+initrd=$(ls $DESTDIR/rootfs/boot/initrd.img-* 2>/dev/null | sort -V | tail -1 | xargs -n1 basename || true)
+if [ -z "$vmlinuz" ]; then
+    echo "WARN: no kernel in /boot — image won't boot"
+    cat > $DESTDIR/rootfs/boot/extlinux/extlinux.conf <<EOF
+DEFAULT linux
+TIMEOUT 50
+PROMPT 1
+LABEL linux
+    MENU LABEL Debian (no kernel installed)
+    KERNEL no-kernel-installed
+EOF
+else
+    cat > $DESTDIR/rootfs/boot/extlinux/extlinux.conf <<EOF
+DEFAULT linux
+TIMEOUT 50
+PROMPT 1
+LABEL linux
+    MENU LABEL Debian
+    KERNEL /boot/$vmlinuz
+EOF
+    if [ -n "$initrd" ]; then
+        echo "    INITRD /boot/$initrd" >> $DESTDIR/rootfs/boot/extlinux/extlinux.conf
+    fi
+    echo "    APPEND %s" >> $DESTDIR/rootfs/boot/extlinux/extlinux.conf
+fi
+""" % cmdline, privileged = True)
+
+def _install_syslinux_debian(img, partitions):
+    """Install syslinux MBR + extlinux for a Debian disk image.
+
+    Reads mbr.bin from /usr/lib/SYSLINUX/ (Debian path) inside the
+    toolchain-glibc container, then loop-mounts the root partition
+    and runs extlinux --install. Same loop-device pre-creation pattern
+    as _install_syslinux.
+    """
+    run("dd if=/usr/lib/SYSLINUX/mbr.bin of=%s bs=440 count=1 conv=notrunc" % img)
+
+    offset_mb = 1
+    root_size_mb = 0
+    for p in partitions:
+        size = _parse_size_mb(p.size)
+        if p.root:
+            root_size_mb = size
+            break
+        offset_mb += size
+    if root_size_mb == 0:
+        return
+
+    offset_bytes = offset_mb * 1024 * 1024
+    size_bytes = root_size_mb * 1024 * 1024
+    run("""
+set -e
+for i in $(seq 0 31); do
+    [ -b /dev/loop$i ] || mknod /dev/loop$i b 7 $i
+done
+LOOP=$(losetup --find --show --offset %d --sizelimit %d %s)
+trap 'umount /mnt/extlinux 2>/dev/null; losetup -d $LOOP 2>/dev/null' EXIT
+mkdir -p /mnt/extlinux
+mount -t ext4 $LOOP /mnt/extlinux
+extlinux --install /mnt/extlinux/boot/extlinux
+""" % (offset_bytes, size_bytes, img), privileged = True)
 
 def _create_disk_image(name, partitions):
     if not partitions:
