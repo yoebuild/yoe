@@ -84,6 +84,19 @@ func BuildDAG(proj *yoestar.Project, effectiveDistro string) (*DAG, error) {
 			deps = append(deps, unit.Artifacts...)
 		}
 		deps = appendContainerDeps(deps, proj, units, unit)
+		// Build-time dep on a feed-materialized split package (e.g.
+		// Debian's python3.11 wrapper) pulls in the package's runtime
+		// closure as additional build-time edges, so the actual
+		// interpreter (python3.11-minimal), library (libpython3.11-
+		// minimal), and stdlib (libpython3.11-stdlib) are scheduled
+		// and staged before this unit runs its tasks. Alpine's
+		// monolithic apks usually have an empty runtime closure of
+		// their own, so the union is a no-op for the alpine path.
+		// Image artifacts use their own runtime closure pass at
+		// rootfs assembly time, so skip the expansion for them.
+		if unit.Class != "image" {
+			deps = appendRuntimeClosureOfDeps(deps, units, name)
+		}
 		// Resolve virtual names in deps through the distro-aware
 		// provides table. Prefer the BuildDAG's effectiveDistro
 		// (consuming image's distro for per-image builds, project
@@ -151,6 +164,34 @@ func resolveDeps(deps []string, proj *yoestar.Project, distro string) []string {
 		out = append(out, resolved)
 	}
 	return out
+}
+
+// appendRuntimeClosureOfDeps walks the runtime_deps of each entry
+// already in deps and appends every transitively-reachable runtime
+// dep. The walk is bounded by `units` (the per-distro view from
+// BuildDAG), and the consuming unit's own name is excluded so a
+// unit that depends on itself's runtime closure doesn't loop.
+func appendRuntimeClosureOfDeps(deps []string, units map[string]*yoestar.Unit, self string) []string {
+	seen := make(map[string]bool, len(deps))
+	for _, d := range deps {
+		seen[d] = true
+	}
+	queue := append([]string{}, deps...)
+	for i := 0; i < len(queue); i++ {
+		u, ok := units[queue[i]]
+		if !ok {
+			continue
+		}
+		for _, r := range u.RuntimeDeps {
+			if r == self || seen[r] {
+				continue
+			}
+			seen[r] = true
+			deps = append(deps, r)
+			queue = append(queue, r)
+		}
+	}
+	return deps
 }
 
 // appendContainerDeps adds the unit's container (and any per-task container

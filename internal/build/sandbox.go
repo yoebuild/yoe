@@ -230,7 +230,11 @@ func StageSysroot(destDir, buildDir string) error {
 // AssembleSysroot merges the sysroot-stage dirs of all transitive deps
 // into a unit's private sysroot. distro is the consuming image's
 // effective distro — it locates each dep's UnitBuildDir under
-// build/<distro>/.
+// build/<distro>/. The DAG already expands a build-time dep's runtime
+// closure into additional build edges (per BuildDAG's
+// appendRuntimeClosureOfDeps), so split feed packages like Debian's
+// python3.11 → python3.11-minimal → libpython3.11-stdlib all appear
+// in TransitiveDeps without an extra runtime walk here.
 func AssembleSysroot(sysrootDir string, dag *resolve.DAG, unit string, projectDir string, arch, distro string) error {
 	os.RemoveAll(sysrootDir)
 	if err := os.MkdirAll(sysrootDir, 0755); err != nil {
