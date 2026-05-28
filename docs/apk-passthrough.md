@@ -308,7 +308,7 @@ Items where the architecture is "works for now" but obviously incomplete.
   strips Alpine's signature and re-signs with the project key. An alternate
   design — keep Alpine's keys + signature, ship Alpine's keyring on-target as
   an additional trust anchor — is captured in
-  [docs/specs/2026-05-18-mirror-alpine-keep-keys.md](specs/2026-05-18-mirror-alpine-keep-keys.md)
+  [docs/specs/2026-05-18-mirror-alpine-keep-keys.md](https://github.com/yoebuild/yoe/blob/main/docs/specs/2026-05-18-mirror-alpine-keep-keys.md)
   (spec only, not implemented). The trade-off: re-signing means the on-target
   trust list stays "one key per project" but every passthrough requires
   cryptographic work; keeping upstream keys removes the re-sign cost but

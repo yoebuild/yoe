@@ -14,7 +14,7 @@ adding a new feed/component.
 > **Implementation details:** how Debian debs pass through yoe's pipeline
 > (`debian_feed`, the InRelease verify path, `dpkg --configure -a` under
 > binfmt, the project repo emitter) live in
-> [`docs/specs/2026-05-25-module-debian.md`](specs/2026-05-25-module-debian.md)
+> [`docs/specs/2026-05-25-module-debian.md`](https://github.com/yoebuild/yoe/blob/main/docs/specs/2026-05-25-module-debian.md)
 > and the matching plan under `docs/plans/`. This doc is the "when to reach
 > for it" rubric.
 

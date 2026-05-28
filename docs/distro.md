@@ -199,7 +199,7 @@ container(                                          # (planned)
 > builtin name for deployable application containers: when called
 > with `artifacts = [...]`, the unit emits an OCI image rather than
 > building a Dockerfile. See
-> [Deployable Containers](specs/2026-05-25-deployable-containers.md)
+> [Deployable Containers spec](https://github.com/yoebuild/yoe/blob/main/docs/specs/2026-05-25-deployable-containers.md)
 > for the spec and the current implementation status. The
 > architectural shape this section describes — distros as orthogonal
 > axes, multi-distro projects, three-layer separation — is current

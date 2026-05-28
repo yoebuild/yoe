@@ -135,4 +135,4 @@ running yoe device on the same network.
 - [Feed Server and yoe deploy](feed-server.md) — how `apk upgrade yoe` works
   once a feed is reachable.
 - Specification:
-  [2026-05-21-selfhost-rpi5-builds](specs/2026-05-21-selfhost-rpi5-builds.md)
+  [2026-05-21-selfhost-rpi5-builds](https://github.com/yoebuild/yoe/blob/main/docs/specs/2026-05-21-selfhost-rpi5-builds.md)
