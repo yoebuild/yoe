@@ -12,13 +12,13 @@ func depProject() *yoestar.Project {
 		// a distro to filter against (R21a). All test units are
 		// untagged, so the filter is a no-op here.
 		DefaultDistro: "alpine",
-		Units: map[string]*yoestar.Unit{
+		UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 			"toolchain-musl": {Name: "toolchain-musl", Class: "container"},
 			"zlib":           {Name: "zlib", Class: "unit", Deps: []string{"toolchain-musl"}},
 			"openssl":        {Name: "openssl", Class: "unit", Deps: []string{"zlib", "toolchain-musl"}, RuntimeDeps: []string{"zlib"}},
 			"apk-tools":      {Name: "apk-tools", Class: "unit", Deps: []string{"openssl", "zlib", "toolchain-musl"}, RuntimeDeps: []string{"openssl", "zlib"}},
 			"base-image":     {Name: "base-image", Class: "image", Artifacts: []string{"openssl", "apk-tools"}},
-		},
+		}},
 		Provides: map[string]string{},
 	}
 }
@@ -46,8 +46,8 @@ func TestClosure_BuildDeps(t *testing.T) {
 
 func TestClosure_RuntimeDepsViaProvides(t *testing.T) {
 	proj := depProject()
-	proj.Units["libcrypto3"] = &yoestar.Unit{Name: "libcrypto3"}
-	proj.Units["consumer"] = &yoestar.Unit{Name: "consumer", RuntimeDeps: []string{"libcrypto3"}}
+	proj.UnitsByModule[""]["libcrypto3"] = &yoestar.Unit{Name: "libcrypto3"}
+	proj.UnitsByModule[""]["consumer"] = &yoestar.Unit{Name: "consumer", RuntimeDeps: []string{"libcrypto3"}}
 	proj.Provides["libcrypto3"] = "openssl"
 	got := BuildInClosure(proj, "consumer")
 	if !got["openssl"] {
@@ -69,10 +69,10 @@ func TestClosure_ImageArtifacts(t *testing.T) {
 }
 
 func TestClosure_Cycle(t *testing.T) {
-	proj := &yoestar.Project{Units: map[string]*yoestar.Unit{
+	proj := &yoestar.Project{UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 		"a": {Name: "a", Deps: []string{"b"}},
 		"b": {Name: "b", Deps: []string{"a"}},
-	}}
+	}}}
 	got := BuildInClosure(proj, "a")
 	if !got["a"] || !got["b"] || len(got) != 2 {
 		t.Fatalf("cycle: %v", got)

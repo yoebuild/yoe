@@ -175,7 +175,7 @@ func TestComputeAllHashes(t *testing.T) {
 
 	// openssh hash includes openssl hash which includes zlib hash
 	// Changing zlib should cascade
-	proj.Units["zlib"].Version = "1.4"
+	proj.AnyUnit("zlib").Version = "1.4"
 	dag2, _ := BuildDAG(proj, "")
 	hashes2, _ := ComputeAllHashes(dag2, "arm64", "", nil, "")
 

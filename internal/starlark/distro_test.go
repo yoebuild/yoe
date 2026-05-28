@@ -41,9 +41,9 @@ func TestEffectiveDistroForImage_Cascade(t *testing.T) {
 			p := &Project{
 				DefaultDistro:         tc.projectDistro,
 				DefaultDistroOverride: tc.overrideDistro,
-				Units: map[string]*Unit{
+				UnitsByModule: map[string]map[string]*Unit{"": {
 					"img": {Name: "img", Class: "image", Distro: tc.imageDistro},
-				},
+				}},
 			}
 			got, err := p.EffectiveDistroForImage("img")
 			if tc.wantErr {
@@ -67,9 +67,9 @@ func TestEffectiveDistroForImage_Cascade(t *testing.T) {
 
 func TestEffectiveDistroForImage_NotAnImage(t *testing.T) {
 	p := &Project{
-		Units: map[string]*Unit{
+		UnitsByModule: map[string]map[string]*Unit{"": {
 			"foo": {Name: "foo", Class: "unit"},
-		},
+		}},
 	}
 	if _, err := p.EffectiveDistroForImage("foo"); err == nil {
 		t.Fatal("expected error for non-image unit")
@@ -77,7 +77,7 @@ func TestEffectiveDistroForImage_NotAnImage(t *testing.T) {
 }
 
 func TestEffectiveDistroForImage_Missing(t *testing.T) {
-	p := &Project{Units: map[string]*Unit{}}
+	p := &Project{UnitsByModule: map[string]map[string]*Unit{"": {}}}
 	if _, err := p.EffectiveDistroForImage("absent"); err == nil {
 		t.Fatal("expected error for missing image")
 	}

@@ -66,7 +66,7 @@ func TestUpdateSearch_CtrlU_ClearsInput(t *testing.T) {
 		queryCompletions: []string{"in:", "module:"},
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units:    map[string]*yoestar.Unit{},
+			UnitsByModule:    map[string]map[string]*yoestar.Unit{"": {}},
 		},
 	}
 	updated, _ := m.updateSearch(tea.KeyMsg{Type: tea.KeyCtrlU})
@@ -120,7 +120,7 @@ func TestViewModulesTab_RendersSyntheticModules(t *testing.T) {
 	m := model{
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
-			Units:    map[string]*yoestar.Unit{},
+			UnitsByModule:    map[string]map[string]*yoestar.Unit{"": {}},
 			ResolvedModules: []yoestar.ResolvedModule{
 				{Name: "module-core", URL: "https://example.com/core.git"},
 			},
@@ -168,7 +168,7 @@ func TestViewModulesTab_FeedsDoNotPushTopOffScreen(t *testing.T) {
 	m := model{
 		proj: &yoestar.Project{
 			Defaults:        yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
-			Units:           map[string]*yoestar.Unit{},
+			UnitsByModule:           map[string]map[string]*yoestar.Unit{"": {}},
 			ResolvedModules: mods,
 			SyntheticModules: []*yoestar.SyntheticModule{
 				{Name: "alpine.main", Parent: "alpine",
@@ -198,11 +198,11 @@ func TestViewModulesTab_FeedsDoNotPushTopOffScreen(t *testing.T) {
 func TestUnitFromFeed(t *testing.T) {
 	m := model{
 		proj: &yoestar.Project{
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"musl":     {Name: "musl", Module: "alpine.main"},
 				"hello":    {Name: "hello", Module: "module-core", DefinedIn: "/tmp/module-core"},
 				"rootunit": {Name: "rootunit"},
-			},
+			}},
 			SyntheticModules: []*yoestar.SyntheticModule{
 				{Name: "alpine.main", Parent: "alpine"},
 			},
@@ -229,10 +229,10 @@ func TestViewUnitsTab_HelpBarOmitsEditForFeedUnits(t *testing.T) {
 	m := model{
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"musl":  {Name: "musl", Class: "unit", Module: "alpine.main"},
 				"hello": {Name: "hello", Class: "unit", Module: "module-core", DefinedIn: "/tmp/module-core"},
-			},
+			}},
 			SyntheticModules: []*yoestar.SyntheticModule{
 				{Name: "alpine.main", Parent: "alpine"},
 			},
@@ -263,7 +263,7 @@ func TestViewUnitsTab_CompletionsRenderUnderQueryLine(t *testing.T) {
 	m := model{
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
-			Units:    map[string]*yoestar.Unit{},
+			UnitsByModule:    map[string]map[string]*yoestar.Unit{"": {}},
 		},
 		queryEditing:     true,
 		queryInput:       "o",
@@ -295,9 +295,9 @@ func TestRefreshUnitSize_PicksUpFreshlyWrittenMeta(t *testing.T) {
 		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit"},
-			},
+			}},
 		},
 	}
 	if m.unitSize["foo"] != 0 {
@@ -317,7 +317,7 @@ func TestRefreshUnitSize_UnknownUnit_NoOp(t *testing.T) {
 		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units:    map[string]*yoestar.Unit{},
+			UnitsByModule:    map[string]map[string]*yoestar.Unit{"": {}},
 		},
 	}
 	// Should not panic, should not allocate spurious entries.
@@ -376,9 +376,9 @@ func TestUnitSourceState_ReadsBuildMeta(t *testing.T) {
 		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -398,9 +398,9 @@ func TestUnitSourceState_NoBuildMeta_ReturnsEmpty(t *testing.T) {
 		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -419,9 +419,9 @@ func TestRenderSrcCell_DevMod_RendersYellow(t *testing.T) {
 		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -445,9 +445,9 @@ func TestRenderSrcCell_Image_RendersBlank(t *testing.T) {
 		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"my-img": {Name: "my-img", Class: "image"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -491,9 +491,9 @@ func TestDetailSourceLine_ImageReturnsEmpty(t *testing.T) {
 		detailUnit: "my-img",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"my-img": {Name: "my-img", Class: "image"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -513,9 +513,9 @@ func TestDetailSourceLine_DevModSurfacesDescribe(t *testing.T) {
 		detailUnit: "foo",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit", Source: "https://example.com/foo.git"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -572,9 +572,9 @@ func TestDetailSourceLine_BranchTrackingHint(t *testing.T) {
 		detailUnit: "foo",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit", Source: "https://example.com/foo.git", Tag: "v1.36.1", Branch: "main"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -598,9 +598,9 @@ func TestDetailSourceLine_PinShowsTag(t *testing.T) {
 		detailUnit: "foo",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit", Source: "https://example.com/foo.git", Tag: "v1.36.1"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -639,9 +639,9 @@ func newModelWithUnit(t *testing.T, projDir, unitName string, state source.State
 		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				unitName: {Name: unitName, Class: "unit", Source: "https://example.com/" + unitName + ".git"},
-			},
+			}},
 		},
 		unitSrcStates:   map[string]source.State{unitName: state},
 		moduleSrcStates: map[string]source.State{},
@@ -688,9 +688,9 @@ func TestOpenSourcePromptForUnit_Image_NoOpsWithMessage(t *testing.T) {
 		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"my-img": {Name: "my-img", Class: "image"},
-			},
+			}},
 		},
 		unitSrcStates:   map[string]source.State{},
 		moduleSrcStates: map[string]source.State{},
@@ -1044,9 +1044,9 @@ func TestRefreshDetailFiles_WalksDestdir(t *testing.T) {
 		detailUnit: "foo",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit"},
-			},
+			}},
 		},
 	}
 	m.refreshDetailFiles()
@@ -1114,9 +1114,9 @@ func TestRefreshDetailFiles_ImageWalksRootfs(t *testing.T) {
 		detailUnit: "img",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"img": {Name: "img", Class: "image"},
-			},
+			}},
 		},
 	}
 	m.refreshDetailFiles()

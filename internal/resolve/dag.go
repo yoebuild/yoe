@@ -34,7 +34,7 @@ func BuildDAG(proj *yoestar.Project, effectiveDistro string) (*DAG, error) {
 	// Pick the unit source. Per-distro view when distro is known —
 	// the closure walker's resolution has already settled — so
 	// cross-distro same-name collisions yield the right variant in
-	// the DAG node. Distro-less callers fall back to proj.Units.
+	// the DAG node.
 	//
 	// When iterating the per-distro view, unresolvable deps are
 	// SKIPPED rather than erroring: an untagged unit (module-core's
@@ -42,15 +42,26 @@ func BuildDAG(proj *yoestar.Project, effectiveDistro string) (*DAG, error) {
 	// different distro's feed. That's fine — nodejs-hello isn't in
 	// any debian image's closure, the build executor's filter
 	// prunes it, and the dep validation needn't second-guess
-	// catalog completeness. For flat-Units iteration (distro=""),
+	// catalog completeness. For the distro-less iteration path,
 	// missing deps still error to preserve the older invariant
-	// callers rely on.
-	units := proj.Units
+	// callers (describe, graph, refs) rely on.
+	var units map[string]*yoestar.Unit
 	allowMissingDeps := false
 	if effectiveDistro != "" && proj.DistroViews != nil {
 		if view, ok := proj.DistroViews[effectiveDistro]; ok {
 			units = view
 			allowMissingDeps = true
+		}
+	}
+	if units == nil {
+		// Distro-less path: collect one entry per unit name across
+		// every module via AllUnits. First match wins — same as the
+		// legacy flat catalog's registration-order-wins behavior.
+		units = map[string]*yoestar.Unit{}
+		for name, u := range proj.AllUnits() {
+			if _, ok := units[name]; !ok {
+				units[name] = u
+			}
 		}
 	}
 

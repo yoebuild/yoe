@@ -34,16 +34,6 @@ type Project struct {
 	// tagged or materialized), even if the view is sparse.
 	DistroViews map[string]map[string]*Unit
 
-	// Units is a flat per-name view derived from DistroViews using the
-	// project's effective distro (DefaultDistroOverride -> DefaultDistro
-	// or the first key in DistroViews when neither is set). It exists for
-	// callers that don't have image-level distro scope — TUI list-all, query
-	// surfaces, single-unit CLI helpers. Per-distro-correct paths (closure
-	// walk, BuildDAG, build executor) consult LookupUnit / DistroViews
-	// directly. Treat Units as read-only at runtime; mutations don't
-	// propagate back into UnitsByModule.
-	Units map[string]*Unit
-
 	// DefaultDistro is the project-wide effective-distro fallback used by
 	// image units that don't set their own `distro` field. The cascade
 	// resolves an image's effective distro as:
@@ -274,6 +264,21 @@ func (p *Project) EffectiveDistroForImage(imageName string) (string, error) {
 	return "", fmt.Errorf("image %q has no distro and project has no default_distro (set distro on the image or default_distro on project)", imageName)
 }
 
+// SetFlatUnits is a test helper that registers a name→*Unit map under
+// the project-root module key in UnitsByModule. Production code never
+// calls this — the loader builds UnitsByModule through per-module
+// registration. Tests that hand-construct a Project use this to
+// populate the catalog without going through the loader.
+func (p *Project) SetFlatUnits(units map[string]*Unit) {
+	if p == nil {
+		return
+	}
+	if p.UnitsByModule == nil {
+		p.UnitsByModule = make(map[string]map[string]*Unit, 1)
+	}
+	p.UnitsByModule[""] = units
+}
+
 // LookupUnit returns the unit visible to a closure walk in the given
 // distro, or nil if no such unit exists. Consults the precomputed
 // DistroViews built at load time — O(1) per lookup, no module-priority
@@ -282,9 +287,12 @@ func (p *Project) EffectiveDistroForImage(imageName string) (string, error) {
 // effective distro; for image-scoped consumers, pass
 // EffectiveDistroForImage(imageName).
 //
-// Hand-constructed projects in tests often skip the DistroViews
-// build pass; LookupUnit falls back to the flat Units catalog so
-// those tests keep working without per-test fixture wiring.
+// When DistroViews is entirely empty — hand-constructed test
+// fixtures skip the buildDistroViews pass that the loader runs —
+// LookupUnit falls through to AnyUnit so unit tests keep working
+// without per-test view wiring. Once a project has ANY DistroViews
+// entry the fallback turns off, so "unknown distro" returns nil
+// rather than silently matching some other distro's variant.
 func (p *Project) LookupUnit(distro, name string) *Unit {
 	if p == nil {
 		return nil
@@ -293,39 +301,38 @@ func (p *Project) LookupUnit(distro, name string) *Unit {
 		if u, ok := view[name]; ok {
 			return u
 		}
+		return nil
 	}
-	if p.Units != nil {
-		if u, ok := p.Units[name]; ok {
-			return u
-		}
+	if len(p.DistroViews) > 0 {
+		return nil
 	}
-	return nil
+	return p.AnyUnit(name)
 }
 
-// AnyUnit returns the first unit registered under `name` across all
-// modules, or nil if no module has one. Used by callers that need to
-// inspect a unit before knowing its consuming distro — most notably
-// EffectiveDistroForImage, which reads the image's own Distro field
-// to compute the very distro a LookupUnit call would need. Pointer
-// identity across modules isn't meaningful; pick one and read.
-//
-// Falls back to the flat Units catalog when UnitsByModule is empty
-// (hand-constructed test fixtures that skip the per-module registration).
+// AnyUnit returns the unit registered under `name` from the highest-
+// priority module that has one, or nil if no module has one. Used by
+// callers that need to inspect a unit before knowing its consuming
+// distro — most notably EffectiveDistroForImage, which reads the
+// image's own Distro field to compute the very distro a LookupUnit
+// call would need. Module priority (highest ModuleIndex wins;
+// project root is strictly above any declared module) mirrors the
+// shadow-resolution semantics of the legacy flat catalog so "the
+// unit named X" is unambiguous when modules overlap.
 func (p *Project) AnyUnit(name string) *Unit {
 	if p == nil {
 		return nil
 	}
+	var best *Unit
 	for _, byName := range p.UnitsByModule {
-		if u, ok := byName[name]; ok {
-			return u
+		u, ok := byName[name]
+		if !ok {
+			continue
+		}
+		if best == nil || u.ModuleIndex > best.ModuleIndex {
+			best = u
 		}
 	}
-	if p.Units != nil {
-		if u, ok := p.Units[name]; ok {
-			return u
-		}
-	}
-	return nil
+	return best
 }
 
 // AllUnits returns an iterator over every (name, *Unit) pair across
@@ -334,27 +341,16 @@ func (p *Project) AnyUnit(name string) *Unit {
 // same name may yield multiple times when different modules registered
 // it for different distros — consumers that want one entry per name
 // should deduplicate themselves or use DistroViews[distro] iteration.
-//
-// Falls back to iterating the flat Units catalog when UnitsByModule is
-// empty (hand-constructed test fixtures).
 func (p *Project) AllUnits() iter.Seq2[string, *Unit] {
 	return func(yield func(string, *Unit) bool) {
 		if p == nil {
 			return
 		}
-		if len(p.UnitsByModule) > 0 {
-			for _, byName := range p.UnitsByModule {
-				for name, u := range byName {
-					if !yield(name, u) {
-						return
-					}
+		for _, byName := range p.UnitsByModule {
+			for name, u := range byName {
+				if !yield(name, u) {
+					return
 				}
-			}
-			return
-		}
-		for name, u := range p.Units {
-			if !yield(name, u) {
-				return
 			}
 		}
 	}

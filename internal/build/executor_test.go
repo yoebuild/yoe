@@ -16,10 +16,10 @@ func TestDryRun(t *testing.T) {
 	proj := &yoestar.Project{
 		Name:          "test",
 		DefaultDistro: "alpine",
-		Units: map[string]*yoestar.Unit{
+		UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 			"zlib":    {Name: "zlib", Version: "1.3", Class: "unit", Tasks: []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "make"}}}}},
 			"openssh": {Name: "openssh", Version: "9.6", Class: "unit", Deps: []string{"zlib"}, Tasks: []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "make"}}}}},
-		},
+		}},
 	}
 
 	var buf bytes.Buffer
@@ -77,12 +77,12 @@ func TestCacheMarker(t *testing.T) {
 
 func TestFilterBuildOrder(t *testing.T) {
 	proj := &yoestar.Project{
-		Units: map[string]*yoestar.Unit{
+		UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 			"a": {Name: "a"},
 			"b": {Name: "b", Deps: []string{"a"}},
 			"c": {Name: "c", Deps: []string{"b"}},
 			"d": {Name: "d"},
-		},
+		}},
 	}
 
 	dag, _ := resolve.BuildDAG(proj, "")
@@ -134,7 +134,7 @@ func TestBuildUnits_WithDeps(t *testing.T) {
 	proj := &yoestar.Project{
 		Name:          "test",
 		DefaultDistro: "alpine",
-		Units: map[string]*yoestar.Unit{
+		UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 			"hello": {
 				Name:          "hello",
 				Version:       "1.0",
@@ -143,7 +143,7 @@ func TestBuildUnits_WithDeps(t *testing.T) {
 				ContainerArch: "target",
 				Tasks:         []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "echo built > built.txt"}}}},
 			},
-		},
+		}},
 	}
 
 	// Create source directory with a file (simulating prepared source)
@@ -248,7 +248,8 @@ func TestBuildUnits_ParallelRespectsDAG(t *testing.T) {
 		run(t, srcDir, "git", "commit", "-m", "upstream")
 		run(t, srcDir, "git", "tag", "yoe/pin")
 	}
-	proj := &yoestar.Project{Name: "test", DefaultDistro: "alpine", Units: units}
+	proj := &yoestar.Project{Name: "test", DefaultDistro: "alpine"}
+	proj.SetFlatUnits(units)
 
 	var buf bytes.Buffer
 	opts := Options{ProjectDir: projectDir, Arch: "x86_64", Parallel: 3}

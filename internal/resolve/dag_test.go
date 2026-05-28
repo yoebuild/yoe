@@ -8,10 +8,9 @@ import (
 )
 
 func makeProject(units map[string]*yoestar.Unit) *yoestar.Project {
-	return &yoestar.Project{
-		Name:    "test",
-		Units: units,
-	}
+	p := &yoestar.Project{Name: "test"}
+	p.SetFlatUnits(units)
+	return p
 }
 
 func TestBuildDAG(t *testing.T) {

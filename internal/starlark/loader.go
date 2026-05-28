@@ -522,7 +522,6 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	}
 
 	proj.Machines = eng.Machines()
-	proj.Units = eng.Units()
 	proj.UnitsByModule = eng.UnitsByModule()
 	proj.ResolvedModules = resolvedForProject
 	proj.Diagnostics.Shadows = eng.Shadows()
@@ -736,8 +735,8 @@ func buildDistroViews(proj *Project) map[string]map[string]*Unit {
 
 // resolveForDistro picks the right unit for (distro, name) from
 // UnitsByModule. Applies prefer_modules pins first, then falls back
-// to module priority + R21a visibility. Returns nil when no candidate
-// exists.
+// to module priority (highest ModuleIndex wins) + R21a visibility.
+// Returns nil when no candidate exists.
 func resolveForDistro(proj *Project, distro, name string) *Unit {
 	// Pin check.
 	if pins, ok := proj.PreferModules[distro]; ok {
@@ -759,7 +758,7 @@ func resolveForDistro(proj *Project, distro, name string) *Unit {
 		if !unitVisibleToDistro(u, distro) {
 			continue
 		}
-		if best == nil || u.ModuleIndex < best.ModuleIndex {
+		if best == nil || u.ModuleIndex > best.ModuleIndex {
 			best = u
 		}
 	}

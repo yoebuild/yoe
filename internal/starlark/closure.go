@@ -252,8 +252,8 @@ func (e *Engine) lookupOrMaterialize(rawName, effectiveDistro string) (*Unit, er
 
 // findVisibleByName scans the per-module catalog for any unit named
 // `name` that's visible to effectiveDistro. Returns the highest-
-// priority (lowest ModuleIndex per the loader's "lower index = higher
-// priority" convention) match, or nil. Holds e.mu.
+// priority (highest ModuleIndex; later-declared modules win, and
+// real modules always outrank synthetics) match, or nil. Holds e.mu.
 func (e *Engine) findVisibleByName(name, effectiveDistro string) *Unit {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -266,7 +266,7 @@ func (e *Engine) findVisibleByName(name, effectiveDistro string) *Unit {
 		if !visibleToDistro(u, effectiveDistro) {
 			continue
 		}
-		if best == nil || u.ModuleIndex < best.ModuleIndex {
+		if best == nil || u.ModuleIndex > best.ModuleIndex {
 			best = u
 		}
 	}

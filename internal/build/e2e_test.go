@@ -41,23 +41,23 @@ func TestE2E_DryRun(t *testing.T) {
 	}
 
 	// Should have units from module-core module
-	if _, ok := proj.Units["busybox"]; !ok {
+	if proj.AnyUnit("busybox") == nil {
 		t.Error("expected busybox unit from module-core module")
 	}
-	if _, ok := proj.Units["linux"]; !ok {
+	if proj.AnyUnit("linux") == nil {
 		t.Error("expected linux unit from module-core module")
 	}
-	if _, ok := proj.Units["base-image"]; !ok {
+	if proj.AnyUnit("base-image") == nil {
 		t.Error("expected base-image from module-core module")
 	}
-	if _, ok := proj.Units["zlib"]; !ok {
+	if proj.AnyUnit("zlib") == nil {
 		t.Error("expected zlib unit from module-core module")
 	}
 
 	// zlib should have been loaded via a class (autotools or similar).
 	// The .star files haven't been migrated to tasks yet (Task 2),
 	// so skip assertions about build steps for now.
-	if r := proj.Units["zlib"]; r != nil {
+	if r := proj.AnyUnit("zlib"); r != nil {
 		t.Logf("zlib class=%s tasks=%d", r.Class, len(r.Tasks))
 	}
 
