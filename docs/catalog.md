@@ -134,7 +134,14 @@ effect.
 
 ### Where it starts
 
-Materialization is triggered by image evaluation. When an image like
+Materialization is triggered by image evaluation. The loader walks
+every `images/*.star` file across the project root and every loaded
+module; each `image(...)` call invokes
+`resolve_closure(artifacts, distro=...)` with its own artifacts list
+and effective distro. So a project with five images defined across
+its modules triggers five closure walks during load — not one per
+build, but one per image found at evaluation time. A representative
+debian image:
 
 ```python
 image(
@@ -144,16 +151,31 @@ image(
 )
 ```
 
-is being evaluated, the image class calls
-`resolve_closure(artifacts, distro="debian")`. That's the entry point.
-The Go-side builtin takes the artifacts list as the **roots** of a
-breadth-first walk through the runtime-dep graph, and every name
-visited triggers a lookup. Lookups that miss the catalog drive
-materialization.
+invokes `resolve_closure(["apt", "openssh-server", "linux-image-amd64"],
+distro="debian")`. The Go-side builtin takes the artifacts list as the
+**roots** of a breadth-first walk through the runtime-dep graph; every
+name visited triggers a lookup, and lookups that miss the catalog
+drive materialization.
 
-Nothing is materialized before an image asks for it. A project that
-declares `module-debian` but defines no debian image never parses the
-debian `Packages` file, never allocates a single debian-tagged `*Unit`.
+Materializations don't repeat across closures. If three alpine images
+all reference `openssh-server`, the synthetic `Lookup` fires once
+(during the first image's walk); the other two walks read the cached
+`*Unit` from `DistroViews["alpine"]["openssh-server"]`. The cost is
+union-of-closures, not sum-of-closures.
+
+What doesn't trigger materialization:
+
+- Modules listed in PROJECT.star but containing no images.
+- Names that exist in upstream catalogs but aren't reached from any
+  image's closure (the 50,000-entry Debian `main` catalog parses to
+  the `archCache` once, but only the few hundred names reached by some
+  image's closure ever become `*Unit` objects).
+- A feed type the project doesn't use — a project that declares
+  `module-debian` but defines no debian image (and no alpine image
+  pulls in a debian-tagged name through provides) parses the debian
+  `Packages` file the first time some `Lookup` references it, which
+  for a no-debian-image project never happens. The feed is registered
+  eagerly; everything beyond registration is gated on actual use.
 
 ### The materialization cycle, step by step
 
