@@ -123,32 +123,42 @@ accepts SSH; until that's done, expect to iterate.
 
 A project can define alpine images and debian images side-by-side.
 Each image's effective distro is independent — yoe doesn't enforce
-"one distro per project." The catalog resolves each image's closure
-through a distro-specific view: an alpine image sees alpine-tagged
-units (plus distro-neutral source units); a debian image sees
-debian-tagged units (plus the same distro-neutral source units).
-Cross-distro entries are filtered out.
+"one distro per project."
 
-Practical caveats:
+Cross-distro coexistence is handled in three parallel layers that all
+keep distros separated:
 
-- **Same-named units across feeds can collide.** If a unit name
-  appears in both `alpine.main` and `debian.main` (e.g. `libcap2`),
-  the catalog needs to know which feed each image should resolve from.
-  The closure walker handles this via per-distro views, but during a
-  transitional period the workaround is `prefer_modules` pins or
-  separate `yoe build` invocations. See
-  [module-debian.md known limitations](module-debian.md#known-limitations)
-  for the workarounds in effect today.
-- **Source-built units pay a per-distro build cost.** A
-  source-built `openssl` consumed by both an alpine and a debian
-  image builds twice — once in each toolchain container — producing
-  two binaries cached separately. This is the correctness mechanism,
-  not a bug; the cost is one cache entry per (unit, distro) pair, and
-  every subsequent build hits the cache.
+- **On-disk repos** are per-distro. `repo/<project>/alpine/<arch>/`
+  holds apks; `repo/<project>/debian/dists/<suite>/` holds debs.
+  Each on-target package manager sees only its own subtree.
+- **On-disk build directories** are per-distro:
+  `build/<distro>/<unit>.<scope>/destdir/`. A source-built unit
+  consumed by both an alpine and a debian image has two separate
+  destdirs, each holding a libc-correct binary.
+- **The in-memory catalog** stores every unit by `(module, name)`
+  and exposes per-distro views: an alpine image queries
+  `DistroViews["alpine"]` and gets alpine-tagged units (plus
+  distro-neutral source units); a debian image queries
+  `DistroViews["debian"]` and gets debian-tagged units (plus the
+  same source units). Same-named entries from different distro feeds
+  live in different `UnitsByModule` buckets and different
+  `DistroViews` cells; they never clobber each other.
 
-Most projects don't mix distros. The flexibility exists for the case
-where a product line needs both — e.g. a small edge device on alpine
-and a larger gateway on debian — within the same `PROJECT.star`.
+The one architectural cost mixing distros DOES pay:
+
+- **Source-built units build per consuming distro.** A source-built
+  `openssl` consumed by both an alpine and a debian image builds
+  twice — once in each toolchain container — producing two binaries
+  cached separately. This is the correctness mechanism, not a bug;
+  the cost is one cache entry per (unit, distro) pair, and every
+  subsequent build hits the cache.
+
+Most projects don't mix distros — the flexibility exists for the case
+where a product line needs both (e.g. a small edge device on alpine
+and a larger gateway on debian within the same `PROJECT.star`). For
+the practical current-state behavior of multi-distro projects on
+versions where catalog separation is still landing, see
+[module-debian.md known limitations](module-debian.md#known-limitations).
 
 ## How distros plug in (high-level)
 
