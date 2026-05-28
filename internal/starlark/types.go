@@ -237,15 +237,37 @@ type QEMUConfig struct {
 //
 //	image.distro -> DefaultDistroOverride -> DefaultDistro -> error
 //
+// When multiple modules ship same-named images (alpine.dev-image AND
+// debian.dev-image), variant selection consults the project's
+// effective distro first: the variant whose Distro matches the
+// project default (or override) wins, even when a higher-priority
+// module ships a different-distro variant. Only when the project
+// default has no visible variant does AnyUnit's module-priority
+// pick decide — that's the "debian-only image inside an alpine
+// project" case where the user explicitly named the cross-distro
+// image.
+//
 // Error: the named image isn't an image-class unit, isn't in the
 // project, or has no resolvable distro after the cascade.
 func (p *Project) EffectiveDistroForImage(imageName string) (string, error) {
 	if p == nil {
 		return "", fmt.Errorf("EffectiveDistroForImage: nil project")
 	}
-	// Read the image's tag from any module — the very call resolves
-	// the distro we'd otherwise need to pass to LookupUnit.
-	u := p.AnyUnit(imageName)
+	// Prefer the variant visible in the project's effective-distro
+	// view so an alpine project picks alpine.dev-image even when
+	// module-debian sits at higher module priority and also ships a
+	// dev-image.
+	projDistro := p.DefaultDistroOverride
+	if projDistro == "" {
+		projDistro = p.DefaultDistro
+	}
+	var u *Unit
+	if projDistro != "" {
+		u = p.LookupUnit(projDistro, imageName)
+	}
+	if u == nil {
+		u = p.AnyUnit(imageName)
+	}
 	if u == nil {
 		return "", fmt.Errorf("EffectiveDistroForImage: unit %q not found", imageName)
 	}
