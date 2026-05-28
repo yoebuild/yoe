@@ -153,10 +153,52 @@ The one architectural cost mixing distros DOES pay:
   the cost is one cache entry per (unit, distro) pair, and every
   subsequent build hits the cache.
 
-Most projects don't mix distros — the flexibility exists for the case
-where a product line needs both (e.g. a small edge device on alpine
-and a larger gateway on debian within the same `PROJECT.star`). For
-the practical current-state behavior of multi-distro projects on
+### The primary multi-distro use case: alpine app containers on a debian host
+
+The pattern that motivates mixing distros within a single project is
+**building alpine-based application containers that get deployed
+inside a debian host image.** The host image is debian for the
+reasons that drive picking debian in the first place — glibc
+compatibility for vendor drivers, broad apt ecosystem, an existing
+fleet management story. The application containers are alpine for the
+reasons that drive picking alpine: small footprint, fast startup,
+minimal attack surface, comprehensive musl-clean package wrapping.
+
+A representative `PROJECT.star` shape:
+
+```python
+# Host image: debian. Boots the device, runs vendor agents,
+# manages the container runtime, handles OTA.
+image(
+    name = "device-host",
+    distro = "debian",
+    artifacts = ["apt", "openssh-server", "linux-image-amd64",
+                 "containerd", ...],
+)
+
+# App container: alpine. Holds the actual product workload.
+# Built as a deployable container artifact, not as a bootable
+# image. Pushed into the host's container store.
+deployable_container(
+    name = "app",
+    distro = "alpine",
+    artifacts = ["busybox", "my-app", "my-app-config", ...],
+)
+```
+
+Both build from the same `PROJECT.star`, share the same source-built
+userland where applicable (a source unit consumed by both builds
+twice — once musl-linked for the alpine container, once glibc-linked
+for the debian host — under separate cache keys), and ship together
+as part of the same project release.
+
+Other multi-distro shapes exist (a product line with a small alpine
+edge device and a larger debian gateway, both shipped from one repo)
+but the alpine-app-in-debian-host pattern is the one yoe's
+distro mixing was designed to make ergonomic. For the deployable
+container specifics, see
+[Deployable Containers](specs/2026-05-25-deployable-containers.md);
+for the practical current-state behavior of multi-distro projects on
 versions where catalog separation is still landing, see
 [module-debian.md known limitations](module-debian.md#known-limitations).
 
