@@ -5,9 +5,9 @@ unit(
     tag = "v34.2",
     license = "LGPL-2.1-or-later AND GPL-2.0-or-later",
     description = "tools for managing Linux kernel modules",
-    deps = ["meson", "zlib", "openssl", "xz", "toolchain-musl"],
+    deps = ["meson", "zlib", "openssl", "xz", "toolchain"],
     runtime_deps = ["zlib", "openssl", "xz"],
-    container = "toolchain-musl",
+    container = "toolchain",
     container_arch = "target",
     tasks = [
         task("build", steps=[

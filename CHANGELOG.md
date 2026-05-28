@@ -8,6 +8,14 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Hand-written `module-core` units now dispatch their build container per
+  distro.** 23 units (meson, samurai, strace, vim, kmod, openssl, zlib, zstd,
+  linux, file's friends, …) had `container = "toolchain-musl"` baked in as a
+  literal, so a project that flipped `defaults.distro` to debian still tried to
+  compile them inside the musl toolchain. They now use the virtual `"toolchain"`
+  reference — same pattern every class in `module-core` already used — which
+  dispatches through the provides table to `toolchain-musl` for alpine
+  closures and `toolchain-glibc` for debian closures.
 - **Alpine images (`base-image`, `dev-image`, `bun-image`, `docker-image`,
   `jukebox-image`, `nodejs-image`, `python-image`, `qt-image`, `selfhost-image`)
   moved from `module-core` to `module-alpine`, and `base-image` + `dev-image`

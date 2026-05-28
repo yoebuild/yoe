@@ -5,8 +5,8 @@ unit(
     tag = "v6.9",
     license = "LGPL-2.1-or-later",
     description = "System call tracer for Linux",
-    deps = ["toolchain-musl"],
-    container = "toolchain-musl",
+    deps = ["toolchain"],
+    container = "toolchain",
     container_arch = "target",
     tasks = [
         task("build", steps=[

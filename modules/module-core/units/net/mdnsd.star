@@ -18,9 +18,6 @@ autotools(
     patches = ["mdnsd/0001-Update-the-records-when-the-iface-has-changed.patch"],
     services = ["mdnsd"],
     runtime_deps = ["musl", "busybox", "openrc"],
-    deps = ["toolchain-musl"],
-    container = "toolchain-musl",
-    container_arch = "target",
     tasks = [
         # mdnsd ignores its own host A record unless at least one service
         # record exists in /etc/mdns.d. Shipping the SSH advertisement is

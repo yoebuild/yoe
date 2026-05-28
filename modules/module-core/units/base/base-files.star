@@ -49,8 +49,8 @@ def base_files(name = "base-files", users = None):
         if u["password"]:
             deps.append("openssl")
             break
-    if "toolchain-musl" not in deps:
-        deps.append("toolchain-musl")
+    if "toolchain" not in deps:
+        deps.append("toolchain")
 
     unit(
         name = name,
@@ -61,7 +61,7 @@ def base_files(name = "base-files", users = None):
         description = "Base filesystem skeleton: users, groups, dirs, inittab, boot config",
         deps = deps,
         runtime_deps = ["openrc"],
-        container = "toolchain-musl",
+        container = "toolchain",
         container_arch = "target",
         tasks = [
             task("build", steps = (

@@ -5,8 +5,8 @@ unit(
     tag = "1.10.2",
     license = "Apache-2.0",
     description = "high performance build system for C/C++ and other languages",
-    deps = ["samurai", "toolchain-musl", "python3", "py3-setuptools"],
-    container = "toolchain-musl",
+    deps = ["samurai", "toolchain", "python3", "py3-setuptools"],
+    container = "toolchain",
     container_arch = "target",
     tasks = [
         task("build", steps=[

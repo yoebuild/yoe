@@ -6,7 +6,7 @@ unit(
     tag = "openssl-3.4.1",
     license = "Apache-2.0",
     description = "TLS/SSL and crypto library",
-    deps = ["zlib", "toolchain-musl"],
+    deps = ["zlib", "toolchain"],
     runtime_deps = ["zlib"],
     # Source-built openssl owns the same /usr/lib/libcrypto.so.3,
     # /usr/lib/libssl.so.3, /etc/ssl/* paths and the same SONAMEs as
@@ -15,7 +15,7 @@ unit(
     # aren't pulled in alongside, which would cause `apk add` to abort
     # with "trying to overwrite ... owned by openssl".
     provides = ["libcrypto3", "libssl3"],
-    container = "toolchain-musl",
+    container = "toolchain",
     container_arch = "target",
     tasks = [
         task("build", steps=[

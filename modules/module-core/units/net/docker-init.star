@@ -4,8 +4,9 @@ unit(
     license = "MIT",
     description = "OpenRC service script for dockerd",
     services = ["docker"],
+    deps = ["toolchain"],
     runtime_deps = ["docker", "openrc"],
-    container = "toolchain-musl",
+    container = "toolchain",
     container_arch = "target",
     tasks = [
         task("build", steps = [

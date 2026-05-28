@@ -6,8 +6,8 @@ unit(
     tag = "v6.6.87",
     license = "GPL-2.0",
     description = "Linux kernel",
-    deps = ["toolchain-musl"],
-    container = "toolchain-musl",
+    deps = ["toolchain"],
+    container = "toolchain",
     container_arch = "target",
     tasks = [
         task("build", steps=[
