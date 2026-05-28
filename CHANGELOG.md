@@ -26,10 +26,15 @@ and this project adheres to
   URL is a regular apt source — no special tooling.
 - **New `debian_feed(...)` declares a Debian package feed alongside
   `alpine_feed`.** One call materializes a synthetic module
-  (`<parent>.<suite>.<component>`) whose units the resolver pulls lazily as the
-  image closure references them; `yoe update-feeds` inside a module repo
-  refreshes the in-tree `Packages` files via signed `InRelease`. See
-  `docs/module-debian.md` for the maintainer playbook.
+  (`<parent>.<component>` — e.g. `debian.main`) whose units the resolver pulls
+  lazily as the image closure references them; `yoe update-feeds` inside a
+  module repo refreshes the in-tree `Packages` files via signed `InRelease`.
+  See `docs/module-debian.md` for the maintainer playbook.
+- **Source units shared between Alpine and Debian images now cache separately.**
+  A unit referenced from both an Alpine and a Debian image used to clobber its
+  own build directory between the two; the build cache now keys on the
+  consuming image's effective distro so each variant builds and stays
+  available.
 - **A new `default_distro` field on `project(...)` plus the `distro` tag on each
   image select which backend an image targets.** Mixed-distro projects work: tag
   images individually, untagged units stay visible to every distro, and

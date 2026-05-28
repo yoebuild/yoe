@@ -3,9 +3,11 @@
 // debian_feed is the Debian analog of alpine_feed: it turns an in-tree
 // directory of decompressed Packages files into a lazily-materialized
 // SyntheticModule that yoe's resolver consults alongside real modules.
-// One call registers one synthetic module per (suite, component) tuple
-// — typically named "debian.<suite>.<component>" such as
-// "debian.bookworm.main".
+// One call registers one synthetic module per component, named
+// "<parent>.<component>" — e.g. "debian.main", "debian.contrib".
+// The suite kwarg picks which on-disk Packages file is parsed but does
+// not appear in the module's identity (one Debian suite per project,
+// enforced at evaluation).
 //
 // Wire it from cmd/yoe (or tests) via:
 //
@@ -67,7 +69,7 @@ func Builtin(eng *yoestar.Engine) *starlark.Builtin {
 // makeDebianFeed produces the debian_feed function. Parameters:
 //
 //	debian_feed(
-//	    name      = "main",                         # feed name; becomes <parent>.<suite>.<name>
+//	    name      = "main",                         # feed name; becomes <parent>.<name>
 //	    url       = "https://deb.debian.org/debian",
 //	    suite     = "bookworm",                     # Debian release codename
 //	    component = "main",                         # main / contrib / non-free
@@ -91,9 +93,10 @@ func makeDebianFeed(eng *yoestar.Engine) func(*starlark.Thread, *starlark.Builti
 		if parent == "" {
 			return nil, fmt.Errorf("debian_feed: must be called from a module's MODULE.star (not the project root)")
 		}
-		// Composed name: <parent>.<suite>.<component>, mirroring the
-		// spec's "debian.<suite>.<component>" convention.
-		composedName := parent + "." + args.suite + "." + args.name
+		// Composed name: <parent>.<component>, matching alpine_feed's
+		// one-segment shape. The suite is feed configuration, not
+		// module identity (one Debian suite per project).
+		composedName := parent + "." + args.name
 
 		var moduleDir string
 		if thread.CallStackDepth() >= 2 {

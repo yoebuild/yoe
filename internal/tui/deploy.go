@@ -93,10 +93,11 @@ func (m model) startDeployCmd() tea.Cmd {
 		}
 		closure := resolve.RuntimeClosure(proj, []string{unitName}, distro)
 		if err := build.BuildUnits(proj, closure, build.Options{
-			Ctx:        ctx,
-			ProjectDir: projectDir,
-			Arch:       arch,
-			Machine:    machine,
+			Ctx:             ctx,
+			ProjectDir:      projectDir,
+			Arch:            arch,
+			Machine:         machine,
+			EffectiveDistro: distro,
 		}, buildOut); err != nil {
 			return deployDoneMsg{err: fmt.Errorf("build %s: %w", unitName, err)}
 		}

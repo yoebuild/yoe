@@ -157,8 +157,8 @@ func (e *Engine) closure(roots []string, effectiveDistro string) ([]string, erro
 // is invisible to this walk — the walker keeps searching synthetic
 // modules for a same-name unit that does match.
 //
-// Cross-distro name collisions (e.g. alpine.main and debian.bookworm.main
-// both export a "libcap2") are resolved by prefer_modules pins or by
+// Cross-distro name collisions (e.g. alpine.main and debian.main both
+// export a "libcap2") are resolved by prefer_modules pins or by
 // module priority, not by probing every synthetic on every lookup. The
 // probe approach was tried and pulled in the full per-call cost of
 // dpkg.MaterializeUnit (Provides resolution, Depends parsing) for names

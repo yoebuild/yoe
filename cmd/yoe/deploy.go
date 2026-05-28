@@ -94,15 +94,16 @@ func buildUnitForDeploy(proj *yoestar.Project, unit, machineName string) error {
 	if resolvedMachine == "" {
 		resolvedMachine = proj.Defaults.Machine
 	}
-	opts := build.Options{
-		Ctx:        ctx,
-		ProjectDir: projectDir(),
-		Arch:       targetArch,
-		Machine:    resolvedMachine,
-	}
 	distro, err := proj.EffectiveDistro()
 	if err != nil {
 		return fmt.Errorf("deploy: %w", err)
+	}
+	opts := build.Options{
+		Ctx:             ctx,
+		ProjectDir:      projectDir(),
+		Arch:            targetArch,
+		Machine:         resolvedMachine,
+		EffectiveDistro: distro,
 	}
 	closure := resolve.RuntimeClosure(proj, []string{unit}, distro)
 	return build.BuildUnits(proj, closure, opts, os.Stdout)

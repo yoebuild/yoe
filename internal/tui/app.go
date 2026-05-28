@@ -4610,12 +4610,17 @@ func (m *model) startBuild(name string) tea.Cmd {
 			freshProj = proj
 		}
 
+		distro, derr := freshProj.EffectiveDistro()
+		if derr != nil {
+			return buildDoneMsg{unit: unitName, err: fmt.Errorf("resolve effective distro: %w", derr)}
+		}
 		err = build.BuildUnits(freshProj, []string{unitName}, build.Options{
-			Ctx:        ctx,
-			Force:      true,
-			ProjectDir: projectDir,
-			Arch:       arch,
-			Machine:    machine,
+			Ctx:             ctx,
+			Force:           true,
+			ProjectDir:      projectDir,
+			Arch:            arch,
+			Machine:         machine,
+			EffectiveDistro: distro,
 			OnEvent: func(ev build.BuildEvent) {
 				if tuiProgram != nil {
 					tuiProgram.Send(buildEventMsg{

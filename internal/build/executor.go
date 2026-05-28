@@ -54,6 +54,14 @@ type Options struct {
 	// Parallel caps how many units build concurrently. Values <= 0 fall
 	// back to DefaultParallel; 1 forces fully sequential builds.
 	Parallel int
+	// EffectiveDistro is the consuming image's effective distro. When
+	// set, it folds into every unit's input hash so an untagged source
+	// unit consumed by both an alpine and a debian image hashes
+	// differently per consumer. Empty falls back to the project-level
+	// EffectiveDistro() (DefaultDistroOverride -> DefaultDistro). Per-
+	// image callers should pass the image's value explicitly via
+	// proj.EffectiveDistroForImage(name).
+	EffectiveDistro string
 }
 
 // syncWriter serializes concurrent writes from parallel unit builds so
@@ -168,12 +176,22 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 	// the hash and the build was served from cache, silently
 	// dropping the user's edits.
 	srcInputs := SrcInputsFn(opts.ProjectDir, opts.Arch, opts.Machine)
-	// effectiveDistro is "" today — the build executor walks every unit
-	// in the project closure regardless of image scope. U4b plus the
-	// per-image build orchestration will thread the consuming image's
-	// effective distro through here so distro-aware units hash
-	// differently between alpine and debian closures.
-	hashes, err := resolve.ComputeAllHashes(dag, opts.Arch, opts.Machine, srcInputs, "")
+	// effectiveDistro participates in every unit's input hash via the
+	// gated effective_distro: line in resolve/hash.go. The same source
+	// unit consumed by an alpine image (effective_distro=alpine) and a
+	// debian image (effective_distro=debian) produces two distinct
+	// cache keys — without this, the second consumer reads back the
+	// first one's wrong-libc binary. Use the explicit Options field
+	// when the caller already knows the consuming image's distro;
+	// otherwise derive the project-level fallback.
+	effectiveDistro := opts.EffectiveDistro
+	if effectiveDistro == "" {
+		effectiveDistro, err = proj.EffectiveDistro()
+		if err != nil {
+			return fmt.Errorf("resolving effective distro for build: %w", err)
+		}
+	}
+	hashes, err := resolve.ComputeAllHashes(dag, opts.Arch, opts.Machine, srcInputs, effectiveDistro)
 	if err != nil {
 		return err
 	}

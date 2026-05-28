@@ -103,7 +103,7 @@ func TestClosure_R21a_TaggedCollisionByDistro(t *testing.T) {
 		"package-mgr": {Name: "package-mgr", Class: "unit", Distro: "debian"},
 	}
 	sm := &SyntheticModule{
-		Name:   "debian.bookworm.main",
+		Name:   "debian.main",
 		Lookup: func(n string) (*Unit, error) { return cache[n], nil },
 		Names:  func() []string { return []string{"package-mgr"} },
 	}

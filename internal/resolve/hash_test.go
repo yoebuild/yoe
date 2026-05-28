@@ -267,6 +267,51 @@ func TestUnitHash_SrcInputsCacheNeutral(t *testing.T) {
 	}
 }
 
+// TestUnitHash_EffectiveDistroDisambiguates confirms R14a's cache
+// disambiguation: the same source unit consumed by an alpine image and
+// a debian image must produce two distinct cache entries so each
+// consumer builds with its own libc. Without this, whichever image
+// builds first wins the cache and the second reads back wrong-libc
+// binaries. Backed by the gated effective_distro line in UnitHash.
+func TestUnitHash_EffectiveDistroDisambiguates(t *testing.T) {
+	u := &yoestar.Unit{
+		Name: "openssl", Version: "3.4.1", Class: "unit",
+		Tasks: []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "make"}}}},
+	}
+	alpineHash := UnitHash(u, "x86_64", nil, "", "alpine")
+	debianHash := UnitHash(u, "x86_64", nil, "", "debian")
+	if alpineHash == debianHash {
+		t.Error("same source unit must hash differently under alpine vs debian effective distro (R14a)")
+	}
+	// Empty effective distro stays cache-neutral against the alpine
+	// build — the gate guarantees that introducing distro-aware
+	// hashing doesn't invalidate the cache for projects that haven't
+	// adopted the field yet.
+	emptyHash := UnitHash(u, "x86_64", nil, "", "")
+	if emptyHash == alpineHash {
+		t.Error("empty effective distro must differ from alpine (else gate doesn't gate)")
+	}
+}
+
+// TestComputeAllHashes_EffectiveDistroFlowsThrough confirms the same
+// disambiguation applies at the closure level — the executor's
+// ComputeAllHashes call propagates effective distro into every unit's
+// hash so a mixed-distro build can keep both variants in cache.
+func TestComputeAllHashes_EffectiveDistroFlowsThrough(t *testing.T) {
+	proj := makeProject(map[string]*yoestar.Unit{
+		"zlib": {Name: "zlib", Version: "1.3", Class: "unit", Tasks: []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "make"}}}}},
+	})
+	dag, err := BuildDAG(proj)
+	if err != nil {
+		t.Fatalf("BuildDAG: %v", err)
+	}
+	alpineHashes, _ := ComputeAllHashes(dag, "arm64", "", nil, "alpine")
+	debianHashes, _ := ComputeAllHashes(dag, "arm64", "", nil, "debian")
+	if alpineHashes["zlib"] == debianHashes["zlib"] {
+		t.Error("ComputeAllHashes must produce distinct hashes per effective distro for the same source unit")
+	}
+}
+
 // TestUnitHash_SrcInputsChangesHash confirms that non-empty srcInputs
 // produces a different hash than empty — i.e., a dev unit's
 // HEAD-sha-derived input actually flows into the cache key.

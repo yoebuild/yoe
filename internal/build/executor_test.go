@@ -14,7 +14,8 @@ import (
 
 func TestDryRun(t *testing.T) {
 	proj := &yoestar.Project{
-		Name: "test",
+		Name:          "test",
+		DefaultDistro: "alpine",
 		Units: map[string]*yoestar.Unit{
 			"zlib":    {Name: "zlib", Version: "1.3", Class: "unit", Tasks: []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "make"}}}}},
 			"openssh": {Name: "openssh", Version: "9.6", Class: "unit", Deps: []string{"zlib"}, Tasks: []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "make"}}}}},
@@ -124,7 +125,8 @@ func TestBuildUnits_WithDeps(t *testing.T) {
 	projectDir := t.TempDir()
 
 	proj := &yoestar.Project{
-		Name: "test",
+		Name:          "test",
+		DefaultDistro: "alpine",
 		Units: map[string]*yoestar.Unit{
 			"hello": {
 				Name:          "hello",
@@ -239,7 +241,7 @@ func TestBuildUnits_ParallelRespectsDAG(t *testing.T) {
 		run(t, srcDir, "git", "commit", "-m", "upstream")
 		run(t, srcDir, "git", "tag", "yoe/pin")
 	}
-	proj := &yoestar.Project{Name: "test", Units: units}
+	proj := &yoestar.Project{Name: "test", DefaultDistro: "alpine", Units: units}
 
 	var buf bytes.Buffer
 	opts := Options{ProjectDir: projectDir, Arch: "x86_64", Parallel: 3}
