@@ -720,6 +720,23 @@ func findProjectRootForLocal(dir string) (string, error) {
 	}
 }
 
+// loadDistroForCWD resolves the project's effective distro (without
+// per-image scope) for CLI subcommands that need to navigate the
+// per-distro build/<distro>/ subtree (e.g. `yoe log`, `yoe diagnose`).
+// Loads PROJECT.star once and returns DefaultDistroOverride ->
+// DefaultDistro -> error.
+func loadDistroForCWD(dir string) (string, error) {
+	proj, err := yoestar.LoadProject(dir)
+	if err != nil {
+		return "", fmt.Errorf("loading project to resolve distro: %w", err)
+	}
+	d, err := proj.EffectiveDistro()
+	if err != nil {
+		return "", err
+	}
+	return d, nil
+}
+
 func defaultArch(proj *yoestar.Project) string {
 	if m, ok := proj.Machines[proj.Defaults.Machine]; ok {
 		return m.Arch
@@ -857,7 +874,12 @@ func cmdLog(args []string) {
 	var logPath string
 
 	if unitName != "" {
-		logPath = filepath.Join(build.UnitBuildDir(dir, build.Arch(), unitName), "build.log")
+		distro, derr := loadDistroForCWD(dir)
+		if derr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", derr)
+			os.Exit(1)
+		}
+		logPath = filepath.Join(build.UnitBuildDir(dir, build.Arch(), unitName, distro), "build.log")
 	} else {
 		logPath = findLatestBuildLog(dir)
 	}
@@ -900,7 +922,12 @@ func cmdDiagnose(args []string) {
 
 	var logPath string
 	if unitName != "" {
-		logPath = filepath.Join(build.UnitBuildDir(dir, build.Arch(), unitName), "build.log")
+		distro, derr := loadDistroForCWD(dir)
+		if derr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", derr)
+			os.Exit(1)
+		}
+		logPath = filepath.Join(build.UnitBuildDir(dir, build.Arch(), unitName, distro), "build.log")
 	} else {
 		logPath = findLatestBuildLog(dir)
 	}

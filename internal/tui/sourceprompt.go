@@ -366,7 +366,7 @@ func (m model) runDevToUpstream(unitName string, ssh bool, depth depthFetchSpec)
 		prevView)
 	opts := yoe.DevUpstreamOpts{SSH: ssh, FetchDepth: depth.FetchDepth}
 	cmd := func() tea.Msg {
-		err := yoe.DevToUpstream(m.projectDir, scope, u, opts)
+		err := yoe.DevToUpstream(m.projectDir, scope, m.distro, u, opts)
 		return sourceOpDoneMsg{
 			target:     targetUnit,
 			name:       unitName,
@@ -403,7 +403,7 @@ func (m model) runDevToPin(unitName string, force bool) (tea.Model, tea.Cmd) {
 	m.sourceOp = newSourceOp(targetUnit, unitName,
 		fmt.Sprintf("Resetting %s to its pinned ref", unitName), prevView)
 	cmd := func() tea.Msg {
-		err := yoe.DevToPin(m.projectDir, scope, u, force)
+		err := yoe.DevToPin(m.projectDir, scope, m.distro, u, force)
 		return sourceOpDoneMsg{
 			target:     targetUnit,
 			name:       unitName,
@@ -429,7 +429,7 @@ func (m model) runDevPromote(unitName string) (tea.Model, tea.Cmd) {
 	m.sourceOp = newSourceOp(targetUnit, unitName,
 		fmt.Sprintf("Pinning %s to current HEAD", unitName), prevView)
 	cmd := func() tea.Msg {
-		err := yoe.DevPromoteToPin(m.projectDir, scope, u)
+		err := yoe.DevPromoteToPin(m.projectDir, scope, m.distro, u)
 		return sourceOpDoneMsg{
 			target:     targetUnit,
 			name:       unitName,
@@ -650,7 +650,7 @@ func (m model) persistedUnitSourceState(name string) source.State {
 		return source.StateEmpty
 	}
 	sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
-	buildDir := build.UnitBuildDir(m.projectDir, sd, name)
+	buildDir := build.UnitBuildDir(m.projectDir, sd, name, m.distro)
 	if meta := build.ReadMeta(buildDir); meta != nil {
 		return source.State(meta.SourceState)
 	}

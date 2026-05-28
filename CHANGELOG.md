@@ -35,6 +35,15 @@ and this project adheres to
   own build directory between the two; the build cache now keys on the
   consuming image's effective distro so each variant builds and stays
   available.
+- **Build directories now live under `build/<distro>/<unit>.<scope>/`.** Each
+  distro keeps its own destdir so a unit shared by Alpine and Debian images
+  doesn't overwrite itself between builds. Old `build/<unit>.<scope>/`
+  directories are stranded and need to be removed manually; the next `yoe
+  build` writes to the new layout.
+- **`yoe clean <unit>` works again.** The previous implementation constructed
+  paths that never matched the actual build directory, so per-unit clean was a
+  silent no-op. The fix walks every distro subtree so a unit referenced from
+  multiple images is cleaned in one step.
 - **A new `default_distro` field on `project(...)` plus the `distro` tag on each
   image select which backend an image targets.** Mixed-distro projects work: tag
   images individually, untagged units stay visible to every distro, and

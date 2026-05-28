@@ -8,16 +8,31 @@ import (
 	"strings"
 )
 
-func RunClean(projectDir, arch string, all bool, force bool, units []string) error {
+func RunClean(projectDir, _ string, all bool, force bool, units []string) error {
 	buildDir := filepath.Join(projectDir, "build")
 
 	if len(units) > 0 {
 		for _, r := range units {
-			dir := filepath.Join(buildDir, arch, r)
-			if err := RemoveDirAnyOwner(dir, projectDir); err != nil {
-				return fmt.Errorf("removing %s: %w", dir, err)
+			// Per-R14a build layout: build/<distro>/<name>.<scopeDir>/.
+			// Glob across every distro and scope so `yoe clean <unit>`
+			// removes the unit's destdirs regardless of which images
+			// have built it. (Pre-fix this constructed
+			// build/<arch>/<unit>, which never matched the actual
+			// layout — per-unit clean was a no-op.)
+			matches, err := filepath.Glob(filepath.Join(buildDir, "*", r+".*"))
+			if err != nil {
+				return fmt.Errorf("globbing %s: %w", r, err)
 			}
-			fmt.Printf("Cleaned %s\n", r)
+			for _, dir := range matches {
+				if err := RemoveDirAnyOwner(dir, projectDir); err != nil {
+					return fmt.Errorf("removing %s: %w", dir, err)
+				}
+			}
+			if len(matches) == 0 {
+				fmt.Printf("Cleaned %s (no on-disk build dirs)\n", r)
+			} else {
+				fmt.Printf("Cleaned %s (%d build dirs)\n", r, len(matches))
+			}
 		}
 		return nil
 	}
@@ -89,34 +104,31 @@ func RemoveDirAnyOwner(dir, projectDir string) error {
 	})
 }
 
-func CleanLocks(projectDir, arch string) error {
-	buildDir := filepath.Join(projectDir, "build", arch)
-	entries, err := os.ReadDir(buildDir)
+func CleanLocks(projectDir, _ string) error {
+	// Per-R14a build layout: build/<distro>/<unit>.<scope>/.lock. Walk
+	// every distro subtree rather than a single per-arch tree.
+	lockPaths, err := filepath.Glob(filepath.Join(projectDir, "build", "*", "*.*/.lock"))
 	if err != nil {
-		if os.IsNotExist(err) {
+		return err
+	}
+	if len(lockPaths) == 0 {
+		// Surface "no build dir" vs "build dir with no locks" so the
+		// user knows whether a typo or a clean slate is to blame.
+		if _, err := os.Stat(filepath.Join(projectDir, "build")); os.IsNotExist(err) {
 			fmt.Println("No build directory")
 			return nil
 		}
-		return err
-	}
-
-	count := 0
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		lockPath := filepath.Join(buildDir, e.Name(), ".lock")
-		if _, err := os.Stat(lockPath); err == nil {
-			os.Remove(lockPath)
-			fmt.Printf("Removed lock: %s\n", e.Name())
-			count++
-		}
-	}
-	if count == 0 {
 		fmt.Println("No stale locks found")
-	} else {
-		fmt.Printf("Removed %d lock(s)\n", count)
+		return nil
 	}
+	for _, lockPath := range lockPaths {
+		os.Remove(lockPath)
+		// Surface the unit name plus its enclosing distro so the user
+		// sees which build was holding the lock.
+		rel, _ := filepath.Rel(filepath.Join(projectDir, "build"), filepath.Dir(lockPath))
+		fmt.Printf("Removed lock: %s\n", rel)
+	}
+	fmt.Printf("Removed %d lock(s)\n", len(lockPaths))
 	return nil
 }
 

@@ -48,23 +48,30 @@ func TestCacheMarker(t *testing.T) {
 	hash := "abc123def456"
 
 	arch := "x86_64"
+	distro := "alpine"
 
 	// Not cached initially
-	if IsBuildCached(dir, arch, name, hash) {
+	if IsBuildCached(dir, arch, name, hash, distro) {
 		t.Error("should not be cached initially")
 	}
 
 	// Write marker
-	writeCacheMarker(dir, arch, name, hash)
+	writeCacheMarker(dir, arch, name, hash, distro)
 
 	// Now cached
-	if !IsBuildCached(dir, arch, name, hash) {
+	if !IsBuildCached(dir, arch, name, hash, distro) {
 		t.Error("should be cached after writing marker")
 	}
 
 	// Different hash not cached
-	if IsBuildCached(dir, arch, name, "different") {
+	if IsBuildCached(dir, arch, name, "different", distro) {
 		t.Error("different hash should not be cached")
+	}
+
+	// Different distro is a separate cache slot — R14a disambiguation
+	// at the disk layer is what U6 enables.
+	if IsBuildCached(dir, arch, name, hash, "debian") {
+		t.Error("different distro should not share the cache marker")
 	}
 }
 
@@ -175,9 +182,9 @@ func TestBuildUnits_WithDeps(t *testing.T) {
 	}
 
 	// Verify cache marker was written
-	if !IsBuildCached(projectDir, "x86_64", "hello", "") {
+	if !IsBuildCached(projectDir, "x86_64", "hello", "", "alpine") {
 		// The hash won't be "" — just verify the marker file exists
-		markerDir := filepath.Join(projectDir, "build", "hello.x86_64")
+		markerDir := filepath.Join(projectDir, "build", "alpine", "hello.x86_64")
 		entries, _ := os.ReadDir(markerDir)
 		found := false
 		for _, e := range entries {

@@ -175,15 +175,15 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 	// state — without that step, an uncommitted edit didn't change
 	// the hash and the build was served from cache, silently
 	// dropping the user's edits.
-	srcInputs := SrcInputsFn(opts.ProjectDir, opts.Arch, opts.Machine)
 	// effectiveDistro participates in every unit's input hash via the
-	// gated effective_distro: line in resolve/hash.go. The same source
-	// unit consumed by an alpine image (effective_distro=alpine) and a
-	// debian image (effective_distro=debian) produces two distinct
-	// cache keys — without this, the second consumer reads back the
-	// first one's wrong-libc binary. Use the explicit Options field
-	// when the caller already knows the consuming image's distro;
-	// otherwise derive the project-level fallback.
+	// gated effective_distro: line in resolve/hash.go AND drives the
+	// on-disk build-dir layout (build/<distro>/<unit>.<scope>/). The
+	// same source unit consumed by an alpine image and a debian image
+	// produces two distinct cache keys AND two distinct destdirs, so
+	// neither consumer reads back the other's wrong-libc binary. Use
+	// the explicit Options field when the caller already knows the
+	// consuming image's distro; otherwise derive the project-level
+	// fallback.
 	effectiveDistro := opts.EffectiveDistro
 	if effectiveDistro == "" {
 		effectiveDistro, err = proj.EffectiveDistro()
@@ -191,6 +191,10 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 			return fmt.Errorf("resolving effective distro for build: %w", err)
 		}
 	}
+	// Pin the resolved distro back into opts so deeper helpers
+	// (buildOne, packageDeb, etc.) read the same value.
+	opts.EffectiveDistro = effectiveDistro
+	srcInputs := SrcInputsFn(opts.ProjectDir, opts.Arch, opts.Machine, effectiveDistro)
 	hashes, err := resolve.ComputeAllHashes(dag, opts.Arch, opts.Machine, srcInputs, effectiveDistro)
 	if err != nil {
 		return err
@@ -225,7 +229,7 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		unit := proj.Units[name]
 		sd := ScopeDir(unit, opts.Arch, opts.Machine)
 		forceThis := (opts.Force || opts.Clean) && (len(requested) == 0 || requested[name])
-		if !forceThis && !opts.NoCache && cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hash) {
+		if !forceThis && !opts.NoCache && cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hash, effectiveDistro) {
 			notify(name, "cached")
 		} else {
 			notify(name, "waiting")
@@ -323,7 +327,7 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 
 		built := false
 		if !forceThis && !opts.NoCache && !depRebuilt &&
-			cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hash) {
+			cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hash, effectiveDistro) {
 			fmt.Fprintf(sw, "%-20s [cached] %s\n", name, hash[:12])
 		} else {
 			fmt.Fprintf(sw, "%-20s [building]\n", name)
@@ -346,7 +350,7 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 				mu.Unlock()
 				return
 			}
-			writeCacheMarker(opts.ProjectDir, sd, name, hash)
+			writeCacheMarker(opts.ProjectDir, sd, name, hash, effectiveDistro)
 			fmt.Fprintf(sw, "%-20s [done] %s\n", name, hash[:12])
 			notify(name, "done")
 			built = true
@@ -398,21 +402,22 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 
 func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit *yoestar.Unit, hash string, opts Options, w io.Writer) (buildErr error) {
 	sd := ScopeDir(unit, opts.Arch, opts.Machine)
-	buildDir := UnitBuildDir(opts.ProjectDir, sd, unit.Name)
+	distro := opts.EffectiveDistro
+	buildDir := UnitBuildDir(opts.ProjectDir, sd, unit.Name, distro)
 	EnsureDir(buildDir)
 
 	// Skip if another process is already building this unit.
-	if IsBuildInProgress(opts.ProjectDir, sd, unit.Name) {
+	if IsBuildInProgress(opts.ProjectDir, sd, unit.Name, distro) {
 		fmt.Fprintf(w, "  %s: build already in progress, skipping\n", unit.Name)
 		return nil
 	}
 
 	// Remove the cache marker before starting so a cancelled or failed
 	// build does not leave a stale marker that makes it appear cached.
-	os.Remove(CacheMarkerPath(opts.ProjectDir, sd, unit.Name, hash))
+	os.Remove(CacheMarkerPath(opts.ProjectDir, sd, unit.Name, hash, distro))
 
 	// Write a lock file so other yoe instances can detect an in-progress build.
-	lockPath := BuildingLockPath(opts.ProjectDir, sd, unit.Name)
+	lockPath := BuildingLockPath(opts.ProjectDir, sd, unit.Name, distro)
 	os.WriteFile(lockPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
 	defer os.Remove(lockPath)
 
@@ -554,7 +559,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 
 	// Assemble per-unit sysroot from transitive deps
 	sysroot := filepath.Join(buildDir, "sysroot")
-	if err := AssembleSysroot(sysroot, dag, unit.Name, opts.ProjectDir, opts.Arch); err != nil {
+	if err := AssembleSysroot(sysroot, dag, unit.Name, opts.ProjectDir, opts.Arch, distro); err != nil {
 		return fmt.Errorf("assembling sysroot: %w", err)
 	}
 	// Extract console device from machine kernel cmdline (e.g., "console=ttyS0,115200" → "ttyS0")
@@ -937,7 +942,7 @@ func dryRun(w io.Writer, proj *yoestar.Project, order []string, hashes map[strin
 		sd := ScopeDir(unit, opts.Arch, opts.Machine)
 		cached := ""
 		forceThis := (opts.Force || opts.Clean) && (len(requested) == 0 || requested[name])
-		if !forceThis && cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hashes[name]) {
+		if !forceThis && cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hashes[name], opts.EffectiveDistro) {
 			cached = " [cached, skip]"
 		}
 		fmt.Fprintf(w, "  %-20s [%s] %s%s\n", name, unit.Class, hashes[name][:12], cached)
@@ -1049,12 +1054,12 @@ func chownDirToHost(ctx context.Context, dir, projectDir, image string) error {
 
 // --- Simple file-based cache ---
 
-func CacheMarkerPath(projectDir, arch, name, hash string) string {
-	return filepath.Join(UnitBuildDir(projectDir, arch, name), ".yoe-hash")
+func CacheMarkerPath(projectDir, arch, name, hash, distro string) string {
+	return filepath.Join(UnitBuildDir(projectDir, arch, name, distro), ".yoe-hash")
 }
 
-func IsBuildCached(projectDir, arch, name, hash string) bool {
-	data, err := os.ReadFile(CacheMarkerPath(projectDir, arch, name, hash))
+func IsBuildCached(projectDir, arch, name, hash, distro string) bool {
+	data, err := os.ReadFile(CacheMarkerPath(projectDir, arch, name, hash, distro))
 	if err != nil {
 		return false
 	}
@@ -1070,8 +1075,8 @@ func IsBuildCached(projectDir, arch, name, hash string) bool {
 // and arch (the actual target architecture) because they diverge for
 // machine-scoped units: the build cache lives under build/<machine>/, but
 // the apk lives under repo/.../<arch>/.
-func cacheValid(proj *yoestar.Project, projectDir string, unit *yoestar.Unit, scopeDir, arch, hash string) bool {
-	if !IsBuildCached(projectDir, scopeDir, unit.Name, hash) {
+func cacheValid(proj *yoestar.Project, projectDir string, unit *yoestar.Unit, scopeDir, arch, hash, distro string) bool {
+	if !IsBuildCached(projectDir, scopeDir, unit.Name, hash, distro) {
 		return false
 	}
 	if unit.Class == "image" || unit.Class == "container" {
@@ -1095,20 +1100,20 @@ func cacheValid(proj *yoestar.Project, projectDir string, unit *yoestar.Unit, sc
 	return false
 }
 
-func HasBuildLog(projectDir, arch, name string) bool {
-	_, err := os.Stat(filepath.Join(UnitBuildDir(projectDir, arch, name), "build.log"))
+func HasBuildLog(projectDir, arch, name, distro string) bool {
+	_, err := os.Stat(filepath.Join(UnitBuildDir(projectDir, arch, name, distro), "build.log"))
 	return err == nil
 }
 
 // BuildingLockPath returns the path of the lock file written during a build.
-func BuildingLockPath(projectDir, arch, name string) string {
-	return filepath.Join(UnitBuildDir(projectDir, arch, name), ".lock")
+func BuildingLockPath(projectDir, arch, name, distro string) string {
+	return filepath.Join(UnitBuildDir(projectDir, arch, name, distro), ".lock")
 }
 
 // IsBuildInProgress returns true if another process is currently building this unit.
 // It checks for the lock file and verifies the PID is still alive.
-func IsBuildInProgress(projectDir, arch, name string) bool {
-	data, err := os.ReadFile(BuildingLockPath(projectDir, arch, name))
+func IsBuildInProgress(projectDir, arch, name, distro string) bool {
+	data, err := os.ReadFile(BuildingLockPath(projectDir, arch, name, distro))
 	if err != nil {
 		return false
 	}
@@ -1118,8 +1123,8 @@ func IsBuildInProgress(projectDir, arch, name string) bool {
 	return err == nil
 }
 
-func writeCacheMarker(projectDir, arch, name, hash string) {
-	path := CacheMarkerPath(projectDir, arch, name, hash)
+func writeCacheMarker(projectDir, arch, name, hash, distro string) {
+	path := CacheMarkerPath(projectDir, arch, name, hash, distro)
 	EnsureDir(filepath.Dir(path))
 	os.WriteFile(path, []byte(hash), 0644)
 }
@@ -1163,10 +1168,14 @@ func repoRelPath(proj *yoestar.Project, projectDir string) string {
 // would treat dev units as cache-neutral at startup, never matching
 // the executor-written marker, and dev units would always show as
 // uncached on TUI restart.
-func SrcInputsFn(projectDir, arch, machine string) func(u *yoestar.Unit) string {
+//
+// distro is the consuming image's effective distro (drives the
+// build-dir path); SrcInputsFn looks at the unit's BuildMeta to decide
+// pin-vs-dev, which is per-distro state now that the layout splits.
+func SrcInputsFn(projectDir, arch, machine, distro string) func(u *yoestar.Unit) string {
 	return func(u *yoestar.Unit) string {
 		sd := ScopeDir(u, arch, machine)
-		buildDir := UnitBuildDir(projectDir, sd, u.Name)
+		buildDir := UnitBuildDir(projectDir, sd, u.Name, distro)
 		persisted := source.StateEmpty
 		if meta := ReadMeta(buildDir); meta != nil {
 			persisted = source.State(meta.SourceState)

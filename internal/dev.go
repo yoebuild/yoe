@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/yoebuild/yoe/internal/source"
@@ -30,10 +31,14 @@ func DevExtract(projectDir, arch, unitName string, w io.Writer) error {
 		return fmt.Errorf("unit %q not found", unitName)
 	}
 
-	srcDir := unitSrcDir(projectDir, arch, unitName)
+	srcDir, err := findUnitSrcDir(projectDir, unitName)
+	if err != nil {
+		return err
+	}
 	if _, err := os.Stat(filepath.Join(srcDir, ".git")); os.IsNotExist(err) {
 		return fmt.Errorf("%s is not a git repo — build the recipe first with yoe build", srcDir)
 	}
+	_ = arch // legacy parameter; unitSrcDir now globs across the per-distro build subtree
 
 	// Check if there are commits beyond upstream
 	out, err := gitCmd(srcDir, "rev-list", source.PinTag+"..HEAD")
@@ -107,10 +112,14 @@ func DevExtract(projectDir, arch, unitName string, w io.Writer) error {
 
 // DevDiff shows local commits beyond upstream in a unit's build directory.
 func DevDiff(projectDir, arch, unitName string, w io.Writer) error {
-	srcDir := unitSrcDir(projectDir, arch, unitName)
+	srcDir, err := findUnitSrcDir(projectDir, unitName)
+	if err != nil {
+		return err
+	}
 	if _, err := os.Stat(filepath.Join(srcDir, ".git")); os.IsNotExist(err) {
 		return fmt.Errorf("%s is not a git repo — build the recipe first", srcDir)
 	}
+	_ = arch
 
 	out, err := gitCmd(srcDir, "log", "--oneline", source.PinTag+"..HEAD")
 	if err != nil {
@@ -132,49 +141,90 @@ func DevDiff(projectDir, arch, unitName string, w io.Writer) error {
 // useful when PROJECT.star or a module has an evaluation error — that's
 // often exactly when you want to know which units have uncommitted local
 // work waiting to be extracted.
-func DevStatus(projectDir, arch string, w io.Writer) error {
-	buildDir := filepath.Join(projectDir, "build", arch)
-	entries, err := os.ReadDir(buildDir)
+//
+// Walks every build/<distro>/<name>.<scope>/src/ subtree so units that
+// only built under one consuming distro still surface.
+func DevStatus(projectDir, _ string, w io.Writer) error {
+	// glob: build/<distro>/<name>.<scope>/src/.git
+	matches, err := filepath.Glob(filepath.Join(projectDir, "build", "*", "*.*", "src", ".git"))
 	if err != nil {
-		if os.IsNotExist(err) {
+		return err
+	}
+	if len(matches) == 0 {
+		if _, statErr := os.Stat(filepath.Join(projectDir, "build")); os.IsNotExist(statErr) {
 			fmt.Fprintln(w, "No units with local modifications")
 			return nil
 		}
-		return fmt.Errorf("reading %s: %w", buildDir, err)
 	}
 
-	found := false
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
+	// Deduplicate by unit name so a unit built under both alpine and
+	// debian only prints once. If both copies have local commits, use
+	// whichever has more.
+	type entry struct {
+		count  string
+		distro string
+	}
+	byUnit := map[string]entry{}
+	for _, gitPath := range matches {
+		srcDir := filepath.Dir(gitPath)
+		unitDir := filepath.Dir(srcDir)
+		base := filepath.Base(unitDir) // <name>.<scope>
+		distroDir := filepath.Base(filepath.Dir(unitDir))
+		name := base
+		if dot := strings.Index(base, "."); dot > 0 {
+			name = base[:dot]
 		}
-		name := e.Name()
-		srcDir := filepath.Join(buildDir, name, "src")
-		if _, err := os.Stat(filepath.Join(srcDir, ".git")); os.IsNotExist(err) {
-			continue
-		}
-
 		out, err := gitCmd(srcDir, "rev-list", "--count", source.PinTag+"..HEAD")
 		if err != nil {
 			continue
 		}
-
 		count := strings.TrimSpace(out)
-		if count != "0" {
-			fmt.Fprintf(w, "%-20s %s commit(s) ahead of upstream\n", name, count)
-			found = true
+		if count == "0" {
+			continue
+		}
+		if prev, ok := byUnit[name]; !ok || count > prev.count {
+			byUnit[name] = entry{count: count, distro: distroDir}
 		}
 	}
 
-	if !found {
+	if len(byUnit) == 0 {
 		fmt.Fprintln(w, "No units with local modifications")
+		return nil
 	}
-
+	names := make([]string, 0, len(byUnit))
+	for n := range byUnit {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		e := byUnit[n]
+		fmt.Fprintf(w, "%-20s %s commit(s) ahead of upstream (%s)\n", n, e.count, e.distro)
+	}
 	return nil
 }
 
-func unitSrcDir(projectDir, arch, unitName string) string {
-	return filepath.Join(projectDir, "build", arch, unitName, "src")
+// unitSrcDir is kept as a small helper for callers that already know
+// the unit's distro and scope.
+func unitSrcDir(projectDir, scopeDir, unitName, distro string) string {
+	return filepath.Join(projectDir, "build", distro, unitName+"."+scopeDir, "src")
+}
+
+// findUnitSrcDir locates a unit's src/ directory under build/<distro>/
+// without requiring the caller to know which distro or scope the unit
+// landed under. If the unit has built under multiple distros, it
+// returns the first match (sorted) — sufficient for read-only ops
+// like DevExtract/DevDiff/DevStatus which present the same local-
+// modifications view regardless of consuming distro.
+func findUnitSrcDir(projectDir, unitName string) (string, error) {
+	matches, err := filepath.Glob(filepath.Join(projectDir, "build", "*", unitName+".*", "src"))
+	if err != nil {
+		return "", fmt.Errorf("locating src dir for %s: %w", unitName, err)
+	}
+	if len(matches) == 0 {
+		return "", fmt.Errorf("no build directory for %s — build the recipe first", unitName)
+	}
+	sort.Strings(matches)
+	return matches[0], nil
 }
 
 func gitCmd(dir string, args ...string) (string, error) {
@@ -189,9 +239,13 @@ func gitCmd(dir string, args ...string) (string, error) {
 
 // devSrcDir returns the src/ path for a unit's build dir. Mirrors
 // build.UnitBuildDir without importing the build package (which
-// imports this package).
-func devSrcDir(projectDir, scopeDir, unitName string) string {
-	return filepath.Join(projectDir, "build", unitName+"."+scopeDir, "src")
+// imports this package). distro is the consuming image's effective
+// distro per R14a; an empty distro is a programmer error and panics.
+func devSrcDir(projectDir, scopeDir, unitName, distro string) string {
+	if distro == "" {
+		panic("devSrcDir: distro must not be empty (R14a)")
+	}
+	return filepath.Join(projectDir, "build", distro, unitName+"."+scopeDir, "src")
 }
 
 // DevUpstreamOpts configures the upstream-fetch performed when a unit
@@ -231,8 +285,8 @@ type DevUpstreamOpts struct {
 //
 // Branch-only (Branch set, Tag empty) is malformed: tag is the pin, branch
 // only tracks dev. Returns an error before touching git.
-func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, opts DevUpstreamOpts) error {
-	srcDir := devSrcDir(projectDir, scopeDir, unit.Name)
+func DevToUpstream(projectDir, scopeDir, distro string, unit *yoestar.Unit, opts DevUpstreamOpts) error {
+	srcDir := devSrcDir(projectDir, scopeDir, unit.Name, distro)
 	if _, err := os.Stat(filepath.Join(srcDir, ".git")); err != nil {
 		return fmt.Errorf("DevToUpstream: %s is not a git repo — build the unit first", srcDir)
 	}
@@ -313,7 +367,7 @@ func DevToUpstream(projectDir, scopeDir string, unit *yoestar.Unit, opts DevUpst
 		}
 	}
 
-	if err := writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StateDev); err != nil {
+	if err := writeUnitSourceState(projectDir, scopeDir, unit.Name, distro, source.StateDev); err != nil {
 		return fmt.Errorf("DevToUpstream: persisting state: %w", err)
 	}
 	return nil
@@ -389,8 +443,8 @@ func devPinnedRef(unit *yoestar.Unit) string {
 // beyond `upstream` or uncommitted edits in the work tree — the caller
 // (TUI or CLI) is responsible for surfacing a confirmation to the user
 // when local work is at stake.
-func DevToPin(projectDir, scopeDir string, unit *yoestar.Unit, force bool) error {
-	srcDir := devSrcDir(projectDir, scopeDir, unit.Name)
+func DevToPin(projectDir, scopeDir, distro string, unit *yoestar.Unit, force bool) error {
+	srcDir := devSrcDir(projectDir, scopeDir, unit.Name, distro)
 	// Refuse to touch anything if srcDir isn't a self-contained git
 	// repo. Without this guard, git commands run with cmd.Dir=srcDir
 	// silently walk up to a parent .git (the user's project repo) and
@@ -399,7 +453,7 @@ func DevToPin(projectDir, scopeDir string, unit *yoestar.Unit, force bool) error
 	if _, err := os.Stat(filepath.Join(srcDir, ".git")); err != nil {
 		return fmt.Errorf("DevToPin: %s is not a git repo (missing .git) — build the unit first", srcDir)
 	}
-	state, _ := source.DetectState(srcDir, readUnitSourceState(projectDir, scopeDir, unit.Name))
+	state, _ := source.DetectState(srcDir, readUnitSourceState(projectDir, scopeDir, unit.Name, distro))
 	if !force {
 		switch state {
 		case source.StateDevDirty:
@@ -440,7 +494,7 @@ func DevToPin(projectDir, scopeDir string, unit *yoestar.Unit, force bool) error
 	if _, err := gitCmd(srcDir, "tag", "-f", source.PinTag, unit.Tag); err != nil {
 		return fmt.Errorf("DevToPin: resetting upstream tag: %w", err)
 	}
-	if err := writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StatePin); err != nil {
+	if err := writeUnitSourceState(projectDir, scopeDir, unit.Name, distro, source.StatePin); err != nil {
 		return fmt.Errorf("DevToPin: persisting pin state: %w", err)
 	}
 	return nil
@@ -470,8 +524,8 @@ func httpsToSSH(httpsURL string) (string, bool) {
 // unit. Returns StateEmpty when the meta file is missing or
 // unreadable — the caller passes that to DetectState, which falls
 // back to the origin-remote heuristic.
-func readUnitSourceState(projectDir, scopeDir, unitName string) source.State {
-	buildDir := filepath.Join(projectDir, "build", unitName+"."+scopeDir)
+func readUnitSourceState(projectDir, scopeDir, unitName, distro string) source.State {
+	buildDir := filepath.Join(projectDir, "build", distro, unitName+"."+scopeDir)
 	data, err := os.ReadFile(filepath.Join(buildDir, "build.json"))
 	if err != nil {
 		return source.StateEmpty
@@ -489,8 +543,8 @@ func readUnitSourceState(projectDir, scopeDir, unitName string) source.State {
 // build dir, leaving every other meta field intact. Used by DevTo*
 // to mark a unit as dev or clear it back to pin without re-running
 // the executor's full meta finalize.
-func writeUnitSourceState(projectDir, scopeDir, unitName string, state source.State) error {
-	buildDir := filepath.Join(projectDir, "build", unitName+"."+scopeDir)
+func writeUnitSourceState(projectDir, scopeDir, unitName, distro string, state source.State) error {
+	buildDir := filepath.Join(projectDir, "build", distro, unitName+"."+scopeDir)
 	if err := os.MkdirAll(buildDir, 0o755); err != nil {
 		return err
 	}
@@ -543,9 +597,9 @@ func writeUnitSourceState(projectDir, scopeDir, unitName string, state source.St
 // and the source-state column now agree on the new pin. The working
 // tree commit is unchanged; the user can toggle `u` to go back to dev
 // mode if they want to keep iterating from this point.
-func DevPromoteToPin(projectDir, scopeDir string, unit *yoestar.Unit) error {
-	srcDir := devSrcDir(projectDir, scopeDir, unit.Name)
-	state, _ := source.DetectState(srcDir, readUnitSourceState(projectDir, scopeDir, unit.Name))
+func DevPromoteToPin(projectDir, scopeDir, distro string, unit *yoestar.Unit) error {
+	srcDir := devSrcDir(projectDir, scopeDir, unit.Name, distro)
+	state, _ := source.DetectState(srcDir, readUnitSourceState(projectDir, scopeDir, unit.Name, distro))
 	switch state {
 	case source.StateDev, source.StateDevMod:
 		// proceed
@@ -599,7 +653,7 @@ func DevPromoteToPin(projectDir, scopeDir string, unit *yoestar.Unit) error {
 	// .star and the working tree now agree on the new pin, and the
 	// SRC column should reflect that. If the user wants to keep
 	// iterating in dev mode after pinning, they can toggle `u` again.
-	return writeUnitSourceState(projectDir, scopeDir, unit.Name, source.StatePin)
+	return writeUnitSourceState(projectDir, scopeDir, unit.Name, distro, source.StatePin)
 }
 
 // findUnitStarFile locates the .star file that registers a unit with

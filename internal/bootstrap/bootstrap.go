@@ -50,11 +50,19 @@ func Stage0(proj *yoestar.Project, projectDir string, w io.Writer) error {
 	// Build each bootstrap unit without sandbox isolation (using host tools)
 	repoDir := repo.RepoDir(proj, projectDir)
 
+	// Bootstrap stages target the Alpine pipeline (glibc-from-source +
+	// apk-tools). The distro segment in build/<distro>/... reflects
+	// that explicit choice rather than the project's default.
+	distro, err := proj.EffectiveDistro()
+	if err != nil {
+		return fmt.Errorf("bootstrap: %w", err)
+	}
+
 	for _, name := range bootstrapUnits {
 		unit := proj.Units[name]
 		fmt.Fprintf(w, "\n--- Building %s %s ---\n", unit.Name, unit.Version)
 
-		buildDir := build.UnitBuildDir(projectDir, arch, unit.Name)
+		buildDir := build.UnitBuildDir(projectDir, arch, unit.Name, distro)
 		destDir := filepath.Join(buildDir, "destdir")
 
 		// Clean and prepare
@@ -118,6 +126,11 @@ func Stage1(proj *yoestar.Project, projectDir string, w io.Writer) error {
 	arch := build.Arch()
 	repoDir := repo.RepoDir(proj, projectDir)
 
+	distro, err := proj.EffectiveDistro()
+	if err != nil {
+		return fmt.Errorf("bootstrap stage1: %w", err)
+	}
+
 	// Verify Stage 0 packages exist in the repo
 	if err := verifyStage0(repoDir, arch); err != nil {
 		return fmt.Errorf("stage 0 not complete: %w\nRun 'yoe bootstrap stage0' first", err)
@@ -134,7 +147,7 @@ func Stage1(proj *yoestar.Project, projectDir string, w io.Writer) error {
 		unit := proj.Units[name]
 		fmt.Fprintf(w, "\n--- Rebuilding %s %s (self-hosted) ---\n", unit.Name, unit.Version)
 
-		buildDir := build.UnitBuildDir(projectDir, arch, unit.Name)
+		buildDir := build.UnitBuildDir(projectDir, arch, unit.Name, distro)
 		destDir := filepath.Join(buildDir, "destdir")
 
 		os.RemoveAll(destDir)

@@ -424,6 +424,10 @@ type model struct {
 	proj              *yoestar.Project
 	projectDir        string
 	arch              string
+	// distro is the project's effective distro at TUI startup. Drives
+	// every UnitBuildDir / IsBuildCached lookup so the TUI inspects
+	// the right per-distro subtree under build/<distro>/.
+	distro            string
 	warning           string // persistent warning banner (e.g., binfmt missing)
 	notification      string // transient global notification (e.g., container rebuild)
 	dag               *resolve.DAG
@@ -596,7 +600,11 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	if m, ok := proj.Machines[proj.Defaults.Machine]; ok {
 		arch = m.Arch
 	}
-	hashes, err := resolve.ComputeAllHashes(dag, arch, proj.Defaults.Machine, build.SrcInputsFn(projectDir, arch, proj.Defaults.Machine), "")
+	distro, err := proj.EffectiveDistro()
+	if err != nil {
+		return fmt.Errorf("resolving effective distro: %w", err)
+	}
+	hashes, err := resolve.ComputeAllHashes(dag, arch, proj.Defaults.Machine, build.SrcInputsFn(projectDir, arch, proj.Defaults.Machine, distro), distro)
 	if err != nil {
 		return fmt.Errorf("computing hashes: %w", err)
 	}
@@ -609,11 +617,11 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 		if u, ok := proj.Units[name]; ok {
 			sd = build.ScopeDir(u, arch, proj.Defaults.Machine)
 		}
-		if build.IsBuildCached(projectDir, sd, name, hash) {
+		if build.IsBuildCached(projectDir, sd, name, hash, distro) {
 			statuses[name] = statusCached
-		} else if build.IsBuildInProgress(projectDir, sd, name) {
+		} else if build.IsBuildInProgress(projectDir, sd, name, distro) {
 			statuses[name] = statusBuilding
-		} else if meta := build.ReadMeta(build.UnitBuildDir(projectDir, sd, name)); meta != nil && meta.Hash == hash && meta.Status == "failed" {
+		} else if meta := build.ReadMeta(build.UnitBuildDir(projectDir, sd, name, distro)); meta != nil && meta.Hash == hash && meta.Status == "failed" {
 			statuses[name] = statusFailed
 		}
 	}
@@ -632,6 +640,7 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 		proj:            proj,
 		projectDir:      projectDir,
 		arch:            arch,
+		distro:          distro,
 		dag:             dag,
 		units:           units,
 		hashes:          hashes,
@@ -1223,7 +1232,7 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "l":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
-			logPath := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name), "build.log")
+			logPath := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name, m.distro), "build.log")
 			if _, err := os.Stat(logPath); err == nil {
 				return m, m.execEditor(logPath)
 			}
@@ -1234,7 +1243,7 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
-			logPath := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name), "build.log")
+			logPath := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name, m.distro), "build.log")
 			c := exec.Command("claude", fmt.Sprintf("diagnose %s", logPath))
 			c.Dir = m.projectDir
 			return m, tea.ExecProcess(c, func(err error) tea.Msg {
@@ -1876,7 +1885,7 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		} else if strings.HasPrefix(action, "clean:") {
 			name := strings.TrimPrefix(action, "clean:")
-			buildDir := build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name)
+			buildDir := build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name, m.distro)
 			if err := yoe.RemoveDirAnyOwner(buildDir, m.projectDir); err != nil {
 				m.message = fmt.Sprintf("Clean failed: %v", err)
 			} else {
@@ -2463,7 +2472,7 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.execShell(srcDir)
 
 	case "d":
-		logPath := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit), "build.log")
+		logPath := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit, m.distro), "build.log")
 		c := exec.Command("claude", fmt.Sprintf("diagnose %s", logPath))
 		c.Dir = m.projectDir
 		return m, tea.ExecProcess(c, func(err error) tea.Msg {
@@ -2497,7 +2506,7 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "l":
-		logPath := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit), "build.log")
+		logPath := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit, m.distro), "build.log")
 		if _, err := os.Stat(logPath); err == nil {
 			return m, m.execEditor(logPath)
 		}
@@ -4202,7 +4211,7 @@ func (m model) viewDetail() string {
 	// Show build metadata if available
 	if u, ok := m.proj.Units[m.detailUnit]; ok {
 		sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
-		buildDir := build.UnitBuildDir(m.projectDir, sd, m.detailUnit)
+		buildDir := build.UnitBuildDir(m.projectDir, sd, m.detailUnit, m.distro)
 		currentHash := m.hashes[m.detailUnit]
 		if meta := build.ReadMeta(buildDir); meta != nil && meta.Hash == currentHash {
 			dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
@@ -4590,7 +4599,7 @@ func (m *model) startBuild(name string) tea.Cmd {
 	if u, ok := m.proj.Units[name]; ok {
 		sd = build.ScopeDir(u, arch, machine)
 	}
-	outputPath := filepath.Join(build.UnitBuildDir(projectDir, sd, unitName), "executor.log")
+	outputPath := filepath.Join(build.UnitBuildDir(projectDir, sd, unitName, m.distro), "executor.log")
 	build.EnsureDir(filepath.Dir(outputPath))
 
 	return func() tea.Msg {
@@ -4669,7 +4678,7 @@ func (m model) unitSrcDir(name string) string {
 	if _, ok := m.proj.Units[name]; !ok {
 		return ""
 	}
-	srcDir := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name), "src")
+	srcDir := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name, m.distro), "src")
 	if _, err := os.Stat(srcDir); err != nil {
 		return ""
 	}
@@ -4677,7 +4686,7 @@ func (m model) unitSrcDir(name string) string {
 }
 
 func (m *model) refreshDetail() {
-	unitDir := build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit)
+	unitDir := build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit, m.distro)
 	outputPath := filepath.Join(unitDir, "executor.log")
 	m.outputLines = readFileAll(outputPath)
 	logPath := filepath.Join(unitDir, "build.log")
@@ -4704,7 +4713,7 @@ func (m *model) refreshDetail() {
 func (m *model) refreshDetailFiles() {
 	m.detailFiles = nil
 	m.detailFilesScroll = 0
-	walkRoot := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit), "destdir")
+	walkRoot := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit, m.distro), "destdir")
 	if u, ok := m.proj.Units[m.detailUnit]; ok && u.Class == "image" {
 		walkRoot = filepath.Join(walkRoot, "rootfs")
 	}
@@ -5092,7 +5101,7 @@ func (m *model) recomputeMetrics() {
 			continue
 		}
 		sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
-		buildDir := build.UnitBuildDir(m.projectDir, sd, name)
+		buildDir := build.UnitBuildDir(m.projectDir, sd, name, m.distro)
 		size[name] = installedSize(buildDir)
 
 		// Runtime closure of what the unit pulls in. For image units the
@@ -5156,7 +5165,7 @@ func (m *model) refreshUnitSize(name string) {
 		return
 	}
 	sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
-	buildDir := build.UnitBuildDir(m.projectDir, sd, name)
+	buildDir := build.UnitBuildDir(m.projectDir, sd, name, m.distro)
 	if m.unitSize == nil {
 		m.unitSize = make(map[string]int64)
 	}
@@ -5210,7 +5219,7 @@ func (m model) detailSourceLine() string {
 	// rewritten origin (HTTPS↔SSH), surface the live remote instead.
 	url := u.Source
 	sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
-	buildDir := build.UnitBuildDir(m.projectDir, sd, m.detailUnit)
+	buildDir := build.UnitBuildDir(m.projectDir, sd, m.detailUnit, m.distro)
 	srcDir := filepath.Join(buildDir, "src")
 	if source.IsDev(state) {
 		if live := remoteOriginURL(srcDir); live != "" {
@@ -5353,7 +5362,7 @@ func (m model) unitSourceState(name string) source.State {
 	state := source.StateEmpty
 	if u, ok := m.proj.Units[name]; ok {
 		sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
-		buildDir := build.UnitBuildDir(m.projectDir, sd, name)
+		buildDir := build.UnitBuildDir(m.projectDir, sd, name, m.distro)
 		if meta := build.ReadMeta(buildDir); meta != nil {
 			state = source.State(meta.SourceState)
 		}
@@ -5448,7 +5457,7 @@ func (m *model) recomputeStatuses() {
 	// m.visible would carry stale indices into the old slice.
 	m.applyQuery()
 
-	hashes, err := resolve.ComputeAllHashes(m.dag, m.arch, m.proj.Defaults.Machine, build.SrcInputsFn(m.projectDir, m.arch, m.proj.Defaults.Machine), "")
+	hashes, err := resolve.ComputeAllHashes(m.dag, m.arch, m.proj.Defaults.Machine, build.SrcInputsFn(m.projectDir, m.arch, m.proj.Defaults.Machine, m.distro), m.distro)
 	if err != nil {
 		return
 	}
@@ -5462,11 +5471,11 @@ func (m *model) recomputeStatuses() {
 		if u, ok := m.proj.Units[name]; ok {
 			sd = build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
 		}
-		if build.IsBuildCached(m.projectDir, sd, name, hash) {
+		if build.IsBuildCached(m.projectDir, sd, name, hash, m.distro) {
 			m.statuses[name] = statusCached
-		} else if build.IsBuildInProgress(m.projectDir, sd, name) {
+		} else if build.IsBuildInProgress(m.projectDir, sd, name, m.distro) {
 			m.statuses[name] = statusBuilding
-		} else if meta := build.ReadMeta(build.UnitBuildDir(m.projectDir, sd, name)); meta != nil && meta.Hash == hash && meta.Status == "failed" {
+		} else if meta := build.ReadMeta(build.UnitBuildDir(m.projectDir, sd, name, m.distro)); meta != nil && meta.Hash == hash && meta.Status == "failed" {
 			m.statuses[name] = statusFailed
 		} else {
 			m.statuses[name] = statusNone
