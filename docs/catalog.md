@@ -453,6 +453,101 @@ The catalog is small enough that storage shape is not a memory or
 speed concern; the structural property the design buys is correctness
 of cross-distro disambiguation, not scale.
 
+## Lifecycle and persistence
+
+The catalog lives entirely in memory and is rebuilt from scratch on
+every yoe invocation. Understanding what survives between processes
+and what doesn't tells you when you can edit something and have it
+take effect, and when you have to restart.
+
+### Per-invocation: everything in memory is fresh
+
+A yoe invocation — `yoe build`, `yoe deploy`, `yoe dry-run`, `yoe tui`,
+`yoe update-feeds`, … — is a fresh process. The `Engine` struct, the
+`archCache`, the materialized `*Unit` pointers, `UnitsByModule`,
+`DistroViews`, the `Provides` map — all are constructed during loader
+evaluation and discarded when the process exits.
+
+So every invocation re-runs the loader in this order:
+
+1. **Module discovery.** Parse `PROJECT.star`, resolve `modules =
+   [...]` to clone paths, evaluate each `MODULE.star` in priority
+   order.
+2. **Eager registration.** Classes (`classes/*.star`), source-declared
+   units (`units/*.star`), machines (`machines/*.star`), and synthetic
+   modules (each `alpine_feed(...)` / `debian_feed(...)` call) all
+   register during this phase. No `archCache` parse yet — the feed
+   builtin only stores the on-disk index path and the callback.
+3. **Image evaluation.** Every `image(...)` call in every module fires
+   `resolve_closure(artifacts, distro=...)`, which drives BFS through
+   the runtime-dep graph. The first time a feed's `Lookup` runs, its
+   `archCache` parses the on-disk `APKINDEX` or `Packages` file
+   (~50–150ms one-time). Subsequent lookups against the same feed are
+   cheap map accesses.
+4. **Distro views.** `buildDistroViews(proj)` runs once at the end of
+   evaluation, filtering / pinning / priority-ranking per name per
+   distro, producing the read-only `DistroViews` map.
+5. **The actual command.** Build executor, deploy, TUI render — all
+   read from the now-frozen catalog through `LookupUnit` and
+   `AllUnits`.
+
+### What survives between invocations
+
+The in-memory catalog rebuilds every time, but several on-disk caches
+make that rebuild cheap on the second-and-later invocations:
+
+- **Build cache.** `build/<unit>.<scope>/destdir/` plus the
+  content-addressed apk/deb output per unit. The build executor hashes
+  each unit's inputs (source digest, dep hashes, effective distro) and
+  re-uses any matching cache entry. A second `yoe build` with no
+  source changes finishes in seconds because nothing actually compiles.
+- **Source cache.** Downloaded tarballs and git clones under
+  `cache/sources/`. A unit's source is fetched once per `(URL, ref)`
+  tuple.
+- **Module cache.** External modules cloned under `cache/modules/`.
+  A `yoe build` does a `git fetch` and resets to the pinned ref but
+  doesn't re-clone.
+- **Feed indexes.** `APKINDEX` for Alpine, `Packages` for Debian — both
+  live as plain text inside the module repos
+  (`module-alpine/feeds/<section>/<arch>/APKINDEX`,
+  `module-debian/feeds/<section>/<arch>/Packages`). These are
+  refreshed only by `yoe update-feeds`; ordinary builds read what's
+  checked in.
+
+So every invocation re-parses these on-disk files into the in-memory
+`archCache`, but the underlying data isn't regenerated unless you
+explicitly run `update-feeds`.
+
+### When you need to restart
+
+For one-shot commands (`yoe build`, `yoe deploy`, `yoe dry-run`,
+etc.), "restart" isn't really a concept — each invocation reloads
+everything from disk. Edit a `.star` file and the next build picks it
+up automatically.
+
+For long-running surfaces (the TUI, or a future `yoe serve` daemon),
+restart is needed for any change that affects what the catalog
+contains:
+
+| What changed | Restart needed? |
+| ------------ | --------------- |
+| A `.star` file: unit, image, class, MODULE.star, PROJECT.star | Yes |
+| `local.star` (default-distro override, QEMU settings) | Yes |
+| `prefer_modules` pin in PROJECT.star | Yes |
+| Synced module repo (`git pull` in a `cache/modules/<mod>/`) | Yes |
+| Refreshed feed index (`yoe update-feeds` ran in another shell) | Yes |
+| A unit's upstream source (the tarball or git repo it points at) | No — next build re-fetches if the unit's ref changes |
+| A unit's build output (you ran `yoe build` in another shell) | No — TUI sees new build state on next refresh |
+
+There's no in-process "reload" API: the `archCache` and `DistroViews`
+are computed once per process by design. Making the in-memory state
+authoritative for the lifetime of the process avoids race conditions
+between "what the resolver thinks" and "what's on disk." If the
+resolver could re-read the catalog mid-run, a build executor partway
+through a closure could find that some name now resolves differently
+than it did at the start of the build — a class of bug worth avoiding
+structurally rather than handling explicitly.
+
 ## Invariants the resolver relies on
 
 The catalog's contract to the rest of the system:
