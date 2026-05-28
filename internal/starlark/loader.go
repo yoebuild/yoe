@@ -197,6 +197,19 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		return nil, fmt.Errorf("evaluating %s: %w", projFile, err)
 	}
 
+	// Layer local.star's per-developer overrides on top of the
+	// project's committed defaults. Today only DefaultDistroOverride
+	// flows through here; the other fields (machine, image, qemu_*,
+	// parallel_builds) are consumed by their own callsites via
+	// LoadLocalOverrides directly.
+	if proj := eng.Project(); proj != nil {
+		if ov, err := LoadLocalOverrides(root); err == nil {
+			if ov.DefaultDistroOverride != "" {
+				proj.DefaultDistroOverride = ov.DefaultDistroOverride
+			}
+		}
+	}
+
 	// Sync modules + walk their MODULE.star for transitive deps in an
 	// iterated sync↔peek fixpoint. Each round: (1) sync the current set,
 	// (2) peek each module for its declared `module_info(deps=...)`,

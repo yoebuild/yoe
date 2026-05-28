@@ -485,6 +485,7 @@ type model struct {
 	setupField     string   // "" = top-level, "machine" / "image" / "qemu" = sub-screen active
 	machineCursor  int      // cursor within machine list
 	imageCursor    int      // cursor within image list
+	distroCursor   int      // cursor within Default Distro picker
 	parallelBuilds int      // effective `yoe build` concurrency (adjusted on the Setup page)
 	qemuMemory     string   // local.star qemu_memory ("" = machine default; adjusted on the Setup page)
 
@@ -1921,7 +1922,7 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // Setup option names — add new options here.
-var setupOptions = []string{"Machine", "Image", "Parallel builds", "QEMU settings"}
+var setupOptions = []string{"Machine", "Image", "Default Distro", "Parallel builds", "QEMU settings"}
 
 // QEMU settings sub-screen rows. Memory and Display occupy fixed positions
 // at the top; below them is the Ports section (each local port row + one
@@ -2014,6 +2015,8 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateSetupMachine(msg)
 	case "image":
 		return m.updateSetupImage(msg)
+	case "distro":
+		return m.updateSetupDistro(msg)
 	case "qemu":
 		return m.updateSetupQEMU(msg)
 	}
@@ -2073,6 +2076,17 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			for i, name := range imgs {
 				if name == m.proj.Defaults.Image {
 					m.imageCursor = i
+					break
+				}
+			}
+		case "Default Distro":
+			m.setupField = "distro"
+			m.distroCursor = 0
+			choices := m.distroChoices()
+			active := m.proj.DefaultDistroOverride
+			for i, name := range choices {
+				if (name == "(none)" && active == "") || name == active {
+					m.distroCursor = i
 					break
 				}
 			}
@@ -2355,6 +2369,108 @@ func (m model) updateSetupMachine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.setupField = ""
 		m.view = viewUnits
+		return m, nil
+	}
+	return m, nil
+}
+
+// distroSummary renders the right-hand value in the top-level Setup
+// row. Shows the override when set, otherwise the project default,
+// otherwise "<none>".
+func (m model) distroSummary() string {
+	if m.proj.DefaultDistroOverride != "" {
+		if m.proj.DefaultDistro != "" && m.proj.DefaultDistroOverride != m.proj.DefaultDistro {
+			return fmt.Sprintf("%s (overrides PROJECT.star: %s)",
+				m.proj.DefaultDistroOverride, m.proj.DefaultDistro)
+		}
+		return m.proj.DefaultDistroOverride
+	}
+	if m.proj.DefaultDistro != "" {
+		return m.proj.DefaultDistro
+	}
+	return "<none>"
+}
+
+func defaultIfEmpty(s, alt string) string {
+	if s == "" {
+		return alt
+	}
+	return s
+}
+
+// distroChoices returns the picker entries for the Default Distro
+// sub-screen. The first entry is "(none)" — selecting it clears the
+// override. The remaining entries are the distinct distros declared
+// by loaded synthetic-feed modules (alpine_feed → "alpine",
+// debian_feed → "debian"), in sorted order. Sourced from the
+// project's synthetic modules so yoe core never hardcodes a distro
+// enum; a project that includes only module-alpine sees just
+// "(none)" and "alpine".
+func (m model) distroChoices() []string {
+	seen := map[string]struct{}{}
+	for _, sm := range m.proj.SyntheticModules {
+		if sm.Parent == "" {
+			continue
+		}
+		seen[sm.Parent] = struct{}{}
+	}
+	out := make([]string, 0, len(seen)+1)
+	out = append(out, "(none)")
+	names := make([]string, 0, len(seen))
+	for n := range seen {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	out = append(out, names...)
+	return out
+}
+
+// updateSetupDistro handles key events on the Default Distro picker
+// sub-screen. Persists the selected override to local.star.
+func (m model) updateSetupDistro(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	choices := m.distroChoices()
+	switch msg.String() {
+	case "esc":
+		m.setupField = ""
+		return m, nil
+	case "up", "k":
+		if m.distroCursor > 0 {
+			m.distroCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.distroCursor < len(choices)-1 {
+			m.distroCursor++
+		}
+		return m, nil
+	case "enter":
+		if len(choices) == 0 {
+			return m, nil
+		}
+		picked := choices[m.distroCursor]
+		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+		if picked == "(none)" {
+			ov.DefaultDistroOverride = ""
+			m.proj.DefaultDistroOverride = ""
+		} else {
+			ov.DefaultDistroOverride = picked
+			m.proj.DefaultDistroOverride = picked
+		}
+		// Effective distro changes ripple into the build/<distro>/
+		// and repo/<project>/<distro>/ subtrees the TUI inspects,
+		// so refresh the cached distro and re-walk statuses.
+		if d, derr := m.proj.EffectiveDistro(); derr == nil {
+			m.distro = d
+		}
+		var msgText string
+		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
+			msgText = fmt.Sprintf("Default Distro set to %s (warning: failed to save local.star: %v)", picked, err)
+		} else {
+			msgText = fmt.Sprintf("Default Distro set to %s (saved to local.star)", picked)
+		}
+		m.message = msgText
+		m.recomputeStatuses()
+		m.setupField = ""
 		return m, nil
 	}
 	return m, nil
@@ -3693,6 +3809,34 @@ func (m model) viewSetup() string {
 	case "qemu":
 		b.WriteString(m.viewSetupQEMU())
 
+	case "distro":
+		b.WriteString(headerStyle.Render("  Select Default Distro"))
+		b.WriteString("\n\n")
+		b.WriteString(helpStyle.Render(fmt.Sprintf("  PROJECT.star default: %s",
+			defaultIfEmpty(m.proj.DefaultDistro, "<none>"))))
+		b.WriteString("\n\n")
+		choices := m.distroChoices()
+		if len(choices) <= 1 {
+			b.WriteString(dimStyle.Render("  no synthetic-feed modules loaded (no distros to pick from)\n"))
+		}
+		active := m.proj.DefaultDistroOverride
+		for i, name := range choices {
+			cursor := "  "
+			style := dimStyle
+			if i == m.distroCursor {
+				cursor = "→ "
+				style = selectedStyle
+			}
+			current := ""
+			if (name == "(none)" && active == "") || name == active {
+				current = cachedStyle.Render(" (current)")
+			}
+			b.WriteString(fmt.Sprintf("%s%s%s\n", cursor, style.Render(name), current))
+		}
+		b.WriteString("\n")
+		b.WriteString(helpStyle.Render("  enter select  esc back  ? help"))
+		b.WriteString("\n")
+
 	default:
 		// Top-level setup menu
 		for i, opt := range setupOptions {
@@ -3708,6 +3852,8 @@ func (m model) viewSetup() string {
 				value = headerStyle.Render(m.proj.Defaults.Machine)
 			case "Image":
 				value = headerStyle.Render(m.proj.Defaults.Image)
+			case "Default Distro":
+				value = headerStyle.Render(m.distroSummary())
 			case "Parallel builds":
 				value = headerStyle.Render(fmt.Sprintf("%d", m.parallelBuilds))
 			case "QEMU settings":

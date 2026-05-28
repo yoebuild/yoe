@@ -44,6 +44,13 @@ and this project adheres to
   paths that never matched the actual build directory, so per-unit clean was a
   silent no-op. The fix walks every distro subtree so a unit referenced from
   multiple images is cleaned in one step.
+- **TUI Setup has a Default Distro picker.** Press `s` on the home screen,
+  navigate to "Default Distro", and pick from the distros provided by your
+  loaded synthetic-feed modules (`alpine`, `debian`, …) or `(none)` to clear
+  the override. The selection persists to `local.star` as
+  `default_distro_override` and takes effect immediately — the TUI re-walks
+  the build cache against the new effective distro so cached/building/failed
+  status reflects the right per-distro subtree.
 - **APK repos now live under `repo/<project>/alpine/<arch>/`.** Per-arch
   `APKINDEX.tar.gz` trees, the project public key, and the `keys/` directory
   all moved one level deeper so an Alpine and a Debian project can coexist
