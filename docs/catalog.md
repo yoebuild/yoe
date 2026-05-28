@@ -132,30 +132,92 @@ effect.
 
 ## Lazy materialization
 
-A `SyntheticModule` is the lazy half of the catalog. Its contract:
+### Where it starts
 
-```go
-type SyntheticModule struct {
-    Name     string             // composed name, e.g. "alpine.main"
-    Parent   string             // owning module, e.g. "module-alpine"
-    Priority int                // negative; below every real module
-    Lookup   func(name string) (*Unit, error)
-    Names    func() []string    // enumeration for diagnostics/TUI
-}
+Materialization is triggered by image evaluation. When an image like
+
+```python
+image(
+    name = "debian-base-image",
+    distro = "debian",
+    artifacts = ["apt", "openssh-server", "linux-image-amd64"],
+)
 ```
 
-`LookupUnit(distro, name)` checks `DistroViews[distro][name]` first
-— a hit returns immediately. On a miss, the loader visits each
-registered `SyntheticModule` in priority order; the first non-nil
-return is registered into `UnitsByModule[<module>][name]` and the
-affected `DistroViews[*][name]` entries are computed before returning.
-Subsequent lookups for the same name hit the view fast path.
+is being evaluated, the image class calls
+`resolve_closure(artifacts, distro="debian")`. That's the entry point.
+The Go-side builtin takes the artifacts list as the **roots** of a
+breadth-first walk through the runtime-dep graph, and every name
+visited triggers a lookup. Lookups that miss the catalog drive
+materialization.
+
+Nothing is materialized before an image asks for it. A project that
+declares `module-debian` but defines no debian image never parses the
+debian `Packages` file, never allocates a single debian-tagged `*Unit`.
+
+### The materialization cycle, step by step
+
+For each name dequeued from the BFS frontier:
+
+1. **Resolve provides.** If the name is a virtual like `toolchain`,
+   `ResolveProvidesForDistro(distro, name)` substitutes the concrete
+   providing unit's name (e.g. `toolchain-glibc` for distro=debian).
+2. **Check the view.** `LookupUnit(distro, resolved)` reads
+   `DistroViews[distro][resolved]`. Hit → return the existing `*Unit`,
+   no allocation. (This is the common case after the first walk
+   visits a name.)
+3. **Walk synthetics on miss.** Visit each `SyntheticModule` in
+   priority order. For each, call `sm.Lookup(resolved)`.
+4. **First synthetic that has the name materializes it.** Inside
+   `sm.Lookup`:
+   - Pick the active arch (e.g. `x86_64` → debian arch `amd64`).
+   - Load the `archCache` if it's not loaded yet — this is the
+     one-time `~50–150ms` parse of `feeds/<section>/<arch>/APKINDEX`
+     or `feeds/<section>/<arch>/Packages` from disk into a
+     `[]Entry` plus a `byName` map.
+   - Look up `resolved` in the `byName` map. Miss → return nil; the
+     walker continues to the next synthetic. Hit → continue.
+   - Call `MaterializeUnit(entry, providers, moduleName)`. This
+     parses the upstream `Depends:` / `depends:` list, runs each
+     token through the project-wide provides table (cross-feed via
+     `multiFeedProviders` for Debian), and constructs one `*Unit`
+     with its `RuntimeDeps`, `Provides`, `Replaces`, etc. filled in.
+   - `populateBuildFields` adds the build-transport metadata: the
+     upstream URL, the `PassthroughAPK` / `PassthroughDeb` filename,
+     the toolchain container, the install task that extracts the
+     archive into `$DESTDIR`, and the unit's `Distro` tag.
+   - Return the `*Unit`.
+5. **Register and update views.** The walker stores the returned
+   `*Unit` under `UnitsByModule[<module>][resolved]` and updates the
+   affected `DistroViews[*][resolved]` entries (only views for distros
+   the unit is visible to — debian-tagged units land in
+   `DistroViews["debian"]`, untagged units land in every view).
+6. **Push runtime-deps onto the queue.** Each name in the new unit's
+   `RuntimeDeps` goes onto the back of the BFS queue. Already-visited
+   names (in a `seen` set) are skipped so cycles don't loop.
+
+Repeat until the queue is empty. Then topologically sort the visited
+set so deps come before dependents, and hand the result to the DAG
+builder.
+
+### Why "lazy"
+
+The synthetic feeds are registered eagerly during module evaluation —
+one `alpine_feed()` or `debian_feed()` call per repo section. But each
+call only registers the `SyntheticModule` (a name + a `Lookup`
+callback + the in-tree `APKINDEX` / `Packages` path); no `*Unit`
+structures exist yet. The 50,000-entry Debian catalog is on disk as
+text and in the `archCache` after first parse, but the resolver
+allocates `*Unit` objects only for names the closure actually
+references.
 
 This dual structure — module-keyed storage plus precomputed per-distro
 views — keeps the lookup-time path O(1) without sacrificing the
 laziness story. Materialization happens on first reference;
 disambiguation (which feed's variant wins for which distro) is
 resolved once during view construction, not on every lookup.
+
+### Scale
 
 The materialization pass gives the resolver a O(closure size) working
 set against an upstream index that can be much larger:
@@ -180,6 +242,29 @@ into yoe's dep tokens, look up each token through the provides table
 construct one `*Unit` and its `Tasks` / `Source` fields, return. This
 is the cost the resolver pays at first reference of each name; the
 returned pointer is then catalog-stable.
+
+### The SyntheticModule contract
+
+The `Lookup` callback the cycle calls is supplied by whichever feed
+builtin registered the synthetic module (`alpine_feed` or
+`debian_feed`). The shape:
+
+```go
+type SyntheticModule struct {
+    Name     string             // composed name, e.g. "alpine.main"
+    Parent   string             // owning module, e.g. "module-alpine"
+    Priority int                // negative; below every real module
+    Lookup   func(name string) (*Unit, error)
+    Names    func() []string    // enumeration for diagnostics/TUI
+}
+```
+
+The walker doesn't know or care which format a synthetic wraps — APK
+indexes, Debian `Packages` files, or anything else a future feed
+type adds. It just calls `Lookup` and trusts the contract: return a
+fully-populated `*Unit` for known names, return nil for misses,
+return an error only for genuine failures (corrupt index, missing
+arch).
 
 **One Lookup per name is load-bearing.** The materialization path
 allocates fresh `*Unit` structures and triggers a Provides parse;
