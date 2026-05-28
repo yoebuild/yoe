@@ -19,6 +19,13 @@
 - [Raspberry Pi (RPi4, RPi5)](machine-rpi.md)
 - [BeaglePlay (AM625)](machine-beagleplay.md)
 
+# Distro
+
+- [module-alpine](module-alpine.md)
+- [Alpine apk Passthrough](apk-passthrough.md)
+- [apk Signing](signing.md)
+- [module-debian](module-debian.md)
+
 # Reference
 
 - [Architecture](architecture.md)
@@ -27,6 +34,7 @@
 - [Catalog and Materialization](catalog.md)
 - [File Templates](file-templates.md)
 - [Build & Configuration Languages](build-languages.md)
+- [Security and Threat Model](security.md)
 
 # Build System
 
@@ -35,14 +43,6 @@
 - [Development Environments](dev-env.md)
 - [Testing](testing.md)
 - [Self-Hosting](selfhost.md)
-
-# Packages and Devices
-
-- [apk Signing](signing.md)
-- [module-alpine](module-alpine.md)
-- [module-debian](module-debian.md)
-- [Alpine apk Passthrough](apk-passthrough.md)
-- [Security and Threat Model](security.md)
 
 # Base System
 
