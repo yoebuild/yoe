@@ -44,6 +44,13 @@ and this project adheres to
   paths that never matched the actual build directory, so per-unit clean was a
   silent no-op. The fix walks every distro subtree so a unit referenced from
   multiple images is cleaned in one step.
+- **`prefer_modules` is now scoped per distro.** The new shape is
+  `prefer_modules = {"alpine": {"xz": "alpine.main"}, "debian": {...}}` — a pin
+  only fires for closures whose effective distro matches the outer key. The
+  prior flat form (`{"xz": "alpine.main"}`) is removed; existing pins need to
+  be rewrapped under their consuming distro key. Mixed-distro projects no
+  longer need to drop pins to keep one backend resolving — an alpine pin
+  doesn't bleed into a debian closure walk and vice versa.
 - **TUI Setup has a Default Distro picker.** Press `s` on the home screen,
   navigate to "Default Distro", and pick from the distros provided by your
   loaded synthetic-feed modules (`alpine`, `debian`, …) or `(none)` to clear
