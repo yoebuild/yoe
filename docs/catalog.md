@@ -191,16 +191,25 @@ the walker never re-resolves the same name twice.
 
 ## The closure walk as materialization driver
 
-`resolve_closure(artifacts, distro=...)` in `image.star` is the phase
-that drives lazy materialization. For an image's effective distro and
-its `artifacts = [...]` list, the closure walker:
+`resolve_closure(artifacts, distro=...)` is a Go-side Starlark builtin
+(`fnResolveClosure` in `internal/starlark/closure.go`, registered as a
+builtin in `internal/starlark/builtins.go`). Image classes call it from
+Starlark — `modules/module-core/classes/image.star` invokes it with the
+image's effective distro and its `artifacts = [...]` list. The Go
+implementation drives lazy materialization. For each invocation, the
+closure walker:
 
-1. **BFS** from each artifact name. For each name visited:
+1. **Breadth-first walk** of the runtime-dep graph rooted at the
+   artifact names. Each name is visited once (a `seen` set prevents
+   revisits across cycles), and for each visit:
    - Resolve provides through `ResolveProvidesForDistro(distro, name)`.
    - `LookupUnit(distro, resolved)` returns the resolved `*Unit` from
      `DistroViews[distro][resolved]`; on a miss, the synthetic walk
      fires and registers the result before returning.
-   - Visit the returned unit's `RuntimeDeps`.
+   - Push the returned unit's `RuntimeDeps` onto the back of the
+     queue. Breadth-first (queue, not recursion) keeps the working
+     set bounded by closure size regardless of dep-tree depth — a
+     deeply-nested transitive chain won't blow the call stack.
 
 2. **Topological sort** of the visited set. Emits units in dependency
    order so the DAG builder can validate edges and the build executor
