@@ -503,7 +503,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 
 	// Resolve container image early so destdir cleanup can recover from
 	// root-owned files left by a previous failed image build.
-	containerImage := resolveContainerImage(proj, unit, opts.Arch)
+	containerImage := resolveContainerImage(proj, unit, opts.Arch, opts.EffectiveDistro)
 
 	// No post-image chown-back-to-host defer. The image class deliberately
 	// preserves per-file ownership from each apk's tar headers so that
@@ -539,7 +539,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		if meta := ReadMeta(buildDir); meta != nil {
 			cachedSourceState = meta.SourceState
 		}
-		if _, err := source.Prepare(opts.ProjectDir, sd, unit, cachedSourceState, w); err != nil {
+		if _, err := source.Prepare(opts.ProjectDir, sd, opts.EffectiveDistro, unit, cachedSourceState, w); err != nil {
 			return fmt.Errorf("preparing source: %w", err)
 		}
 	} else {
@@ -647,7 +647,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		if t.Container != "" {
 			taskUnit := *unit
 			taskUnit.Container = t.Container
-			taskContainer = resolveContainerImage(proj, &taskUnit, opts.Arch)
+			taskContainer = resolveContainerImage(proj, &taskUnit, opts.Arch, opts.EffectiveDistro)
 		}
 
 		for i, step := range t.Steps {
@@ -962,12 +962,13 @@ func hasTask(unit *yoestar.Unit, name string) bool {
 //
 // Per R9 (toolchain dispatch via provides + distro), a virtual reference
 // like Container="toolchain" is dereferenced through the project's
-// Provides table to a concrete container unit. effectiveDistro narrows
-// the candidate set: R21a's visibility filter already ensures exactly
-// one toolchain candidate is visible per closure, but if the caller is
-// outside an image walk (the BuildUnits hot path is, today), the
-// dereference still favors the first concrete container unit found.
-func resolveContainerImage(proj *yoestar.Project, unit *yoestar.Unit, arch string) string {
+// Provides table to a concrete container unit. The dispatch distro is
+// the unit's own Distro tag when set; otherwise effectiveDistro (the
+// consuming image's, or the project default for image-less builds) is
+// used so untagged source units like module-core's `file` route through
+// the correct backend toolchain instead of the global Provides table's
+// alphabetical first.
+func resolveContainerImage(proj *yoestar.Project, unit *yoestar.Unit, arch, effectiveDistro string) string {
 	container := unit.Container
 	if container == "" {
 		return ""
@@ -978,24 +979,31 @@ func resolveContainerImage(proj *yoestar.Project, unit *yoestar.Unit, arch strin
 		return container
 	}
 
+	// Distro context: unit's own tag wins; otherwise fall back to the
+	// caller-supplied effectiveDistro so untagged source units still
+	// dispatch to the right backend toolchain.
+	distroCtx := unit.Distro
+	if distroCtx == "" {
+		distroCtx = effectiveDistro
+	}
+
 	// Virtual reference — dereference through Provides to the concrete
 	// container unit, distro-aware per R9. Looks like Container="toolchain"
 	// -> "toolchain-glibc" (debian) or "toolchain-musl" (alpine). Falls
 	// through to literal interpretation when no provider exists,
 	// preserving back-compat for Container="toolchain-musl" literal
 	// references.
-	if resolved := proj.ResolveProvidesForDistro(container, unit.Distro); resolved != "" {
+	if resolved := proj.ResolveProvidesForDistro(container, distroCtx); resolved != "" {
 		container = resolved
 	}
 
 	// Container unit — look up version and build tag. Resolve in the
-	// unit's own distro context: a toolchain reference from an
-	// alpine source unit picks toolchain-musl, a debian source unit
-	// picks toolchain-glibc. Falls back to the cross-module AnyUnit
-	// lookup when the unit is untagged so the literal-container
-	// path (e.g. container="toolchain-musl") still finds its
+	// distro context: an alpine source unit picks toolchain-musl, a
+	// debian source unit picks toolchain-glibc. Falls back to the
+	// cross-module AnyUnit lookup when nothing matches so the literal-
+	// container path (e.g. container="toolchain-musl") still finds its
 	// container regardless of which distro registered it.
-	cu := proj.LookupUnit(unit.Distro, container)
+	cu := proj.LookupUnit(distroCtx, container)
 	if cu == nil {
 		cu = proj.AnyUnit(container)
 	}

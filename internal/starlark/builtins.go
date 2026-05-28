@@ -455,7 +455,7 @@ func (e *Engine) fnProject(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.T
 			Path: structString(cacheS, "path"),
 		},
 		SigningKey:    kwString(kwargs, "signing_key"),
-		DefaultDistro: kwString(kwargs, "default_distro"),
+		DefaultDistro: structString(defs, "distro"),
 	}
 
 	// Parse modules list

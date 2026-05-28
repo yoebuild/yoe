@@ -1,14 +1,17 @@
 project(
     name = "e2e-test",
     version = "0.1.0",
-    defaults = defaults(machine = "qemu-x86_64", image = "base-image"),
-    # default_distro selects the effective distro for any image that
+    # defaults.distro selects the effective distro for any image that
     # doesn't set its own `distro` field. The cascade is
-    #   image.distro -> local.default_distro_override -> default_distro
+    #   image.distro -> local.default_distro_override -> defaults.distro
     # If all three are empty the closure walk errors at evaluation
     # time, so every project must declare at least one. Today all
     # images here are alpine-based, hence "alpine".
-    default_distro = "alpine",
+    defaults = defaults(
+        machine = "qemu-x86_64",
+        image = "base-image",
+        distro = "alpine",
+    ),
     # modules listed in priority order: later entries shadow earlier ones,
     # so module-core wins over module-bsp and the Alpine/Jetson prebuilts.
     modules = [

@@ -14,7 +14,7 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
     image that wants its own brand).
 
     `distro` selects the distro this image targets. When unset, the project's
-    `default_distro` (overridable per-developer via `local.star`'s
+    `defaults.distro` (overridable per-developer via `local.star`'s
     `default_distro_override`) supplies the fallback. With nothing set in
     either, image evaluation errors — every image must resolve to a distro.
     """
@@ -34,7 +34,7 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
     if not effective_distro:
         effective_distro = ctx.default_distro
     if not effective_distro:
-        fail("image %s: no distro set and project has no default_distro" % name)
+        fail("image %s: no distro set and project has no defaults.distro" % name)
 
     # Merge machine packages. The machine config's `packages` list
     # (e.g. ["syslinux"] on qemu-x86_64) names module-core source units

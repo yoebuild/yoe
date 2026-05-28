@@ -261,7 +261,7 @@ func (p *Project) EffectiveDistroForImage(imageName string) (string, error) {
 	if p.DefaultDistro != "" {
 		return p.DefaultDistro, nil
 	}
-	return "", fmt.Errorf("image %q has no distro and project has no default_distro (set distro on the image or default_distro on project)", imageName)
+	return "", fmt.Errorf("image %q has no distro and project has no defaults.distro (set distro on the image or defaults.distro on project)", imageName)
 }
 
 // SetFlatUnits is a test helper that registers a name→*Unit map under
@@ -424,7 +424,7 @@ func (p *Project) EffectiveDistro() (string, error) {
 	if p.DefaultDistro != "" {
 		return p.DefaultDistro, nil
 	}
-	return "", fmt.Errorf("project has no default_distro (set default_distro on project)")
+	return "", fmt.Errorf("project has no defaults.distro (set defaults.distro on project)")
 }
 
 // QEMUPorts returns the port mappings from the machine's QEMU config, or nil.

@@ -1026,6 +1026,7 @@ func peekModuleInfo(modulePath string) *ModuleInfo {
 		"module_info": moduleInfo,
 		"module":      moduleBuiltin,
 		"alpine_feed": noop,
+		"debian_feed": noop,
 	})
 	return info
 }

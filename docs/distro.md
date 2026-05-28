@@ -43,7 +43,7 @@ When unset, yoe resolves the effective distro through a three-level cascade:
 2. **`local.star`'s `default_distro_override`** — a per-developer override (not
    committed) for trying a different distro locally without editing project
    config.
-3. **`PROJECT.star`'s `default_distro`** — the project-wide fallback.
+3. **`PROJECT.star`'s `defaults.distro`** — the project-wide fallback.
 
 If none of the three is set, image evaluation errors immediately. The distro
 choice is too consequential to pick silently.

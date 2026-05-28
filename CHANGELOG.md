@@ -8,8 +8,23 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Building a single source unit by name (`yoe build file`) now picks the
+  toolchain matching the project's default distro.** Previously untagged units
+  routed through the global provides table, which silently picked whichever
+  toolchain sorted first — so an Alpine project could end up compiling inside
+  the glibc toolchain against a musl sysroot and fail at the first link.
+- **Alpine and Debian prebuilt units now build cleanly.** Source preparation
+  was writing the fetched `.apk` / `.deb` into the old pre-distro-split
+  `build/<unit>.<scope>/src/` path while the install task looked inside the
+  new `build/<distro>/<unit>.<scope>/src/` location, so every prebuilt-from-
+  feed unit failed with `tar: Cannot open: No such file or directory`. Both
+  sides now agree on the per-distro layout.
+- **TUI Default Distro picker shows "debian" instead of "module-debian".** The
+  picker was surfacing the on-disk module directory name as the distro choice
+  whenever a module declared its feed via `debian_feed(...)`. Fixed; the picker
+  now lists the canonical distro name declared in `MODULE.star`.
 - **Build Debian images with `distro = "debian"` on any image.** Set the field
-  on an `image(...)` call (or rely on `default_distro` for whole- project Debian
+  on an `image(...)` call (or rely on `defaults.distro` for whole-project Debian
   targets) and yoe routes that image through the new Debian backend: closure
   walks pick `toolchain-glibc` instead of toolchain-musl, source units get
   packaged as `.deb`, the project repo emits a signed Debian-format archive, and
@@ -75,10 +90,10 @@ and this project adheres to
   external pipelines or hardcoded URLs (feed-server clients, deploy scripts,
   `/etc/apk/repositories` entries) — the next `yoe build` writes to the new
   layout and old `repo/<project>/<arch>/` trees are stranded.
-- **A new `default_distro` field on `project(...)` plus the `distro` tag on each
-  image select which backend an image targets.** Mixed-distro projects work: tag
-  images individually, untagged units stay visible to every distro, and
-  `local.star`'s `default_distro_override` lets a developer flip the
+- **A new `defaults.distro` field on `project(...)` plus the `distro` tag on
+  each image select which backend an image targets.** Mixed-distro projects
+  work: tag images individually, untagged units stay visible to every distro,
+  and `local.star`'s `default_distro_override` lets a developer flip the
   project-wide default without touching PROJECT.star.
 
 ## [0.10.15] - 2026-05-26
