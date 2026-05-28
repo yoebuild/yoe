@@ -177,6 +177,19 @@ than scanning the directories.
   with no implementation plan (brainstorming, future-looking writing without
   commitment to ship); final-form-during-plan covers everything once a plan
   exists. Switch framings the moment a plan commits.
+- **Docs stand on their own; no plan vocabulary in `docs/`.** Reference docs
+  under `docs/` (excluding `docs/plans/`) must read self-contained. Do not
+  reference R-numbers (R5, R14a, R20a/R21, R21a, …), U-numbers (U6b, U4a-fix,
+  U24, …), commit hashes, or phrases like "plan unit X" / "tracked in the
+  plan." These are plan-internal identifiers — load-bearing inside
+  `docs/plans/` for tracing requirements to implementation units, but noise
+  in a user-facing doc where nothing on the page tells the reader what they
+  mean. Replace every such reference with a self-contained description of the
+  property, behavior, or workaround being documented. Name the *concept*, not
+  the plan label. For a known limitation, describe the limitation and its
+  workaround on its own terms — don't send the reader on a cross-reference
+  hunt to find out what's going on. Plans and docs have different audiences
+  and different shelf lives; keep them separable.
 - **Changelog entries stay simple and user-focused.** Write for the user of
   `yoe`, not the engineer changing it. One or two short sentences, leading with
   the user-visible benefit (what they see, what they can now do, what was broken
