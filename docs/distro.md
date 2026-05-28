@@ -168,23 +168,43 @@ A representative `PROJECT.star` shape:
 
 ```python
 # Host image: debian. Boots the device, runs vendor agents,
-# manages the container runtime, handles OTA.
+# manages the container runtime, handles OTA. The app container
+# is in artifacts, so the image build embeds it into the host's
+# container store at image-assembly time.
 image(
     name = "device-host",
     distro = "debian",
-    artifacts = ["apt", "openssh-server", "linux-image-amd64",
-                 "containerd", ...],
+    artifacts = [
+        "apt", "openssh-server", "linux-image-amd64",
+        "containerd",
+        "app",                # the alpine container below
+    ],
 )
 
 # App container: alpine. Holds the actual product workload.
-# Built as a deployable container artifact, not as a bootable
-# image. Pushed into the host's container store.
-deployable_container(
+# Built as a deployable OCI artifact, not as a bootable image.
+container(                                          # (planned)
     name = "app",
     distro = "alpine",
-    artifacts = ["busybox", "my-app", "my-app-config", ...],
+    artifacts = ["busybox", "my-app", "my-app-config"],
 )
 ```
+
+> **Status (planned):** the `container(...)` form shown above —
+> producing a deployable application-container artifact from an
+> `artifacts = [...]` list, embeddable in a host image's own artifacts
+> — is not yet implemented. Today, `container(...)` exists only for
+> declaring **build** containers (`toolchain-musl`, `toolchain-glibc`,
+> …) from a `Dockerfile`. The planned extension repurposes the same
+> builtin name for deployable application containers: when called
+> with `artifacts = [...]`, the unit emits an OCI image rather than
+> building a Dockerfile. See
+> [Deployable Containers](specs/2026-05-25-deployable-containers.md)
+> for the spec and the current implementation status. The
+> architectural shape this section describes — distros as orthogonal
+> axes, multi-distro projects, three-layer separation — is current
+> behavior; only the deployable-container form of the `container(...)`
+> builtin is future work.
 
 Both build from the same `PROJECT.star`, share the same source-built
 userland where applicable (a source unit consumed by both builds
@@ -194,12 +214,10 @@ as part of the same project release.
 
 Other multi-distro shapes exist (a product line with a small alpine
 edge device and a larger debian gateway, both shipped from one repo)
-but the alpine-app-in-debian-host pattern is the one yoe's
-distro mixing was designed to make ergonomic. For the deployable
-container specifics, see
-[Deployable Containers](specs/2026-05-25-deployable-containers.md);
-for the practical current-state behavior of multi-distro projects on
-versions where catalog separation is still landing, see
+but the alpine-app-in-debian-host pattern is the one yoe's distro
+mixing was designed to make ergonomic. For the practical current-state
+behavior of multi-distro projects on versions where catalog separation
+is still landing, see
 [module-debian.md known limitations](module-debian.md#known-limitations).
 
 ## How distros plug in (high-level)
