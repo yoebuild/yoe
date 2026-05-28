@@ -408,6 +408,12 @@ embeds OCI archive at
   the producer + delivery, not the workload manager.
 - **Read-only rootfs + A/B updates on the host image.** Tracked separately in
   `docs/containers.md`'s "What is not yet shipped" section.
+- **Host OS as a bootc-style container image.** bootc treats the OS itself as
+  an OCI image deployed via ostree, which is a different layer than this
+  spec's application-container producer. The
+  [swupdate spec's Alternatives considered](2026-05-20-swupdate-zig-initramfs.md#alternatives-considered)
+  section analyses bootc and the structural prerequisites (systemd, ostree,
+  read-only `/usr`) that yoe does not have today.
 - **Source-built Docker / containerd / runc replacing Alpine apk passthrough.**
   Separate roadmap item.
 - **Coupling to the 2026-04-06 starlark-packaging refactor.** Approach 3 from
