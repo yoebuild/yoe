@@ -160,11 +160,11 @@ resolved once during view construction, not on every lookup.
 The materialization pass gives the resolver a O(closure size) working
 set against an upstream index that can be much larger:
 
-| Feed                          | Upstream entries | Typical closure | Materialized |
-| ----------------------------- | ---------------: | --------------: | -----------: |
-| Alpine `main` (v3.21, x86_64) |          ~12,000 |     150 (e2e)   |         ~150 |
-| Alpine `community`            |          ~24,000 |     0–50        |        0–50  |
-| Debian `main` (bookworm)      |          ~50,000 |     ~200 (e2e)  |        ~200  |
+| Feed               | Upstream entries | Typical closure | Materialized |
+| ------------------ | ---------------: | --------------: | -----------: |
+| Alpine `main`      |          ~12,000 |     150 (e2e)   |         ~150 |
+| Alpine `community` |          ~24,000 |     0–50        |        0–50  |
+| Debian `main`      |          ~50,000 |     ~200 (e2e)  |        ~200  |
 
 The `archCache` (per-arch, per-feed) parses the on-disk `APKINDEX` /
 `Packages` once on first `Lookup` call (~150ms for Debian's main; ~50ms
