@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`yoe run` and `yoe flash` find your built images again.** Both
+  commands (and the TUI's flash action) were looking under the old
+  pre-distro-split `build/<image>.<machine>/` path while the executor
+  writes to `build/<distro>/<image>.<machine>/`, so every freshly built
+  image looked "missing."
 - **Building a single source unit by name (`yoe build file`) now picks the
   toolchain matching the project's default distro.** Previously untagged units
   routed through the global provides table, which silently picked whichever

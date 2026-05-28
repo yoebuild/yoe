@@ -37,7 +37,11 @@ func Flash(proj *yoestar.Project, unitName, devicePath, projectDir string, dryRu
 		return fmt.Errorf("default machine %q not found", proj.Defaults.Machine)
 	}
 
-	imgPath := findImage(projectDir, machine.Name, unitName)
+	distro, err := proj.EffectiveDistroForImage(unitName)
+	if err != nil {
+		return fmt.Errorf("resolving distro for %q: %w", unitName, err)
+	}
+	imgPath := findImage(projectDir, machine.Name, unitName, distro)
 	if imgPath == "" {
 		return fmt.Errorf("no built image found for %q on machine %q — run yoe build %s first", unitName, machine.Name, unitName)
 	}
@@ -151,8 +155,8 @@ func newCLIProgress(w io.Writer) func(written, total int64) {
 	}
 }
 
-func findImage(projectDir, scopeDir, unitName string) string {
-	dir := filepath.Join(projectDir, "build", unitName+"."+scopeDir, "destdir")
+func findImage(projectDir, scopeDir, unitName, distro string) string {
+	dir := filepath.Join(projectDir, "build", distro, unitName+"."+scopeDir, "destdir")
 	imgPath := filepath.Join(dir, unitName+".img")
 	if _, err := os.Stat(imgPath); err == nil {
 		return imgPath

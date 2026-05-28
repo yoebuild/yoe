@@ -6095,7 +6095,11 @@ func findImageForFlash(proj *yoestar.Project, unitName, projectDir string) (stri
 	if !ok {
 		return "", 0, fmt.Errorf("default machine %q not found", proj.Defaults.Machine)
 	}
-	imgPath := filepath.Join(projectDir, "build", unitName+"."+machine.Name, "destdir", unitName+".img")
+	distro, err := proj.EffectiveDistroForImage(unitName)
+	if err != nil {
+		return "", 0, fmt.Errorf("resolving distro for %q: %w", unitName, err)
+	}
+	imgPath := filepath.Join(projectDir, "build", distro, unitName+"."+machine.Name, "destdir", unitName+".img")
 	info, err := os.Stat(imgPath)
 	if err != nil {
 		return "", 0, fmt.Errorf("no built image found — run yoe build %s first", unitName)
