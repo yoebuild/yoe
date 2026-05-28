@@ -2,20 +2,47 @@ package starlark
 
 import (
 	"fmt"
+	"iter"
 
 	"go.starlark.net/starlark"
 )
 
 // Project represents an evaluated PROJECT.star.
 type Project struct {
-	Name      string
-	Version   string
-	Defaults  Defaults
-	Cache     CacheConfig
-	Sources   SourcesConfig
-	Modules   []ModuleRef
-	Machines  map[string]*Machine
-	Units     map[string]*Unit
+	Name     string
+	Version  string
+	Defaults Defaults
+	Cache    CacheConfig
+	Sources  SourcesConfig
+	Modules  []ModuleRef
+	Machines map[string]*Machine
+
+	// UnitsByModule is the primary unit storage: [moduleName][unitName]*Unit.
+	// Every unit registers under its declaring module's canonical name; same-
+	// named units from different modules (e.g. libcap2 from alpine.main and
+	// debian.main) coexist as separate entries here. Module name is the
+	// canonical name from module_info(name=...) for real modules or the
+	// synthetic module's Name (alpine.main, debian.main) for feed-materialized
+	// units. The project root's units register under the empty string "".
+	UnitsByModule map[string]map[string]*Unit
+
+	// DistroViews maps a consuming image's effective distro to a per-distro
+	// resolved view: [distro][unitName]*Unit. Precomputed at load time after
+	// all registrations and prefer_modules pins settle. Read-only after
+	// construction; LookupUnit consults this for O(1) per-distro lookup.
+	// A distro key is present whenever any unit is registered for it (either
+	// tagged or materialized), even if the view is sparse.
+	DistroViews map[string]map[string]*Unit
+
+	// Units is a flat per-name view derived from DistroViews using the
+	// project's effective distro (DefaultDistroOverride -> DefaultDistro
+	// or the first key in DistroViews when neither is set). It exists for
+	// callers that don't have image-level distro scope — TUI list-all, query
+	// surfaces, single-unit CLI helpers. Per-distro-correct paths (closure
+	// walk, BuildDAG, build executor) consult LookupUnit / DistroViews
+	// directly. Treat Units as read-only at runtime; mutations don't
+	// propagate back into UnitsByModule.
+	Units map[string]*Unit
 
 	// DefaultDistro is the project-wide effective-distro fallback used by
 	// image units that don't set their own `distro` field. The cascade
@@ -245,6 +272,46 @@ func (p *Project) EffectiveDistroForImage(imageName string) (string, error) {
 	return "", fmt.Errorf("image %q has no distro and project has no default_distro (set distro on the image or default_distro on project)", imageName)
 }
 
+// LookupUnit returns the unit visible to a closure walk in the given
+// distro, or nil if no such unit exists. Consults the precomputed
+// DistroViews built at load time — O(1) per lookup, no module-priority
+// rescan, no synthetic walk. For callers without a distro context
+// (TUI list-all, single-unit CLI helpers), pass the project's
+// effective distro; for image-scoped consumers, pass
+// EffectiveDistroForImage(imageName).
+func (p *Project) LookupUnit(distro, name string) *Unit {
+	if p == nil {
+		return nil
+	}
+	if view, ok := p.DistroViews[distro]; ok {
+		if u, ok := view[name]; ok {
+			return u
+		}
+	}
+	return nil
+}
+
+// AllUnits returns an iterator over every (name, *Unit) pair across
+// every module in UnitsByModule. Used by callers that need to enumerate
+// the catalog regardless of distro (TUI search, diagnostic dumps). The
+// same name may yield multiple times when different modules registered
+// it for different distros — consumers that want one entry per name
+// should deduplicate themselves or use DistroViews[distro] iteration.
+func (p *Project) AllUnits() iter.Seq2[string, *Unit] {
+	return func(yield func(string, *Unit) bool) {
+		if p == nil {
+			return
+		}
+		for _, byName := range p.UnitsByModule {
+			for name, u := range byName {
+				if !yield(name, u) {
+					return
+				}
+			}
+		}
+	}
+}
+
 // ResolveProvidesForDistro finds the unit that provides `virtual` whose
 // Distro matches `effectiveDistro`. When effectiveDistro is non-empty,
 // the fallback to the global proj.Provides table is FILTERED: a global
@@ -263,23 +330,27 @@ func (p *Project) ResolveProvidesForDistro(virtual, effectiveDistro string) stri
 	if p == nil || virtual == "" {
 		return ""
 	}
-	// First: a unit with the same name AND matching distro wins (R21a
-	// tagged-wins on direct name lookup).
+	// First: a unit with the same name visible in the per-distro view
+	// wins (R21a tagged-wins on direct name lookup). Untagged units
+	// satisfy every distro; tagged units only their own.
 	if effectiveDistro != "" {
-		if u, ok := p.Units[virtual]; ok && u.Distro == effectiveDistro {
-			return u.Name
+		if u := p.LookupUnit(effectiveDistro, virtual); u != nil && (u.Distro == effectiveDistro || u.Distro == "") {
+			if u.Distro == effectiveDistro {
+				return u.Name
+			}
 		}
 	}
-	// Second: walk every unit for a matching-distro provider via the
-	// Provides list.
+	// Second: walk units tagged for effectiveDistro for a Provides match.
 	if effectiveDistro != "" {
-		for _, u := range p.Units {
-			if u.Distro != effectiveDistro {
-				continue
-			}
-			for _, v := range u.Provides {
-				if v == virtual {
-					return u.Name
+		for _, byName := range p.UnitsByModule {
+			for _, u := range byName {
+				if u.Distro != effectiveDistro {
+					continue
+				}
+				for _, v := range u.Provides {
+					if v == virtual {
+						return u.Name
+					}
 				}
 			}
 		}
@@ -289,6 +360,7 @@ func (p *Project) ResolveProvidesForDistro(virtual, effectiveDistro string) stri
 	// when the closure walker has no per-distro alternative yet.
 	return p.Provides[virtual]
 }
+
 
 // EffectiveDistro returns the project's effective distro without an
 // image scope: DefaultDistroOverride -> DefaultDistro -> error.

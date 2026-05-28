@@ -117,6 +117,65 @@ func TestClosure_R21a_TaggedCollisionByDistro(t *testing.T) {
 	}
 }
 
+// TestClosure_R6b_CrossDistroSyntheticCollision: two synthetic feeds
+// both provide a unit with the same name but different distros (the
+// canonical libssl3-from-alpine.main vs libssl3-from-debian.main
+// case). Each closure walk reaches its own variant via the per-
+// module catalog fallback — neither overwrites the other, and the
+// second walk doesn't need to re-materialize.
+func TestClosure_R6b_CrossDistroSyntheticCollision(t *testing.T) {
+	e := NewEngine()
+	e.project = &Project{Provides: map[string]string{}}
+
+	alpineLibssl := &Unit{Name: "libssl3", Class: "unit", Distro: "alpine", Module: "alpine.main"}
+	debianLibssl := &Unit{Name: "libssl3", Class: "unit", Distro: "debian", Module: "debian.main"}
+
+	alpineSM := &SyntheticModule{
+		Name:   "alpine.main",
+		Lookup: func(n string) (*Unit, error) {
+			if n == "libssl3" {
+				return alpineLibssl, nil
+			}
+			return nil, nil
+		},
+		Names: func() []string { return []string{"libssl3"} },
+	}
+	debianSM := &SyntheticModule{
+		Name:   "debian.main",
+		Lookup: func(n string) (*Unit, error) {
+			if n == "libssl3" {
+				return debianLibssl, nil
+			}
+			return nil, nil
+		},
+		Names: func() []string { return []string{"libssl3"} },
+	}
+	e.syntheticModules = []*SyntheticModule{alpineSM, debianSM}
+
+	// First walk: alpine materializes alpine.main's libssl3, registers
+	// into both e.units and unitsByModule.
+	if _, err := e.closure([]string{"libssl3"}, "alpine"); err != nil {
+		t.Fatalf("alpine closure: %v", err)
+	}
+	// e.units now holds the alpine variant.
+	if u := e.units["libssl3"]; u == nil || u.Distro != "alpine" {
+		t.Fatalf("after alpine walk, e.units[libssl3] should be alpine variant; got %+v", u)
+	}
+
+	// Second walk: debian must NOT inherit the alpine variant. The
+	// per-module catalog fallback should find debian.main's libssl3.
+	if _, err := e.closure([]string{"libssl3"}, "debian"); err != nil {
+		t.Fatalf("debian closure: %v", err)
+	}
+	// Both variants live in the per-module catalog now.
+	if u, ok := e.unitsByModule["alpine.main"]["libssl3"]; !ok || u.Distro != "alpine" {
+		t.Errorf("alpine.main libssl3 missing from unitsByModule: %+v", u)
+	}
+	if u, ok := e.unitsByModule["debian.main"]["libssl3"]; !ok || u.Distro != "debian" {
+		t.Errorf("debian.main libssl3 missing from unitsByModule: %+v", u)
+	}
+}
+
 // TestClosure_R21a_PanicOnEmptyDistro: the walker panics when called
 // with empty effectiveDistro — a programmer error.
 func TestClosure_R21a_PanicOnEmptyDistro(t *testing.T) {

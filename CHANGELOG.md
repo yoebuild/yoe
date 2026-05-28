@@ -44,6 +44,16 @@ and this project adheres to
   paths that never matched the actual build directory, so per-unit clean was a
   silent no-op. The fix walks every distro subtree so a unit referenced from
   multiple images is cleaned in one step.
+- **Cross-distro projects with same-named units now resolve correctly.** When
+  Alpine's and Debian's package feeds both define a unit (e.g. `libssl3`), each
+  consuming image picks its own variant from a precomputed per-distro view.
+  Previously, the second walk's variant could be invisible because the catalog
+  held only one slot per name. The new module-keyed catalog (`UnitsByModule`)
+  and precomputed `DistroViews` make each distro's resolution independent.
+  Available to in-tree code via `proj.LookupUnit(distro, name)` and
+  `proj.AllUnits()` iterator; `BuildDAG(proj, distro)` consumes the per-distro
+  view so `yoe build <image>` automatically selects the right distro context
+  from the named image.
 - **`prefer_modules` is now scoped per distro.** The new shape is
   `prefer_modules = {"alpine": {"xz": "alpine.main"}, "debian": {...}}` — a pin
   only fires for closures whose effective distro matches the outer key. The

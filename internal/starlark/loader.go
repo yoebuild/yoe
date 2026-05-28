@@ -523,6 +523,7 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 
 	proj.Machines = eng.Machines()
 	proj.Units = eng.Units()
+	proj.UnitsByModule = eng.UnitsByModule()
 	proj.ResolvedModules = resolvedForProject
 	proj.Diagnostics.Shadows = eng.Shadows()
 
@@ -658,7 +659,121 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		return nil, err
 	}
 
+	// Refresh UnitsByModule after the build-time dep fixpoint may
+	// have materialized additional synthetic units. The eng map is
+	// the source of truth; reassign so proj.UnitsByModule reflects
+	// every materialization that happened during this load.
+	proj.UnitsByModule = eng.UnitsByModule()
+
+	// Build the per-distro views (R14b). Each consuming image's
+	// effective distro gets its own pre-resolved [name → *Unit] map
+	// so closure-walk and BuildDAG lookups are O(1) without
+	// re-running prefer_modules + module-priority + R21a visibility
+	// on every probe. Cross-distro same-name collisions resolve here
+	// once, not on every closure walk.
+	proj.DistroViews = buildDistroViews(proj)
+
 	return proj, nil
+}
+
+// buildDistroViews precomputes a per-distro resolved [name → *Unit]
+// map from UnitsByModule. For each (name, distro) pair, applies:
+//
+//  1. prefer_modules[distro][name] pin (if set and the pinned module
+//     has a visible unit for this name) — pin wins.
+//  2. Module priority: highest-priority module's unit visible to the
+//     distro wins. Untagged units are visible to every distro; tagged
+//     units only their own.
+//
+// A distro is included in the result if any unit in UnitsByModule is
+// either untagged or tagged for that distro. The project's
+// DefaultDistro and DefaultDistroOverride are also included so
+// callers can rely on those keys existing even if no unit references
+// the distro yet.
+func buildDistroViews(proj *Project) map[string]map[string]*Unit {
+	if proj == nil {
+		return nil
+	}
+	// Collect every distinct distro seen across registered units, plus
+	// the project-level fallbacks.
+	distros := map[string]struct{}{}
+	if proj.DefaultDistro != "" {
+		distros[proj.DefaultDistro] = struct{}{}
+	}
+	if proj.DefaultDistroOverride != "" {
+		distros[proj.DefaultDistroOverride] = struct{}{}
+	}
+	for d := range proj.PreferModules {
+		distros[d] = struct{}{}
+	}
+	allNames := map[string]struct{}{}
+	for _, byName := range proj.UnitsByModule {
+		for name, u := range byName {
+			allNames[name] = struct{}{}
+			if u.Distro != "" {
+				distros[u.Distro] = struct{}{}
+			}
+		}
+	}
+
+	views := make(map[string]map[string]*Unit, len(distros))
+	for distro := range distros {
+		view := make(map[string]*Unit, len(allNames))
+		for name := range allNames {
+			if u := resolveForDistro(proj, distro, name); u != nil {
+				view[name] = u
+			}
+		}
+		views[distro] = view
+	}
+	return views
+}
+
+// resolveForDistro picks the right unit for (distro, name) from
+// UnitsByModule. Applies prefer_modules pins first, then falls back
+// to module priority + R21a visibility. Returns nil when no candidate
+// exists.
+func resolveForDistro(proj *Project, distro, name string) *Unit {
+	// Pin check.
+	if pins, ok := proj.PreferModules[distro]; ok {
+		if pinned, ok := pins[name]; ok && pinned != "" {
+			if byName, ok := proj.UnitsByModule[pinned]; ok {
+				if u, ok := byName[name]; ok && unitVisibleToDistro(u, distro) {
+					return u
+				}
+			}
+		}
+	}
+	// Default: highest-priority module's unit visible to distro.
+	var best *Unit
+	for _, byName := range proj.UnitsByModule {
+		u, ok := byName[name]
+		if !ok {
+			continue
+		}
+		if !unitVisibleToDistro(u, distro) {
+			continue
+		}
+		if best == nil || u.ModuleIndex < best.ModuleIndex {
+			best = u
+		}
+	}
+	return best
+}
+
+// unitVisibleToDistro mirrors the closure walker's visibleToDistro
+// for use from buildDistroViews (which is in the same package but
+// can't import a private walker helper without rearranging).
+// Untagged units are visible to every distro; tagged units only
+// their own.
+func unitVisibleToDistro(u *Unit, distro string) bool {
+	if u == nil {
+		return false
+	}
+	if distro == "" {
+		return true
+	}
+	return u.Distro == "" || u.Distro == distro
 }
 
 // validatePreferModules walks proj.PreferModules and errors when a

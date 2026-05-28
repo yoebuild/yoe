@@ -151,7 +151,7 @@ func TestComputeAllHashes(t *testing.T) {
 		"openssh": {Name: "openssh", Version: "9.6", Class: "unit", Deps: []string{"zlib", "openssl"}, Tasks: []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "make"}}}}},
 	})
 
-	dag, err := BuildDAG(proj)
+	dag, err := BuildDAG(proj, "")
 	if err != nil {
 		t.Fatalf("BuildDAG: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestComputeAllHashes(t *testing.T) {
 	// openssh hash includes openssl hash which includes zlib hash
 	// Changing zlib should cascade
 	proj.Units["zlib"].Version = "1.4"
-	dag2, _ := BuildDAG(proj)
+	dag2, _ := BuildDAG(proj, "")
 	hashes2, _ := ComputeAllHashes(dag2, "arm64", "", nil, "")
 
 	if hashes["zlib"] == hashes2["zlib"] {
@@ -301,7 +301,7 @@ func TestComputeAllHashes_EffectiveDistroFlowsThrough(t *testing.T) {
 	proj := makeProject(map[string]*yoestar.Unit{
 		"zlib": {Name: "zlib", Version: "1.3", Class: "unit", Tasks: []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "make"}}}}},
 	})
-	dag, err := BuildDAG(proj)
+	dag, err := BuildDAG(proj, "")
 	if err != nil {
 		t.Fatalf("BuildDAG: %v", err)
 	}

@@ -198,9 +198,17 @@ func (e *Engine) lookupOrMaterialize(rawName, effectiveDistro string) (*Unit, er
 		if visibleToDistro(u, effectiveDistro) {
 			return u, nil
 		}
-		// A real unit exists but is tagged for a different distro;
-		// fall through so a same-name unit in a synthetic module can
-		// still satisfy this walk if one exists.
+		// A real unit exists but is tagged for a different distro.
+		// First check the per-module catalog for a same-name unit
+		// matching effectiveDistro that's already been registered or
+		// materialized by an earlier walk — this is the cross-distro
+		// collision case (alpine.main and debian.main both define
+		// libssl3). Falling straight through to synthetic walk would
+		// re-materialize on every lookup; the per-module catalog
+		// caches all variants once each.
+		if alt := e.findVisibleByName(name, effectiveDistro); alt != nil {
+			return alt, nil
+		}
 	}
 	// Walk synthetics in priority order. A synthetic module that
 	// returns a unit matching the effective distro wins even if
@@ -225,6 +233,13 @@ func (e *Engine) lookupOrMaterialize(rawName, effectiveDistro string) (*Unit, er
 		if _, ok := e.units[name]; !ok {
 			e.units[name] = u
 		}
+		// Always store in the per-module catalog under the synthetic
+		// module's name. This is what enables the cross-distro
+		// fallback above: even when e.units holds a different
+		// distro's variant, the per-module map has every
+		// materialization keyed by its source module.
+		u.Module = sm.Name
+		e.storeByModule(u)
 		existing := e.units[name]
 		e.mu.Unlock()
 		if visibleToDistro(existing, effectiveDistro) && existing.Distro == effectiveDistro {
@@ -233,6 +248,29 @@ func (e *Engine) lookupOrMaterialize(rawName, effectiveDistro string) (*Unit, er
 		return u, nil
 	}
 	return nil, nil
+}
+
+// findVisibleByName scans the per-module catalog for any unit named
+// `name` that's visible to effectiveDistro. Returns the highest-
+// priority (lowest ModuleIndex per the loader's "lower index = higher
+// priority" convention) match, or nil. Holds e.mu.
+func (e *Engine) findVisibleByName(name, effectiveDistro string) *Unit {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var best *Unit
+	for _, byName := range e.unitsByModule {
+		u, ok := byName[name]
+		if !ok {
+			continue
+		}
+		if !visibleToDistro(u, effectiveDistro) {
+			continue
+		}
+		if best == nil || u.ModuleIndex < best.ModuleIndex {
+			best = u
+		}
+	}
+	return best
 }
 
 // lookupInModule resolves name through a specific module — either a
@@ -257,14 +295,34 @@ func (e *Engine) lookupInModule(name, moduleName, effectiveDistro string) (*Unit
 			return nil, nil
 		}
 		u.ModuleIndex = sm.Priority
+		u.Module = sm.Name
+		// Cache the materialization in the per-module catalog so the
+		// next walk for any distro finds it without re-running
+		// sm.Lookup.
+		e.mu.Lock()
+		e.storeByModule(u)
+		e.mu.Unlock()
 		return u, nil
 	}
 	// Real module path — the unit must already be registered under
-	// the bare name from the named module.
-	if u, ok := e.units[name]; ok && u.Module == moduleName && visibleToDistro(u, effectiveDistro) {
+	// the bare name from the named module. Consult the per-module
+	// catalog so cross-distro siblings are reachable even when
+	// e.units[name] holds a different module's variant.
+	if u := e.findInModuleByName(name, moduleName); u != nil && visibleToDistro(u, effectiveDistro) {
 		return u, nil
 	}
 	return nil, nil
+}
+
+// findInModuleByName returns the unit named `name` from `moduleName`
+// via the per-module catalog. Holds e.mu briefly.
+func (e *Engine) findInModuleByName(name, moduleName string) *Unit {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if byName, ok := e.unitsByModule[moduleName]; ok {
+		return byName[name]
+	}
+	return nil
 }
 
 // visibleToDistro returns true when u is visible to a closure walk

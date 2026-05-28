@@ -368,6 +368,35 @@ func cmdBuild(args []string) {
 		Machine:    resolvedMachine,
 	}
 
+	// Derive the consuming distro from the requested target. When the
+	// user names an image, use that image's effective distro so the
+	// per-distro view picks the right variants for cross-distro
+	// same-name collisions. When the user names a non-image unit (or
+	// no name — build everything), fall back to the project default.
+	if len(units) >= 1 {
+		for _, n := range units {
+			if u := proj.LookupUnit(proj.DefaultDistro, n); u != nil && u.Class == "image" {
+				if d, err := proj.EffectiveDistroForImage(n); err == nil {
+					opts.EffectiveDistro = d
+					break
+				}
+			}
+			// Fall back: scan AllUnits for any module's variant
+			// to catch images registered under a non-default distro.
+			for name, u := range proj.AllUnits() {
+				if name == n && u.Class == "image" {
+					if d, err := proj.EffectiveDistroForImage(n); err == nil {
+						opts.EffectiveDistro = d
+					}
+					break
+				}
+			}
+			if opts.EffectiveDistro != "" {
+				break
+			}
+		}
+	}
+
 	// Parallelism precedence: -j flag > local.star parallel_builds >
 	// build.DefaultParallel. A -j value is also persisted so subsequent
 	// builds (and the TUI) reuse it without re-passing the flag.

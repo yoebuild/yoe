@@ -165,7 +165,9 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		return fmt.Errorf("publishing project public key: %w", err)
 	}
 
-	dag, err := resolve.BuildDAG(proj)
+	// BuildDAG iterates the per-distro view so cross-distro same-name
+	// collisions resolve to the variant the consuming distro expects.
+	dag, err := resolve.BuildDAG(proj, effectiveDistro)
 	if err != nil {
 		return err
 	}

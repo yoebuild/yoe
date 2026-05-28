@@ -85,7 +85,7 @@ func TestFilterBuildOrder(t *testing.T) {
 		},
 	}
 
-	dag, _ := resolve.BuildDAG(proj)
+	dag, _ := resolve.BuildDAG(proj, "")
 	order, _ := dag.TopologicalSort()
 
 	filtered, err := filterBuildOrder(dag, order, []string{"c"})

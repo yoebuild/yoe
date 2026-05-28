@@ -15,7 +15,7 @@ func Describe(w io.Writer, proj *yoestar.Project, name string, arch string) erro
 		return fmt.Errorf("unit %q not found", name)
 	}
 
-	dag, err := BuildDAG(proj)
+	dag, err := BuildDAG(proj, "")
 	if err != nil {
 		return err
 	}
@@ -65,7 +65,7 @@ func Describe(w io.Writer, proj *yoestar.Project, name string, arch string) erro
 
 // Refs prints what depends on a given unit (reverse dependencies).
 func Refs(w io.Writer, proj *yoestar.Project, name string, direct bool) error {
-	dag, err := BuildDAG(proj)
+	dag, err := BuildDAG(proj, "")
 	if err != nil {
 		return err
 	}
@@ -106,7 +106,7 @@ func Refs(w io.Writer, proj *yoestar.Project, name string, direct bool) error {
 
 // Graph prints the dependency graph in text or DOT format.
 func Graph(w io.Writer, proj *yoestar.Project, format string, filter string) error {
-	dag, err := BuildDAG(proj)
+	dag, err := BuildDAG(proj, "")
 	if err != nil {
 		return err
 	}

@@ -21,7 +21,7 @@ func TestBuildDAG(t *testing.T) {
 		"openssh": {Name: "openssh", Deps: []string{"zlib", "openssl"}},
 	})
 
-	dag, err := BuildDAG(proj)
+	dag, err := BuildDAG(proj, "")
 	if err != nil {
 		t.Fatalf("BuildDAG: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestBuildDAG_ContainerIsImplicitDep(t *testing.T) {
 		"musl":           {Name: "musl", Deps: nil, Container: "toolchain-musl"},
 	})
 
-	dag, err := BuildDAG(proj)
+	dag, err := BuildDAG(proj, "")
 	if err != nil {
 		t.Fatalf("BuildDAG: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestBuildDAG_ExternalContainerImageNotADep(t *testing.T) {
 		"hello": {Name: "hello", Deps: nil, Container: "golang:1.24"},
 	})
 
-	dag, err := BuildDAG(proj)
+	dag, err := BuildDAG(proj, "")
 	if err != nil {
 		t.Fatalf("BuildDAG: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestBuildDAG_ContainerDepDeduped(t *testing.T) {
 		"gcc":            {Name: "gcc", Deps: []string{"toolchain-musl"}, Container: "toolchain-musl"},
 	})
 
-	dag, err := BuildDAG(proj)
+	dag, err := BuildDAG(proj, "")
 	if err != nil {
 		t.Fatalf("BuildDAG: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestBuildDAG_ContainerUnitNoSelfDep(t *testing.T) {
 		"toolchain-musl": {Name: "toolchain-musl", Class: "container", Container: "toolchain-musl"},
 	})
 
-	dag, err := BuildDAG(proj)
+	dag, err := BuildDAG(proj, "")
 	if err != nil {
 		t.Fatalf("BuildDAG: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestBuildDAG_MissingDep(t *testing.T) {
 		"openssh": {Name: "openssh", Deps: []string{"nonexistent"}},
 	})
 
-	_, err := BuildDAG(proj)
+	_, err := BuildDAG(proj, "")
 	if err == nil {
 		t.Fatal("expected error for missing dependency, got nil")
 	}
@@ -162,7 +162,7 @@ func TestTopologicalSort(t *testing.T) {
 		"myapp":   {Name: "myapp", Deps: []string{"openssh"}},
 	})
 
-	dag, err := BuildDAG(proj)
+	dag, err := BuildDAG(proj, "")
 	if err != nil {
 		t.Fatalf("BuildDAG: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestTopologicalSort_Cycle(t *testing.T) {
 		"c": {Name: "c", Deps: []string{"a"}},
 	})
 
-	dag, err := BuildDAG(proj)
+	dag, err := BuildDAG(proj, "")
 	if err != nil {
 		t.Fatalf("BuildDAG: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestTopologicalSort_NoDeps(t *testing.T) {
 		"c": {Name: "c", Deps: nil},
 	})
 
-	dag, err := BuildDAG(proj)
+	dag, err := BuildDAG(proj, "")
 	if err != nil {
 		t.Fatalf("BuildDAG: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestDepsOf(t *testing.T) {
 		"openssh": {Name: "openssh", Deps: []string{"openssl"}},
 	})
 
-	dag, _ := BuildDAG(proj)
+	dag, _ := BuildDAG(proj, "")
 
 	deps, err := dag.DepsOf("openssh")
 	if err != nil {
@@ -266,7 +266,7 @@ func TestRdepsOf(t *testing.T) {
 		"curl":    {Name: "curl", Deps: []string{"openssl"}},
 	})
 
-	dag, _ := BuildDAG(proj)
+	dag, _ := BuildDAG(proj, "")
 
 	rdeps, err := dag.RdepsOf("zlib")
 	if err != nil {

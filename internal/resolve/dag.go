@@ -20,9 +20,39 @@ type Node struct {
 	Rdeps  []string // reverse dependencies (computed)
 }
 
-// BuildDAG constructs a dependency graph from a loaded project.
-func BuildDAG(proj *yoestar.Project) (*DAG, error) {
+// BuildDAG constructs a dependency graph from a loaded project. When
+// effectiveDistro is non-empty, deps are resolved through the per-
+// distro view of proj.Provides so virtual references (e.g.
+// container="toolchain") pick the variant matching the consuming
+// closure. Per-distro filtering of which units appear in the DAG is
+// applied AFTER iteration — same-name cross-distro collisions land
+// in the catalog at most once, and the DAG passes them through; the
+// build executor's per-name filter restricts what actually builds.
+func BuildDAG(proj *yoestar.Project, effectiveDistro string) (*DAG, error) {
 	dag := &DAG{Nodes: make(map[string]*Node)}
+
+	// Pick the unit source. Per-distro view when distro is known —
+	// the closure walker's resolution has already settled — so
+	// cross-distro same-name collisions yield the right variant in
+	// the DAG node. Distro-less callers fall back to proj.Units.
+	//
+	// When iterating the per-distro view, unresolvable deps are
+	// SKIPPED rather than erroring: an untagged unit (module-core's
+	// nodejs-hello) may pull in a dep (nodejs) provided only by a
+	// different distro's feed. That's fine — nodejs-hello isn't in
+	// any debian image's closure, the build executor's filter
+	// prunes it, and the dep validation needn't second-guess
+	// catalog completeness. For flat-Units iteration (distro=""),
+	// missing deps still error to preserve the older invariant
+	// callers rely on.
+	units := proj.Units
+	allowMissingDeps := false
+	if effectiveDistro != "" && proj.DistroViews != nil {
+		if view, ok := proj.DistroViews[effectiveDistro]; ok {
+			units = view
+			allowMissingDeps = true
+		}
+	}
 
 	// Add all units as nodes.
 	// For image units, Artifacts are also dependencies (they must be built
@@ -37,33 +67,49 @@ func BuildDAG(proj *yoestar.Project) (*DAG, error) {
 	// container is never scheduled and `docker run` fails on a missing
 	// image. (The old EnsureImage() was removed when containers became
 	// DAG-participating units.)
-	for name, unit := range proj.Units {
+	for name, unit := range units {
 		deps := append([]string{}, unit.Deps...)
 		if unit.Class == "image" {
 			deps = append(deps, unit.Artifacts...)
 		}
-		deps = appendContainerDeps(deps, proj, unit)
+		deps = appendContainerDeps(deps, proj, units, unit)
 		// Resolve virtual names in deps through the distro-aware
-		// provides table. For images, the image's own Distro drives
-		// the lookup; for other units, the global provides fallback
-		// applies (an untagged unit picks whichever toolchain the
-		// project default winds up routing to).
-		resolveDistro := unit.Distro
+		// provides table. Prefer the BuildDAG's effectiveDistro
+		// (consuming image's distro for per-image builds, project
+		// default otherwise) over the unit's own tag — an untagged
+		// source unit consumed by a debian image should resolve its
+		// "toolchain" virtual to toolchain-glibc, not whatever its
+		// own (empty) Distro field would suggest.
+		resolveDistro := effectiveDistro
+		if resolveDistro == "" {
+			resolveDistro = unit.Distro
+		}
 		dag.Nodes[name] = &Node{
 			Unit: unit,
 			Deps: resolveDeps(deps, proj, resolveDistro),
 		}
 	}
 
-	// Validate that all dependencies exist and compute reverse deps
+	// Validate that all dependencies exist and compute reverse deps.
+	// In the per-distro-view iteration mode, drop edges to missing
+	// deps silently: an untagged unit's dep on a feed-only name (e.g.
+	// nodejs-hello → nodejs from alpine.main) is naturally
+	// unresolvable in the debian view but doesn't represent a real
+	// failure — the unit isn't reached by any debian image's closure.
 	for name, node := range dag.Nodes {
+		filtered := node.Deps[:0]
 		for _, dep := range node.Deps {
 			target, ok := dag.Nodes[dep]
 			if !ok {
+				if allowMissingDeps {
+					continue
+				}
 				return nil, fmt.Errorf("unit %q depends on %q, which does not exist", name, dep)
 			}
+			filtered = append(filtered, dep)
 			target.Rdeps = append(target.Rdeps, name)
 		}
+		node.Deps = filtered
 	}
 
 	// Sort rdeps for deterministic output
@@ -102,7 +148,12 @@ func resolveDeps(deps []string, proj *yoestar.Project, distro string) []string {
 // "golang:1.24") and self-references are ignored, and existing entries are
 // not duplicated — TopologicalSort's in-degree bookkeeping counts
 // len(node.Deps), so a duplicate edge would corrupt ordering.
-func appendContainerDeps(deps []string, proj *yoestar.Project, unit *yoestar.Unit) []string {
+//
+// `units` is the per-distro view BuildDAG selected (or proj.Units for
+// distro-less callers); container deps are validated against this same
+// view so the dep edges match the graph nodes.
+func appendContainerDeps(deps []string, proj *yoestar.Project, units map[string]*yoestar.Unit, unit *yoestar.Unit) []string {
+	_ = proj
 	seen := make(map[string]bool, len(deps))
 	for _, d := range deps {
 		seen[d] = true
@@ -114,7 +165,7 @@ func appendContainerDeps(deps []string, proj *yoestar.Project, unit *yoestar.Uni
 		if strings.Contains(container, ":") || strings.Contains(container, "/") {
 			return // external image reference, not a project unit
 		}
-		if _, ok := proj.Units[container]; !ok {
+		if _, ok := units[container]; !ok {
 			return // not a known unit; leave dep validation untouched
 		}
 		if seen[container] {

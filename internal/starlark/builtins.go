@@ -771,6 +771,11 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 		}
 	}
 	e.units[name] = r
+	// Also store in the per-module catalog. Same-named units from
+	// different modules coexist here (alpine.main's libssl3 doesn't
+	// shadow debian.main's); the closure walker picks per consuming
+	// distro at lookup time.
+	e.storeByModule(r)
 	e.mu.Unlock()
 
 	return r, nil

@@ -592,7 +592,7 @@ type Config struct {
 
 // Run launches the TUI.
 func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
-	dag, err := resolve.BuildDAG(proj)
+	dag, err := resolve.BuildDAG(proj, "")
 	if err != nil {
 		return fmt.Errorf("building DAG: %w", err)
 	}
@@ -5590,7 +5590,7 @@ func (m *model) recomputeStatuses() {
 	if err == nil {
 		m.proj = freshProj
 		// Rebuild DAG and unit list from fresh project
-		if dag, err := resolve.BuildDAG(freshProj); err == nil {
+		if dag, err := resolve.BuildDAG(freshProj, m.distro); err == nil {
 			m.dag = dag
 			m.units = allUnits(freshProj)
 			m.cursor = 0
