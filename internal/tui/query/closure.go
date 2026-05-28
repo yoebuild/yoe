@@ -36,7 +36,16 @@ func BuildInClosure(proj *yoestar.Project, root string) map[string]bool {
 	seen := map[string]bool{}
 	var walk func(name string)
 	walk = func(name string) {
-		if real, ok := proj.Provides[name]; ok {
+		// Distro-aware provides resolution so a virtual like
+		// "toolchain" routes to toolchain-musl in an alpine closure
+		// and toolchain-glibc in a debian closure. The global
+		// proj.Provides table has one winner per virtual and would
+		// silently drag the wrong-distro variant into the closure.
+		if distro != "" {
+			if real := proj.ResolveProvidesForDistro(name, distro); real != "" {
+				name = real
+			}
+		} else if real, ok := proj.Provides[name]; ok {
 			name = real
 		}
 		u := proj.LookupUnit(distro, name)

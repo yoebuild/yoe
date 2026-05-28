@@ -85,3 +85,57 @@ func TestClosure_MissingRoot(t *testing.T) {
 		t.Fatalf("missing root: expected nil, got %v", got)
 	}
 }
+
+// TestClosure_VirtualResolutionIsDistroAware: a virtual like "toolchain"
+// has two distro-scoped providers; the closure walker must pick the
+// provider whose Distro matches the walker's effective distro instead
+// of whichever provider happens to win the global proj.Provides slot.
+// Without distro-aware resolution, a debian dev-image closure would
+// pull toolchain-musl through the global table's winner — exactly the
+// shape that originally let alpine-tagged toolchains leak into debian
+// closures.
+func TestClosure_VirtualResolutionIsDistroAware(t *testing.T) {
+	proj := &yoestar.Project{
+		DefaultDistro: "debian",
+		UnitsByModule: map[string]map[string]*yoestar.Unit{
+			"alpine.main": {
+				"toolchain-musl": {Name: "toolchain-musl", Class: "container", Distro: "alpine", Module: "alpine.main", ModuleIndex: -1, Provides: []string{"toolchain"}},
+			},
+			"debian.main": {
+				"toolchain-glibc": {Name: "toolchain-glibc", Class: "container", Distro: "debian", Module: "debian.main", ModuleIndex: -2, Provides: []string{"toolchain"}},
+			},
+			"module-core": {
+				"consumer":  {Name: "consumer", Class: "unit", Deps: []string{"toolchain"}, ModuleIndex: 5},
+				"dev-image": {Name: "dev-image", Class: "image", Distro: "debian", Artifacts: []string{"consumer"}, ModuleIndex: 5},
+			},
+		},
+		// Mimic the loader: the global wins by registration order;
+		// here alpine.main loaded first leaves toolchain-musl in the
+		// global slot. A naive (non-distro-aware) walker would then
+		// pull toolchain-musl into the debian closure.
+		Provides: map[string]string{"toolchain": "toolchain-musl"},
+	}
+	proj.DistroViews = map[string]map[string]*yoestar.Unit{}
+	// Hand-build the per-distro views since we're not running the loader.
+	for _, distro := range []string{"alpine", "debian"} {
+		view := map[string]*yoestar.Unit{}
+		for _, byName := range proj.UnitsByModule {
+			for n, u := range byName {
+				if u.Distro == "" || u.Distro == distro {
+					if cur, ok := view[n]; !ok || u.ModuleIndex > cur.ModuleIndex {
+						view[n] = u
+					}
+				}
+			}
+		}
+		proj.DistroViews[distro] = view
+	}
+
+	got := BuildInClosure(proj, "dev-image")
+	if !got["toolchain-glibc"] {
+		t.Fatalf("debian closure should include toolchain-glibc; got %v", got)
+	}
+	if got["toolchain-musl"] {
+		t.Fatalf("debian closure should NOT include toolchain-musl (it's alpine-tagged); got %v", got)
+	}
+}

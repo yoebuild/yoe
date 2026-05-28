@@ -5,8 +5,10 @@ import (
 )
 
 // RuntimeClosure returns the unit names reachable from `roots` by walking
-// `runtime_deps`, with each dep routed through `proj.Provides` so that
-// virtual names resolve to the concrete unit that won override resolution.
+// `runtime_deps`, with each dep routed through ResolveProvidesForDistro so
+// that virtual names like "toolchain" resolve to the per-distro concrete
+// unit (toolchain-musl for alpine, toolchain-glibc for debian) rather than
+// the single winner in the global proj.Provides table.
 //
 // The returned slice includes the roots themselves and every transitive
 // runtime dep, deduplicated. Order is not significant — callers that need
@@ -36,7 +38,7 @@ func RuntimeClosure(proj *yoestar.Project, roots []string, effectiveDistro strin
 	var queue []string
 
 	visit := func(name string) {
-		if real, ok := proj.Provides[name]; ok {
+		if real := proj.ResolveProvidesForDistro(name, effectiveDistro); real != "" {
 			name = real
 		}
 		u := proj.LookupUnit(effectiveDistro, name)
