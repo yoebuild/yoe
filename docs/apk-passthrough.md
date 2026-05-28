@@ -239,7 +239,7 @@ splits util-linux: `libmount` and `libblkid` are separate apks. When apk's
 solver tries to install both yoe's util-linux and Alpine's libmount/libblkid, it
 fails because both packages own the same library paths.
 
-**First attempt: `prefer_modules = {"util-linux": "alpine.main"}`.** Forces the
+**First attempt: `prefer_modules = {"alpine": {"util-linux": "alpine.main"}}`.** Forces the
 Alpine prebuilt instead of yoe's source-built version (pin syntax names the
 synthetic module, not the parent — `alpine.main` rather than `alpine`). Resolves
 the library conflict. But Alpine's `util-linux` apk is a _meta_ package — it

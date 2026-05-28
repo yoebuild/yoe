@@ -689,32 +689,35 @@ func validatePreferModules(proj *Project) error {
 // validatePreferModules (at end of load) and the early preflight in
 // LoadProjectFromRoot (before resolve_closure runs, so the user sees
 // the helpful fixit instead of a confusing "unresolved name" from
-// the closure walk).
-func preflightPreferModules(prefer map[string]string, known map[string]struct{}) error {
-	for unit, modName := range prefer {
-		if modName == "" {
-			continue
-		}
-		if _, ok := known[modName]; ok {
-			continue
-		}
-		suggestions := suggestModuleNames(modName, known)
-		hint := ""
-		switch len(suggestions) {
-		case 0:
-			// nothing to suggest
-		case 1:
-			hint = fmt.Sprintf(" Did you mean %q?", suggestions[0])
-		default:
-			quoted := make([]string, len(suggestions))
-			for i, s := range suggestions {
-				quoted[i] = fmt.Sprintf("%q", s)
+// the closure walk). Walks the nested-per-distro shape and errors on
+// the first pin whose module name doesn't appear in the known set.
+func preflightPreferModules(prefer map[string]map[string]string, known map[string]struct{}) error {
+	for distro, pins := range prefer {
+		for unit, modName := range pins {
+			if modName == "" {
+				continue
 			}
-			hint = fmt.Sprintf(" Did you mean one of: %s?", strings.Join(quoted, ", "))
+			if _, ok := known[modName]; ok {
+				continue
+			}
+			suggestions := suggestModuleNames(modName, known)
+			hint := ""
+			switch len(suggestions) {
+			case 0:
+				// nothing to suggest
+			case 1:
+				hint = fmt.Sprintf(" Did you mean %q?", suggestions[0])
+			default:
+				quoted := make([]string, len(suggestions))
+				for i, s := range suggestions {
+					quoted[i] = fmt.Sprintf("%q", s)
+				}
+				hint = fmt.Sprintf(" Did you mean one of: %s?", strings.Join(quoted, ", "))
+			}
+			return fmt.Errorf(
+				`prefer_modules[%q] entry %q: %q — module %q not found.%s See docs/module-alpine.md "alpine_feed: declaring a whole repo as one module entry" for the alpine → alpine.main/alpine.community migration.`,
+				distro, unit, modName, modName, hint)
 		}
-		return fmt.Errorf(
-			`prefer_modules entry %q: %q — module %q not found.%s See docs/module-alpine.md "alpine_feed: declaring a whole repo as one module entry" for the alpine → alpine.main/alpine.community migration.`,
-			unit, modName, modName, hint)
 	}
 	return nil
 }

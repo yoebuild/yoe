@@ -48,38 +48,32 @@ func RunInit(projectDir string, machine string) error {
                ref = "main",
                path = "modules/module-core"),
     ],
-    # Per-unit pins that override the default last-module-wins shadowing.
-    # Use these when module-core's source-built version of a package is
-    # broken or under-configured and Alpine's prebuilt is the right
-    # answer (e.g. xz is built static-only in module-core, but kmod's
-    # depmod needs the shared liblzma.so.5).
+    # Per-unit pins that override the default last-module-wins
+    # shadowing, scoped per distro. The outer key is the consuming
+    # image's effective distro, so an "alpine" pin has no effect on
+    # a debian closure walk and vice versa — mixed-distro projects
+    # don't need to drop pins to keep one backend resolving.
     prefer_modules = {
-        "xz": "alpine.main",
-        # module-core's source-built zstd ships libzstd.so.1 at its own
-        # soversion. Alpine's nodejs links against libzstd.so.1 from
-        # Alpine's zstd-libs, so mixing the two trips an apk conflict
-        # (both packages own the same .so path with incompatible
-        # versions). Pin zstd to Alpine so the .so and CLI come from one
-        # source.
-        "zstd": "alpine.main",
-        # module-core's source-built util-linux is one monolithic apk that
-        # bundles libblkid.so.1, libmount.so.1, and libuuid.so.1 (via
-        # --enable-libblkid/--enable-libmount). Alpine splits those libs
-        # into separate libblkid/libmount/libuuid packages, which get
-        # pulled in transitively by eudev, glib, e2fsprogs, etc. as soon
-        # as an image grows past the base set (e.g. jukebox-image's
-        # navidrome closure). Both then claim ownership of the same
-        # SONAMEs and apk refuses to install. Pin util-linux to Alpine so
-        # util-linux and its split libs come from one coordinated source.
-        "util-linux": "alpine.main",
-        # module-core's source-built curl bundles its own libcurl.so.4 at
-        # 8.11.1's soversion. Alpine ships libcurl as a separate package
-        # at 8.14.1, and other Alpine packages (git, libcurl consumers)
-        # link against it. Mixing both trips a so:libcurl.so.4 conflict
-        # the moment an image pulls in git or any other libcurl consumer
-        # from Alpine. Pin curl to Alpine so curl and libcurl come from
-        # one coordinated source.
-        "curl": "alpine.main",
+        "alpine": {
+            # xz is built static-only in module-core, but kmod's
+            # depmod needs shared liblzma.so.5 — Alpine ships it.
+            "xz": "alpine.main",
+            # module-core's source-built zstd ships libzstd.so.1 at
+            # its own soversion; Alpine's nodejs links against
+            # libzstd.so.1 from Alpine's zstd-libs. Pin zstd to Alpine
+            # so the .so and CLI come from one source.
+            "zstd": "alpine.main",
+            # module-core's source-built util-linux bundles
+            # libblkid/libmount/libuuid into one apk; Alpine splits
+            # them. Mixing trips SONAME ownership conflicts. Pin to
+            # Alpine for the coordinated split.
+            "util-linux": "alpine.main",
+            # module-core's curl bundles libcurl.so.4 at 8.11.1's
+            # soversion; Alpine's libcurl is 8.14.1 and other Alpine
+            # packages link against it. Pin curl to Alpine so curl
+            # and libcurl come from one coordinated source.
+            "curl": "alpine.main",
+        },
     },
 )
 `, name, defaultMachine)

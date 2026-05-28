@@ -170,6 +170,30 @@ func (e *Engine) closure(roots []string, effectiveDistro string) ([]string, erro
 func (e *Engine) lookupOrMaterialize(rawName, effectiveDistro string) (*Unit, error) {
 	name := e.resolveProvidesForDistro(rawName, effectiveDistro)
 
+	// prefer_modules per-distro pin: when the consuming closure's
+	// effective distro has a pin for this name, look the pinned module
+	// up first. A pin to a synthetic feed module (alpine.main,
+	// debian.main) materializes the feed's unit; a pin to a real
+	// module returns the unit registered from that module. Either way
+	// the pin overrides the default catalog lookup so the pinned
+	// module wins even when a higher-priority real module would
+	// otherwise satisfy the name.
+	if effectiveDistro != "" && e.project != nil {
+		if pins, ok := e.project.PreferModules[effectiveDistro]; ok {
+			if pinned, ok := pins[name]; ok && pinned != "" {
+				u, err := e.lookupInModule(name, pinned, effectiveDistro)
+				if err != nil {
+					return nil, err
+				}
+				if u != nil {
+					return u, nil
+				}
+				// Pin's target couldn't satisfy (filtered out or
+				// missing). Fall through to default resolution.
+			}
+		}
+	}
+
 	if u, ok := e.units[name]; ok {
 		if visibleToDistro(u, effectiveDistro) {
 			return u, nil
@@ -206,6 +230,38 @@ func (e *Engine) lookupOrMaterialize(rawName, effectiveDistro string) (*Unit, er
 		if visibleToDistro(existing, effectiveDistro) && existing.Distro == effectiveDistro {
 			return existing, nil
 		}
+		return u, nil
+	}
+	return nil, nil
+}
+
+// lookupInModule resolves name through a specific module — either a
+// real module (consult e.units, accept the registration if
+// u.Module == moduleName), or a synthetic feed module (materialize
+// via sm.Lookup). Returns (nil, nil) when the named module doesn't
+// satisfy the request — the caller falls through to default lookup.
+func (e *Engine) lookupInModule(name, moduleName, effectiveDistro string) (*Unit, error) {
+	// Synthetic module path first — feed modules satisfy most pins.
+	for _, sm := range e.syntheticModules {
+		if sm.Name != moduleName {
+			continue
+		}
+		u, err := sm.Lookup(name)
+		if err != nil {
+			return nil, fmt.Errorf("synthetic module %q lookup %q: %w", sm.Name, name, err)
+		}
+		if u == nil {
+			return nil, nil
+		}
+		if !visibleToDistro(u, effectiveDistro) {
+			return nil, nil
+		}
+		u.ModuleIndex = sm.Priority
+		return u, nil
+	}
+	// Real module path — the unit must already be registered under
+	// the bare name from the named module.
+	if u, ok := e.units[name]; ok && u.Module == moduleName && visibleToDistro(u, effectiveDistro) {
 		return u, nil
 	}
 	return nil, nil

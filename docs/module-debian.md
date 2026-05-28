@@ -151,19 +151,11 @@ End-to-end verification — does the image actually boot? — runs against the
 the smallest closure that boots in QEMU and accepts SSH: kernel, init,
 networking, openssh-server.
 
-A caveat applies before the catalog-by-distro refactor lands: the
-`testdata/e2e-project` PROJECT.star pins several names
-(`xz`, `zstd`, `util-linux`, `curl`) to `alpine.main` via `prefer_modules`, and
-those pins drop the corresponding `module-core` units at load time. When the
-debian closure walks the same names, alpine-tagged units are filtered out and
-the resolver fails with `unresolved name "xz"`. The right fix is the
-catalog-by-distro design captured in the plan (`U6b` —
-`docs/plans/2026-05-27-001-feat-module-debian-debian-backend-plan.md`), which
-defers the `prefer_modules` decision to closure-walk time so a pin to a
-filtered-out module falls back gracefully. Until that lands, drive the boot
-test from a clean-slate project that doesn't pin colliding names — copy
-`testdata/e2e-project/PROJECT.star` and `images/debian-base-image.star` into a
-fresh directory and drop the `prefer_modules = {...}` block.
+`prefer_modules` is scoped per consuming distro, so the alpine pins in the
+e2e-project PROJECT.star (`xz`, `zstd`, `util-linux`, `curl` → `alpine.main`)
+don't bleed into the debian closure: a debian image build resolves those names
+through their distro-neutral module-core equivalents. The fixture builds out of
+the box on a mixed-distro project.
 
 ```sh
 cd testdata/e2e-project
