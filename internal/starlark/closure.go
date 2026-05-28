@@ -170,34 +170,6 @@ func (e *Engine) closure(roots []string, effectiveDistro string) ([]string, erro
 func (e *Engine) lookupOrMaterialize(rawName, effectiveDistro string) (*Unit, error) {
 	name := e.resolveProvidesForDistro(rawName, effectiveDistro)
 
-	// Honor prefer_modules pins when both the pinned module is
-	// distro-scoped AND a distro-neutral unit coexists in e.units
-	// for the same name (the pin's drop was skipped at load time to
-	// preserve cross-distro resolution). Within the pinned distro,
-	// the synthetic module's unit must shadow the distro-neutral
-	// one; outside the pinned distro the visibility filter below
-	// handles fallthrough naturally.
-	if e.project != nil {
-		if preferred, ok := e.project.PreferModules[name]; ok && preferred != "" {
-			preferredDistro := e.syntheticModuleDistro(preferred)
-			if preferredDistro != "" && preferredDistro == effectiveDistro {
-				for _, sm := range e.syntheticModules {
-					if sm.Name != preferred {
-						continue
-					}
-					u, err := sm.Lookup(name)
-					if err != nil {
-						return nil, fmt.Errorf("synthetic module %q lookup %q: %w", sm.Name, name, err)
-					}
-					if u != nil && visibleToDistro(u, effectiveDistro) {
-						return u, nil
-					}
-					break
-				}
-			}
-		}
-	}
-
 	if u, ok := e.units[name]; ok {
 		if visibleToDistro(u, effectiveDistro) {
 			return u, nil

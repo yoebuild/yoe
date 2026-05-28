@@ -237,24 +237,9 @@ there's only one delivery mechanism to understand.
 ### Reaching a running device
 
 Built packages flow from the workstation to a running yoe device through a small
-set of orthogonal channels: mDNS for discovery, HTTP for the package pull, and
-SSH for orchestration. The delivery mechanism is one — the per-distro package
-format is two:
-
-- **Alpine images** consume an apk repo at `repo/<project>/alpine/<arch>/`
-  with the project's RSA-signed `APKINDEX`. `yoe device repo add` writes the
-  matching `/etc/apk/repositories` entry; `apk add` / `apk upgrade` then work
-  on-device against the project's own feed.
-- **Debian images** consume a Debian-format repo at
-  `repo/<project>/debian/dists/<suite>/`. The project's GPG key signs the
-  `InRelease`; image assembly stages
-  `/etc/apt/sources.list.d/<project>.sources` (deb822 format) referencing the
-  keyring via `Signed-By:`. `apt update` and `apt install` on the device verify
-  against the project key only, so other apt sources can't smuggle packages
-  into the project's namespace.
-
-Same project key, same HTTP transport, same mDNS + SSH channels — the apk vs
-apt split is on-device tooling, not on-workstation infrastructure.
+set of orthogonal channels: mDNS for discovery, HTTP for the apk pull, and SSH
+for orchestration. The same apk repo, signing key, and `APKINDEX` serve
+image-time installs, the dev loop, and on-device OTA:
 
 ![Feed server topology](assets/feed-server-topology.png)
 
@@ -262,8 +247,7 @@ apt split is on-device tooling, not on-workstation infrastructure.
 one-time `/etc/apk/repositories` setup, and `yoe deploy` orchestrates the whole
 "build → ship → install" round trip. See
 [Feed Server and yoe deploy](feed-server.md) for the workflows, command
-reference, and trust model, and [module-debian](module-debian.md) for the apt
-side end-to-end.
+reference, and trust model.
 
 ## Development
 
@@ -272,13 +256,9 @@ experimental tweak — yoe leans on plain git rather than a separate "dev mode."
 
 ### Source modifications round-trip
 
-Every unit's build directory is a regular git repo, living under
-`build/<distro>/<unit>.<scope>/`. The per-distro segment lets a source unit
-consumed by both an Alpine and a Debian image keep two destdirs (one built
-against musl, one against glibc) so each image gets the right libc without
-clobbering its peer between builds. Upstream source is checked out at the
-version pinned by the unit and tagged `upstream`; any patches the unit
-declares are applied as commits on top; your local edits become further
+Every unit's build directory is a regular git repo. Upstream source is checked
+out at the version pinned by the unit and tagged `upstream`; any patches the
+unit declares are applied as commits on top; your local edits become further
 commits. There's no separate workspace, no mode to enter:
 
 ![Source modification flow](assets/source-mod-flow.png)
