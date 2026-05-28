@@ -144,6 +144,71 @@ component or apt-overlay URL) gives apt-equivalent priority resolution on the
 project side. The closure walker consults each in declaration order; first match
 wins.
 
+## Verifying a Debian image
+
+End-to-end verification — does the image actually boot? — runs against the
+`debian-base-image` fixture under `testdata/e2e-project/`. The fixture targets
+the smallest closure that boots in QEMU and accepts SSH: kernel, init,
+networking, openssh-server.
+
+A caveat applies before the catalog-by-distro refactor lands: the
+`testdata/e2e-project` PROJECT.star pins several names
+(`xz`, `zstd`, `util-linux`, `curl`) to `alpine.main` via `prefer_modules`, and
+those pins drop the corresponding `module-core` units at load time. When the
+debian closure walks the same names, alpine-tagged units are filtered out and
+the resolver fails with `unresolved name "xz"`. The right fix is the
+catalog-by-distro design captured in the plan (`U6b` —
+`docs/plans/2026-05-27-001-feat-module-debian-debian-backend-plan.md`), which
+defers the `prefer_modules` decision to closure-walk time so a pin to a
+filtered-out module falls back gracefully. Until that lands, drive the boot
+test from a clean-slate project that doesn't pin colliding names — copy
+`testdata/e2e-project/PROJECT.star` and `images/debian-base-image.star` into a
+fresh directory and drop the `prefer_modules = {...}` block.
+
+```sh
+cd testdata/e2e-project
+
+# 1. Refresh the in-tree Packages files if upstream has moved since the
+#    cached snapshot was taken. Safe to skip on a clean check-out.
+yoe update-feeds
+
+# 2. Build the image. This pulls every artifact's .deb from the cached
+#    bookworm feed, builds toolchain-glibc on first run, extracts each
+#    .deb into the rootfs, runs `dpkg --configure -a` inside the
+#    no-network sandbox, stages the project APT keyring + deb822
+#    sources file, and writes a bootable disk image. Expect ~5–10 min
+#    on first run (toolchain build); subsequent runs hit the cache.
+yoe build debian-base-image
+
+# 3. Boot under QEMU. The fixture's machine config forwards host port
+#    2222 → guest port 22 so SSH lands without extra flags.
+yoe run debian-base-image
+
+# 4. From another terminal, connect to the running image.
+ssh -p 2222 root@localhost
+```
+
+If `apt-get update` and `apt-get install` work from inside the booted image
+against the project's own repo (`https://<feed-host>/<project>/debian`), the
+verification has fully closed: project repo emission, on-device APT trust
+staging, and the iterate–deploy–update loop all work end-to-end.
+
+When the build fails or the image won't boot, the failure usually surfaces in
+one of these places:
+
+- `dpkg --configure -a` inside the toolchain container — postinst error in the
+  configure log; check whether the package needs network access (see Known
+  limitations).
+- Bootloader install — `extlinux` / `syslinux-common` must be present in the
+  toolchain-glibc Dockerfile so `_install_syslinux_debian` can find
+  `/usr/lib/SYSLINUX/mbr.bin`.
+- Init startup — kernel and systemd-sysv pull in /sbin/init transitively; if
+  the kernel boots but init doesn't run, check that `init` (the symlink
+  package) is in the closure.
+- SSH not running on first boot — Debian's `openssh-server` package enables
+  itself via systemd preset; verify with `systemctl status ssh` on the device
+  console.
+
 ## Known limitations
 
 Two structural properties of the debian backend that users will encounter
