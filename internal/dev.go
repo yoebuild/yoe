@@ -26,8 +26,11 @@ func DevExtract(projectDir, arch, unitName string, w io.Writer) error {
 		return err
 	}
 
-	unit, ok := proj.Units[unitName]
-	if !ok {
+	// DevExtract operates on the unit's source-control state, not
+	// its distro-specific build artifact, so AnyUnit is enough — the
+	// patch list and source URL it reads are distro-neutral fields.
+	unit := proj.AnyUnit(unitName)
+	if unit == nil {
 		return fmt.Errorf("unit %q not found", unitName)
 	}
 

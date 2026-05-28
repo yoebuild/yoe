@@ -565,9 +565,11 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	// Compute duplicate-provides diagnostics: every virtual claimed by
 	// more than one unit. The active provider in proj.Provides is the
 	// winner; the rest go in Others. Sorted by virtual name and then by
-	// unit name so the diagnostics tab is deterministic.
+	// unit name so the diagnostics tab is deterministic. Walk the
+	// per-module catalog so cross-distro siblings each contribute
+	// their own Provides claims.
 	virtToUnits := map[string][]string{}
-	for _, u := range proj.Units {
+	for _, u := range proj.AllUnits() {
 		for _, virt := range u.Provides {
 			if virt == "" {
 				continue
@@ -599,8 +601,11 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		})
 	}
 
-	// Validate: units with tasks must have container and container_arch.
-	for name, u := range proj.Units {
+	// Validate: units with tasks must have container and
+	// container_arch. Walk every registered unit (across modules)
+	// since the requirement applies to all variants, not just the
+	// project default's view.
+	for name, u := range proj.AllUnits() {
 		if len(u.Tasks) == 0 {
 			continue // metadata-only units
 		}

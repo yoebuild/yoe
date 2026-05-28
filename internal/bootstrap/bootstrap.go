@@ -35,18 +35,6 @@ func Stage0(proj *yoestar.Project, projectDir string, w io.Writer) error {
 
 	arch := build.Arch()
 
-	// Verify bootstrap units exist
-	var missing []string
-	for _, name := range bootstrapUnits {
-		if _, ok := proj.Units[name]; !ok {
-			missing = append(missing, name)
-		}
-	}
-	if len(missing) > 0 {
-		return fmt.Errorf("bootstrap units not found: %s\nAdd them to your project or include a module that provides them",
-			strings.Join(missing, ", "))
-	}
-
 	// Bootstrap stages target the Alpine pipeline (glibc-from-source +
 	// apk-tools). The distro segment in build/<distro>/... and
 	// repo/<project>/<distro>/ reflects that explicit choice rather
@@ -55,11 +43,24 @@ func Stage0(proj *yoestar.Project, projectDir string, w io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("bootstrap: %w", err)
 	}
+
+	// Verify bootstrap units exist in the bootstrap distro's view.
+	var missing []string
+	for _, name := range bootstrapUnits {
+		if proj.LookupUnit(distro, name) == nil {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("bootstrap units not found: %s\nAdd them to your project or include a module that provides them",
+			strings.Join(missing, ", "))
+	}
+
 	// Build each bootstrap unit without sandbox isolation (using host tools)
 	repoDir := repo.RepoDistroDir(proj, projectDir, distro)
 
 	for _, name := range bootstrapUnits {
-		unit := proj.Units[name]
+		unit := proj.LookupUnit(distro, name)
 		fmt.Fprintf(w, "\n--- Building %s %s ---\n", unit.Name, unit.Version)
 
 		buildDir := build.UnitBuildDir(projectDir, arch, unit.Name, distro)
@@ -143,7 +144,10 @@ func Stage1(proj *yoestar.Project, projectDir string, w io.Writer) error {
 
 	// Rebuild each bootstrap unit inside the build root
 	for _, name := range bootstrapUnits {
-		unit := proj.Units[name]
+		unit := proj.LookupUnit(distro, name)
+		if unit == nil {
+			return fmt.Errorf("bootstrap unit %q disappeared between stages", name)
+		}
 		fmt.Fprintf(w, "\n--- Rebuilding %s %s (self-hosted) ---\n", unit.Name, unit.Version)
 
 		buildDir := build.UnitBuildDir(projectDir, arch, unit.Name, distro)
@@ -213,7 +217,7 @@ func Status(proj *yoestar.Project, projectDir string, w io.Writer) error {
 
 	for _, name := range bootstrapUnits {
 		status := "missing"
-		if _, ok := proj.Units[name]; ok {
+		if proj.LookupUnit(distro, name) != nil {
 			status = "unit found"
 		}
 

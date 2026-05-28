@@ -52,8 +52,9 @@ func TestStatus(t *testing.T) {
 
 func TestStage0_MissingUnits(t *testing.T) {
 	proj := &yoestar.Project{
-		Name:    "test",
-		Units: map[string]*yoestar.Unit{},
+		Name:          "test",
+		DefaultDistro: "alpine",
+		Units:         map[string]*yoestar.Unit{},
 	}
 
 	var buf bytes.Buffer

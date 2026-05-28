@@ -44,7 +44,7 @@ func Assemble(unit *yoestar.Unit, proj *yoestar.Project, projectDir, outputDir, 
 	default:
 		// alpine path (current behavior)
 		repoDir := repo.RepoDistroDir(proj, projectDir, effectiveDistro)
-		allPackages := resolvePackageDeps(unit.Artifacts, proj)
+		allPackages := resolvePackageDeps(unit.Artifacts, proj, effectiveDistro)
 		if err := installPackages(rootfs, repoDir, allPackages, w); err != nil {
 			return fmt.Errorf("installing packages: %w", err)
 		}
@@ -82,7 +82,7 @@ func assembleDebian(rootfs string, unit *yoestar.Unit, proj *yoestar.Project, pr
 	if _, err := os.Stat(debianPoolDir); err != nil {
 		return fmt.Errorf("debian pool missing at %s — build the project's debian artifacts first", debianPoolDir)
 	}
-	allPackages := resolvePackageDeps(unit.Artifacts, proj)
+	allPackages := resolvePackageDeps(unit.Artifacts, proj, "debian")
 	fmt.Fprintf(w, "  Installing %d debs into rootfs...\n", len(allPackages))
 	for _, pkg := range allPackages {
 		debFile, err := findDebInPool(debianPoolDir, pkg)
@@ -138,7 +138,10 @@ func findDebInPool(poolRoot, pkg string) (string, error) {
 // runtime dependencies. Build-time-only deps (unit.Deps) are excluded — they
 // are needed to compile but not to run. The returned list is in dependency
 // order (deps before dependents), with image-class units excluded.
-func resolvePackageDeps(packages []string, proj *yoestar.Project) []string {
+// effectiveDistro restricts resolution to units visible to the
+// consuming image — cross-distro siblings of the same name don't
+// pollute the walk.
+func resolvePackageDeps(packages []string, proj *yoestar.Project, effectiveDistro string) []string {
 	seen := make(map[string]bool)
 	var result []string
 
@@ -149,7 +152,7 @@ func resolvePackageDeps(packages []string, proj *yoestar.Project) []string {
 		}
 		seen[name] = true
 
-		if unit, ok := proj.Units[name]; ok {
+		if unit := proj.LookupUnit(effectiveDistro, name); unit != nil {
 			// Skip image units — they aren't installable artifacts
 			if unit.Class == "image" {
 				return

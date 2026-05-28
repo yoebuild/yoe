@@ -42,11 +42,15 @@ func ListSources(projectDir string, w io.Writer) error {
 		return err
 	}
 
+	// Dedup by name across modules: a unit registered for multiple
+	// distros shares its source URL, so reporting it once is right.
+	seen := map[string]bool{}
 	fmt.Fprintf(w, "%-20s %-10s %s\n", "Unit", "Status", "Source")
-	for _, unit := range proj.Units {
-		if unit.Source == "" {
+	for name, unit := range proj.AllUnits() {
+		if unit.Source == "" || seen[name] {
 			continue
 		}
+		seen[name] = true
 
 		status := "missing"
 		if isCached(cacheDir, unit) {
@@ -71,10 +75,12 @@ func VerifyAll(projectDir string, w io.Writer) error {
 	}
 
 	allOk := true
-	for _, unit := range proj.Units {
-		if unit.Source == "" || unit.SHA256 == "" {
+	seen := map[string]bool{}
+	for name, unit := range proj.AllUnits() {
+		if unit.Source == "" || unit.SHA256 == "" || seen[name] {
 			continue
 		}
+		seen[name] = true
 		if err := Verify(unit); err != nil {
 			fmt.Fprintf(w, "FAIL  %s: %v\n", unit.Name, err)
 			allOk = false
@@ -117,9 +123,18 @@ func CleanSources(w io.Writer) error {
 }
 
 func filterUnits(proj *yoestar.Project, names []string) []*yoestar.Unit {
+	// Use AnyUnit lookups across modules so source operations work
+	// regardless of which distro registered the named unit. Dedup
+	// by name when no filter is given so the result mirrors the
+	// project's effective catalog of distinct unit names.
 	if len(names) == 0 {
-		result := make([]*yoestar.Unit, 0, len(proj.Units))
-		for _, r := range proj.Units {
+		seen := map[string]bool{}
+		var result []*yoestar.Unit
+		for name, r := range proj.AllUnits() {
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
 			result = append(result, r)
 		}
 		return result
@@ -127,7 +142,7 @@ func filterUnits(proj *yoestar.Project, names []string) []*yoestar.Unit {
 
 	result := make([]*yoestar.Unit, 0, len(names))
 	for _, name := range names {
-		if r, ok := proj.Units[name]; ok {
+		if r := proj.AnyUnit(name); r != nil {
 			result = append(result, r)
 		}
 	}

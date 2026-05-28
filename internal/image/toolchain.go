@@ -25,7 +25,11 @@ func ResolveToolchainImage(proj *yoestar.Project, effectiveDistro, arch string) 
 	if effectiveDistro == "" {
 		return "", fmt.Errorf("image: ResolveToolchainImage: empty effectiveDistro")
 	}
-	for _, u := range proj.Units {
+	// Iterate the per-distro view so cross-distro toolchain
+	// candidates (toolchain-musl tagged alpine + toolchain-glibc
+	// tagged debian) each resolve in their own view without
+	// interfering.
+	for _, u := range proj.DistroViews[effectiveDistro] {
 		if u.Class != "container" {
 			continue
 		}

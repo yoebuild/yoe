@@ -109,9 +109,10 @@ type QEMUOptions struct {
 
 // RunQEMU launches an image in QEMU.
 func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, opts QEMUOptions, w io.Writer) error {
-	// Find the image unit
-	unit, ok := proj.Units[unitName]
-	if !ok {
+	// Find the image unit. AnyUnit suffices to read class + name;
+	// the actual built artifact lives at a per-machine path.
+	unit := proj.AnyUnit(unitName)
+	if unit == nil {
 		return fmt.Errorf("unit %q not found", unitName)
 	}
 	if unit.Class != "image" {
@@ -202,7 +203,7 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 	fullCmd := qemuBin + " " + strings.Join(args, " ")
 
 	return yoe.RunInContainer(yoe.ContainerRunConfig{
-		Image:       yoe.DefaultContainerImage(proj.Units),
+		Image:       yoe.DefaultContainerImage(proj),
 		Command:     fullCmd,
 		ProjectDir:  projectDir,
 		Interactive: !opts.Daemon,

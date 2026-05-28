@@ -516,7 +516,7 @@ func cmdContainerShell() {
 
 	if err := yoe.RunInContainer(yoe.ContainerRunConfig{
 		Shell:       "bash",
-		Image:       yoe.DefaultContainerImage(proj.Units),
+		Image:       yoe.DefaultContainerImage(proj),
 		Command:     bwrapCmd,
 		ProjectDir:  projectDir,
 		Mounts:      mounts,
@@ -724,7 +724,7 @@ func loadProjectWithMachine(machineName string) *yoestar.Project {
 		os.Exit(1)
 	}
 	if ovImage != "" {
-		if _, ok := proj.Units[ovImage]; ok {
+		if proj.AnyUnit(ovImage) != nil {
 			proj.Defaults.Image = ovImage
 		} else {
 			fmt.Fprintf(os.Stderr, "Warning: local.star image %q not found in project; ignoring\n", ovImage)

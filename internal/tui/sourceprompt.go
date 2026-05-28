@@ -21,7 +21,8 @@ import (
 // state. Returns the updated model and a command (always nil today —
 // network operations live in the post-confirmation handler).
 func (m model) openSourcePromptForUnit(unitName string) (tea.Model, tea.Cmd) {
-	u, ok := m.proj.Units[unitName]
+	u := m.proj.LookupUnit(m.distro, unitName)
+	ok := u != nil
 	if !ok || u.Class == "image" || u.Class == "container" {
 		m.message = fmt.Sprintf("%s has no source dir to toggle", unitName)
 		return m, nil
@@ -136,7 +137,8 @@ func (m model) openSourcePromptForModule(rmName string) (tea.Model, tea.Cmd) {
 // tag name (when one exists) or 40-char SHA directly to the unit's .star
 // `tag` field.
 func (m model) openPromotePrompt(unitName string) (tea.Model, tea.Cmd) {
-	u, ok := m.proj.Units[unitName]
+	u := m.proj.LookupUnit(m.distro, unitName)
+	ok := u != nil
 	if !ok || u.Class == "image" || u.Class == "container" {
 		m.message = fmt.Sprintf("%s has no source dir to pin", unitName)
 		return m, nil
@@ -353,7 +355,8 @@ func depthOptionToFetch(value string) depthFetchSpec {
 // slow — `git fetch --unshallow` against a multi-GB repo can run for
 // tens of seconds — so blocking the Update loop would freeze the UI.
 func (m model) runDevToUpstream(unitName string, ssh bool, depth depthFetchSpec) (tea.Model, tea.Cmd) {
-	u, ok := m.proj.Units[unitName]
+	u := m.proj.LookupUnit(m.distro, unitName)
+	ok := u != nil
 	if !ok {
 		m.message = fmt.Sprintf("unit %s not found", unitName)
 		return m, nil
@@ -392,7 +395,8 @@ func depthLabel(d depthFetchSpec) string {
 // few seconds, so we keep the same spinner machinery for parity with
 // the upstream toggle.
 func (m model) runDevToPin(unitName string, force bool) (tea.Model, tea.Cmd) {
-	u, ok := m.proj.Units[unitName]
+	u := m.proj.LookupUnit(m.distro, unitName)
+	ok := u != nil
 	if !ok {
 		m.message = fmt.Sprintf("unit %s not found", unitName)
 		return m, nil
@@ -418,7 +422,8 @@ func (m model) runDevToPin(unitName string, force bool) (tea.Model, tea.Cmd) {
 // but routed through the same background path so the user always sees
 // a "working…" hint instead of a frozen screen.
 func (m model) runDevPromote(unitName string) (tea.Model, tea.Cmd) {
-	u, ok := m.proj.Units[unitName]
+	u := m.proj.LookupUnit(m.distro, unitName)
+	ok := u != nil
 	if !ok {
 		m.message = fmt.Sprintf("unit %s not found", unitName)
 		return m, nil
@@ -558,7 +563,10 @@ func (m *model) armWatcherFromInitialStates() {
 	if m.srcWatcher == nil {
 		return
 	}
-	for name := range m.proj.Units {
+	// Iterate the project's effective-distro view so dev-state
+	// detection runs once per visible unit; cross-distro siblings
+	// of the same name share src state per persistedUnitSourceState.
+	for name := range m.proj.DistroViews[m.distro] {
 		persisted := m.persistedUnitSourceState(name)
 		if !source.IsDev(persisted) {
 			continue // pin/empty — BuildMeta is the truth, no scan needed
@@ -611,7 +619,7 @@ func (m model) invalidateUnitState(name string) {
 	if m.proj == nil {
 		return
 	}
-	if _, ok := m.proj.Units[name]; !ok {
+	if m.proj.LookupUnit(m.distro, name) == nil {
 		return
 	}
 	persisted := m.persistedUnitSourceState(name)
@@ -645,7 +653,8 @@ func (m model) invalidateUnitState(name string) {
 // argument to DetectState so a clean checkout is disambiguated
 // correctly.
 func (m model) persistedUnitSourceState(name string) source.State {
-	u, ok := m.proj.Units[name]
+	u := m.proj.LookupUnit(m.distro, name)
+	ok := u != nil
 	if !ok {
 		return source.StateEmpty
 	}

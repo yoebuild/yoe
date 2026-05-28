@@ -253,8 +253,10 @@ func (p *Project) EffectiveDistroForImage(imageName string) (string, error) {
 	if p == nil {
 		return "", fmt.Errorf("EffectiveDistroForImage: nil project")
 	}
-	u, ok := p.Units[imageName]
-	if !ok {
+	// Read the image's tag from any module — the very call resolves
+	// the distro we'd otherwise need to pass to LookupUnit.
+	u := p.AnyUnit(imageName)
+	if u == nil {
 		return "", fmt.Errorf("EffectiveDistroForImage: unit %q not found", imageName)
 	}
 	if u.Class != "image" {
@@ -279,12 +281,47 @@ func (p *Project) EffectiveDistroForImage(imageName string) (string, error) {
 // (TUI list-all, single-unit CLI helpers), pass the project's
 // effective distro; for image-scoped consumers, pass
 // EffectiveDistroForImage(imageName).
+//
+// Hand-constructed projects in tests often skip the DistroViews
+// build pass; LookupUnit falls back to the flat Units catalog so
+// those tests keep working without per-test fixture wiring.
 func (p *Project) LookupUnit(distro, name string) *Unit {
 	if p == nil {
 		return nil
 	}
 	if view, ok := p.DistroViews[distro]; ok {
 		if u, ok := view[name]; ok {
+			return u
+		}
+	}
+	if p.Units != nil {
+		if u, ok := p.Units[name]; ok {
+			return u
+		}
+	}
+	return nil
+}
+
+// AnyUnit returns the first unit registered under `name` across all
+// modules, or nil if no module has one. Used by callers that need to
+// inspect a unit before knowing its consuming distro — most notably
+// EffectiveDistroForImage, which reads the image's own Distro field
+// to compute the very distro a LookupUnit call would need. Pointer
+// identity across modules isn't meaningful; pick one and read.
+//
+// Falls back to the flat Units catalog when UnitsByModule is empty
+// (hand-constructed test fixtures that skip the per-module registration).
+func (p *Project) AnyUnit(name string) *Unit {
+	if p == nil {
+		return nil
+	}
+	for _, byName := range p.UnitsByModule {
+		if u, ok := byName[name]; ok {
+			return u
+		}
+	}
+	if p.Units != nil {
+		if u, ok := p.Units[name]; ok {
 			return u
 		}
 	}
@@ -297,16 +334,27 @@ func (p *Project) LookupUnit(distro, name string) *Unit {
 // same name may yield multiple times when different modules registered
 // it for different distros — consumers that want one entry per name
 // should deduplicate themselves or use DistroViews[distro] iteration.
+//
+// Falls back to iterating the flat Units catalog when UnitsByModule is
+// empty (hand-constructed test fixtures).
 func (p *Project) AllUnits() iter.Seq2[string, *Unit] {
 	return func(yield func(string, *Unit) bool) {
 		if p == nil {
 			return
 		}
-		for _, byName := range p.UnitsByModule {
-			for name, u := range byName {
-				if !yield(name, u) {
-					return
+		if len(p.UnitsByModule) > 0 {
+			for _, byName := range p.UnitsByModule {
+				for name, u := range byName {
+					if !yield(name, u) {
+						return
+					}
 				}
+			}
+			return
+		}
+		for name, u := range p.Units {
+			if !yield(name, u) {
+				return
 			}
 		}
 	}

@@ -248,8 +248,13 @@ func Clean(proj *yoestar.Project, repoDir string, signer *artifact.Signer, w io.
 		return fmt.Errorf("Clean requires a loaded project")
 	}
 
-	keep := make(map[string]struct{}, len(proj.Units))
-	for _, u := range proj.Units {
+	// AllUnits iterates UnitsByModule directly, so cross-module
+	// same-name variants (alpine.main + debian.main both defining
+	// libssl3) each contribute their own apk filename to the keep
+	// set — neither is treated as stale just because the other
+	// satisfies the same name in some closure.
+	keep := map[string]struct{}{}
+	for _, u := range proj.AllUnits() {
 		if u.Version == "" {
 			continue
 		}

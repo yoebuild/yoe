@@ -21,8 +21,11 @@ func Flash(proj *yoestar.Project, unitName, devicePath, projectDir string, dryRu
 		return fmt.Errorf("flash currently supports Linux only")
 	}
 
-	unit, ok := proj.Units[unitName]
-	if !ok {
+	// Flash reads the image's class to validate the request, then
+	// drives device-level I/O. AnyUnit suffices: an image registered
+	// under any module identifies as an image regardless of distro.
+	unit := proj.AnyUnit(unitName)
+	if unit == nil {
 		return fmt.Errorf("unit %q not found", unitName)
 	}
 	if unit.Class != "image" {

@@ -17,10 +17,19 @@ import (
 // never recurses into a name it has already visited, and missing names
 // are skipped (the build planner is responsible for flagging them).
 func BuildInClosure(proj *yoestar.Project, root string) map[string]bool {
-	if proj == nil || proj.Units == nil {
+	if proj == nil {
 		return nil
 	}
-	if _, ok := proj.Units[root]; !ok {
+	// The TUI query has no image scope, so resolve through the
+	// project's effective distro. If neither default_distro nor an
+	// override is set, fall back to scanning any module for the root
+	// — search-as-you-type UX is best-effort.
+	distro, _ := proj.EffectiveDistro()
+	rootUnit := proj.LookupUnit(distro, root)
+	if rootUnit == nil {
+		rootUnit = proj.AnyUnit(root)
+	}
+	if rootUnit == nil {
 		return nil
 	}
 
@@ -30,8 +39,11 @@ func BuildInClosure(proj *yoestar.Project, root string) map[string]bool {
 		if real, ok := proj.Provides[name]; ok {
 			name = real
 		}
-		u, ok := proj.Units[name]
-		if !ok || seen[name] {
+		u := proj.LookupUnit(distro, name)
+		if u == nil {
+			u = proj.AnyUnit(name)
+		}
+		if u == nil || seen[name] {
 			return
 		}
 		seen[name] = true
@@ -50,18 +62,12 @@ func BuildInClosure(proj *yoestar.Project, root string) map[string]bool {
 	walk(root)
 
 	// Union runtime-dep closure rooted at the same unit. RuntimeClosure
-	// already routes through proj.Provides.
-	//
-	// The TUI query has no image scope, so use the project's effective
-	// distro fallback. If neither default_distro nor an override is set
-	// the walker would panic; surface that as "no closure" since the
-	// caller's UX (search filter) is best-effort.
-	distro, err := proj.EffectiveDistro()
-	if err != nil {
-		return seen
-	}
-	for _, name := range resolve.RuntimeClosure(proj, []string{root}, distro) {
-		seen[name] = true
+	// already routes through proj.Provides. Empty distro short-circuits
+	// (the walker would panic on it).
+	if distro != "" {
+		for _, name := range resolve.RuntimeClosure(proj, []string{root}, distro) {
+			seen[name] = true
+		}
 	}
 	return seen
 }

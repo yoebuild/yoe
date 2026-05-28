@@ -39,8 +39,8 @@ func RuntimeClosure(proj *yoestar.Project, roots []string, effectiveDistro strin
 		if real, ok := proj.Provides[name]; ok {
 			name = real
 		}
-		u, ok := proj.Units[name]
-		if !ok {
+		u := proj.LookupUnit(effectiveDistro, name)
+		if u == nil {
 			return
 		}
 		if u.Distro != "" && u.Distro != effectiveDistro {
@@ -58,7 +58,10 @@ func RuntimeClosure(proj *yoestar.Project, roots []string, effectiveDistro strin
 	}
 
 	for i := 0; i < len(queue); i++ {
-		u := proj.Units[queue[i]]
+		u := proj.LookupUnit(effectiveDistro, queue[i])
+		if u == nil {
+			continue
+		}
 		for _, dep := range u.RuntimeDeps {
 			visit(dep)
 		}

@@ -224,7 +224,7 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 	// can show the full build queue before any work starts.
 	for _, name := range order {
 		hash := hashes[name]
-		unit := proj.Units[name]
+		unit := proj.LookupUnit(effectiveDistro, name)
 		sd := ScopeDir(unit, opts.Arch, opts.Machine)
 		forceThis := (opts.Force || opts.Clean) && (len(requested) == 0 || requested[name])
 		if !forceThis && !opts.NoCache && cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hash, effectiveDistro) {
@@ -305,7 +305,7 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		}
 		mu.Unlock()
 
-		unit := proj.Units[name]
+		unit := proj.LookupUnit(effectiveDistro, name)
 		hash := hashes[name]
 		sd := ScopeDir(unit, opts.Arch, opts.Machine)
 
@@ -934,7 +934,7 @@ func blockedUnits(dag *resolve.DAG, failed string, order []string) []string {
 func dryRun(w io.Writer, proj *yoestar.Project, order []string, hashes map[string]string, opts Options, requested map[string]bool) error {
 	fmt.Fprintln(w, "Dry run — would build in this order:")
 	for _, name := range order {
-		unit := proj.Units[name]
+		unit := proj.LookupUnit(opts.EffectiveDistro, name)
 		sd := ScopeDir(unit, opts.Arch, opts.Machine)
 		cached := ""
 		forceThis := (opts.Force || opts.Clean) && (len(requested) == 0 || requested[name])
@@ -988,9 +988,18 @@ func resolveContainerImage(proj *yoestar.Project, unit *yoestar.Unit, arch strin
 		container = resolved
 	}
 
-	// Container unit — look up version and build tag.
-	// Always include arch in tag for explicitness.
-	if cu, ok := proj.Units[container]; ok {
+	// Container unit — look up version and build tag. Resolve in the
+	// unit's own distro context: a toolchain reference from an
+	// alpine source unit picks toolchain-musl, a debian source unit
+	// picks toolchain-glibc. Falls back to the cross-module AnyUnit
+	// lookup when the unit is untagged so the literal-container
+	// path (e.g. container="toolchain-musl") still finds its
+	// container regardless of which distro registered it.
+	cu := proj.LookupUnit(unit.Distro, container)
+	if cu == nil {
+		cu = proj.AnyUnit(container)
+	}
+	if cu != nil {
 		imageArch := arch
 		if unit.ContainerArch == "host" {
 			imageArch = Arch()

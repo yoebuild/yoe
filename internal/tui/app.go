@@ -615,7 +615,7 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	for _, name := range units {
 		hash := hashes[name]
 		sd := arch
-		if u, ok := proj.Units[name]; ok {
+		if u := proj.LookupUnit(distro, name); u != nil {
 			sd = build.ScopeDir(u, arch, proj.Defaults.Machine)
 		}
 		if build.IsBuildCached(projectDir, sd, name, hash, distro) {
@@ -1205,7 +1205,7 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// .star directory after prefer_modules + last-module-wins
 			// shadowing) so editing opens the file yoe actually uses,
 			// not just the first `<name>.star` the filesystem walk hits.
-			if path := unitStarPath(m.proj.Units[name]); path != "" {
+			if path := unitStarPath(m.proj.LookupUnit(m.distro, name)); path != "" {
 				return m, m.execEditor(path)
 			}
 			// Fallback for derived units (e.g., base-files-dev defined
@@ -1263,7 +1263,7 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
-			if u, ok := m.proj.Units[name]; ok && u.Class == "image" {
+			if u := m.proj.LookupUnit(m.distro, name); u != nil && u.Class == "image" {
 				// Catch "a guest is already running" before launching, so
 				// the reason shows in the TUI rather than scrolling past
 				// as an opaque subprocess exit code.
@@ -1294,7 +1294,7 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "f":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
-			u, ok := m.proj.Units[name]
+			u := m.proj.LookupUnit(m.distro, name); ok := u != nil
 			if !ok || u.Class != "image" {
 				m.message = fmt.Sprintf("%s is not an image unit", name)
 				return m, nil
@@ -1334,7 +1334,7 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "D":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
-			u, ok := m.proj.Units[name]
+			u := m.proj.LookupUnit(m.distro, name); ok := u != nil
 			if !ok || u.Class == "image" {
 				m.message = fmt.Sprintf("%s is an image unit; use `f` to flash, not deploy", name)
 				return m, nil
@@ -1765,7 +1765,7 @@ func (m *model) applyQuery() {
 		m.visible = make([]int, 0, len(m.units))
 	}
 	for i, name := range m.units {
-		u := m.proj.Units[name]
+		u := m.proj.LookupUnit(m.distro, name)
 		if m.query.Matches(name, u, statusKey(m.statuses[name]), m.inSet) {
 			m.visible = append(m.visible, i)
 		}
@@ -1792,7 +1792,10 @@ func (m *model) applyQuery() {
 // plus the synthetic "project" name used for project-root units.
 func (m model) moduleNames() []string {
 	set := map[string]bool{"project": true}
-	for _, u := range m.proj.Units {
+	// AllUnits iterates UnitsByModule so cross-distro siblings each
+	// contribute their module to the set — alpine.main and
+	// debian.main both appear when both feeds are loaded.
+	for _, u := range m.proj.AllUnits() {
 		if u.Module != "" {
 			set[u.Module] = true
 		}
@@ -2270,13 +2273,18 @@ func (m *model) saveQEMUSettings(label string) {
 	m.message = fmt.Sprintf("%s (saved to local.star)", label)
 }
 
-// imageUnits returns the sorted names of all image-class units in the project.
+// imageUnits returns the sorted names of all image-class units in
+// the project. AllUnits surfaces every module's images; dedup by
+// name so an image registered under multiple modules only lists once.
 func (m model) imageUnits() []string {
+	seen := map[string]bool{}
 	var out []string
-	for name, u := range m.proj.Units {
-		if u.Class == "image" {
-			out = append(out, name)
+	for name, u := range m.proj.AllUnits() {
+		if u.Class != "image" || seen[name] {
+			continue
 		}
+		seen[name] = true
+		out = append(out, name)
 	}
 	sort.Strings(out)
 	return out
@@ -2596,7 +2604,7 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		})
 
 	case "D":
-		u, ok := m.proj.Units[m.detailUnit]
+		u := m.proj.LookupUnit(m.distro, m.detailUnit); ok := u != nil
 		if !ok || u.Class == "image" {
 			m.message = fmt.Sprintf("%s is an image unit; use `f` to flash, not deploy", m.detailUnit)
 			return m, nil
@@ -2609,7 +2617,7 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "r":
-		if u, ok := m.proj.Units[m.detailUnit]; ok && u.Class == "image" {
+		if u := m.proj.LookupUnit(m.distro, m.detailUnit); u != nil && u.Class == "image" {
 			args := append([]string{}, m.globalFlagArgs...)
 			args = append(args, "run", m.detailUnit, "--machine", m.proj.Defaults.Machine)
 			c := exec.Command(os.Args[0], args...)
@@ -2950,7 +2958,7 @@ func (m model) viewUnitsTab() string {
 		class := ""
 		module := ""
 		version := ""
-		if u, ok := m.proj.Units[name]; ok {
+		if u := m.proj.LookupUnit(m.distro, name); u != nil {
 			class = u.Class
 			module = u.Module
 			version = u.Version
@@ -3043,7 +3051,7 @@ func (m model) viewUnitsTab() string {
 			items = defaultHelpItems
 			if m.cursor < len(m.units) {
 				name := m.units[m.cursor]
-				if u, ok := m.proj.Units[name]; ok && u.Class == "image" {
+				if u := m.proj.LookupUnit(m.distro, name); u != nil && u.Class == "image" {
 					if m.statuses[name] == statusCached {
 						items = imageCachedHelpItems
 					} else {
@@ -4144,7 +4152,7 @@ func (m model) upstreamLines() []string {
 	if imgName == "" {
 		return []string{dimStyle.Render("    (no default image set)")}
 	}
-	img, ok := m.proj.Units[imgName]
+	img := m.proj.LookupUnit(m.distro, imgName); ok := img != nil
 	if !ok || img.Class != "image" {
 		return []string{dimStyle.Render("    (default image " + imgName + " not found)")}
 	}
@@ -4211,7 +4219,7 @@ func (m model) findRuntimePath(from, to string) []string {
 	for len(queue) > 0 {
 		cur := queue[0]
 		queue = queue[1:]
-		u, ok := m.proj.Units[cur.name]
+		u := m.proj.LookupUnit(m.distro, cur.name); ok := u != nil
 		if !ok {
 			continue
 		}
@@ -4241,7 +4249,7 @@ func (m model) findRuntimePath(from, to string) []string {
 // matches what the user actually wrote in image() rather than the
 // fully flattened runtime closure.
 func (m model) downstreamChildren(name string) []string {
-	u, ok := m.proj.Units[name]
+	u := m.proj.LookupUnit(m.distro, name); ok := u != nil
 	if !ok {
 		return nil
 	}
@@ -4260,7 +4268,7 @@ func (m model) downstreamChildren(name string) []string {
 		if real, ok := m.proj.Provides[dep]; ok {
 			dep = real
 		}
-		if _, ok := m.proj.Units[dep]; ok {
+		if m.proj.LookupUnit(m.distro, dep) != nil {
 			out = append(out, dep)
 		}
 	}
@@ -4285,7 +4293,7 @@ func (m model) renderUnitTree(root string, getChildren func(string) []string, ma
 			connector = "└── "
 		}
 		label := name
-		if u, ok := m.proj.Units[name]; ok {
+		if u := m.proj.LookupUnit(m.distro, name); u != nil {
 			switch u.Class {
 			case "image":
 				label += dimStyle.Render(" (image)")
@@ -4346,7 +4354,7 @@ func (m model) viewDetail() string {
 
 	status := m.renderStatus(m.detailUnit)
 	titleVersion := ""
-	if u, ok := m.proj.Units[m.detailUnit]; ok && u.Version != "" {
+	if u := m.proj.LookupUnit(m.distro, m.detailUnit); u != nil && u.Version != "" {
 		titleVersion = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(u.Version)
 	}
 	b.WriteString(fmt.Sprintf("  ← %s%s %s\n",
@@ -4355,7 +4363,7 @@ func (m model) viewDetail() string {
 		status))
 
 	// Show build metadata if available
-	if u, ok := m.proj.Units[m.detailUnit]; ok {
+	if u := m.proj.LookupUnit(m.distro, m.detailUnit); u != nil {
 		sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
 		buildDir := build.UnitBuildDir(m.projectDir, sd, m.detailUnit, m.distro)
 		currentHash := m.hashes[m.detailUnit]
@@ -4503,7 +4511,7 @@ func (m model) viewDetail() string {
 		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
 	} else {
 		items := detailHelpItems
-		if u, ok := m.proj.Units[m.detailUnit]; ok && u.Class == "image" {
+		if u := m.proj.LookupUnit(m.distro, m.detailUnit); u != nil && u.Class == "image" {
 			items = detailImageHelpItems
 		}
 		b.WriteString(renderHelp(items))
@@ -4742,7 +4750,7 @@ func (m *model) startBuild(name string) tea.Cmd {
 
 	// Write executor output to a log file so detail view can tail it
 	sd := arch
-	if u, ok := m.proj.Units[name]; ok {
+	if u := m.proj.LookupUnit(m.distro, name); u != nil {
 		sd = build.ScopeDir(u, arch, machine)
 	}
 	outputPath := filepath.Join(build.UnitBuildDir(projectDir, sd, unitName, m.distro), "executor.log")
@@ -4821,7 +4829,7 @@ func (m model) execShell(dir string) tea.Cmd {
 // build/, or "" if the unit hasn't been fetched yet (so the caller can
 // surface a helpful message instead of dropping into a phantom path).
 func (m model) unitSrcDir(name string) string {
-	if _, ok := m.proj.Units[name]; !ok {
+	if m.proj.LookupUnit(m.distro, name) == nil {
 		return ""
 	}
 	srcDir := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name, m.distro), "src")
@@ -4860,7 +4868,7 @@ func (m *model) refreshDetailFiles() {
 	m.detailFiles = nil
 	m.detailFilesScroll = 0
 	walkRoot := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit, m.distro), "destdir")
-	if u, ok := m.proj.Units[m.detailUnit]; ok && u.Class == "image" {
+	if u := m.proj.LookupUnit(m.distro, m.detailUnit); u != nil && u.Class == "image" {
 		walkRoot = filepath.Join(walkRoot, "rootfs")
 	}
 	filepath.Walk(walkRoot, func(path string, info os.FileInfo, err error) error {
@@ -5130,13 +5138,13 @@ func (m *model) sortVisible() {
 
 	keyName := func(i int) string { return m.units[i] }
 	keyClass := func(i int) string {
-		if u, ok := m.proj.Units[m.units[i]]; ok {
+		if u := m.proj.LookupUnit(m.distro, m.units[i]); u != nil {
 			return u.Class
 		}
 		return ""
 	}
 	keyModule := func(i int) string {
-		if u, ok := m.proj.Units[m.units[i]]; ok {
+		if u := m.proj.LookupUnit(m.distro, m.units[i]); u != nil {
 			if u.Module == "" {
 				return "(local)"
 			}
@@ -5145,7 +5153,7 @@ func (m *model) sortVisible() {
 		return ""
 	}
 	keyVersion := func(i int) string {
-		if u, ok := m.proj.Units[m.units[i]]; ok {
+		if u := m.proj.LookupUnit(m.distro, m.units[i]); u != nil {
 			return u.Version
 		}
 		return ""
@@ -5242,7 +5250,7 @@ func (m *model) recomputeMetrics() {
 	size := make(map[string]int64, len(m.units))
 	deps := make(map[string]int, len(m.units))
 	for _, name := range m.units {
-		u := m.proj.Units[name]
+		u := m.proj.LookupUnit(m.distro, name)
 		if u == nil {
 			continue
 		}
@@ -5306,7 +5314,7 @@ func (m *model) recomputeMetrics() {
 // final recomputeMetrics. Skips the runtime-closure walk because deps
 // don't change just because the unit got built.
 func (m *model) refreshUnitSize(name string) {
-	u, ok := m.proj.Units[name]
+	u := m.proj.LookupUnit(m.distro, name); ok := u != nil
 	if !ok {
 		return
 	}
@@ -5347,7 +5355,7 @@ func clipFixed(s string, w int) string {
 // "v3.4.1-3-gabc1234-dirty"). Returns "" when the unit has no source
 // dir (image/container) so the caller can skip the line entirely.
 func (m model) detailSourceLine() string {
-	u, ok := m.proj.Units[m.detailUnit]
+	u := m.proj.LookupUnit(m.distro, m.detailUnit); ok := u != nil
 	if !ok || u.Class == "image" || u.Class == "container" {
 		return ""
 	}
@@ -5483,7 +5491,7 @@ func srcStateStyle(s source.State) lipgloss.Style {
 // is assumed pin (it has never been toggled to dev).
 func (m model) renderSrcCell(name string) string {
 	const w = 9
-	u, ok := m.proj.Units[name]
+	u := m.proj.LookupUnit(m.distro, name); ok := u != nil
 	if !ok || u.Class == "image" || u.Class == "container" {
 		return clipFixed("", w)
 	}
@@ -5506,7 +5514,7 @@ func (m model) unitSourceState(name string) source.State {
 		return s
 	}
 	state := source.StateEmpty
-	if u, ok := m.proj.Units[name]; ok {
+	if u := m.proj.LookupUnit(m.distro, name); u != nil {
 		sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
 		buildDir := build.UnitBuildDir(m.projectDir, sd, name, m.distro)
 		if meta := build.ReadMeta(buildDir); meta != nil {
@@ -5573,7 +5581,7 @@ func formatSize(b int64) string {
 
 // unitScopeDir returns the scope directory for a unit (arch, machine name, or noarch).
 func (m model) unitScopeDir(name string) string {
-	if u, ok := m.proj.Units[name]; ok {
+	if u := m.proj.LookupUnit(m.distro, name); u != nil {
 		return build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
 	}
 	return m.arch
@@ -5614,7 +5622,7 @@ func (m *model) recomputeStatuses() {
 		}
 		hash := hashes[name]
 		sd := m.arch
-		if u, ok := m.proj.Units[name]; ok {
+		if u := m.proj.LookupUnit(m.distro, name); u != nil {
 			sd = build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
 		}
 		if build.IsBuildCached(m.projectDir, sd, name, hash, m.distro) {
@@ -5739,7 +5747,7 @@ func (m model) unitFromFeed(name string) bool {
 	if m.proj == nil {
 		return false
 	}
-	u, ok := m.proj.Units[name]
+	u := m.proj.LookupUnit(m.distro, name); ok := u != nil
 	if !ok || u == nil || u.Module == "" {
 		return false
 	}
@@ -5884,9 +5892,20 @@ func readFileAll(path string) []string {
 	return lines
 }
 
-// allUnits returns sorted unit names from the project.
+// allUnits returns sorted unit names from the project. Dedupes
+// across modules so cross-distro siblings (alpine.main + debian.main
+// both registering libssl3) yield a single entry rather than two.
 func allUnits(proj *yoestar.Project) []string {
-	return sortedKeys(proj.Units)
+	seen := map[string]struct{}{}
+	for name := range proj.AllUnits() {
+		seen[name] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func sortedKeys[V any](m map[string]V) []string {

@@ -35,8 +35,12 @@ func cmdDeploy(args []string) {
 	hostArg := fs.Arg(1)
 
 	proj := loadProjectWithMachine(*machineName)
-	unit, ok := proj.Units[unitName]
-	if !ok {
+	// AnyUnit suffices to read the unit's class — we only need to
+	// know whether it's an image (flash, not deploy) before driving
+	// the build/ship/install pipeline. The build path itself uses
+	// per-distro views via opts.EffectiveDistro.
+	unit := proj.AnyUnit(unitName)
+	if unit == nil {
 		fmt.Fprintf(os.Stderr, "Error: unit %q not found\n", unitName)
 		os.Exit(1)
 	}
