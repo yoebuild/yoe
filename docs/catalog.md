@@ -194,6 +194,15 @@ the walker never re-resolves the same name twice.
 
 ## The closure walk as materialization driver
 
+An image's **closure** is the transitive runtime-dependency set: the
+set of every unit reachable from the image's `artifacts = [...]` list
+by following `RuntimeDeps` edges. If unit A runtime-depends on B and
+B runtime-depends on C, then C is in A's closure. The term comes from
+graph theory (the transitive closure of a binary relation) and is the
+same usage Nix and Guix have for package dependencies. yoe uses it the
+same way throughout: "the image's closure," "closure walker," "closure
+size," all refer to this transitive set.
+
 `resolve_closure(artifacts, distro=...)` is a Go-side Starlark builtin
 (`fnResolveClosure` in `internal/starlark/closure.go`, registered as a
 builtin in `internal/starlark/builtins.go`). Image classes call it from
