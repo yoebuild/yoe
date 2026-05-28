@@ -15,6 +15,58 @@ and `prefer_modules` look like in Starlark) see
 internals view: storage shapes, lifecycle, allocation cost, and the
 invariants the resolver relies on.
 
+## Terminology
+
+A handful of terms recur throughout this page. They're defined here so
+the body sections can use them without re-introducing each one.
+
+**Unit.** The yoe representation of one buildable artifact — a `*Unit`
+struct holding name, version, runtime/build deps, source URL, container
+choice, install task, distro tag, and so on. Created either by a
+`.star` builtin (`unit(...)`, `image(...)`, `container(...)`, …) or by
+a synthetic feed's materialization callback.
+
+**Closure.** The *transitive runtime-dependency set* of an image — the
+set of every unit reachable from the image's `artifacts = [...]` list
+by following `RuntimeDeps` edges. If unit A runtime-depends on B and B
+on C, then C is in A's closure. Term borrowed from graph theory (the
+transitive closure of a binary relation) and from the Nix/Guix
+package-manager tradition that uses it for the same concept.
+
+**Synthetic module.** A registration in the catalog that names a feed
+(`alpine.main`, `debian.main`, …) and provides a `Lookup(name) → *Unit`
+callback. The callback runs only when something asks for a name the
+feed exposes — registration is eager (one call per `alpine_feed()` /
+`debian_feed()` in MODULE.star), but per-name `*Unit` allocation is
+lazy.
+
+**Materialization.** The act of allocating a `*Unit` for a name a
+synthetic module exposes. A synthetic's `Lookup` parses the upstream
+catalog entry (Alpine APKINDEX or Debian `Packages`), builds dep tokens,
+constructs the `*Unit`, and returns it. The walker then registers it
+into `UnitsByModule` and updates the affected `DistroViews` entries.
+
+**BFS (breadth-first search).** The traversal algorithm the closure
+walker uses: maintain a queue, dequeue from the front, enqueue each
+visited unit's `RuntimeDeps` at the back, mark visited names in a
+`seen` set so cycles don't loop. Chosen over recursive depth-first
+because the queue keeps the working set bounded by closure size, not
+dep-tree depth — a deeply nested transitive chain can't blow the call
+stack.
+
+**Provides resolution.** Replacing a *virtual* name in a deps list
+(`linux`, `toolchain`, `init`) with the concrete unit that satisfies it
+(`linux-rpi4`, `toolchain-glibc`, `busybox-init`). Driven by the
+project's `Provides` map plus per-distro filtering (a provides entry
+tagged for a different distro is invisible to the lookup).
+
+**Distro view.** A precomputed table `DistroViews[distro][name] →
+*Unit` populated once at the end of the loader's evaluation phase.
+Maps every name reachable in any image's closure to the winner of the
+per-distro resolution (filter by distro tag → apply `prefer_modules`
+pin → apply module priority). Consumers query through `LookupUnit`
+which reads this map in O(1).
+
 ## Three classes of units
 
 Every Unit in the catalog falls into one of three categories. They
@@ -301,15 +353,6 @@ the walker never re-resolves the same name twice.
 
 ## The closure walk as materialization driver
 
-An image's **closure** is the transitive runtime-dependency set: the
-set of every unit reachable from the image's `artifacts = [...]` list
-by following `RuntimeDeps` edges. If unit A runtime-depends on B and
-B runtime-depends on C, then C is in A's closure. The term comes from
-graph theory (the transitive closure of a binary relation) and is the
-same usage Nix and Guix have for package dependencies. yoe uses it the
-same way throughout: "the image's closure," "closure walker," "closure
-size," all refer to this transitive set.
-
 `resolve_closure(artifacts, distro=...)` is a Go-side Starlark builtin
 (`fnResolveClosure` in `internal/starlark/closure.go`, registered as a
 builtin in `internal/starlark/builtins.go`). Image classes call it from
@@ -318,17 +361,14 @@ image's effective distro and its `artifacts = [...]` list. The Go
 implementation drives lazy materialization. For each invocation, the
 closure walker:
 
-1. **Breadth-first walk** of the runtime-dep graph rooted at the
-   artifact names. Each name is visited once (a `seen` set prevents
-   revisits across cycles), and for each visit:
+1. **BFS** the runtime-dep graph rooted at the artifact names. For
+   each name dequeued:
    - Resolve provides through `ResolveProvidesForDistro(distro, name)`.
-   - `LookupUnit(distro, resolved)` returns the resolved `*Unit` from
+   - `LookupUnit(distro, resolved)` returns the `*Unit` from
      `DistroViews[distro][resolved]`; on a miss, the synthetic walk
      fires and registers the result before returning.
    - Push the returned unit's `RuntimeDeps` onto the back of the
-     queue. Breadth-first (queue, not recursion) keeps the working
-     set bounded by closure size regardless of dep-tree depth — a
-     deeply-nested transitive chain won't blow the call stack.
+     queue.
 
 2. **Topological sort** of the visited set. Emits units in dependency
    order so the DAG builder can validate edges and the build executor
