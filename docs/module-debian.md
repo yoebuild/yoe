@@ -18,15 +18,6 @@ adding a new feed/component.
 > and the matching plan under `docs/plans/`. This doc is the "when to reach for
 > it" rubric.
 
-> **Status: experimental.** The Debian backend's plumbing (debian_feed, .deb
-> passthrough, InRelease verify, project repo emitter, `dpkg --configure -a`
-> under binfmt) is implemented and exercised by the e2e fixture, but **the
-> end-to-end boot-and-SSH path has not been verified yet**. A Debian image built
-> by yoe today should produce a configured rootfs; whether it boots in QEMU and
-> accepts an SSH session is currently an expectation, not a fact. See
-> [Known limitations](#known-limitations) below before relying on this in
-> production.
-
 ## When to reach for it
 
 The same policy yoe follows for Alpine applies to Debian. The choice between the
@@ -135,65 +126,52 @@ debian_feed(
 )
 ```
 
-Each call registers a `SyntheticModule` named `<parent>.<suite>.<component>`
-(e.g. `debian.bookworm.main`). Units materialize lazily as the runtime closure
-references them, so a project pulling in `openssh-server` parses about a
-thousand entries on the way to its closure — not the full 60k-entry catalog. See
-[Catalog and Materialization](catalog.md) for the resolver-side mechanics (how
-synthetic modules differ from real modules, lazy-Lookup contract, and the
-working-set sizes the resolver operates at).
+Each call registers a `SyntheticModule` named `<parent>.<component>` (e.g.
+`debian.main`, `debian.contrib`, `debian.non-free`) — matching alpine's
+`alpine.main` / `alpine.community` shape. The `suite` kwarg configures which
+on-disk `Packages` file is parsed but does not appear in the module name; one
+Debian suite per project, enforced at evaluation, so the suite has no
+disambiguating role at the module level. Units materialize lazily as the
+runtime closure references them, so a project pulling in `openssh-server`
+parses about a thousand entries on the way to its closure — not the full
+60k-entry catalog. See [Catalog and Materialization](catalog.md) for the
+resolver-side mechanics (how synthetic modules differ from real modules,
+lazy-Lookup contract, and the working-set sizes the resolver operates at).
 
-Multiple feeds compose: declaring `bookworm.main` plus `bookworm-security.main`
-plus `bookworm-updates.main` gives apt-equivalent priority resolution on the
-project side. The closure walker consults each in declaration order; first match
-wins.
-
-> **Naming convention change (planned):** the suite segment will be dropped from
-> the module identity, making `debian_feed(name="main", suite="bookworm")`
-> register as `debian.main` (matching alpine's `alpine.main`). Suite stays as a
-> feed configuration parameter — it chooses which on-disk `Packages` file is
-> parsed — but it won't appear in the module name. Today the synthetic module is
-> still named `debian.bookworm.main`. Pins in `prefer_modules` written as
-> `debian.main` will start working as soon as the rename lands; until then,
-> write the suite-embedded form.
+Multiple feeds compose: declaring `debian.main` plus security and updates
+overlays (each with its own `debian_feed(...)` call, same suite, different
+component or apt-overlay URL) gives apt-equivalent priority resolution on the
+project side. The closure walker consults each in declaration order; first
+match wins.
 
 ## Known limitations
 
-These are user-visible behaviors today. Each one names the workaround that
-bridges the gap until the underlying limitation is removed.
+Two structural properties of the debian backend that users will encounter
+regardless of yoe version. Neither is a bug or a transitional gap — both are
+deliberate trade-offs that the architecture chose, and changing either one is
+a substantial follow-up rather than routine work.
 
-- **End-to-end boot is unverified.** The image assembler produces a configured
-  rootfs and the project repo emitter ships a valid InRelease, but a
-  `yoe run debian-base-image` → `ssh root@localhost` round trip hasn't been
-  demonstrated yet on a clean repo. Treat any production deployment as untested
-  until the round trip has been verified on the version of yoe you're running.
-  The expectation is that it will work; the verification is pending.
-- **Cross-distro multi-image projects collide on same-named units.** If your
-  project defines both an alpine image and a debian image, and any unit name
-  appears in both feeds (e.g. `libcap2` from `alpine.main` and from
-  `debian.main`), the second-registered variant overwrites the first in the flat
-  catalog. The closure of the losing image points at the wrong variant.
-  Workarounds:
-  - Pin the colliding name with `prefer_modules` to the module appropriate for
-    the dominant image.
-  - Build the alpine and debian images in separate `yoe build` invocations —
-    each invocation resolves its own catalog without cross-contamination.
-- **Source-built units shared between alpine and debian closures produce
-  wrong-libc binaries.** `module-core`'s source-built `openssl` (and similar)
-  currently caches under a single hash regardless of consuming distro. If you
-  build the alpine image first, the cache holds a musl-linked binary; the
-  subsequent debian build hits that cache and gets a binary that won't run in a
-  glibc rootfs. Workarounds:
-  - Build alpine and debian images separately, running `yoe clean <unit>`
-    between invocations to evict the wrong-libc binary.
-  - Pin the affected names with `prefer_modules` to the distro feed's prebuilt
-    (e.g. `"openssl": "debian.bookworm.main"` for debian-side consumption), so
-    the closure resolves to the feed's prebuilt rather than the source-built
-    version.
 - **Some upstream `.deb` postinsts assume network access.** yoe runs
   `dpkg --configure -a` under `--network=none` for hash stability and
-  reproducibility, so postinsts that reach out to the network (`cloud-init`
-  provisioning, telemetry agents, license-prompt downloaders) will fail loudly
-  during image assembly. The narrow set of packages this affects isn't
-  appropriate for embedded images; replace with a from-source `module-core` unit
-  if equivalent functionality is needed.
+  reproducibility — a configure pass that reaches out to a DNS resolver, a
+  metadata server, or a license-prompt download produces different output
+  depending on what's reachable when, which would break the
+  content-addressed cache. Packages whose postinsts do this (`cloud-init`
+  provisioning, telemetry agents, license-prompt downloaders, a small set of
+  enterprise-software installers) fail loudly during image assembly. The
+  narrow set this affects isn't appropriate for embedded images anyway;
+  replace with a from-source `module-core` unit if equivalent functionality
+  is needed, or carry the package and provide the configuration it would
+  have fetched via the project rootfs overlay.
+
+- **One Debian suite per project, enforced at evaluation.** Every
+  `debian_feed(...)` call in a project must agree on its `suite` kwarg; the
+  resolver errors at load time if it sees `bookworm` and `trixie` declared
+  in the same project. The constraint exists because the toolchain
+  container (`@module-debian//containers/toolchain-glibc`) pins one Debian
+  release, and source units built against that toolchain's headers/libs
+  can't safely mix with prebuilt packages from a different release's libc.
+  Multi-suite support would require a suite axis in the toolchain cache
+  key and parallel toolchain containers per suite — feasible but out of
+  scope today. For most projects this is the correct constraint: a fleet
+  runs one Debian release at a time.
