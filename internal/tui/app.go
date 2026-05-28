@@ -4748,35 +4748,51 @@ func (m *model) startBuild(name string) tea.Cmd {
 	unitName := name
 	loadOpts := append([]yoestar.LoadOption{}, m.loadOpts...)
 
-	// Write executor output to a log file so detail view can tail it
-	sd := arch
-	if u := m.proj.LookupUnit(m.distro, name); u != nil {
-		sd = build.ScopeDir(u, arch, machine)
-	}
-	outputPath := filepath.Join(build.UnitBuildDir(projectDir, sd, unitName, m.distro), "executor.log")
-	build.EnsureDir(filepath.Dir(outputPath))
-
 	return func() tea.Msg {
 		defer cancel()
-		f, err := os.Create(outputPath)
-		if err != nil {
-			return buildDoneMsg{unit: unitName, err: err}
-		}
-		defer f.Close()
 
 		// Reload project from .star files so we pick up any changes
 		// made since the TUI started (e.g., edited build steps).
 		freshProj, err := yoestar.LoadProject(projectDir,
 			append(loadOpts, yoestar.WithMachine(machine))...)
 		if err != nil {
-			fmt.Fprintf(f, "warning: could not reload project: %v, using cached config\n", err)
 			freshProj = proj
 		}
 
-		distro, derr := freshProj.EffectiveDistro()
+		// Image units carry their own distro tag — debian-tagged
+		// dev-image must build into build/debian/, not whatever the
+		// project default happens to be. Mirrors cmdBuild's per-target
+		// derivation so TUI and CLI agree on which dev-image is
+		// "the" dev-image when both alpine.dev-image and
+		// debian.dev-image are registered.
+		var distro string
+		var derr error
+		if u := freshProj.AnyUnit(unitName); u != nil && u.Class == "image" {
+			distro, derr = freshProj.EffectiveDistroForImage(unitName)
+		} else {
+			distro, derr = freshProj.EffectiveDistro()
+		}
 		if derr != nil {
 			return buildDoneMsg{unit: unitName, err: fmt.Errorf("resolve effective distro: %w", derr)}
 		}
+
+		// Write executor output under the same per-distro build dir the
+		// executor will use, so the detail view's log tail and the
+		// build's own destdir/cache land next to each other.
+		sd := arch
+		if u := freshProj.LookupUnit(distro, unitName); u != nil {
+			sd = build.ScopeDir(u, arch, machine)
+		}
+		outputPath := filepath.Join(build.UnitBuildDir(projectDir, sd, unitName, distro), "executor.log")
+		if err := build.EnsureDir(filepath.Dir(outputPath)); err != nil {
+			return buildDoneMsg{unit: unitName, err: err}
+		}
+		f, err := os.Create(outputPath)
+		if err != nil {
+			return buildDoneMsg{unit: unitName, err: err}
+		}
+		defer f.Close()
+
 		err = build.BuildUnits(freshProj, []string{unitName}, build.Options{
 			Ctx:             ctx,
 			Force:           true,
