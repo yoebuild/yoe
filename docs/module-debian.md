@@ -131,47 +131,46 @@ Each call registers a `SyntheticModule` named `<parent>.<component>` (e.g.
 `alpine.main` / `alpine.community` shape. The `suite` kwarg configures which
 on-disk `Packages` file is parsed but does not appear in the module name; one
 Debian suite per project, enforced at evaluation, so the suite has no
-disambiguating role at the module level. Units materialize lazily as the
-runtime closure references them, so a project pulling in `openssh-server`
-parses about a thousand entries on the way to its closure — not the full
-60k-entry catalog. See [Catalog and Materialization](catalog.md) for the
-resolver-side mechanics (how synthetic modules differ from real modules,
-lazy-Lookup contract, and the working-set sizes the resolver operates at).
+disambiguating role at the module level. Units materialize lazily as the runtime
+closure references them, so a project pulling in `openssh-server` parses about a
+thousand entries on the way to its closure — not the full 60k-entry catalog. See
+[Catalog and Materialization](catalog.md) for the resolver-side mechanics (how
+synthetic modules differ from real modules, lazy-Lookup contract, and the
+working-set sizes the resolver operates at).
 
 Multiple feeds compose: declaring `debian.main` plus security and updates
 overlays (each with its own `debian_feed(...)` call, same suite, different
 component or apt-overlay URL) gives apt-equivalent priority resolution on the
-project side. The closure walker consults each in declaration order; first
-match wins.
+project side. The closure walker consults each in declaration order; first match
+wins.
 
 ## Known limitations
 
 Two structural properties of the debian backend that users will encounter
 regardless of yoe version. Neither is a bug or a transitional gap — both are
-deliberate trade-offs that the architecture chose, and changing either one is
-a substantial follow-up rather than routine work.
+deliberate trade-offs that the architecture chose, and changing either one is a
+substantial follow-up rather than routine work.
 
 - **Some upstream `.deb` postinsts assume network access.** yoe runs
   `dpkg --configure -a` under `--network=none` for hash stability and
   reproducibility — a configure pass that reaches out to a DNS resolver, a
   metadata server, or a license-prompt download produces different output
-  depending on what's reachable when, which would break the
-  content-addressed cache. Packages whose postinsts do this (`cloud-init`
-  provisioning, telemetry agents, license-prompt downloaders, a small set of
-  enterprise-software installers) fail loudly during image assembly. The
-  narrow set this affects isn't appropriate for embedded images anyway;
-  replace with a from-source `module-core` unit if equivalent functionality
-  is needed, or carry the package and provide the configuration it would
-  have fetched via the project rootfs overlay.
+  depending on what's reachable when, which would break the content-addressed
+  cache. Packages whose postinsts do this (`cloud-init` provisioning, telemetry
+  agents, license-prompt downloaders, a small set of enterprise-software
+  installers) fail loudly during image assembly. The narrow set this affects
+  isn't appropriate for embedded images anyway; replace with a from-source
+  `module-core` unit if equivalent functionality is needed, or carry the package
+  and provide the configuration it would have fetched via the project rootfs
+  overlay.
 
 - **One Debian suite per project, enforced at evaluation.** Every
   `debian_feed(...)` call in a project must agree on its `suite` kwarg; the
-  resolver errors at load time if it sees `bookworm` and `trixie` declared
-  in the same project. The constraint exists because the toolchain
-  container (`@module-debian//containers/toolchain-glibc`) pins one Debian
-  release, and source units built against that toolchain's headers/libs
-  can't safely mix with prebuilt packages from a different release's libc.
-  Multi-suite support would require a suite axis in the toolchain cache
-  key and parallel toolchain containers per suite — feasible but out of
-  scope today. For most projects this is the correct constraint: a fleet
-  runs one Debian release at a time.
+  resolver errors at load time if it sees `bookworm` and `trixie` declared in
+  the same project. The constraint exists because the toolchain container
+  (`@module-debian//containers/toolchain-glibc`) pins one Debian release, and
+  source units built against that toolchain's headers/libs can't safely mix with
+  prebuilt packages from a different release's libc. Multi-suite support would
+  require a suite axis in the toolchain cache key and parallel toolchain
+  containers per suite — feasible but out of scope today. For most projects this
+  is the correct constraint: a fleet runs one Debian release at a time.
