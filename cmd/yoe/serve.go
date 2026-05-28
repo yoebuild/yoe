@@ -29,7 +29,16 @@ func cmdServe(args []string) {
 	projRepoDir := repo.RepoDir(proj, projectDir())
 	httpRoot := filepath.Dir(projRepoDir)
 
-	archs, err := repo.ArchDirs(projRepoDir)
+	// Arches live one level deeper now (repo/<project>/<distro>/<arch>/).
+	// Walk the project's effective-distro subtree to advertise the
+	// arches mDNS clients should expect under that distro prefix. A
+	// future multi-distro serve will iterate every distro subtree.
+	distro, derr := proj.EffectiveDistro()
+	if derr != nil {
+		fmt.Fprintf(os.Stderr, "Error: resolve effective distro: %v\n", derr)
+		os.Exit(1)
+	}
+	archs, err := repo.ArchDirs(repo.RepoDistroDir(proj, projectDir(), distro))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: list arch dirs: %v\n", err)
 		os.Exit(1)

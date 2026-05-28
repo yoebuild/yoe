@@ -43,7 +43,7 @@ func Assemble(unit *yoestar.Unit, proj *yoestar.Project, projectDir, outputDir, 
 		}
 	default:
 		// alpine path (current behavior)
-		repoDir := repo.RepoDir(proj, projectDir)
+		repoDir := repo.RepoDistroDir(proj, projectDir, effectiveDistro)
 		allPackages := resolvePackageDeps(unit.Artifacts, proj)
 		if err := installPackages(rootfs, repoDir, allPackages, w); err != nil {
 			return fmt.Errorf("installing packages: %w", err)
@@ -78,7 +78,7 @@ func Assemble(unit *yoestar.Unit, proj *yoestar.Project, projectDir, outputDir, 
 // all extracts the caller runs dpkg --configure -a under a binfmt
 // sandbox to invoke maintainer scripts (U17 wires that step).
 func assembleDebian(rootfs string, unit *yoestar.Unit, proj *yoestar.Project, projectDir, arch string, w io.Writer) error {
-	debianPoolDir := filepath.Join(repo.RepoDir(proj, projectDir), "debian", "pool", "main")
+	debianPoolDir := filepath.Join(repo.RepoDistroDir(proj, projectDir, "debian"), "pool", "main")
 	if _, err := os.Stat(debianPoolDir); err != nil {
 		return fmt.Errorf("debian pool missing at %s — build the project's debian artifacts first", debianPoolDir)
 	}

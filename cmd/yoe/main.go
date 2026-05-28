@@ -1164,7 +1164,16 @@ func cmdRepo(args []string) {
 	}
 
 	proj := loadProject()
-	repoDir := repo.RepoDir(proj, projectDir())
+	// `yoe repo list/info/remove/clean` operates on the per-distro
+	// subtree at repo/<project>/<distro>/. Use the project's
+	// effective distro; cross-distro queries would walk each distro
+	// subtree separately.
+	distro, err := proj.EffectiveDistro()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	repoDir := repo.RepoDistroDir(proj, projectDir(), distro)
 
 	switch args[0] {
 	case "list":

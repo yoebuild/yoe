@@ -15,7 +15,8 @@ func TestStatus(t *testing.T) {
 	os.MkdirAll(filepath.Join(projectDir, "build", "repo"), 0755)
 
 	proj := &yoestar.Project{
-		Name: "test",
+		Name:          "test",
+		DefaultDistro: "alpine",
 		Units: map[string]*yoestar.Unit{
 			"glibc":   {Name: "glibc", Version: "2.39"},
 			"gcc":     {Name: "gcc", Version: "14.1"},

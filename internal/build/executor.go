@@ -142,12 +142,25 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		opts.Signer = signer
 	}
 
-	// Make the project's public key available under <repo>/keys/ before any
-	// unit's tasks run. Units that ship the key (base-files puts it under
-	// /etc/apk/keys/ in the rootfs) need it on disk during their own build,
-	// not after the first apk is published. Idempotent — Publish would
-	// rewrite the same bytes later.
-	repoDir := repo.RepoDir(proj, opts.ProjectDir)
+	// Make the project's public key available under
+	// <repo>/<distro>/keys/ before any unit's tasks run. Units that ship
+	// the key (base-files puts it under /etc/apk/keys/ in the rootfs)
+	// need it on disk during their own build, not after the first apk
+	// is published. Idempotent — Publish would rewrite the same bytes
+	// later. The pubkey lives under the per-distro subtree so each
+	// backend (apk + deb) owns its own key surface — Alpine's RSA key
+	// here, Debian's GPG key under debian/. Effective distro derivation
+	// moved up so it's available for this early bootstrap step.
+	effectiveDistro := opts.EffectiveDistro
+	if effectiveDistro == "" {
+		var derr error
+		effectiveDistro, derr = proj.EffectiveDistro()
+		if derr != nil {
+			return fmt.Errorf("resolving effective distro for build: %w", derr)
+		}
+		opts.EffectiveDistro = effectiveDistro
+	}
+	repoDir := repo.RepoDistroDir(proj, opts.ProjectDir, effectiveDistro)
 	if err := repo.WritePublicKey(repoDir, opts.Signer); err != nil {
 		return fmt.Errorf("publishing project public key: %w", err)
 	}
@@ -175,25 +188,8 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 	// state — without that step, an uncommitted edit didn't change
 	// the hash and the build was served from cache, silently
 	// dropping the user's edits.
-	// effectiveDistro participates in every unit's input hash via the
-	// gated effective_distro: line in resolve/hash.go AND drives the
-	// on-disk build-dir layout (build/<distro>/<unit>.<scope>/). The
-	// same source unit consumed by an alpine image and a debian image
-	// produces two distinct cache keys AND two distinct destdirs, so
-	// neither consumer reads back the other's wrong-libc binary. Use
-	// the explicit Options field when the caller already knows the
-	// consuming image's distro; otherwise derive the project-level
-	// fallback.
-	effectiveDistro := opts.EffectiveDistro
-	if effectiveDistro == "" {
-		effectiveDistro, err = proj.EffectiveDistro()
-		if err != nil {
-			return fmt.Errorf("resolving effective distro for build: %w", err)
-		}
-	}
-	// Pin the resolved distro back into opts so deeper helpers
-	// (buildOne, packageDeb, etc.) read the same value.
-	opts.EffectiveDistro = effectiveDistro
+	// effectiveDistro is already resolved above (the WritePublicKey
+	// path needs it). Re-use the pinned value rather than re-deriving.
 	srcInputs := SrcInputsFn(opts.ProjectDir, opts.Arch, opts.Machine, effectiveDistro)
 	hashes, err := resolve.ComputeAllHashes(dag, opts.Arch, opts.Machine, srcInputs, effectiveDistro)
 	if err != nil {
@@ -592,7 +588,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		"LDFLAGS":         "-L/build/sysroot/usr/lib",
 		"LD_LIBRARY_PATH": "/build/sysroot/usr/lib",
 		"PYTHONPATH":      "/build/sysroot/usr/lib/python3.12/site-packages",
-		"REPO":            filepath.Join("/project", repoRelPath(proj, opts.ProjectDir)),
+		"REPO":            filepath.Join("/project", repoRelPath(proj, opts.ProjectDir), opts.EffectiveDistro),
 	}
 
 	// Expose the project's signing key info so units that need to ship the
@@ -601,7 +597,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	// key file is YOE_KEY_NAME inside it. Both are unset when the build
 	// runs without a Signer (apk add then needs --allow-untrusted).
 	if opts.Signer != nil {
-		env["YOE_KEYS_DIR"] = filepath.Join("/project", repoRelPath(proj, opts.ProjectDir), "keys")
+		env["YOE_KEYS_DIR"] = filepath.Join("/project", repoRelPath(proj, opts.ProjectDir), opts.EffectiveDistro, "keys")
 		env["YOE_KEY_NAME"] = opts.Signer.KeyName
 	}
 
@@ -786,7 +782,7 @@ func packageAPK(unit *yoestar.Unit, destDir, sysroot, srcDir, buildDir string, o
 	}
 	fmt.Fprintf(w, "  → %s\n", filepath.Base(apkPath))
 
-	repoDir := repo.RepoDir(proj, opts.ProjectDir)
+	repoDir := repo.RepoDistroDir(proj, opts.ProjectDir, opts.EffectiveDistro)
 	if err := repo.Publish(apkPath, repoDir, archDir, opts.Signer); err != nil {
 		return fmt.Errorf("publishing to repo: %w", err)
 	}
@@ -848,10 +844,8 @@ func packageDeb(unit *yoestar.Unit, destDir, srcDir, buildDir string, opts Optio
 	fmt.Fprintf(w, "  → %s\n", filepath.Base(debPath))
 
 	// Publish into the project pool and regenerate the per-arch
-	// Packages + Release + InRelease. The repo lives at
-	// repo/<project>/debian/ for now (full per-distro layout split
-	// arrives with U7).
-	repoDir := filepath.Join(repo.RepoDir(proj, opts.ProjectDir), "debian")
+	// Packages + Release + InRelease at repo/<project>/debian/.
+	repoDir := repo.RepoDistroDir(proj, opts.ProjectDir, "debian")
 	publishOpts := repo.DebRepoOptions{
 		RepoDir:    repoDir,
 		Suite:      "bookworm",
@@ -1084,7 +1078,7 @@ func cacheValid(proj *yoestar.Project, projectDir string, unit *yoestar.Unit, sc
 	}
 	archDir := RepoArchDir(unit, arch)
 	apkName := fmt.Sprintf("%s-%s-r%d.apk", unit.Name, unit.Version, unit.Release)
-	repoBase := repo.RepoDir(proj, projectDir)
+	repoBase := repo.RepoDistroDir(proj, projectDir, distro)
 	if _, err := os.Stat(filepath.Join(repoBase, archDir, apkName)); err == nil {
 		return true
 	}

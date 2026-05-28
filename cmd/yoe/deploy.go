@@ -124,7 +124,13 @@ func resolveOrStartFeed(proj *yoestar.Project, projDir string, port int, hostIP 
 
 	projRepoDir := repo.RepoDir(proj, projDir)
 	httpRoot := filepath.Dir(projRepoDir)
-	archs, _ := repo.ArchDirs(projRepoDir)
+	// Arches live under repo/<project>/<distro>/<arch>/ now; advertise
+	// arches found under the project's effective-distro subtree.
+	deployDistro, derr := proj.EffectiveDistro()
+	if derr != nil {
+		return "", nil, fmt.Errorf("resolve effective distro: %w", derr)
+	}
+	archs, _ := repo.ArchDirs(repo.RepoDistroDir(proj, projDir, deployDistro))
 
 	bind := "0.0.0.0"
 	hostName := ""

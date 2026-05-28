@@ -44,6 +44,13 @@ and this project adheres to
   paths that never matched the actual build directory, so per-unit clean was a
   silent no-op. The fix walks every distro subtree so a unit referenced from
   multiple images is cleaned in one step.
+- **APK repos now live under `repo/<project>/alpine/<arch>/`.** Per-arch
+  `APKINDEX.tar.gz` trees, the project public key, and the `keys/` directory
+  all moved one level deeper so an Alpine and a Debian project can coexist
+  under the same `repo/<project>/` root without name collisions. Update any
+  external pipelines or hardcoded URLs (feed-server clients, deploy scripts,
+  `/etc/apk/repositories` entries) — the next `yoe build` writes to the new
+  layout and old `repo/<project>/<arch>/` trees are stranded.
 - **A new `default_distro` field on `project(...)` plus the `distro` tag on each
   image select which backend an image targets.** Mixed-distro projects work: tag
   images individually, untagged units stay visible to every distro, and

@@ -47,16 +47,16 @@ func Stage0(proj *yoestar.Project, projectDir string, w io.Writer) error {
 			strings.Join(missing, ", "))
 	}
 
-	// Build each bootstrap unit without sandbox isolation (using host tools)
-	repoDir := repo.RepoDir(proj, projectDir)
-
 	// Bootstrap stages target the Alpine pipeline (glibc-from-source +
-	// apk-tools). The distro segment in build/<distro>/... reflects
-	// that explicit choice rather than the project's default.
+	// apk-tools). The distro segment in build/<distro>/... and
+	// repo/<project>/<distro>/ reflects that explicit choice rather
+	// than the project's default.
 	distro, err := proj.EffectiveDistro()
 	if err != nil {
 		return fmt.Errorf("bootstrap: %w", err)
 	}
+	// Build each bootstrap unit without sandbox isolation (using host tools)
+	repoDir := repo.RepoDistroDir(proj, projectDir, distro)
 
 	for _, name := range bootstrapUnits {
 		unit := proj.Units[name]
@@ -124,12 +124,11 @@ func Stage1(proj *yoestar.Project, projectDir string, w io.Writer) error {
 	fmt.Fprintln(w)
 
 	arch := build.Arch()
-	repoDir := repo.RepoDir(proj, projectDir)
-
 	distro, err := proj.EffectiveDistro()
 	if err != nil {
 		return fmt.Errorf("bootstrap stage1: %w", err)
 	}
+	repoDir := repo.RepoDistroDir(proj, projectDir, distro)
 
 	// Verify Stage 0 packages exist in the repo
 	if err := verifyStage0(repoDir, arch); err != nil {
@@ -200,7 +199,11 @@ func Stage1(proj *yoestar.Project, projectDir string, w io.Writer) error {
 
 // Status shows the current bootstrap state.
 func Status(proj *yoestar.Project, projectDir string, w io.Writer) error {
-	repoDir := repo.RepoDir(proj, projectDir)
+	distro, err := proj.EffectiveDistro()
+	if err != nil {
+		return fmt.Errorf("bootstrap status: %w", err)
+	}
+	repoDir := repo.RepoDistroDir(proj, projectDir, distro)
 	arch := build.Arch()
 	archDir := filepath.Join(repoDir, arch)
 
