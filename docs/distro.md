@@ -253,8 +253,3 @@ upstream keys and URLs, so a future `module-ubuntu` could mostly shim over
 format parser (`.rpm`, `repodata`), a new materializer, and a new
 image-assembler branch (`rpm -i` instead of `dpkg --configure -a`); the
 infrastructure is already factored to make this additive rather than invasive.
-
-There's no plan in flight for a third distro today. The split between alpine and
-debian was driven by concrete user needs (musl footprint vs glibc
-compatibility); adding a third should be driven the same way, not by
-completeness.
