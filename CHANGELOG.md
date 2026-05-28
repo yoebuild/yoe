@@ -8,6 +8,14 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Alpine images (`base-image`, `dev-image`, `bun-image`, `docker-image`,
+  `jukebox-image`, `nodejs-image`, `python-image`, `qt-image`, `selfhost-image`)
+  moved from `module-core` to `module-alpine`, and `base-image` + `dev-image`
+  now also exist in `module-debian`.** Each image is tagged with its distro, so
+  setting `defaults.distro = "debian"` on your project picks the Debian
+  `base-image` and `dev-image` automatically — no PROJECT.star surgery required
+  to switch backends. `module-core` keeps the distro-neutral classes and the
+  multi-distro infrastructure.
 - **`yoe run` and `yoe flash` find your built images again.** Both
   commands (and the TUI's flash action) were looking under the old
   pre-distro-split `build/<image>.<machine>/` path while the executor

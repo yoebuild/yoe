@@ -175,7 +175,7 @@ automatically.
 
 ## `bun-image`
 
-`module-core/images/bun-image.star` boots into a userland with `bun`, `bunx`,
+`module-alpine/images/bun-image.star` boots into a userland with `bun`, `bunx`,
 the dev-image diagnostic tools, and the `bun-hello` demo pre-installed. Run
 `yoe build bun-image && yoe run bun-image` to get a QEMU VM where
 `bun-hello "..."` renders an ASCII-art banner — useful as a smoke test that
