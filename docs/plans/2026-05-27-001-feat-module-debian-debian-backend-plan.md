@@ -71,6 +71,8 @@ attributes each unit to specific R-IDs.
 - R10–R11 (in-tree `Packages` storage, `yoe update-feeds` dispatch) → Phase 5
 - R12–R14 (`.deb` build, repo emitter, project repo layout split) → Phases 3, 6
 - R14a (on-disk `build/<distro>/...` split) → Phase 3
+- R14b (in-memory catalog by `(module, name)` with distro-filtered views) →
+  Phase 3 (emerged from R21a integration; see U6b)
 - R15–R17 (mirror-verbatim with mirror-time SHA256 verify, InRelease signing,
   signed-by= keyring) → Phases 6, 7
 - R18–R19 (image-build `dpkg --configure -a` under binfmt, package-driven
@@ -147,6 +149,14 @@ and AE5b (untagged-unit build-twice + tagged-unit invisible).
 ---
 
 ## Context & Research
+
+### Architectural reference
+
+[**docs/catalog.md**](../catalog.md) — The in-memory unit catalog,
+synthetic-module lazy materialization, working-set sizes, hash gating,
+and the catalog-by-distro evolution motivating U6b. Read this before
+reviewing U4a, U4b, U6, U6b, or U4a-fix; their design rationale lives
+there, not in this plan.
 
 ### Relevant Code and Patterns
 
@@ -385,6 +395,20 @@ solutions; reject the surrounding metadata model.
   rejected: suffix-on-unit-name (`build/<unit>.<scope>.<libc>/`) — smaller
   code-touch but shape-asymmetric with the repo split, harder to reset
   surgically, noisier visually.
+- **Catalog: storage is module-keyed, lookup is distro-filtered + module-
+  prioritized.** Distro is a visibility filter; module is the priority
+  axis; the catalog separates them so cross-distro same-name collisions
+  coexist instead of overwriting at the catalog level. See
+  [docs/catalog.md](../catalog.md) for the full architecture — storage
+  shape, lazy materialization contract, working-set sizes, invariants
+  the resolver depends on, and the rejected alternatives (walker-side
+  per-lookup probe attempted in 45b6f6b and reverted same-day after
+  the working set grew past 23 GB; distro-keyed storage with untagged-
+  first fallback which inverts today's `module-core`-wins semantics;
+  composite-key flat map). U6b is the implementation unit. R14a's
+  build-twice-along-libc property is wired separately via U4a-fix at
+  the hash layer; the catalog supplies the right `*Unit` definition,
+  the hash key disambiguates the binary outputs.
 - **`distro` field semantics: driver on images, compatibility tag on
   non-image units.** Same field name, two semantics by context. On a
   `class = "image"` unit, `distro` drives toolchain, packaging, repo
@@ -593,7 +617,7 @@ better layout. Per-unit `**Files:**` sections remain authoritative.
 graph TD
   PROJECT["PROJECT.star<br/>default_distro=alpine<br/>+ image distro=debian"] --> EFFECTIVE["Effective distro<br/>R20a + R21 cascade"]
   EFFECTIVE --> CLOSURE["Closure walk<br/>R21a visibility filter"]
-  MODULE_DEBIAN["module-debian<br/>debian_feed(bookworm.main)"] --> SYNTH["SyntheticModule<br/>debian.bookworm.main"]
+  MODULE_DEBIAN["module-debian<br/>debian_feed(bookworm.main)"] --> SYNTH["SyntheticModule<br/>debian.main"]
   SYNTH --> CLOSURE
   TOOLCHAIN_GLIBC["toolchain-glibc<br/>provides=toolchain<br/>distro=debian"] --> CLOSURE
   TOOLCHAIN_MUSL["toolchain-musl<br/>provides=toolchain<br/>distro=alpine"] -.filtered out.-> CLOSURE
@@ -676,6 +700,11 @@ its own CHANGELOG entry.
 
 #### U1. `internal/dpkg/` — Debian format parser
 
+> **Status:** Landed in a10c883 (Phase 1+2 commit, 2026-05-27).
+> `internal/dpkg/` package exists with `ParseIndex`, dep parsing, and
+> InRelease clearsign verify wired against `pault.ag/go/debian` +
+> ProtonMail/go-crypto.
+
 **Goal:** Wrap `pault.ag/go/debian` into a yoe-shaped `internal/dpkg` package
 covering `Packages` parsing, dpkg dep-syntax, version comparison, virtual
 provides, and `InRelease` clearsign verification.
@@ -749,6 +778,10 @@ table that mirrors the Alpine shape.
 ---
 
 #### U2. `internal/deb/` — `.deb` reader, writer, extract, control, sign
+
+> **Status:** Landed in a10c883. `internal/deb/` shells `dpkg-deb` for
+> build/extract/info and `gpg --clearsign` for InRelease signing. Pure-Go
+> read path uses `pault.ag/go/debian`.
 
 **Goal:** Read and write `.deb` files. Reader: extract `data.tar` for image
 assembly and `control.tar` for indexing. Writer: build a `.deb` from a staged
@@ -833,6 +866,18 @@ destdir + control metadata. Sign: shell `gpg --clearsign` for `InRelease`.
 ### Phase 2 — Distro selector, cascade, and visibility
 
 #### U4a. Distro fields + cascade + hash gating
+
+> **Status:** Partially landed in a10c883. Type fields and cascade
+> (`Distro`, `DefaultDistro`, `DefaultDistroOverride`,
+> `EffectiveDistroForImage`) all in `internal/starlark/types.go`. The
+> hash-gating sink in `internal/resolve/hash.go` accepts an
+> `effectiveDistro` parameter and emits it into the hash when non-empty
+> — but the executor calls `ComputeAllHashes(..., "")` at
+> `internal/build/executor.go:176`, so no consumer actually supplies a
+> distro today. The "build module-core's openssl twice along the libc
+> axis" property R14a relies on does NOT work yet; alpine wins the
+> cache and debian reads back the musl binary. Completion of U4a needs
+> **U4a-fix** (below).
 
 **Goal:** Land the `distro` field on Unit, `default_distro` on Project, the
 effective-distro cascade (R20a + R21), and the hash-key gating for
@@ -938,6 +983,16 @@ effective-distro cascade (R20a + R21), and the hash-key gating for
 
 #### U4b. Closure-walk visibility filter (R21a)
 
+> **Status:** Landed in a10c883 as the simple `visibleToDistro` filter
+> in `internal/starlark/closure.go`. An attempt to extend the walker
+> with cross-distro tagged-wins probing landed in 45b6f6b and was
+> reverted in the same session after it caused a multi-GB memory blow-up
+> during normal alpine dry-runs (each lookup re-allocated `*Unit`
+> structures via `dpkg.MaterializeUnit` for names it would discard).
+> The current code matches this unit's intent; the proper fix for
+> cross-distro name collisions is U6b (catalog-by-distro), not a walker
+> probe.
+
 **Goal:** Apply R21a's per-unit visibility filter at every closure-walk
 entry point. A unit is reachable from a closure iff `unit.Distro == ""`
 OR `unit.Distro == effectiveDistro` (the consuming image's effective
@@ -1026,6 +1081,10 @@ before recursing/returning candidates.
 
 #### U5. Virtual-container resolution in executor
 
+> **Status:** Landed in a10c883. `internal/build/executor.go`
+> `resolveContainerImage` calls `proj.ResolveProvidesForDistro` and
+> picks the matching toolchain unit's container reference.
+
 **Goal:** Allow `Unit.Container = "toolchain"` (a virtual reference) to
 dereference through the closure to the resolved concrete unit's container
 image at build time. Container units themselves (`toolchain-musl`,
@@ -1113,6 +1172,12 @@ R9's `provides`-based dispatch.
 
 #### U6. `build/<distro>/<unit>.<scope>/` layout migration
 
+> **Status:** Pending. Today every unit builds under
+> `build/<unit>.<scope>/` regardless of consuming distro, so a source
+> unit consumed by both alpine and debian images clobbers its own
+> destdir between builds. Blocks R14a effective-distro disambiguation
+> at the disk layer (the cache-key half is handled by U4a-fix).
+
 **Goal:** Implement R14a's on-disk build-dir split. `UnitBuildDir` gains a
 `distro` parameter; threaded through every caller and through the
 manually-duplicated path constructions in `internal/dev.go` and
@@ -1192,7 +1257,178 @@ manually-duplicated path constructions in `internal/dev.go` and
 
 ---
 
+#### U6b. Catalog by distro (module-keyed storage, distro-filtered views)
+
+> **Status:** Pending — design captured in this plan during 2026-05-28
+> session after the reverted tagged-wins probe (commit 45b6f6b) blew
+> memory to 23+ GB. No code changes yet. Today's `Project.Units` is
+> still flat single-keyed; cross-distro name collisions silently
+> overwrite at the catalog level. Workaround until landed:
+> `prefer_modules` pins for the colliding names, or build the alpine
+> and debian images in separate `yoe build` invocations.
+
+**Goal:** Implement the module-keyed storage + per-distro views design
+documented in [docs/catalog.md](../catalog.md#storage-shape).
+Cross-distro same-name registrations (alpine.main's `libcap2` and
+debian.main's `libcap2`) coexist; the closure walker disambiguates by a
+single precomputed-view lookup with no per-call probing.
+
+Note: `docs/catalog.md` describes the system as it will be after this
+unit lands — `UnitsByModule`, `DistroViews`, `LookupUnit`, and
+`AllUnits` are the target API surface, not the current code shape.
+U6b's job is to make the catalog match the documented design.
+
+**Design reference:** [docs/catalog.md](../catalog.md) — read this first
+for the storage shape, resolution rules, invariants, and rejected
+alternatives (walker-side probe, distro-keyed-with-untagged-fallback,
+composite-key flat map).
+
+**Requirements:** R14b (in-memory catalog by `(module, name)` with
+distro-filtered views), R21a (provides the Distro field used as a
+filter), R5 (module priority ordering applied during view construction).
+
+**Dependencies:** U4a (Distro field exists on Unit), the loader's
+existing prefer_modules + module-priority resolution.
+
+**Files:**
+
+- Modify: `internal/starlark/types.go` — change `Project.Units` to nested
+  storage and add view + accessors:
+  - `UnitsByModule map[string]map[string]*Unit` — `[module][name]*Unit`.
+    Primary storage; every registration lands here keyed by the unit's
+    source module.
+  - `DistroViews map[string]map[string]*Unit` — `[distro][name]*Unit`.
+    Precomputed at load time after all registrations and `prefer_modules`
+    pins have settled. Read-only after construction.
+  - `LookupUnit(distro, name string) *Unit` — single map access into
+    `DistroViews[distro][name]`. Returns nil on miss.
+  - `AllUnits() iter.Seq2[string, *Unit]` — range-over-func iteration
+    over `UnitsByModule`, yielding `(name, unit)` pairs. Same-named
+    units across modules yield separately. Callers that don't care
+    about distro use this.
+  - Delete the flat `Units map[string]*Unit` field. Callers either pass
+    distro context through to `LookupUnit` or migrate to `AllUnits()`
+    iteration.
+- Modify: `internal/starlark/engine.go` —
+  - `Engine.units` mirrors the new shape (`map[string]map[string]*Unit`
+    keyed by module).
+  - `Engine.RegisterUnit(u *Unit)` (new helper or callsite-internal)
+    stores into `e.units[u.Module][u.Name]`. Same-name same-module
+    collisions error (existing rule); cross-module same-name collisions
+    register independently (the new behavior).
+  - `Engine.Units()` returns the module-keyed map; callers using it for
+    flat iteration migrate to `AllUnits()`.
+- Modify: `internal/starlark/loader.go` —
+  - Move `Project.Units` assignment (~line 512) to construct
+    `UnitsByModule` from `eng.Units()` directly (same shape).
+  - Add `buildDistroViews(proj)` helper after all units register and
+    `prefer_modules` is validated. Walks every unique `name` across
+    `UnitsByModule`, gathers candidates per name, and for each
+    distro in `proj.SeenDistros()` (untagged + each Distro tag observed
+    in the project), runs the (visibility filter → prefer_modules pin →
+    module priority) resolution, writing the winner into
+    `proj.DistroViews[distro][name]`.
+  - Build-time deps materialization fixpoint loop (~line 612) iterates
+    via `eng.AllUnits()` instead of `eng.Units()`.
+- Modify: `internal/starlark/closure.go` —
+  - `lookupOrMaterialize` collapses to: `if u := e.project.LookupUnit(
+    effectiveDistro, name); u != nil { return u }; else walk synthetics`.
+    The synthetic walk only fires when no real unit + provides resolution
+    has registered the name. The post-walk registration writes into
+    `UnitsByModule`; the precomputed `DistroViews` are rebuilt at the
+    next load (closure-walk-time mutations don't update views).
+  - Remove `visibleToDistro` if no remaining consumer; the filter
+    moves to load-time view construction.
+- Modify: `internal/starlark/types.go` `ResolveProvidesForDistro` —
+  walks `UnitsByModule` instead of `Units`, applies the same distro
+  filter + module-priority pick.
+- Migrate: callers using `proj.Units[name]` direct access. ~50 sites
+  across `internal/build/executor.go`, `internal/resolve/`, `internal/
+  image/`, `internal/tui/`, `internal/source/`, `internal/bootstrap/`,
+  `cmd/yoe/`. Each call site either:
+  - Has distro context (build executor, image assembler, closure walker)
+    → migrate to `proj.LookupUnit(distro, name)`.
+  - Has no distro context (TUI list-all, source workspace) → use
+    `proj.LookupUnit("", name)` to get the untagged variant, or
+    iterate `proj.AllUnits()` if the goal is enumeration.
+- Migrate: callers iterating `for name, u := range proj.Units`. ~30
+  sites. Most become `for name, u := range proj.AllUnits()`. Sites that
+  need per-distro iteration use `proj.DistroViews[distro]` directly.
+- Test: `internal/starlark/catalog_test.go` (new) covers:
+  - Same-name across modules → both stored, both retrievable by module.
+  - Cross-distro collision (alpine + debian) → both visible in their
+    own DistroView, neither in the other's.
+  - Module priority within a distro → highest-priority module wins.
+  - `prefer_modules` pin honored when pinned module is among survivors.
+  - `prefer_modules` pin falls through to default priority when the
+    pinned module is filtered out by distro (with a diagnostic).
+- Test: existing `internal/starlark/closure_test.go` updates — the
+  walker no longer needs the tagged-wins probe paths; replace
+  `TestClosure_PointerStability` and `TestClosure_R21a_*` with
+  view-resolution coverage.
+
+**Approach:**
+
+- Land the type swap + view construction first, while keeping
+  `Project.Units` as a deprecated alias of `DistroViews[DefaultDistro]`
+  for one commit. This lets the build + tests stay green while the
+  migration progresses. Remove the alias in the same PR before merge.
+- Migrate callsites in topological order: `closure.go` first (the
+  closure walker is the highest-value consumer), then `resolve/dag.go`
+  + `build/executor.go` (the build path), then `image/` + `tui/`, then
+  miscellaneous CLI commands.
+- Pre-1.0 rule (CLAUDE.md): no compat shim past the temporary alias.
+  Delete the flat `Units` field once every caller has migrated.
+
+**Patterns to follow:**
+
+- `Project.ResolveProvidesForDistro` (lands as part of R9 / U4b) already
+  models the "filter by distro then resolve" pattern; the view
+  construction is its sibling at the unit level.
+- The existing `Diagnostics.Shadows` and `Diagnostics.DuplicateProvides`
+  population logic in `loader.go` (~line 551) shows the shape of
+  per-name aggregate-then-resolve passes; the DistroView builder follows
+  the same pattern.
+
+**Test scenarios:**
+
+- Happy path: project with module-core (untagged `openssl`) and
+  module-alpine (alpine.main's `openssl`); alpine image's lookup of
+  `openssl` returns module-core's variant (priority wins). Coverage:
+  unit + integration via test-project fixture.
+- Happy path: project with module-alpine's `libcap2` (Distro=alpine)
+  and module-debian's `libcap2` (Distro=debian); alpine image's lookup
+  returns alpine's, debian image's lookup returns debian's, neither
+  closure contaminates the other.
+- Happy path: `prefer_modules = {"xz": "alpine.main"}` — alpine image's
+  lookup of `xz` returns alpine.main's variant even though module-core
+  has higher priority.
+- Edge case: `prefer_modules = {"libcap2": "alpine.main"}` in a project
+  with both alpine and debian images. Alpine image: pin honored. Debian
+  image: alpine.main filtered out, pin falls through to default
+  priority among debian-visible candidates; diagnostic emitted.
+- Edge case: build-time dep on a name that resolves through Provides
+  rather than direct name. View construction picks the right Provides
+  source for the consuming distro.
+
+**Verification:**
+
+- `go test ./internal/...` passes.
+- `yoe build base-image` (alpine, the only current image) produces
+  identical output to pre-U6b (no behavior change for single-distro
+  projects).
+- A two-image fixture project (alpine + debian, both referencing
+  `libcap2`) builds cleanly without prefer_modules pins for the
+  collision; each image's closure picks its own variant.
+
+---
+
 #### U7. `repo/<project>/<distro>/...` layout migration
+
+> **Status:** Pending. Today's repo emitters write to
+> `repo/<project>/<arch>/` (apk) and `repo/<project>/debian/` (deb,
+> hardcoded). A multi-distro project would have apk and dpkg writing
+> into overlapping subtrees; needs the distro segment to coexist.
 
 **Goal:** Implement R14's on-disk repo split. `RepoDir` gains a `distro`
 parameter; per-arch APK contents move to `repo/<project>/alpine/<arch>/`
@@ -1284,6 +1520,9 @@ and Debian content lands at `repo/<project>/debian/dists/<suite>/...` +
 
 #### U8. Move `toolchain-musl` to `module-alpine` with `provides` + `distro`
 
+> **Status:** Landed in d661acf (Phase 4). `toolchain-musl` lives in
+> module-alpine with `provides = ["toolchain"]` and `distro = "alpine"`.
+
 **Goal:** Relocate `toolchain-musl` from `module-core` to `module-alpine`.
 Add `provides = ["toolchain"]` and `distro = "alpine"` so the R9 dispatch
 mechanism works.
@@ -1348,6 +1587,9 @@ resolution); also affects U7 (toolchain home shifts post-migration).
 
 #### U9. Add `toolchain-glibc` to `module-debian` with `provides` + `distro`
 
+> **Status:** Landed in d661acf. `toolchain-glibc` in module-debian
+> with `provides = ["toolchain"]` and `distro = "debian"`.
+
 **Goal:** New container unit `toolchain-glibc` on `debian:bookworm-slim`,
 declared in `module-debian` with `provides = ["toolchain"]` and
 `distro = "debian"`. Carries Debian-side native toolchain + the shell-out
@@ -1408,6 +1650,10 @@ image assembly call into.
 
 #### U10. Migrate build classes to `container = "toolchain"` virtual reference
 
+> **Status:** Landed in d661acf. Build classes in `module-core/classes/`
+> (autotools, cmake, go_binary, etc.) set `container = "toolchain"`;
+> resolution happens via R9 provides dispatch at executor time.
+
 **Goal:** Update `autotools`, `cmake`, `go_binary`, `python_pip`, and any
 other distro-aware class to use the virtual `toolchain` reference + a
 `toolchain` dep, replacing the hardcoded `container = "toolchain-musl"`
@@ -1465,6 +1711,12 @@ literal.
 
 #### U11. `debian_feed()` Starlark builtin
 
+> **Status:** Landed in 7d5b214. `internal/feeds/debian/builtin.go`
+> registers a SyntheticModule per debian_feed call with cross-feed
+> Provides resolution via the multi-feed table. Composed name
+> currently embeds the suite (`debian.bookworm.main`) — see **U11-fix**
+> below to drop the suite from module identity.
+
 **Goal:** Add the `debian_feed(...)` builtin in `internal/feeds/debian/`,
 mirroring `alpine_feed`. Materializes one `SyntheticModule` per declared
 `(suite, component)` tuple; feed units inherit `Distro = "debian"`
@@ -1491,11 +1743,15 @@ automatically.
 **Approach:**
 
 - Builtin signature mirrors `alpine_feed` with Debian terminology:
-  `debian_feed(name = "bookworm-main", url = "https://deb.debian.org/debian",
+  `debian_feed(name = "main", url = "https://deb.debian.org/debian",
   suite = "bookworm", component = "main", arches = ["amd64", "arm64"],
   index = "feeds/main", keyring = "keys/debian-archive-keyring.gpg")`.
-- One call materializes one `SyntheticModule` per `(suite, component)`
-  named `<distro>.<suite>.<component>` (e.g. `debian.bookworm.main`).
+- One call materializes one `SyntheticModule` per component, named
+  `<parent>.<component>` (e.g. `debian.main`). The `suite` kwarg
+  configures which on-disk `Packages` file is parsed but does not appear
+  in the module identity — one Debian suite per project (enforced at
+  evaluation), so the suite has no disambiguating role at the module
+  level. Mirrors alpine's `alpine.main` / `alpine.community` shape.
 - Synthesized units carry `Distro = "debian"` (set in the materialization
   closure).
 - Cross-feed provides wiring: a `bookworm-security` feed's package depending
@@ -1516,7 +1772,7 @@ automatically.
 
 - Happy path: declare a `debian_feed(suite="bookworm", component="main")`
   pointing at a fixture `Packages` file; the synthetic module
-  `debian.bookworm.main` registers and its `Lookup("openssl")` returns a
+  `debian.main` registers and its `Lookup("openssl")` returns a
   materialized `*Unit` with `Distro = "debian"`. Covers AE1.
 - Happy path: declare three feeds (`bookworm.main`,
   `bookworm-security.main`, `bookworm-updates.main`) and resolve a package
@@ -1535,6 +1791,10 @@ automatically.
 ---
 
 #### U12. `yoe update-feeds` Debian dispatch
+
+> **Status:** Landed in 7d5b214. `cmd/yoe/main.go` routes update-feeds
+> to `internal/feeds/debian.UpdateFeeds` when `debian_feed` declarations
+> are detected.
 
 **Goal:** Extend `cmd/yoe/main.go`'s `update-feeds` subcommand to detect
 which feed builtins the loaded module declared and route accordingly. Today
@@ -1635,6 +1895,10 @@ sibling dispatch to `internal/feeds/debian.UpdateFeeds`.
 
 #### U13a. Project GPG key bootstrap + homedir isolation
 
+> **Status:** Landed in 5d8aa80 (Phase 6+7). Project signing key
+> auto-generates under `~/.config/yoe/keys/<project>.gpg/`; `gpg
+> --clearsign` invocations use explicit `--homedir`.
+
 **Goal:** Generate, store, and isolate the project's GPG signing key —
 the sole runtime trust anchor (R16). Every yoe gpg shell-out (U2, U13)
 uses an explicit `--homedir` so ambient keyrings can't leak into the
@@ -1710,6 +1974,10 @@ build. Mirrors the existing RSA key bootstrap at
 ---
 
 #### U13. `internal/repo/deb_emitter.go` — Debian-format project repo emitter
+
+> **Status:** Landed in 5d8aa80. Pure-Go emitter writes pool, dists,
+> InRelease. Mutex-serialized publish (`debPublishMu`) was added during
+> end-to-end debugging when parallel builds raced on partial writes.
 
 **Goal:** Emit a signed Debian-format project repo at
 `repo/<project>/debian/`: per-arch `Packages.{gz,xz}`, suite-level
@@ -1798,6 +2066,12 @@ Shells `apt-ftparchive` + `gpg --clearsign`.
 
 #### U14. `.deb` build path for project units
 
+> **Status:** Landed in 5d8aa80. Executor's `packageDeb` branch
+> shells `dpkg-deb --build`; passthrough path for feed-materialized
+> units verbatim-copies upstream `.deb`. `.deb` extension wired
+> through `internal/source/workspace.go` + `fetch.go` so bare-copy
+> caching works.
+
 **Goal:** When a project-built unit is consumed by a `distro = "debian"`
 image, package it as a `.deb` via `internal/deb.BuildDeb` and publish to
 the project's debian subtree.
@@ -1864,6 +2138,12 @@ verify step.)
 
 #### U16. Image assembler Debian branch
 
+> **Status:** Landed in 5d8aa80. `modules/module-core/classes/image.star`
+> branches on `effective_distro == "debian"` and dispatches to
+> `_assemble_debian_rootfs` + `_create_disk_image_debian`. Includes
+> `_install_syslinux_debian` for the bootloader path (uses
+> `/usr/lib/SYSLINUX/mbr.bin` — Debian-specific path).
+
 **Goal:** Branch `internal/image/rootfs.go:Assemble` on effective distro.
 For debian images: extract each resolved deb via `internal/deb.ExtractDataTar`,
 chmod/ownership preserved.
@@ -1917,6 +2197,12 @@ chmod/ownership preserved.
 ---
 
 #### U17. `dpkg --configure -a` under no-network binfmt sandbox
+
+> **Status:** Landed in 5d8aa80. `internal/image/debian_configure.go`
+> `ConfigureDebianRootfs` runs configure in toolchain-glibc under
+> `--network=none`; installs policy-rc.d / ischroot stubs before,
+> removes after. Privileged mode enabled to allow chown after
+> configure rewrites file ownership.
 
 **Goal:** After U16's extract, run `dpkg --configure -a --no-triggers`
 followed by `dpkg --triggers-only -a` inside a binfmt container with no
@@ -2009,6 +2295,10 @@ Install/remove the standard `policy-rc.d` + `ischroot` +
 
 #### U18. APT trust staging: keyring + deb822 sources + HTTPS guard
 
+> **Status:** Landed in 5d8aa80. Project keyring staged at
+> `/etc/apt/keyrings/<project>.gpg`; deb822 `.sources` file with
+> `Signed-By:` scope. HTTPS-only validation at evaluation per R26.
+
 **Goal:** After U17, stage `/etc/apt/keyrings/<project>.gpg` and write
 `/etc/apt/sources.list.d/<project>.sources` (deb822) with `Signed-By:`
 referencing the keyring. Error at image-build time if the configured
@@ -2071,6 +2361,11 @@ project repo URL is HTTP.
 ### Phase 8 — `module-debian` sibling repo bootstrap
 
 #### U19. `module-debian` sibling repo skeleton
+
+> **Status:** Landed in d661acf and tracked at
+> `testdata/e2e-project/cache/modules/module-debian/`. MODULE.star,
+> debian_feed wiring, toolchain-glibc unit, bootstrap keyring all
+> populated.
 
 **Goal:** Create the `module-debian` sibling git repo at the path the spec
 named (`/scratch4/yoe/module-debian/`). Populate `MODULE.star` with the
@@ -2152,6 +2447,12 @@ U12 (`yoe update-feeds` Debian dispatch).
 
 #### U20. Add Debian fixture to `testdata/e2e-project/`
 
+> **Status:** Landed in d12c0d5 originally; the `debian-base-image.star`
+> fixture was deleted during 2026-05-28 debugging to isolate alpine
+> regression testing. Re-adding it is part of **U24** (boot
+> verification). PROJECT.star already lists module-debian under
+> `modules = [...]`.
+
 **Goal:** Extend `testdata/e2e-project/PROJECT.star` with
 `default_distro = "alpine"` and (gated by Debian-module availability) a
 test Debian image so e2e validates the full Debian path end-to-end.
@@ -2166,7 +2467,7 @@ rule).
 - Modify: `testdata/e2e-project/PROJECT.star` — add `default_distro = "alpine"`.
 - Add a Debian image (e.g. `debian-base-image`) declaring `distro = "debian"`
   with a small `artifacts` list pulling a handful of packages from
-  `debian.bookworm.main`.
+  `debian.main`.
 
 **Approach:**
 
@@ -2199,6 +2500,9 @@ rule).
 
 #### U21. `internal/init.go` template mirrors e2e-project
 
+> **Status:** Landed in d12c0d5. `yoe init` generates a PROJECT.star
+> matching the e2e fixture (module list, default_distro, prefer_modules).
+
 **Goal:** Per CLAUDE.md's "yoe init mirrors the e2e-project template" rule,
 update `internal/init.go`'s generated `PROJECT.star` to include
 `default_distro` field (defaulting to `"alpine"`).
@@ -2229,6 +2533,9 @@ update `internal/init.go`'s generated `PROJECT.star` to include
 ---
 
 #### U23. TUI Setup: Default Distro picker (local.star override)
+
+> **Status:** Pending. `DefaultDistroOverride` field on Project exists
+> (lands in U4a); TUI surface to set it from a picker is not yet wired.
 
 **Goal:** Add an interactive "Default Distro" row to the TUI Setup screen.
 Choices populate from the loaded modules' synthetic-feed distros (no
@@ -2319,6 +2626,10 @@ project demonstrates the override).
 
 #### U22. Docs + CHANGELOG + SPEC_PLAN_INDEX
 
+> **Status:** Landed in 76da6e4. `docs/module-debian.md` written,
+> CHANGELOG entries added, SPEC_PLAN_INDEX updated. Will need a
+> follow-up pass once U4a-fix, U6, U6b, U7, U11-fix, U23, and U24 land.
+
 **Goal:** Land all documentation R23 names: a `docs/module-debian.md`
 companion to `docs/module-alpine.md`, the `distro` / `default_distro`
 field docs, the Debian sibling section in `docs/apk-passthrough.md` (or a
@@ -2369,6 +2680,362 @@ the SPEC_PLAN_INDEX row flip.
 
 - All docs render cleanly in any markdown renderer.
 - No internal file paths / symbol names in CHANGELOG.
+
+---
+
+### Phase 10 — Wiring fixes and verification (added 2026-05-28)
+
+This phase captures four work items surfaced after Phase 1–9 landed but
+before module-debian is genuinely "done." The done criterion is: a
+Debian-distro image built by yoe boots in QEMU and accepts an SSH
+session. Paper-plan landing isn't done; bootable rootfs accepting SSH
+is.
+
+#### U4a-fix. Thread effective distro from executor through to `ComputeAllHashes`
+
+> **Status:** Pending. U4a as landed gives `UnitHash` an `effectiveDistro`
+> parameter but the executor passes `""` at
+> `internal/build/executor.go:176`. The "build module-core's openssl
+> twice — once musl-linked for alpine, once glibc-linked for debian"
+> property R14a relies on cannot work in the current state.
+
+**Goal:** Make R14a real at the cache layer. Source-built units consumed
+by both an alpine and a debian image must produce two distinct cache
+entries; today they collapse to one because the consumer's distro
+doesn't reach the hasher.
+
+**Requirements:** R14a.
+
+**Dependencies:** U4a (mechanism), U4b (closure walker supplies distro
+context). Naturally precedes U6 (which wants the matching
+disk-layer split) and U6b (which wants the matching catalog split).
+
+**Files:**
+
+- Modify: `internal/build/executor.go` —
+  - `BuildAll` (or its image-loop equivalent) derives the consuming
+    image's effective distro via `proj.EffectiveDistroForImage(name)`
+    once per image, then passes it into `ComputeAllHashes`.
+  - For multi-image builds in one invocation, hash table is rebuilt
+    per image-effective-distro (cheap; same DAG).
+  - `cmd/yoe/build.go` or similar single-unit-build entry points
+    derive distro from `proj.EffectiveDistro()` (no image scope) and
+    pass that.
+- Test: `internal/resolve/hash_test.go` already covers the gate; add an
+  integration test that builds the same source-unit name under two
+  effective distros and asserts different cache keys.
+
+**Approach:**
+
+- One-line change at the existing `ComputeAllHashes` callsite, plus the
+  derivation that gathers the right effective distro per image.
+- Mechanical; no design choices. Verifies via `yoe build base-image`
+  (alpine) producing the same hash it produced before, and an
+  alpine + debian project producing two distinct hashes for the same
+  source unit.
+
+**Test scenarios:**
+
+- Happy path: alpine-only project — same hash as today (no behavior
+  change for single-distro projects).
+- Happy path: mixed project — source unit's cache key differs between
+  alpine and debian closures.
+- Edge case: single-unit deploy with no image scope — falls back to
+  `proj.EffectiveDistro()` (DefaultDistroOverride → DefaultDistro);
+  errors loudly if both are empty.
+
+**Verification:**
+
+- `go test ./internal/...` passes.
+- Inspect a build's cache layout after a mixed-distro build: two
+  entries under `cache/build/` (or wherever U6 lands them) with
+  matching unit name and divergent hash suffixes.
+
+---
+
+#### U11-fix. Drop suite from `debian_feed` composed name
+
+> **Status:** Pending. `internal/feeds/debian/builtin.go:96` builds the
+> synthetic module name as `parent + "." + args.suite + "." + args.name`,
+> embedding `bookworm` into module identity. Plan-level naming was
+> updated in this commit (debian.bookworm.main → debian.main). Code +
+> in-tree docs not yet aligned.
+
+**Goal:** Align debian_feed module naming with alpine_feed: one segment
+after the parent (`debian.main`, `debian.contrib`, `debian.non-free`).
+Suite stays as a feed configuration parameter (it picks which on-disk
+`Packages` file to parse) but does not appear in the module's identity.
+
+**Requirements:** R1, R5 (module naming convention consistency).
+
+**Dependencies:** None. Standalone.
+
+**Files:**
+
+- Modify: `internal/feeds/debian/builtin.go:96` — change
+  `composedName := parent + "." + args.suite + "." + args.name` to
+  `composedName := parent + "." + args.name`.
+- Modify: `internal/feeds/debian/builtin.go` doc-comments at lines 7–8
+  and 70 that reference `<parent>.<suite>.<name>` convention.
+- Modify: `testdata/e2e-project/cache/modules/module-debian/MODULE.star`
+  doc-comment (line 8) — update the example `prefer_modules` entry from
+  `"debian.bookworm.main"` to `"debian.main"`.
+- Modify: `docs/module-debian.md` if it references the old convention.
+
+**Approach:**
+
+- Pure code change, no migration needed: nothing in the repo today pins
+  `prefer_modules` to a `debian.<suite>.<component>` name.
+
+**Test scenarios:**
+
+- Happy path: `debian_feed(name="main", suite="bookworm", ...)` →
+  registered synthetic module is named `debian.main`.
+- Happy path: existing alpine-only e2e build still works (no change to
+  alpine path).
+
+**Verification:**
+
+- `go test ./internal/feeds/debian/...` passes.
+- Manually grep the repo for `debian.bookworm.` — only allowed remaining
+  reference is in CHANGELOG/historical notes that describe the rename.
+
+---
+
+#### U24. Verify Debian image boots in QEMU and accepts SSH
+
+> **Status:** Pending. The actual definition-of-done for module-debian
+> per `project_module_debian_done_criterion.md`. Today the plan ends
+> Phase 7 at "rootfs configured via `dpkg --configure -a`" without
+> closing the loop on "does this boot."
+
+**Goal:** Demonstrate end-to-end that a Debian disk image built via
+yoe boots under QEMU, brings up the network, starts SSH, and accepts
+an SSH session. This is the criterion under which module-debian
+graduates from "plan landed" to "works."
+
+**Requirements:** R12, R13, R14, R14a (cache disambiguation), R18
+(rootfs configure), R20, R26, U4a-fix (real cache distro key), U6
+(distro build-dir split), U6b (catalog-by-distro), U11-fix (clean
+module names).
+
+**Dependencies:** Everything above. This unit is the closing-the-loop
+verification, not an isolated piece of work.
+
+**Files:**
+
+- Restore: `testdata/e2e-project/images/debian-base-image.star` — a
+  minimal debian image with `distro = "debian"`,
+  `artifacts = ["apt", "openssh-server", "linux-image-amd64"]`. The
+  file existed in commit d12c0d5 and was deleted during this session;
+  rewrite from scratch incorporating any post-fix changes.
+- Modify: `cmd/yoe/run.go` (or wherever `yoe run` lives) — confirm
+  it dispatches to QEMU with the right machine config for the debian
+  image. May or may not need a tweak depending on `effective_distro`
+  pass-through.
+- Modify: `testdata/e2e-project/cache/modules/module-debian/containers/toolchain-glibc/Dockerfile`
+  — ensure `extlinux` and `syslinux-common` remain installed (added
+  during 2026-05-28 debugging for the bootloader path).
+- Add: a documented manual verification procedure in
+  `docs/module-debian.md` covering `yoe build debian-base-image` →
+  `yoe run debian-base-image` → SSH connection.
+
+**Approach:**
+
+- Build the debian image with U4a-fix, U6, U6b, U11-fix in place. Each
+  earlier fix unblocks part of this verification (cache disambiguation
+  for source units consumed by both images; clean catalog for
+  cross-distro coexistence; clean module names in any
+  `prefer_modules` interactions).
+- Boot in QEMU via `yoe run debian-base-image`. Inspect the console
+  for kernel boot, init, openssh-server startup.
+- From host, SSH to `localhost:2222` (the e2e project's QEMU forward)
+  with the project's seeded SSH key. Expect a shell.
+- Capture failures in iteration: bootloader misconfigured, missing
+  kernel module, openssh-server not auto-enabled, network bring-up
+  fails, etc. Each failure becomes a fix in the appropriate adjacent
+  unit (U16 for assembler, U17 for configure, U18 for sources) or a
+  new unit if it's a genuinely new piece.
+
+**Patterns to follow:**
+
+- Existing alpine boot verification — the e2e project's
+  `base-image` builds and runs successfully under `yoe run`; the same
+  contract must hold for `debian-base-image`.
+
+**Test scenarios:**
+
+- Happy path: `yoe build debian-base-image` succeeds without
+  `prefer_modules` workarounds for cross-distro names (per U6b).
+- Happy path: `yoe run debian-base-image` brings the VM up; kernel
+  prints; init starts; getty appears.
+- Happy path: `ssh -p 2222 root@localhost` accepts the project's
+  SSH key (or password if so configured) and yields a working shell.
+- Edge case: package's postinst expected network access — should
+  fail loudly per U17's no-network sandbox; document if any
+  artifacts need to move to no-scripts mode.
+- Edge case: missing init script enablement for `openssh-server` —
+  service must auto-enable per the package-driven enable mechanism
+  (yoe's `setup-<pkg>` analog, R19); if Debian's
+  `openssh-server` package doesn't enable itself, add an
+  `openssh-server-enable` unit to module-debian.
+
+**Verification:**
+
+- A run of the above procedure on a clean repo from `main` succeeds
+  end-to-end, recorded as a CHANGELOG entry under "Verified."
+- The procedure is documented in `docs/module-debian.md` so a future
+  user can reproduce.
+- Until this unit passes, module-debian is "plan landed but not done";
+  the SPEC_PLAN_INDEX reflects that state.
+
+---
+
+### Known limitations until Phase 10 completes
+
+These are user-visible behaviors today; document in
+`docs/module-debian.md` so users have workarounds while the fix
+pipeline lands.
+
+- **Cross-distro multi-image projects collide on same-named units.**
+  A project with both an alpine image and a debian image referencing
+  units with the same name (e.g. `libcap2` from both `alpine.main`
+  and `debian.main`) sees the second-registered overwrite the first
+  in the flat `Project.Units` map. Workaround: pin the colliding name
+  with `prefer_modules` to the module appropriate for the dominant
+  image, OR build the two images in separate `yoe build` invocations.
+  Resolved by U6b.
+- **Source-built units (module-core) shared between alpine and debian
+  closures produce wrong-libc binaries.** Without U4a-fix, the cache
+  key for `module-core/openssl` collapses to one entry regardless of
+  consuming distro; whichever image builds first wins. Workaround:
+  build images separately and `yoe clean <unit>` between invocations,
+  OR pin the affected name with `prefer_modules` to the distro feed's
+  prebuilt. Resolved by U4a-fix.
+- **`debian.bookworm.main` module name lingers in any `prefer_modules`
+  pin written before U11-fix lands.** Workaround: write pins as
+  `debian.main` (the post-U11-fix shape); they'll start working as
+  soon as U11-fix lands. Until then, the suite-embedded form is what
+  the synthetic module is actually named.
+- **module-debian is not yet verified to boot.** The image assembler
+  produces a configured rootfs but until U24 has been executed
+  end-to-end, "module-debian works" is an expectation, not a fact.
+  Treat any production deployment as untested until U24 closes.
+
+---
+
+#### U25. Architecture doc refresh post-U6 / U24
+
+> **Status:** Pending. `docs/architecture.md` was partially updated
+> 2026-05-28 with the typical-modules list, the `.apk`-vs-`.deb`
+> packaging framing, the abstract-name resolution distro-filter
+> mention, and the parallel debian pipeline + GPG/InRelease signing
+> paragraph. Three more updates were audited but deferred because
+> they depend on work that hasn't landed (U6, U24) or require
+> non-text-edit changes (diagrams are PNGs whose source files need
+> editing first).
+
+**Goal:** Close the remaining `docs/architecture.md` gaps once the
+debian backend's prerequisite work has landed and verified — the
+deployment story for `apt update` / `apt install`, the build-dir
+layout reflecting U6, and the three diagrams that today show only the
+apk/single-toolchain shape.
+
+**Requirements:** R12, R14a, R18, R20, R26.
+
+**Dependencies:** U6 (build dir layout migration — required before
+the build-dir paragraph can be accurate), U24 (boot-and-SSH
+verification — required so the deployment paragraph describes a real
+flow rather than an aspirational one). U7 (repo split) and U6b
+(catalog-by-distro) are not hard dependencies for this unit but, if
+they've landed by the time U25 runs, the doc should reflect them too.
+
+**Files:**
+
+- Modify: `docs/architecture.md` —
+  - "Reaching a running device" section (current lines ~187-206):
+    add a parallel paragraph for the debian deploy path — the project
+    repo's `dists/<suite>/InRelease` + `pool/<comp>/...`, the
+    on-device deb822 `.sources` file referencing the project
+    keyring via `Signed-By:`, and the `apt update` → `apt install`
+    flow that this enables. Same one-delivery-mechanism property
+    holds (same project key, same HTTP transport, same
+    discovery/orchestration channels) but the on-device command
+    surface differs. Remove the implicit "apk-tools only" framing.
+  - "Source modifications round-trip" section (current lines
+    ~213-220): update the build-dir reference to match U6's layout.
+    "Every unit's build directory is a regular git repo" stays true;
+    the path changes from `build/<unit>.<scope>/` to
+    `build/<distro>/<unit>.<scope>/`. Update any concrete example
+    paths shown in the section or referenced PNGs.
+- Modify: `docs/assets/build-environment-tiers.drawio` — show two
+  toolchain containers (`toolchain-musl` and `toolchain-glibc`)
+  selected per distro via R9 `provides = ["toolchain"]` dispatch.
+  Re-export to PNG.
+- Modify: `docs/assets/feed-server-topology.drawio` — add the deb822
+  `Signed-By:` keyring + `apt` flow as a sibling to the apk path,
+  using the same delivery channels (mDNS for discovery, HTTP for
+  pull, SSH for orchestration). Re-export to PNG.
+- Modify: `docs/assets/provides-resolution.drawio` — show the
+  R21a-shaped flow: virtual name lookup filters by the consuming
+  image's effective distro before walking `provides`. Re-export
+  to PNG.
+- Verify: `docs/architecture.md` cross-links to `module-debian.md`
+  and `catalog.md` still resolve and read cleanly after the
+  parallel-paragraph rewrites.
+
+**Approach:**
+
+- Bundle all three deferred items into one architecture-doc-refresh
+  commit. Each is small individually but they touch overlapping
+  sections (Packaging, Deployment, Development) plus the diagram
+  assets — splitting them would create churn without review benefit.
+- The PNG re-export step lives in the same commit as the
+  `.drawio` edit so the doc and image always agree. Follow the
+  draw.io workflow from the user-global CLAUDE.md "Diagrams"
+  section: rounded rectangles, color palette
+  (blue `#dae8fc`, green `#d5e8d4`, yellow `#fff2cc`, purple
+  `#e1d5e7`, red `#f8cecc`, orange `#ffe6cc`), 14pt titles,
+  900x500 default size.
+- For the deployment section: the parallel paragraph should be
+  *short* — yoe's one-delivery-mechanism story is the headline; apk
+  vs apt is implementation. Don't double the section length.
+
+**Patterns to follow:**
+
+- The Bucket 2 Packaging-section rewrite from the 2026-05-28
+  architecture.md edit — same parallel-pipeline framing, same
+  experimental-status flagging on the debian sibling, same link
+  pattern out to `module-debian.md`.
+- The CLAUDE.md global "Diagrams" guidance: composition (no title
+  embedded in diagram), style (rounded rectangles, color palette,
+  font sizes), source preference (draw.io).
+
+**Test scenarios:**
+
+- Happy path: render `docs/architecture.md` in mdBook (or any
+  markdown viewer). All sections read cleanly; no orphan diagrams;
+  all internal links resolve; no overstated debian maturity (every
+  debian description either carries `(experimental)` flag or links
+  to module-debian.md for current status).
+- Happy path: a reader landing on "Reaching a running device" sees
+  both apk and deb paths without one feeling like an afterthought.
+  Section length stays close to today's word count; the parallel
+  paragraph adds depth, not bulk.
+- Happy path: the three updated diagrams render cleanly at the
+  documented 900x500 default size; PNG and `.drawio` source agree
+  byte-for-byte (no stale exports).
+
+**Verification:**
+
+- `docs/architecture.md` reads as one coherent document, not as
+  "today's truth + a debian footnote."
+- The deferred-documentation section under Phase 10's Known
+  Limitations (this section's predecessor) is removed in the same
+  commit; the work is complete, not deferred-again.
+- A note in CHANGELOG.md under the next version: one-sentence
+  user-facing mention that the architecture doc now reflects the
+  debian backend's deployment and build flows.
 
 ---
 

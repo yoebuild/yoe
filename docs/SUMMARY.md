@@ -24,6 +24,7 @@
 - [Architecture](architecture.md)
 - [Unit & Configuration Format](metadata-format.md)
 - [Naming and Resolution](naming-and-resolution.md)
+- [Catalog and Materialization](catalog.md)
 - [File Templates](file-templates.md)
 - [Build & Configuration Languages](build-languages.md)
 
@@ -39,6 +40,7 @@
 
 - [apk Signing](signing.md)
 - [module-alpine](module-alpine.md)
+- [module-debian](module-debian.md)
 - [Alpine apk Passthrough](apk-passthrough.md)
 - [Security and Threat Model](security.md)
 

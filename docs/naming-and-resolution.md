@@ -496,6 +496,11 @@ from a 60k-entry feed allocates 300 `*Unit` pointers, not 60k. The on-disk
 APKINDEX cache (header-versioned, content-keyed) keeps re-parse times under
 ~300ms even for the full Debian-class case.
 
+See [Catalog and Materialization](catalog.md) for the internal data structures
+and lifecycle that back this — the `SyntheticModule` contract, the closure
+walker's role as materialization driver, working-set sizes per feed, and the
+allocation invariants the resolver depends on.
+
 ### Companion units (the enable-service pattern)
 
 A feed gives you every package's `.apk` but doesn't enable services — Alpine

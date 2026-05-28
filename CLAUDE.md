@@ -163,6 +163,20 @@ than scanning the directories.
   suffix and the Status blockquote in the same change that ships the code. The
   goal: a reader of `docs/` can never confuse aspirational design with what
   `yoe` actually does today.
+- **When a plan commits to implementation, write docs in final form.** Once a
+  plan under `docs/plans/` exists and we are committed to building it, the
+  matching reference docs under `docs/` are rewritten to describe the
+  post-implementation state — no `(planned)` flags, no `> Status:` blockquotes,
+  no "today's flat shape" or "wiring incomplete" caveats. A reviewer should
+  read the docs as if the work were already done; a single coherent
+  target-state doc is faster to comprehend than a verbose plan with
+  disconnected steps. The plan's **first step** lands the target-state docs
+  (reviewable artifact); the plan's **last step** verifies docs and code agree
+  and closes any gaps that surfaced during implementation. This rule is
+  disjoint from `(planned)` above: `(planned)` covers design-ahead sections
+  with no implementation plan (brainstorming, future-looking writing without
+  commitment to ship); final-form-during-plan covers everything once a plan
+  exists. Switch framings the moment a plan commits.
 - **Changelog entries stay simple and user-focused.** Write for the user of
   `yoe`, not the engineer changing it. One or two short sentences, leading with
   the user-visible benefit (what they see, what they can now do, what was broken
