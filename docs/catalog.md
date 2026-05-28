@@ -518,35 +518,24 @@ So every invocation re-parses these on-disk files into the in-memory
 `archCache`, but the underlying data isn't regenerated unless you
 explicitly run `update-feeds`.
 
-### When you need to restart
+### Reload semantics
 
-For one-shot commands (`yoe build`, `yoe deploy`, `yoe dry-run`,
-etc.), "restart" isn't really a concept — each invocation reloads
-everything from disk. Edit a `.star` file and the next build picks it
-up automatically.
-
-For long-running surfaces (the TUI, or a future `yoe serve` daemon),
-restart is needed for any change that affects what the catalog
-contains:
-
-| What changed | Restart needed? |
-| ------------ | --------------- |
-| A `.star` file: unit, image, class, MODULE.star, PROJECT.star | Yes |
-| `local.star` (default-distro override, QEMU settings) | Yes |
-| `prefer_modules` pin in PROJECT.star | Yes |
-| Synced module repo (`git pull` in a `cache/modules/<mod>/`) | Yes |
-| Refreshed feed index (`yoe update-feeds` ran in another shell) | Yes |
-| A unit's upstream source (the tarball or git repo it points at) | No — next build re-fetches if the unit's ref changes |
-| A unit's build output (you ran `yoe build` in another shell) | No — TUI sees new build state on next refresh |
-
-There's no in-process "reload" API: the `archCache` and `DistroViews`
-are computed once per process by design. Making the in-memory state
+There is no in-process reload API. The `archCache` and `DistroViews`
+are computed once per process by design — making the in-memory state
 authoritative for the lifetime of the process avoids race conditions
 between "what the resolver thinks" and "what's on disk." If the
 resolver could re-read the catalog mid-run, a build executor partway
-through a closure could find that some name now resolves differently
-than it did at the start of the build — a class of bug worth avoiding
+through a closure could find names resolving differently than they
+did at the start of the build, a class of bug worth avoiding
 structurally rather than handling explicitly.
+
+For one-shot commands (`yoe build`, `yoe deploy`, `yoe dry-run`,
+etc.), each invocation is a fresh process; any edit to any `.star` or
+feed index is picked up on the next command automatically. For
+long-running surfaces (the TUI, or a future daemon), a restart is
+required after any change that affects what the catalog contains —
+see [Restarting after edits](yoe-tool.md#restarting-after-edits) in
+the yoe-tool guide for the change-vs-restart table.
 
 ## Invariants the resolver relies on
 
