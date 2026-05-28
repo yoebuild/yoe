@@ -919,6 +919,14 @@ catalog in memory for the lifetime of the process. There is no
 in-process reload — if you change something that affects what the
 catalog contains, exit (`q`) and re-launch.
 
+**Restart is fast.** Module-cache clones, build outputs, source
+tarballs, and `APKINDEX` / `Packages` files all stay on disk between
+runs — only the in-memory structures rebuild. A typical project's
+TUI launches in well under a second; a large multi-feed project might
+take a second or two on the first launch (cold OS file-cache),
+warming up to a fraction of a second afterward. The exit/relaunch
+loop is a routine workflow step, not something to dread.
+
 | What changed                                                  | Restart needed? |
 | ------------------------------------------------------------- | --------------- |
 | A `.star` file: unit, image, class, MODULE.star, PROJECT.star | Yes             |
