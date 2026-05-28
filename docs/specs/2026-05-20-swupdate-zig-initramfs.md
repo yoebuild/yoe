@@ -142,11 +142,12 @@ preferential:
 
 - **systemd as PID 1.** bootc assumes systemd plus `systemd-tmpfiles` and
   `systemd-sysusers`. yoe's default image is Alpine + OpenRC, and the
-  unit-services contract ([2026-04-07-unit-services.md](2026-04-07-unit-services.md))
-  is OpenRC-shaped. Switching the init system is a larger move than the update
-  mechanism this spec replaces.
-- **ostree on the host and in the image.** bootc requires ostree ≥ 2025.03,
-  the `/sysroot/ostree/deploy/` layout, and a build-side step that commits the
+  unit-services contract
+  ([2026-04-07-unit-services.md](2026-04-07-unit-services.md)) is OpenRC-shaped.
+  Switching the init system is a larger move than the update mechanism this spec
+  replaces.
+- **ostree on the host and in the image.** bootc requires ostree ≥ 2025.03, the
+  `/sysroot/ostree/deploy/` layout, and a build-side step that commits the
   rootfs into an ostree repo and projects it as an OCI image. None of that
   machinery exists in yoe today.
 - **Read-only `/usr`, factory `/etc` with 3-way merge, mutable `/var`.**
@@ -157,19 +158,19 @@ preferential:
   carry a patched bootupd unit or substitute its existing bootloader handling
   and bypass bootupd, with the corresponding maintenance cost.
 - **Hardware-boot vs. OCI-pull asymmetry.** bootc's update path assumes the
-  device can reach an OCI registry. yoe's primary update target is a board
-  that may boot from removable media without a network, which is the case
+  device can reach an OCI registry. yoe's primary update target is a board that
+  may boot from removable media without a network, which is the case
   swupdate-from-USB is designed for. Network/OTA arrives via swupdate's
   `suricatta` later; it is not the v1 floor.
 
-None of this rules bootc out as a future yoe output. The rootfs-closure
-assembly this codebase already does is the right input to a `bootc_image(...)`
-finalize step that wraps a closure into an ostree-committed OCI image — gated
-on a systemd-based image variant and the missing infrastructure listed above.
-For now the framing is: swupdate is the v1 update mechanism for the
-single-image, OpenRC, hardware-boot target; bootc is an alternative output
-shape that becomes interesting once a systemd-based image variant exists and a
-project needs the OCI-as-OS deployment model.
+None of this rules bootc out as a future yoe output. The rootfs-closure assembly
+this codebase already does is the right input to a `bootc_image(...)` finalize
+step that wraps a closure into an ostree-committed OCI image — gated on a
+systemd-based image variant and the missing infrastructure listed above. For now
+the framing is: swupdate is the v1 update mechanism for the single-image,
+OpenRC, hardware-boot target; bootc is an alternative output shape that becomes
+interesting once a systemd-based image variant exists and a project needs the
+OCI-as-OS deployment model.
 
 Cross-reference: the
 [deployable-containers spec](2026-05-25-deployable-containers.md) treats the OS

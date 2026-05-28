@@ -914,42 +914,39 @@ The TUI is built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
 #### Restarting after edits
 
-The TUI loads the project once at startup and holds the resolved unit
-catalog in memory for the lifetime of the process. There is no
-in-process reload — if you change something that affects what the
-catalog contains, exit (`q`) and re-launch.
+The TUI loads the project once at startup and holds the resolved unit catalog in
+memory for the lifetime of the process. There is no in-process reload — if you
+change something that affects what the catalog contains, exit (`q`) and
+re-launch.
 
-**Restart is fast.** Module-cache clones, build outputs, source
-tarballs, and `APKINDEX` / `Packages` files all stay on disk between
-runs — only the in-memory structures rebuild. A typical project's
-TUI launches in well under a second; a large multi-feed project might
-take a second or two on the first launch (cold OS file-cache),
-warming up to a fraction of a second afterward. The exit/relaunch
+**Restart is fast.** Module-cache clones, build outputs, source tarballs, and
+`APKINDEX` / `Packages` files all stay on disk between runs — only the in-memory
+structures rebuild. A typical project's TUI launches in well under a second; a
+large multi-feed project might take a second or two on the first launch (cold OS
+file-cache), warming up to a fraction of a second afterward. The exit/relaunch
 loop is a routine workflow step, not something to dread.
 
-| What changed                                                  | Restart needed? |
-| ------------------------------------------------------------- | --------------- |
-| A `.star` file: unit, image, class, MODULE.star, PROJECT.star | Yes             |
-| `local.star` (default-distro override, QEMU settings)         | Yes             |
-| `prefer_modules` pin in PROJECT.star                          | Yes             |
-| Synced module repo (`git pull` in a `cache/modules/<mod>/`)   | Yes             |
-| Refreshed feed index (`yoe update-feeds` ran in another shell)| Yes             |
+| What changed                                                    | Restart needed?                                      |
+| --------------------------------------------------------------- | ---------------------------------------------------- |
+| A `.star` file: unit, image, class, MODULE.star, PROJECT.star   | Yes                                                  |
+| `local.star` (default-distro override, QEMU settings)           | Yes                                                  |
+| `prefer_modules` pin in PROJECT.star                            | Yes                                                  |
+| Synced module repo (`git pull` in a `cache/modules/<mod>/`)     | Yes                                                  |
+| Refreshed feed index (`yoe update-feeds` ran in another shell)  | Yes                                                  |
 | A unit's upstream source (the tarball or git repo it points at) | No — next build re-fetches if the unit's ref changes |
-| A unit's build output (you ran `yoe build` in another shell)  | No — TUI sees new build state on next refresh |
+| A unit's build output (you ran `yoe build` in another shell)    | No — TUI sees new build state on next refresh        |
 
-The "no in-process reload" stance is deliberate: making the
-in-memory catalog authoritative for the process lifetime avoids races
-between "what the resolver thinks" and "what's on disk." If a long
-build were partway through a closure when the catalog mutated under
-it, names could resolve differently mid-walk than at the start — a
-class of bug worth avoiding structurally rather than handling
-explicitly. For the architectural shape of what gets loaded and when,
-see [Catalog and Materialization](catalog.md#lifecycle-and-persistence).
+The "no in-process reload" stance is deliberate: making the in-memory catalog
+authoritative for the process lifetime avoids races between "what the resolver
+thinks" and "what's on disk." If a long build were partway through a closure
+when the catalog mutated under it, names could resolve differently mid-walk than
+at the start — a class of bug worth avoiding structurally rather than handling
+explicitly. For the architectural shape of what gets loaded and when, see
+[Catalog and Materialization](catalog.md#lifecycle-and-persistence).
 
-One-shot commands (`yoe build`, `yoe deploy`, `yoe dry-run`, …)
-sidestep this entirely: every invocation is a fresh process, so any
-edit to any `.star` or feed index is picked up on the next command
-automatically.
+One-shot commands (`yoe build`, `yoe deploy`, `yoe dry-run`, …) sidestep this
+entirely: every invocation is a fresh process, so any edit to any `.star` or
+feed index is picked up on the next command automatically.
 
 ### `yoe log`
 

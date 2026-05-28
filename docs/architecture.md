@@ -45,8 +45,8 @@ Typical modules:
   bootloader / firmware units.
 - `module-alpine` — passthrough access to upstream Alpine `.apk` packages.
 - `module-debian` — passthrough access to upstream Debian `.deb` packages
-  (experimental; see [module-debian.md](module-debian.md) for current status
-  and limitations).
+  (experimental; see [module-debian.md](module-debian.md) for current status and
+  limitations).
 
 Modules are referenced by URL and Git ref in `PROJECT.star`. The `[yoe]` CLI
 clones them into the project's cache. See
@@ -79,8 +79,8 @@ on-device package manager for over-the-air updates.
 
 One unit produces one package today — `.apk` or `.deb` is chosen per the
 consuming image's distro, not per unit. A small set of subpackage splits
-(`-dev`, `-dbg`) is planned for cases where the runtime image should not
-carry headers or debug info. See
+(`-dev`, `-dbg`) is planned for cases where the runtime image should not carry
+headers or debug info. See
 [metadata-format.md#units-vs-packages](metadata-format.md#units-vs-packages) for
 the contract between units and packages, [apk Signing](signing.md) for the
 alpine pipeline, [module-debian.md](module-debian.md) for the debian pipeline,
@@ -158,25 +158,25 @@ route to the matching toolchain unit (`toolchain-musl` for alpine,
 `toolchain-glibc` for debian) via the same `provides` mechanism. See
 [Naming and Resolution](naming-and-resolution.md) for collision rules, name
 shadowing, and the `replaces` mechanism, and
-[Catalog and Materialization](catalog.md) for the in-memory data structures
-that hold units while a project is being evaluated, how synthetic feed units
-materialize lazily, the distro visibility filter, and the working-set sizes
-the resolver operates at.
+[Catalog and Materialization](catalog.md) for the in-memory data structures that
+hold units while a project is being evaluated, how synthetic feed units
+materialize lazily, the distro visibility filter, and the working-set sizes the
+resolver operates at.
 
 ## Packaging
 
 Every artifact published by yoe — whether built from source or repacked from a
 distro — flows through one of two parallel format pipelines, both signed by the
-project key. The pipelines mirror each other: same content-addressed cache,
-same source paths, same `yoe build` invocation; only the on-disk format and
-signing mechanism differ to match the consuming image's distro.
+project key. The pipelines mirror each other: same content-addressed cache, same
+source paths, same `yoe build` invocation; only the on-disk format and signing
+mechanism differ to match the consuming image's distro.
 
 - **`.apk` pipeline** — used by alpine images. Per-`.apk` RSA-SHA1 signature
   plus a signed `APKINDEX.tar.gz` per arch. Verified on-device by apk-tools.
 - **`.deb` pipeline** — used by debian images. Per-`.deb` SHA256 in the
-  `Packages` file plus a clearsign-GPG `InRelease` per suite. Verified
-  on-device by apt with `Signed-By:` scoped to the project keyring.
-  Experimental — see [module-debian.md](module-debian.md) for current status.
+  `Packages` file plus a clearsign-GPG `InRelease` per suite. Verified on-device
+  by apt with `Signed-By:` scoped to the project keyring. Experimental — see
+  [module-debian.md](module-debian.md) for current status.
 
 A single project can have both — one image targeting alpine and another
 targeting debian — and each lands in its own per-distro repository subtree.
@@ -200,11 +200,11 @@ install time) and the noarch routing details.
 are mirrored verbatim (no repack), and only the project's `InRelease` is
 re-signed with the project's GPG key. Each downloaded `.deb`'s SHA256 is
 verified at mirror time against the upstream-signed `Packages` entry, and the
-device's apt trust is scoped to the project key via deb822 `Signed-By:` — so
-the per-`.deb` upstream signature isn't on the trust path at all, only the
+device's apt trust is scoped to the project key via deb822 `Signed-By:` — so the
+per-`.deb` upstream signature isn't on the trust path at all, only the
 project-signed `InRelease` and the per-`.deb` SHA256 inside it. See
-[module-debian.md](module-debian.md) for the verbatim-mirror rationale and
-the `Valid-Until` posture.
+[module-debian.md](module-debian.md) for the verbatim-mirror rationale and the
+`Valid-Until` posture.
 
 ### Signing and trust
 
@@ -216,17 +216,17 @@ per-project key bootstrapped under `~/.config/yoe/keys/<project>/`:
 
   ![apk signing trust chain](assets/apk-signing-trust-chain.png)
 
-- **deb pipeline** — clearsign-GPG `InRelease` per suite, public key staged
-  at `/etc/apt/keyrings/<project>.gpg` and referenced from the deb822
-  `.sources` file's `Signed-By:` field (scoping trust to the project source
-  only, not the system-wide trust store). HTTPS-only URLs enforced at
-  evaluation. Experimental status applies.
+- **deb pipeline** — clearsign-GPG `InRelease` per suite, public key staged at
+  `/etc/apt/keyrings/<project>.gpg` and referenced from the deb822 `.sources`
+  file's `Signed-By:` field (scoping trust to the project source only, not the
+  system-wide trust store). HTTPS-only URLs enforced at evaluation. Experimental
+  status applies.
 
 For both: the private key never leaves the workstation, and the public key
-travels through two independent channels (the project repo for inspection,
-the rootfs for verification). See [apk Signing](signing.md) for the alpine
-key generation / rotation surface and the exact apk bytes that get signed.
-See [module-debian.md](module-debian.md) for the deb trust details.
+travels through two independent channels (the project repo for inspection, the
+rootfs for verification). See [apk Signing](signing.md) for the alpine key
+generation / rotation surface and the exact apk bytes that get signed. See
+[module-debian.md](module-debian.md) for the deb trust details.
 
 ## Deployment
 

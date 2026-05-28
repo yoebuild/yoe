@@ -6,9 +6,9 @@ adding a new feed, debugging a "no such package" install error, or expanding the
 Alpine surface beyond `module-core`'s source-built userland.
 
 See [Catalog and Materialization](catalog.md) for the resolver-side mechanics
-that back the passthrough path — how `alpine_feed` registers a synthetic
-module, when units actually materialize, and what the working set looks like.
-This page focuses on what passes through and why.
+that back the passthrough path — how `alpine_feed` registers a synthetic module,
+when units actually materialize, and what the working set looks like. This page
+focuses on what passes through and why.
 
 ## Why this exists
 
@@ -46,10 +46,10 @@ Alpine's apk verbatim, only swapping the signature.
 ### 1. `alpine_feed` materializes synthetic units lazily
 
 `module-alpine/MODULE.star` is two `alpine_feed(...)` calls — one per Alpine
-repo section (`main`, `community`) — and a small `units/*-enable.star`
-companion layer for service enablement. No per-package `.star` files; the
-~3,700-entry Alpine main catalog is checked in as one decompressed `APKINDEX`
-text file per arch.
+repo section (`main`, `community`) — and a small `units/*-enable.star` companion
+layer for service enablement. No per-package `.star` files; the ~3,700-entry
+Alpine main catalog is checked in as one decompressed `APKINDEX` text file per
+arch.
 
 ```python
 # module-alpine/MODULE.star (production shape)
@@ -67,18 +67,17 @@ Each `alpine_feed` call registers a `SyntheticModule` named
 `<parent>.<feed-name>` (`alpine.main`, `alpine.community`). The resolver
 materializes a `*Unit` on demand the first time a closure walk references the
 package name — see
-[Catalog and Materialization](catalog.md#lazy-materialization) for the
-cache + lookup flow. The materialized unit carries `PassthroughAPK =
-"<pkgname>-<pkgver>.apk"` and an `install` task constructed from the
-upstream APKINDEX entry.
+[Catalog and Materialization](catalog.md#lazy-materialization) for the cache +
+lookup flow. The materialized unit carries
+`PassthroughAPK = "<pkgname>-<pkgver>.apk"` and an `install` task constructed
+from the upstream APKINDEX entry.
 
-The companion layer is small and hand-written. Today:
-`units/docker-enable.star` and `units/navidrome-enable.star` — units with
-no build steps that declare `services = ["docker"]` / `["navidrome"]` so
-the runlevel symlink lands in the package's data tar. See the
-"package-driven service enablement" decision in
-[CLAUDE.md](../CLAUDE.md) for why service enablement is its own unit
-rather than a flag on the feed.
+The companion layer is small and hand-written. Today: `units/docker-enable.star`
+and `units/navidrome-enable.star` — units with no build steps that declare
+`services = ["docker"]` / `["navidrome"]` so the runlevel symlink lands in the
+package's data tar. See the "package-driven service enablement" decision in
+[CLAUDE.md](../CLAUDE.md) for why service enablement is its own unit rather than
+a flag on the feed.
 
 ### 2. The executor calls `RepackAPK` instead of `CreateAPK`
 
@@ -97,23 +96,23 @@ rather than a flag on the feed.
 Alpine's `PKGINFO`, `replaces`, `provides`, `triggers`, install scripts, file
 checksums — all unchanged.
 
-The destdir extraction (the materialized unit's `install` task) is still
-useful: yoe's per-unit sysroots are built by hardlinking each dep's destdir
-into `<unit>/sysroot/`, so a unit that `gcc -lfoo`s against a `module-alpine`
-library finds headers and shared objects there. Image-time `apk add` reads
-the published apk (passthrough) and never looks at the destdir.
+The destdir extraction (the materialized unit's `install` task) is still useful:
+yoe's per-unit sysroots are built by hardlinking each dep's destdir into
+`<unit>/sysroot/`, so a unit that `gcc -lfoo`s against a `module-alpine` library
+finds headers and shared objects there. Image-time `apk add` reads the published
+apk (passthrough) and never looks at the destdir.
 
 ### Legacy: `alpine_pkg` class
 
-`classes/alpine_pkg.star` is still in the module but no production unit uses
-it. It was the pre-feed entry point — one hand-written `.star` file per
-package, calling `alpine_pkg(...)` with hashes baked in. The class is
-preserved for one-off external uses (a downstream module that wants to wrap
-a single upstream apk without standing up a whole feed); for the in-tree
-module-alpine, feeds replaced it. If you're tempted to add a per-package
-`.star` calling `alpine_pkg`, ask first whether the feed should have the
-package already — adding a hand-written wrapper for a name the feed already
-exposes will produce a conflicting registration.
+`classes/alpine_pkg.star` is still in the module but no production unit uses it.
+It was the pre-feed entry point — one hand-written `.star` file per package,
+calling `alpine_pkg(...)` with hashes baked in. The class is preserved for
+one-off external uses (a downstream module that wants to wrap a single upstream
+apk without standing up a whole feed); for the in-tree module-alpine, feeds
+replaced it. If you're tempted to add a per-package `.star` calling
+`alpine_pkg`, ask first whether the feed should have the package already —
+adding a hand-written wrapper for a name the feed already exposes will produce a
+conflicting registration.
 
 ## Two metadata systems, two purposes
 
@@ -121,13 +120,12 @@ After passthrough, every unit has metadata in two places:
 
 - **The materialized `*Unit`** (`Name`, `Version`, `RuntimeDeps`, `Provides`,
   `Replaces`, `Distro`, …) drives yoe's _resolver_: build-order DAG,
-  runtime-closure walk for image artifacts, virtual-package routing
-  (`linux` → `linux-rpi4`), TUI USED-BY/PULLS-IN trees, the per-image
-  distro visibility filter (an alpine image's closure doesn't see
-  debian-tagged units and vice versa). For feed-materialized units this
-  view is constructed from the APKINDEX entry at lookup time
-  (`apkindex.MaterializeUnit` in `internal/apkindex/`); for source-built
-  and companion units, it's whatever the `.star` file declared.
+  runtime-closure walk for image artifacts, virtual-package routing (`linux` →
+  `linux-rpi4`), TUI USED-BY/PULLS-IN trees, the per-image distro visibility
+  filter (an alpine image's closure doesn't see debian-tagged units and vice
+  versa). For feed-materialized units this view is constructed from the APKINDEX
+  entry at lookup time (`apkindex.MaterializeUnit` in `internal/apkindex/`); for
+  source-built and companion units, it's whatever the `.star` file declared.
 - **Upstream `PKGINFO`** (inside the apk's control segment) drives apk-tools at
   install time on the target: real shared-library deps, file-dep resolution,
   install-script execution, conflict checking.
@@ -142,10 +140,10 @@ that yoe's resolver makes the same decisions apk-tools would — without
 duplicating every field. For feed-materialized units this happens at lookup
 time: `MaterializeUnit` reads the APKINDEX entry's dep list, runs each token
 through the project-wide provides table (cross-feed siblings included via
-`multiFeedProviders`), and produces a `*Unit` whose RuntimeDeps name yoe
-units rather than apk virtuals. Hand-written companion units like
-`docker-enable` set yoe-specific overrides (`services = ["docker"]`) that
-the feed couldn't infer from APKINDEX alone.
+`multiFeedProviders`), and produces a `*Unit` whose RuntimeDeps name yoe units
+rather than apk virtuals. Hand-written companion units like `docker-enable` set
+yoe-specific overrides (`services = ["docker"]`) that the feed couldn't infer
+from APKINDEX alone.
 
 ## noarch routing — the four-part fix
 
@@ -241,14 +239,14 @@ splits util-linux: `libmount` and `libblkid` are separate apks. When apk's
 solver tries to install both yoe's util-linux and Alpine's libmount/libblkid, it
 fails because both packages own the same library paths.
 
-**First attempt: `prefer_modules = {"util-linux": "alpine.main"}`.** Forces
-the Alpine prebuilt instead of yoe's source-built version (pin syntax names
-the synthetic module, not the parent — `alpine.main` rather than `alpine`).
-Resolves the library conflict. But Alpine's `util-linux` apk is a _meta_
-package — it ships nothing on disk; the actual binaries live in
-`util-linux-misc`, `util-linux-login`, the libraries in
-`libuuid`/`libmount`/`libblkid`, and the headers + unversioned `.so`
-symlinks needed at compile time live in `util-linux-dev`.
+**First attempt: `prefer_modules = {"util-linux": "alpine.main"}`.** Forces the
+Alpine prebuilt instead of yoe's source-built version (pin syntax names the
+synthetic module, not the parent — `alpine.main` rather than `alpine`). Resolves
+the library conflict. But Alpine's `util-linux` apk is a _meta_ package — it
+ships nothing on disk; the actual binaries live in `util-linux-misc`,
+`util-linux-login`, the libraries in `libuuid`/`libmount`/`libblkid`, and the
+headers + unversioned `.so` symlinks needed at compile time live in
+`util-linux-dev`.
 
 After pulling subpackages in via `runtime_deps`, the next layer: `e2fsprogs`
 (yoe-source-built) needs `libuuid` headers + the unversioned `libuuid.so`
@@ -300,31 +298,30 @@ Items where the architecture is "works for now" but obviously incomplete.
   source-built unit (`util-linux`) to Alpine's split form, yoe's resolver
   follows `runtime_deps` from the meta package — but _build-time_ deps
   (`unit.Deps`) on `util-linux` don't pull subpackage destdirs into the build
-  sysroot. Workaround: declare downstream units' build deps on the
-  subpackages directly. Long-term the resolver should walk runtime_deps for
-  build-deps too, or `unit.Deps` should accept the same expansion.
+  sysroot. Workaround: declare downstream units' build deps on the subpackages
+  directly. Long-term the resolver should walk runtime_deps for build-deps too,
+  or `unit.Deps` should accept the same expansion.
 
-- **`RepackAPK` re-sign vs upstream-keys passthrough.** The current path
-  strips Alpine's signature and re-signs with the project key. An alternate
-  design — keep Alpine's keys + signature, ship Alpine's keyring on-target as
-  an additional trust anchor — is captured in
+- **`RepackAPK` re-sign vs upstream-keys passthrough.** The current path strips
+  Alpine's signature and re-signs with the project key. An alternate design —
+  keep Alpine's keys + signature, ship Alpine's keyring on-target as an
+  additional trust anchor — is captured in
   [docs/specs/2026-05-18-mirror-alpine-keep-keys.md](https://github.com/yoebuild/yoe/blob/main/docs/specs/2026-05-18-mirror-alpine-keep-keys.md)
   (spec only, not implemented). The trade-off: re-signing means the on-target
   trust list stays "one key per project" but every passthrough requires
   cryptographic work; keeping upstream keys removes the re-sign cost but
-  multiplies on-target trust anchors (one per distro the project consumes
-  from). No decision yet on which way to land.
+  multiplies on-target trust anchors (one per distro the project consumes from).
+  No decision yet on which way to land.
 
 ## Reference
 
 - `internal/artifact/apk.go` — `CreateAPK`, `RepackAPK`, `ReadAPKArch`,
   `scanSONAMEs`.
-- `internal/feeds/alpine/builtin.go` — `alpine_feed` builtin,
-  `SyntheticModule` registration, `populateBuildFields` (sets
-  `PassthroughAPK`, `Source` URL, `Distro = "alpine"`, install task with
-  control-file exclusions). The pre-feed wrapper class lives at
-  `testdata/.../module-alpine/classes/alpine_pkg.star` for legacy /
-  external one-off use.
+- `internal/feeds/alpine/builtin.go` — `alpine_feed` builtin, `SyntheticModule`
+  registration, `populateBuildFields` (sets `PassthroughAPK`, `Source` URL,
+  `Distro = "alpine"`, install task with control-file exclusions). The pre-feed
+  wrapper class lives at `testdata/.../module-alpine/classes/alpine_pkg.star`
+  for legacy / external one-off use.
 - `internal/apkindex/materialize.go` — `MaterializeUnit`: APKINDEX entry →
   `*Unit`. Wraps `multiFeedProviders` for cross-feed dep resolution.
 - `internal/build/executor.go` — passthrough branch in the build loop;
@@ -332,8 +329,8 @@ Items where the architecture is "works for now" but obviously incomplete.
 - `internal/repo/local.go` — `Publish` (with cross-arch reindex on noarch) and
   `index.go`'s `GenerateIndex` (sibling-noarch scan).
 - `internal/feeds/alpine/update.go` — `yoe update-feeds` driver: fetches
-  upstream APKINDEX, verifies RSA-SHA1 against declared keys, atomically
-  writes to the in-tree feed index.
+  upstream APKINDEX, verifies RSA-SHA1 against declared keys, atomically writes
+  to the in-tree feed index.
 - `docs/catalog.md` — resolver-side mechanics (synthetic modules, lazy
   materialization, working-set sizes, invariants).
 - `docs/module-alpine.md` — when to reach for `module-alpine` vs `module-core`

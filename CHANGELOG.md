@@ -8,35 +8,33 @@ and this project adheres to
 
 ## [Unreleased]
 
-- **Build Debian images with `distro = "debian"` on any image.** Set the
-  field on an `image(...)` call (or rely on `default_distro` for whole-
-  project Debian targets) and yoe routes that image through the new
-  Debian backend: closure walks pick `toolchain-glibc` instead of
-  toolchain-musl, source units get packaged as `.deb`, the project repo
-  emits a signed Debian-format archive, and rootfs assembly runs
-  `dpkg --configure -a` inside the toolchain container before booting.
+- **Build Debian images with `distro = "debian"` on any image.** Set the field
+  on an `image(...)` call (or rely on `default_distro` for whole- project Debian
+  targets) and yoe routes that image through the new Debian backend: closure
+  walks pick `toolchain-glibc` instead of toolchain-musl, source units get
+  packaged as `.deb`, the project repo emits a signed Debian-format archive, and
+  rootfs assembly runs `dpkg --configure -a` inside the toolchain container
+  before booting.
 - **`apt-get install` and `apt-get upgrade` now work offline against your
-  project repo.** Deployed Debian images carry the project's GPG key
-  scoped via `Signed-By:` in a deb822 `.sources` entry, so device-side
-  apt verifies your packages without trusting any other source.
-- **Project repos now host Debian-format signed package archives alongside
-  the existing APK tree.** Building a Debian artifact populates
+  project repo.** Deployed Debian images carry the project's GPG key scoped via
+  `Signed-By:` in a deb822 `.sources` entry, so device-side apt verifies your
+  packages without trusting any other source.
+- **Project repos now host Debian-format signed package archives alongside the
+  existing APK tree.** Building a Debian artifact populates
   `repo/<project>/debian/` with `pool/<component>/...` + per-arch
-  `Packages.{gz}` + a Valid-Until-stamped `InRelease`. Pointing a device
-  at the URL is a regular apt source — no special tooling.
+  `Packages.{gz}` + a Valid-Until-stamped `InRelease`. Pointing a device at the
+  URL is a regular apt source — no special tooling.
 - **New `debian_feed(...)` declares a Debian package feed alongside
   `alpine_feed`.** One call materializes a synthetic module
-  (`<parent>.<suite>.<component>`) whose units the resolver pulls
-  lazily as the image closure references them; `yoe update-feeds`
-  inside a module repo refreshes the in-tree `Packages` files via
-  signed `InRelease`. See `docs/module-debian.md` for the maintainer
-  playbook.
-- **A new `default_distro` field on `project(...)` plus the `distro` tag
-  on each image select which backend an image targets.** Mixed-distro
-  projects work: tag images individually, untagged units stay visible
-  to every distro, and `local.star`'s `default_distro_override` lets a
-  developer flip the project-wide default without touching
-  PROJECT.star.
+  (`<parent>.<suite>.<component>`) whose units the resolver pulls lazily as the
+  image closure references them; `yoe update-feeds` inside a module repo
+  refreshes the in-tree `Packages` files via signed `InRelease`. See
+  `docs/module-debian.md` for the maintainer playbook.
+- **A new `default_distro` field on `project(...)` plus the `distro` tag on each
+  image select which backend an image targets.** Mixed-distro projects work: tag
+  images individually, untagged units stay visible to every distro, and
+  `local.star`'s `default_distro_override` lets a developer flip the
+  project-wide default without touching PROJECT.star.
 
 ## [0.10.15] - 2026-05-26
 

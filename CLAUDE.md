@@ -50,10 +50,10 @@ architecture description live under `docs/` (start with `docs/intro.md` and
   last resort: it multiplies the cache surface, breaks binary reuse across
   projects, and pushes complexity from a few clean conditionals into N parallel
   build configurations. Reach for it only when runtime resolution is genuinely
-  impossible — kernel defconfig, bootloader target, and libc family
-  (musl-built and glibc-built binaries cannot share at the ABI level, so a
-  unit consumed by both Alpine and Debian images builds twice along the
-  distro axis; see `docs/specs/2026-05-25-module-debian.md` R14a).
+  impossible — kernel defconfig, bootloader target, and libc family (musl-built
+  and glibc-built binaries cannot share at the ABI level, so a unit consumed by
+  both Alpine and Debian images builds twice along the distro axis; see
+  `docs/specs/2026-05-25-module-debian.md` R14a).
 - **Explicit over implicit.** Values in Starlark units and configuration should
   not have hidden defaults. Require fields to be set explicitly — this makes it
   easier for AI to reason about the system and for humans to understand what a
@@ -167,29 +167,29 @@ than scanning the directories.
   plan under `docs/plans/` exists and we are committed to building it, the
   matching reference docs under `docs/` are rewritten to describe the
   post-implementation state — no `(planned)` flags, no `> Status:` blockquotes,
-  no "today's flat shape" or "wiring incomplete" caveats. A reviewer should
-  read the docs as if the work were already done; a single coherent
-  target-state doc is faster to comprehend than a verbose plan with
-  disconnected steps. The plan's **first step** lands the target-state docs
-  (reviewable artifact); the plan's **last step** verifies docs and code agree
-  and closes any gaps that surfaced during implementation. This rule is
-  disjoint from `(planned)` above: `(planned)` covers design-ahead sections
-  with no implementation plan (brainstorming, future-looking writing without
-  commitment to ship); final-form-during-plan covers everything once a plan
-  exists. Switch framings the moment a plan commits.
+  no "today's flat shape" or "wiring incomplete" caveats. A reviewer should read
+  the docs as if the work were already done; a single coherent target-state doc
+  is faster to comprehend than a verbose plan with disconnected steps. The
+  plan's **first step** lands the target-state docs (reviewable artifact); the
+  plan's **last step** verifies docs and code agree and closes any gaps that
+  surfaced during implementation. This rule is disjoint from `(planned)` above:
+  `(planned)` covers design-ahead sections with no implementation plan
+  (brainstorming, future-looking writing without commitment to ship);
+  final-form-during-plan covers everything once a plan exists. Switch framings
+  the moment a plan commits.
 - **Docs stand on their own; no plan vocabulary in `docs/`.** Reference docs
   under `docs/` (excluding `docs/plans/`) must read self-contained. Do not
   reference R-numbers (R5, R14a, R20a/R21, R21a, …), U-numbers (U6b, U4a-fix,
-  U24, …), commit hashes, or phrases like "plan unit X" / "tracked in the
-  plan." These are plan-internal identifiers — load-bearing inside
-  `docs/plans/` for tracing requirements to implementation units, but noise
-  in a user-facing doc where nothing on the page tells the reader what they
-  mean. Replace every such reference with a self-contained description of the
-  property, behavior, or workaround being documented. Name the *concept*, not
-  the plan label. For a known limitation, describe the limitation and its
-  workaround on its own terms — don't send the reader on a cross-reference
-  hunt to find out what's going on. Plans and docs have different audiences
-  and different shelf lives; keep them separable.
+  U24, …), commit hashes, or phrases like "plan unit X" / "tracked in the plan."
+  These are plan-internal identifiers — load-bearing inside `docs/plans/` for
+  tracing requirements to implementation units, but noise in a user-facing doc
+  where nothing on the page tells the reader what they mean. Replace every such
+  reference with a self-contained description of the property, behavior, or
+  workaround being documented. Name the _concept_, not the plan label. For a
+  known limitation, describe the limitation and its workaround on its own terms
+  — don't send the reader on a cross-reference hunt to find out what's going on.
+  Plans and docs have different audiences and different shelf lives; keep them
+  separable.
 - **Changelog entries stay simple and user-focused.** Write for the user of
   `yoe`, not the engineer changing it. One or two short sentences, leading with
   the user-visible benefit (what they see, what they can now do, what was broken
