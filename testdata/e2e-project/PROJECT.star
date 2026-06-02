@@ -67,7 +67,34 @@ project(
             # one coordinated source.
             "curl": "alpine.main",
         },
-        # Debian pins go here when added; the empty entry is fine.
-        "debian": {},
+        # Most module-core source units consumed by a Debian image build
+        # in the glibc container and package as .deb automatically (the
+        # build-twice model), so no per-unit pin is needed just to pick
+        # the Debian package format. Pins below are for the cases where a
+        # monolithic module-core unit collides with Debian's split
+        # packaging — same as the Alpine pins above, the lib and its
+        # consumers must come from one coordinated source.
+        "debian": {
+            # module-core's source-built util-linux is a minimal
+            # busybox-replacement build (--disable-all-programs) that
+            # omits getopt, which Debian maintainer scripts
+            # (update-initramfs) require, and it collides with Debian's
+            # split util-linux/libuuid1/libmount1 family. Pin to Debian
+            # so util-linux and its split libs come from one source.
+            "util-linux": "debian.main",
+            # module-core's source-built zstd is one package bundling
+            # libzstd.so.1 and the CLI. Debian ships libzstd1 as a
+            # separate package pulled transitively by libsystemd0,
+            # libapt-pkg, etc.; both then own
+            # /usr/lib/<tuple>/libzstd.so.1 and dpkg refuses to unpack.
+            # Pin to Debian so the lib and CLI come from one source.
+            "zstd": "debian.main",
+            # module-core's source-built kmod bundles libkmod.so.2 with
+            # the kmod tools. Debian splits libkmod2 from kmod and pulls
+            # libkmod2 transitively (systemd, udev); both own
+            # /usr/lib/<tuple>/libkmod.so.2. Pin to Debian so libkmod2
+            # and the kmod tools come from one source.
+            "kmod": "debian.main",
+        },
     },
 )
