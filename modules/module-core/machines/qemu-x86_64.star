@@ -6,7 +6,7 @@ machine(
         unit = "linux",
         provides = "linux",
         defconfig = "x86_64_defconfig",
-        cmdline = "console=ttyS0 root=/dev/vda2 rw",
+        cmdline = "console=ttyS0 root=/dev/vda1 rw",
     ),
     packages = ["syslinux"],
     partitions = [
