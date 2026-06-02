@@ -286,7 +286,27 @@ esac
 
 mkdir -p $DESTDIR/rootfs
 
-mmdebstrap --mode=root --variant=custom --architectures="$debarch" --include="%s" --aptopt='APT::Get::Install-Recommends "false"' --aptopt='Acquire::Check-Valid-Until "false"' bookworm "$DESTDIR/rootfs" "deb [trusted=yes] copy:$REPO bookworm main"
+# Establish merged-usr before any package is extracted. mmdebstrap
+# --variant=custom skips the usr-merge that the normal variants set up,
+# leaving /bin, /sbin, /lib as real directories. The usrmerge package
+# (pulled by init-system-helpers' "usrmerge | usr-is-merged" dep) then
+# tries a fragile post-hoc conversion that ldd-walks every binary and
+# dies in the chroot. The --setup-hook runs against the empty target
+# ($1) before extraction, so turning the alias dirs into symlinks here
+# means packages unpack straight into /usr and usrmerge's postinst sees
+# an already-merged system and no-ops. lib64 is created on every arch:
+# amd64 needs it for the ELF loader, and an unused symlink is inert on
+# arm64.
+#
+# The --extract-hook pre-stages the awk alternative. mmdebstrap's single
+# `dpkg --install --force-depends` batch does not configure mawk before
+# the packages whose maintainer scripts call awk (ucf, run from
+# openssh-server's postinst), so awk is missing on the first pass and
+# the postinst exits 127. The hook runs after extraction (mawk's binary
+# present) but before configure, pointing /usr/bin/awk at mawk through
+# the standard /etc/alternatives link; mawk's own update-alternatives
+# call then adopts the identical link idempotently.
+mmdebstrap --mode=root --variant=custom --setup-hook='for d in bin sbin lib lib64; do mkdir -p "$1/usr/$d"; ln -sf "usr/$d" "$1/$d"; done' --extract-hook='mkdir -p "$1/etc/alternatives"; ln -sf /usr/bin/mawk "$1/etc/alternatives/awk"; ln -sf /etc/alternatives/awk "$1/usr/bin/awk"' --architectures="$debarch" --include="%s" --aptopt='APT::Get::Install-Recommends "false"' --aptopt='Acquire::Check-Valid-Until "false"' bookworm "$DESTDIR/rootfs" "deb [trusted=yes] copy:$REPO bookworm main"
 
 # Fail loudly on a half-configured rootfs. mmdebstrap runs dpkg with
 # --force-depends during the essential bootstrap, so a broken dependency
