@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`yoe deploy` now works for Debian devices, not just Alpine.** Deploy follows
+  the project's distro: Alpine targets install over apk as before, and Debian
+  targets get the dev feed wired into apt and the unit installed with `apt-get`.
+  Rebuilds with the same version still land — a rolled-back pin downgrades
+  cleanly — so the edit-deploy loop is identical on both.
 - **Debian images build faster and boot fully configured.** Debian image
   assembly now installs the whole package set in a single pass with `mmdebstrap`
   instead of starting a fresh container for every package, and package

@@ -78,20 +78,29 @@ cycle.
 
 ### Fast deploy
 
-`yoe deploy <unit> <host>` builds the apk for `<unit>`, exposes the project's
-repo over an HTTP feed (reusing a running `yoe serve` if one is up), and runs
-`apk add --upgrade <unit>` on the device over SSH. Combined with local-path
-sources, the loop is:
+`yoe deploy <unit> <host>` builds the package for `<unit>`, exposes the
+project's repo over an HTTP feed (reusing a running `yoe serve` if one is up),
+and installs `<unit>` on the device over SSH. It follows the project's
+effective distro: an Alpine target gets the feed written into
+`/etc/apk/repositories` and an `apk del`+`apk add` to land the rebuild; a
+Debian target gets `/etc/apt/sources.list.d/yoe-dev.list` plus a high-priority
+pin and an `apt-get install --reinstall --allow-downgrades`. Combined with
+local-path sources, the loop is:
 
 ```
 edit code → yoe deploy myapp dev-pi → service running on the device
 ```
 
-Pull, not push: apk on the device resolves transitive deps from the same
-`APKINDEX.tar.gz` production OTA uses, so adding a runtime dep to a unit doesn't
-require updating any deploy machinery. After the first deploy the device's
-`/etc/apk/repositories` keeps the dev-feed line in place, so subsequent
-`apk add` calls from the device work too. See [feed-server.md](feed-server.md).
+Pull, not push: the package manager on the device resolves transitive deps from
+the same per-arch index production OTA uses, so adding a runtime dep to a unit
+doesn't require updating any deploy machinery. The dev-feed line is left in
+place after the first deploy, so subsequent installs from the device work too.
+Because dev rebuilds keep the same version string, the install side forces a
+reinstall — `apk del`+`apk add` on Alpine, `--reinstall --allow-downgrades`
+(backed by a `Pin-Priority: 1001` preference) on Debian — so a rebuilt or
+rolled-back package always lands. The Debian feed's `InRelease` is unsigned
+during development, so the sources line carries `[trusted=yes]`. See
+[feed-server.md](feed-server.md).
 
 ### Watch mode
 
