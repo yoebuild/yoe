@@ -14,6 +14,7 @@ import (
 	"github.com/yoebuild/yoe/internal/build"
 	"github.com/yoebuild/yoe/internal/device"
 	"github.com/yoebuild/yoe/internal/feed"
+	"github.com/yoebuild/yoe/internal/repo"
 	"github.com/yoebuild/yoe/internal/resolve"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
@@ -117,10 +118,16 @@ func (m model) startDeployCmd() tea.Cmd {
 			return deployDoneMsg{err: err}
 		}
 
-		emit(fmt.Sprintf("→ ssh %s — apk del + apk add %s", target.Host, unitName))
+		installVerb := "apk del + apk add"
+		if distro == "debian" {
+			installVerb = "apt-get install --reinstall"
+		}
+		emit(fmt.Sprintf("→ ssh %s — %s %s", target.Host, installVerb, unitName))
 		err = device.Deploy(ctx, device.DeployInput{
 			Target:  target,
 			Unit:    unitName,
+			Distro:  distro,
+			Suite:   repo.DebianSuite, // ignored for alpine targets
 			FeedURL: feedURL,
 			Out:     lineWriter{emit: emit},
 		})

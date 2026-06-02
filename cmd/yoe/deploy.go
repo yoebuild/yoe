@@ -68,9 +68,16 @@ func cmdDeploy(args []string) {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+	deployDistro, err := proj.EffectiveDistro()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: resolve effective distro: %v\n", err)
+		os.Exit(1)
+	}
 	err = device.Deploy(context.Background(), device.DeployInput{
 		Target:  target,
 		Unit:    unitName,
+		Distro:  deployDistro,
+		Suite:   repo.DebianSuite, // ignored for alpine targets
 		FeedURL: feedURL,
 		Out:     os.Stdout,
 	})
