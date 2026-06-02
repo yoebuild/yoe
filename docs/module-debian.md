@@ -12,7 +12,7 @@ browse the bootstrap keyring, the in-tree `Packages` snapshots, or to send a PR
 adding a new feed/component.
 
 > **Implementation details:** how Debian debs pass through yoe's pipeline
-> (`debian_feed`, the InRelease verify path, `dpkg --configure -a` under binfmt,
+> (`debian_feed`, the InRelease verify path, mmdebstrap-driven image assembly,
 > the project repo emitter) live in
 > [`docs/specs/2026-05-25-module-debian.md`](https://github.com/yoebuild/yoe/blob/main/docs/specs/2026-05-25-module-debian.md)
 > and the matching plan under `docs/plans/`. This doc is the "when to reach for
@@ -165,9 +165,9 @@ cd testdata/e2e-project
 yoe update-feeds
 
 # 2. Build the image. This pulls every artifact's .deb from the cached
-#    bookworm feed, builds toolchain-glibc on first run, extracts each
-#    .deb into the rootfs, runs `dpkg --configure -a` inside the
-#    no-network sandbox, stages the project APT keyring + deb822
+#    bookworm feed, builds toolchain-glibc on first run, installs the
+#    closure into the rootfs with `mmdebstrap` (apt + dpkg in one pass,
+#    running maintainer scripts), stages the project APT keyring + deb822
 #    sources file, and writes a bootable disk image. Expect ~5–10 min
 #    on first run (toolchain build); subsequent runs hit the cache.
 yoe build debian-base-image
@@ -188,9 +188,8 @@ staging, and the iterate–deploy–update loop all work end-to-end.
 When the build fails or the image won't boot, the failure usually surfaces in
 one of these places:
 
-- `dpkg --configure -a` inside the toolchain container — postinst error in the
-  configure log; check whether the package needs network access (see Known
-  limitations).
+- `mmdebstrap` inside the toolchain container — postinst error in the configure
+  log; check whether the package needs network access (see Known limitations).
 - Bootloader install — `extlinux` / `syslinux-common` must be present in the
   toolchain-glibc Dockerfile so `_install_syslinux_debian` can find
   `/usr/lib/SYSLINUX/mbr.bin`.
@@ -209,7 +208,7 @@ deliberate trade-offs that the architecture chose, and changing either one is a
 substantial follow-up rather than routine work.
 
 - **Some upstream `.deb` postinsts assume network access.** yoe runs
-  `dpkg --configure -a` under `--network=none` for hash stability and
+  `mmdebstrap` under `--network=none` for hash stability and
   reproducibility — a configure pass that reaches out to a DNS resolver, a
   metadata server, or a license-prompt download produces different output
   depending on what's reachable when, which would break the content-addressed

@@ -145,10 +145,11 @@ glibc-only library, a fleet already running debian — start with alpine. The
 defaults work, the cache hits land, and the boot-and-SSH path has miles on it.
 
 If you do have a hard reason, debian's plumbing is in place: feeds resolve,
-packages mirror verbatim, the image assembler runs `dpkg --configure -a` under a
-no-network sandbox, the project repo emits a signed `InRelease`. What's still
-pending is end-to-end verification that the assembled rootfs actually boots in
-QEMU and accepts SSH; until that's done, expect to iterate.
+packages mirror verbatim, the image assembler runs `mmdebstrap` against the
+project's local repo to unpack and configure the rootfs in a single pass, and
+the project repo emits a signed `InRelease`. What's still pending is end-to-end
+verification that the assembled rootfs actually boots in QEMU and accepts SSH;
+until that's done, expect to iterate.
 
 ## Mixing distros in one project
 
@@ -289,5 +290,5 @@ Ubuntu is the cheapest plausible next distro — it's `.deb`-format with differe
 upstream keys and URLs, so a future `module-ubuntu` could mostly shim over
 `debian_feed()` with a different keyring + suite. Fedora / RHEL would need a new
 format parser (`.rpm`, `repodata`), a new materializer, and a new
-image-assembler branch (`rpm -i` instead of `dpkg --configure -a`); the
+image-assembler branch (`dnf --installroot` instead of `mmdebstrap`); the
 infrastructure is already factored to make this additive rather than invasive.

@@ -94,10 +94,30 @@ func WriteControl(w io.Writer, c Control) error {
 	emit("Breaks", c.Breaks)
 	emit("Replaces", c.Replaces)
 	emit("Provides", c.Provides)
-	emit("Description", c.Description)
+	writeDescription(&b, c.Description)
 
 	if _, err := io.WriteString(w, b.String()); err != nil {
 		return fmt.Errorf("deb: write control: %w", err)
 	}
 	return nil
+}
+
+// writeDescription emits the folded deb822 Description field. The
+// synopsis sits on the `Description:` line; every extended-description
+// line is indented one space, with empty lines encoded as " .". The
+// reader unfolds Description (drops the indent and turns " ." into an
+// empty line), so without re-folding here apt rejects the whole
+// Packages stanza with "Encountered a section with no Package: header"
+// the moment an empty line inside a description prematurely terminates
+// the stanza.
+func writeDescription(b *strings.Builder, desc string) {
+	lines := strings.Split(strings.TrimRight(desc, "\n"), "\n")
+	fmt.Fprintf(b, "Description: %s\n", lines[0])
+	for _, line := range lines[1:] {
+		if line == "" {
+			b.WriteString(" .\n")
+		} else {
+			fmt.Fprintf(b, " %s\n", line)
+		}
+	}
 }

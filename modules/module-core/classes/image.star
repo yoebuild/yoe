@@ -193,57 +193,62 @@ done
     # does not patch the rootfs after install.
 
 def _assemble_debian_rootfs(packages, hostname, timezone, locale):
-    """Install packages into the rootfs by extracting each .deb's
-    data.tar in dependency order, then running `dpkg --configure -a`
-    inside toolchain-glibc to invoke maintainer scripts.
+    """Install packages into the rootfs with a single mmdebstrap run.
 
-    The rootfs sits at $DESTDIR/rootfs. The project's debian repo
-    lives at $REPO/debian/. dpkg-deb + tar + dpkg all ship in
-    toolchain-glibc.
+    mmdebstrap drives apt + dpkg in one pass: it resolves the package
+    list against the project's local Debian repo ($REPO/debian, with the
+    Packages/Release index the repo emitter writes), unpacks every .deb,
+    and runs maintainer scripts so the rootfs boots into a fully
+    configured dpkg state — populated /var/lib/dpkg/status, postinst-
+    created users and groups, update-alternatives, and systemd/OpenRC
+    service-preset enablement. This mirrors how the Alpine path hands its
+    resolved closure to a single `apk add`, and replaces the previous
+    per-package extract loop that started a fresh container for every
+    .deb (the slow part) and never populated the dpkg database, so
+    maintainer scripts never actually ran.
+
+    --variant=custom installs exactly the resolved closure plus the hard
+    dependencies apt pulls from the same index — no implicit Essential /
+    Priority base — keeping the image to the explicit closure, and
+    Recommends are disabled for the same reason. mmdebstrap installs its
+    own policy-rc.d (and diverts start-stop-daemon) for the duration, so
+    no daemon starts while configuring. The local repo is consumed with
+    [trusted=yes]: it is a build-time file: mirror, so signature
+    verification is skipped the same way image assembly trusts the local
+    Alpine repo. The repo is referenced with the copy: method (not file:)
+    so apt can reach the .debs from inside mmdebstrap's mount namespace —
+    file: paths aren't visible there, and copy: stages each .deb into the
+    target's apt cache.
+
+    Runs privileged (root in a --privileged container) so mmdebstrap's
+    root mode can chroot and mount /proc, /sys, /dev/pts in the target
+    while configuring. The suite below must match the one the repo
+    emitter publishes (internal/build/executor.go).
     """
-    run("mkdir -p $DESTDIR/rootfs")
+    pkg_list = ",".join(packages)
 
-    # Extract each .deb's data.tar in the dependency order
-    # resolve_closure handed us. The pool layout matches what the
-    # repo emitter writes: pool/main/<initial>/<src>/<pkg>_<ver>_<arch>.deb.
-    # Locate by package basename prefix to tolerate version-string
-    # variations.
-    for pkg in packages:
-        run("""
-poolglob=$REPO/debian/pool/main/*/*/%s_*.deb
-debfile=$(ls $poolglob 2>/dev/null | head -1)
-if [ -z "$debfile" ]; then
-    echo "WARNING: no .deb for %s in $REPO/debian/pool/main; skipping"
-    exit 0
-fi
-dpkg-deb --fsys-tarfile "$debfile" | tar -xpf - -C $DESTDIR/rootfs
-""" % (pkg, pkg), privileged = True)
-
-    # Install build-time stubs so postinsts don't try to start
-    # services or talk to running daemons inside the chroot.
-    run("""
-mkdir -p $DESTDIR/rootfs/usr/sbin $DESTDIR/rootfs/usr/bin $DESTDIR/rootfs/sbin
-printf '#!/bin/sh\\nexit 101\\n' > $DESTDIR/rootfs/usr/sbin/policy-rc.d
-chmod 755 $DESTDIR/rootfs/usr/sbin/policy-rc.d
-""", privileged = True)
-
-    # Run dpkg --configure -a under no-network to invoke maintainer
-    # scripts. eatmydata no-ops fsync for the configure pass.
-    run("""
-eatmydata chroot $DESTDIR/rootfs dpkg --configure -a --no-triggers || true
-eatmydata chroot $DESTDIR/rootfs dpkg --triggers-only -a || true
-""", privileged = True)
-
-    # Remove build-time stub.
-    run("rm -f $DESTDIR/rootfs/usr/sbin/policy-rc.d", privileged = True)
-
-    # Run as root inside the container because the extracted rootfs is
-    # owned by root after dpkg --configure -a chowned per-file ownership
-    # to match what the Debian packages declare.
+    # Set hostname/timezone in the same container so the whole assembly
+    # is one container start, not N.
+    extra = ""
     if hostname:
-        run("mkdir -p $DESTDIR/rootfs/etc && echo %s > $DESTDIR/rootfs/etc/hostname" % hostname, privileged = True)
+        extra += "\necho %s > $DESTDIR/rootfs/etc/hostname" % hostname
     if timezone:
-        run("mkdir -p $DESTDIR/rootfs/etc && echo %s > $DESTDIR/rootfs/etc/timezone" % timezone, privileged = True)
+        extra += "\necho %s > $DESTDIR/rootfs/etc/timezone" % timezone
+
+    run("""
+set -eu
+case "$ARCH" in
+    x86_64) debarch=amd64 ;;
+    arm64)  debarch=arm64 ;;
+    *) echo "debian rootfs: unsupported arch $ARCH" >&2; exit 1 ;;
+esac
+
+mkdir -p $DESTDIR/rootfs
+
+mmdebstrap --mode=root --variant=custom --architectures="$debarch" --include="%s" --aptopt='APT::Get::Install-Recommends "false"' --aptopt='Acquire::Check-Valid-Until "false"' bookworm "$DESTDIR/rootfs" "deb [trusted=yes] copy:$REPO/debian bookworm main"
+
+mkdir -p $DESTDIR/rootfs/etc%s
+""" % (pkg_list, extra), privileged = True)
 
 def _create_disk_image_debian(name, partitions):
     """Disk image creator for Debian rootfs.

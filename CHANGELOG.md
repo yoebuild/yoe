@@ -8,6 +8,15 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Debian images build faster and boot fully configured.** Debian image
+  assembly now installs the whole package set in a single pass with `mmdebstrap`
+  instead of starting a fresh container for every package, and package
+  maintainer scripts now run during assembly — so users, groups, alternatives,
+  and service enablement are set up in the image rather than skipped.
+- **The project's Debian package repository now produces a valid apt index.**
+  Package descriptions with multiple paragraphs are formatted correctly, so
+  `apt update` against a project repo — on a device or during image assembly —
+  no longer fails to parse the package list.
 - **Fixed an intermittent startup failure in multi-distro projects.** `yoe`
   could occasionally refuse to start with an error like `unit "optee-k3"
   depends on "python3-minimal", which does not exist`, then start fine on the
