@@ -175,6 +175,19 @@ func resolveDeps(deps []string, proj *yoestar.Project, distro string) []string {
 // per-distro runtime-deps merge (RuntimeDepsForDistro) applies, so
 // distro_runtime_deps additions on a transitive dep show up in the
 // consumer's closure under the right consuming distro.
+//
+// Only runtime deps that name a unit present in `units` become build
+// edges: the expansion exists to schedule those units before the
+// consumer builds, so a name with no unit in this view can't be
+// scheduled and would only create a dangling edge. This matters for
+// the distro-less union catalog, where a same-name unit (e.g.
+// "python3") may non-deterministically resolve to the Debian variant
+// whose runtime closure references split-package names (python3-
+// minimal, …) that only exist in the Debian view. Skipping the
+// unmaterialized names keeps the distro-less DAG valid regardless of
+// which variant the union catalog happened to pick, while the per-
+// distro views — where the split packages do resolve — still pull
+// them in.
 func appendRuntimeClosureOfDeps(deps []string, units map[string]*yoestar.Unit, self, distro string) []string {
 	seen := make(map[string]bool, len(deps))
 	for _, d := range deps {
@@ -191,6 +204,9 @@ func appendRuntimeClosureOfDeps(deps []string, units map[string]*yoestar.Unit, s
 				continue
 			}
 			seen[r] = true
+			if _, ok := units[r]; !ok {
+				continue // no unit to schedule in this view; don't add a dangling edge
+			}
 			deps = append(deps, r)
 			queue = append(queue, r)
 		}

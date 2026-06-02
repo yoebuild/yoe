@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Fixed an intermittent startup failure in multi-distro projects.** `yoe`
+  could occasionally refuse to start with an error like `unit "optee-k3"
+  depends on "python3-minimal", which does not exist`, then start fine on the
+  next try. Projects that mix Alpine and Debian now start reliably.
 - **`distro_deps` and `distro_runtime_deps` on `unit(...)`.** One source unit
   can now satisfy both alpine and debian closures even when the package names
   differ between distros (alpine's `py3-setuptools` vs debian's
