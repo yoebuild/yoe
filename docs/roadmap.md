@@ -9,6 +9,7 @@
 ## Next
 
 - Build container packages and deploy to target.
+- vcpkg (seems popular, Rust uses it)
 - Building from console is now confusing with parallel build as to what is
   happening [1/1] task: build (should also include unit)
 - Option to ignore certain flash devices, save in local.star, and then they are

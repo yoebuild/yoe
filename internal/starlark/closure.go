@@ -95,7 +95,7 @@ func (e *Engine) closure(roots []string, effectiveDistro string) ([]string, erro
 			return nil, fmt.Errorf("unresolved name %q (not in any module, no provider, or filtered by distro=%q)", name, effectiveDistro)
 		}
 		seen[u.Name] = true
-		for _, dep := range u.RuntimeDeps {
+		for _, dep := range u.RuntimeDepsForDistro(effectiveDistro) {
 			if seen[dep] {
 				continue
 			}
@@ -118,7 +118,7 @@ func (e *Engine) closure(roots []string, effectiveDistro string) ([]string, erro
 			u, _ := e.lookupOrMaterialize(name, effectiveDistro)
 			ready := true
 			if u != nil {
-				for _, dep := range u.RuntimeDeps {
+				for _, dep := range u.RuntimeDepsForDistro(effectiveDistro) {
 					resolved := e.resolveProvides(dep)
 					if seen[resolved] && !emitted[resolved] {
 						ready = false

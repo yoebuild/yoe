@@ -8,6 +8,14 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`distro_deps` and `distro_runtime_deps` on `unit(...)`.** One source unit
+  can now satisfy both alpine and debian closures even when the package names
+  differ between distros (alpine's `py3-setuptools` vs debian's
+  `python3-setuptools`, alpine's `zlib` vs debian's split `zlib1g-dev` /
+  `zlib1g`). Effective deps at any consuming closure walk are
+  `deps + distro_deps[consumer_distro]`, resolved per-consumer rather than at
+  unit-registration time, so a debian-shaped name in one branch doesn't break
+  alpine closures that also reach the unit.
 - **Hand-written `module-core` units now dispatch their build container per
   distro.** 23 units (meson, samurai, strace, vim, kmod, openssl, zlib, zstd,
   linux, file's friends, …) had `container = "toolchain-musl"` baked in as a

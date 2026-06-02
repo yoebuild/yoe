@@ -79,7 +79,19 @@ func BuildDAG(proj *yoestar.Project, effectiveDistro string) (*DAG, error) {
 	// image. (The old EnsureImage() was removed when containers became
 	// DAG-participating units.)
 	for name, unit := range units {
-		deps := append([]string{}, unit.Deps...)
+		// Resolve distro context once: prefer the caller's
+		// effectiveDistro (the image being built), then the unit's
+		// own tag for untagged-source-unit standalone builds.
+		resolveDistro := effectiveDistro
+		if resolveDistro == "" {
+			resolveDistro = unit.Distro
+		}
+		// DepsForDistro merges unit.Deps with any distro-specific
+		// additions (distro_deps[resolveDistro]) so a unit that says
+		// "python3" on alpine and "python3.11" on debian gets the
+		// right per-consumer build edges. Plain unit.Deps when no
+		// per-distro entry exists.
+		deps := append([]string{}, unit.DepsForDistro(resolveDistro)...)
 		if unit.Class == "image" {
 			deps = append(deps, unit.Artifacts...)
 		}
@@ -95,18 +107,7 @@ func BuildDAG(proj *yoestar.Project, effectiveDistro string) (*DAG, error) {
 		// Image artifacts use their own runtime closure pass at
 		// rootfs assembly time, so skip the expansion for them.
 		if unit.Class != "image" {
-			deps = appendRuntimeClosureOfDeps(deps, units, name)
-		}
-		// Resolve virtual names in deps through the distro-aware
-		// provides table. Prefer the BuildDAG's effectiveDistro
-		// (consuming image's distro for per-image builds, project
-		// default otherwise) over the unit's own tag — an untagged
-		// source unit consumed by a debian image should resolve its
-		// "toolchain" virtual to toolchain-glibc, not whatever its
-		// own (empty) Distro field would suggest.
-		resolveDistro := effectiveDistro
-		if resolveDistro == "" {
-			resolveDistro = unit.Distro
+			deps = appendRuntimeClosureOfDeps(deps, units, name, resolveDistro)
 		}
 		dag.Nodes[name] = &Node{
 			Unit: unit,
@@ -170,8 +171,11 @@ func resolveDeps(deps []string, proj *yoestar.Project, distro string) []string {
 // already in deps and appends every transitively-reachable runtime
 // dep. The walk is bounded by `units` (the per-distro view from
 // BuildDAG), and the consuming unit's own name is excluded so a
-// unit that depends on itself's runtime closure doesn't loop.
-func appendRuntimeClosureOfDeps(deps []string, units map[string]*yoestar.Unit, self string) []string {
+// unit that depends on itself's runtime closure doesn't loop. The
+// per-distro runtime-deps merge (RuntimeDepsForDistro) applies, so
+// distro_runtime_deps additions on a transitive dep show up in the
+// consumer's closure under the right consuming distro.
+func appendRuntimeClosureOfDeps(deps []string, units map[string]*yoestar.Unit, self, distro string) []string {
 	seen := make(map[string]bool, len(deps))
 	for _, d := range deps {
 		seen[d] = true
@@ -182,7 +186,7 @@ func appendRuntimeClosureOfDeps(deps []string, units map[string]*yoestar.Unit, s
 		if !ok {
 			continue
 		}
-		for _, r := range u.RuntimeDeps {
+		for _, r := range u.RuntimeDepsForDistro(distro) {
 			if r == self || seen[r] {
 				continue
 			}

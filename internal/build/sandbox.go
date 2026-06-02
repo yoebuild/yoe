@@ -271,6 +271,25 @@ func NProc() string {
 	return strings.TrimSpace(string(out))
 }
 
+// multiarchTuple maps a yoe arch name to debian's multiarch tuple
+// for /usr/lib/<tuple>/ paths. Used by the build env so debian feed
+// packages' .so / .pc files (which live under
+// /usr/lib/x86_64-linux-gnu/ on amd64) are visible to pkg-config /
+// ld / rtld during compile-from-source units. The tuple is empty
+// for unknown arches — the caller's path-join still works; the
+// resulting `/usr/lib//pkgconfig` entry is harmless noise.
+func multiarchTuple(arch string) string {
+	switch arch {
+	case "x86_64":
+		return "x86_64-linux-gnu"
+	case "arm64":
+		return "aarch64-linux-gnu"
+	case "riscv64":
+		return "riscv64-linux-gnu"
+	}
+	return ""
+}
+
 // Arch returns the current machine architecture in Yoe format.
 func Arch() string {
 	out, err := exec.Command("uname", "-m").Output()

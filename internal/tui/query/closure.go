@@ -56,7 +56,7 @@ func BuildInClosure(proj *yoestar.Project, root string) map[string]bool {
 			return
 		}
 		seen[name] = true
-		for _, dep := range u.Deps {
+		for _, dep := range u.DepsForDistro(distro) {
 			walk(dep)
 		}
 		// image units carry their package list in Artifacts; treat those

@@ -509,6 +509,16 @@ type Unit struct {
 	Deps        []string
 	RuntimeDeps []string
 
+	// Per-consumer-distro dep additions. Combined with Deps /
+	// RuntimeDeps at closure walk and build time via
+	// DepsForDistro / RuntimeDepsForDistro. Lets a single source
+	// unit express that it needs python3 on alpine but python3.11
+	// on debian, libzstd1 on debian but zstd on alpine, etc. —
+	// without baking one distro's names in at registration time and
+	// breaking closure walks for the other distro.
+	DistroDeps        map[string][]string
+	DistroRuntimeDeps map[string][]string
+
 	// Build
 	Container     string // default container for all tasks
 	ContainerArch string // "target" or "host"
@@ -602,4 +612,47 @@ var validArchitectures = map[string]bool{
 	"arm64":   true,
 	"riscv64": true,
 	"x86_64":  true,
+}
+
+// DepsForDistro returns the build-time deps that apply to a closure
+// walk in the given distro: unit.Deps (always) plus any
+// distro_deps[distro] additions. Returns Deps unchanged when no
+// per-distro entry exists for the target. Pass "" for distro-less
+// callers (TUI list-all) — they get plain Deps and may miss
+// per-distro additions, which is fine for a search-as-you-type
+// surface.
+func (u *Unit) DepsForDistro(distro string) []string {
+	if u == nil {
+		return nil
+	}
+	if distro == "" || len(u.DistroDeps) == 0 {
+		return u.Deps
+	}
+	extra, ok := u.DistroDeps[distro]
+	if !ok || len(extra) == 0 {
+		return u.Deps
+	}
+	out := make([]string, 0, len(u.Deps)+len(extra))
+	out = append(out, u.Deps...)
+	out = append(out, extra...)
+	return out
+}
+
+// RuntimeDepsForDistro is the runtime-deps sibling of
+// DepsForDistro. Same merge rule: RuntimeDeps + DistroRuntimeDeps[distro].
+func (u *Unit) RuntimeDepsForDistro(distro string) []string {
+	if u == nil {
+		return nil
+	}
+	if distro == "" || len(u.DistroRuntimeDeps) == 0 {
+		return u.RuntimeDeps
+	}
+	extra, ok := u.DistroRuntimeDeps[distro]
+	if !ok || len(extra) == 0 {
+		return u.RuntimeDeps
+	}
+	out := make([]string, 0, len(u.RuntimeDeps)+len(extra))
+	out = append(out, u.RuntimeDeps...)
+	out = append(out, extra...)
+	return out
 }

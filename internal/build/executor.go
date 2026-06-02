@@ -584,11 +584,18 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		"CONSOLE":         console,
 		"HOME":            "/tmp",
 		"PATH":            "/build/sysroot/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		"PKG_CONFIG_PATH": "/build/sysroot/usr/lib/pkgconfig:/usr/lib/pkgconfig",
+		// Debian's multiarch layout puts arch-specific libs, .pc files,
+		// and the core dynamic loader under /usr/lib/<tuple>/ and
+		// /lib/<tuple>/. Include those alongside the legacy /usr/lib
+		// paths so debian-feed deps (liblzma-dev's liblzma.pc,
+		// libssl-dev's libssl.pc, libc6's ld-linux) are visible to
+		// pkg-config / ld / rtld during builds. Alpine ignores the
+		// multiarch paths since they don't exist in its sysroot.
+		"PKG_CONFIG_PATH": fmt.Sprintf("/build/sysroot/usr/lib/pkgconfig:/build/sysroot/usr/lib/%s/pkgconfig:/usr/lib/pkgconfig:/usr/lib/%s/pkgconfig", multiarchTuple(opts.Arch), multiarchTuple(opts.Arch)),
 		"CFLAGS":          "-I/build/sysroot/usr/include",
 		"CPPFLAGS":        "-I/build/sysroot/usr/include",
-		"LDFLAGS":         "-L/build/sysroot/usr/lib",
-		"LD_LIBRARY_PATH": "/build/sysroot/usr/lib",
+		"LDFLAGS":         fmt.Sprintf("-L/build/sysroot/usr/lib -L/build/sysroot/usr/lib/%s -L/build/sysroot/lib/%s", multiarchTuple(opts.Arch), multiarchTuple(opts.Arch)),
+		"LD_LIBRARY_PATH": fmt.Sprintf("/build/sysroot/usr/lib:/build/sysroot/usr/lib/%s:/build/sysroot/lib/%s", multiarchTuple(opts.Arch), multiarchTuple(opts.Arch)),
 		"PYTHONPATH":      "/build/sysroot/usr/lib/python3.12/site-packages",
 		"REPO":            filepath.Join("/project", repoRelPath(proj, opts.ProjectDir), opts.EffectiveDistro),
 	}

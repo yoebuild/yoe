@@ -64,7 +64,7 @@ func RuntimeClosure(proj *yoestar.Project, roots []string, effectiveDistro strin
 		if u == nil {
 			continue
 		}
-		for _, dep := range u.RuntimeDeps {
+		for _, dep := range u.RuntimeDepsForDistro(effectiveDistro) {
 			visit(dep)
 		}
 	}

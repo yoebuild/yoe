@@ -113,6 +113,31 @@ Starlark has `if` with fields on the predeclared `ctx` struct (`ctx.machine`,
 downstream" case. When machine-specific behavior is needed, it's right there in
 the `.star` file — no hidden layering of string operations.
 
+**Two operational pain points** stand out in day-to-day use and are a large part
+of why `[yoe]` replaces BitBake rather than wrapping it:
+
+- **Network access only during `do_fetch`.** BitBake confines the network to the
+  fetch task: `do_fetch` may reach the internet, but `do_compile` and the other
+  tasks run network-isolated. Everything a build consumes must therefore be
+  declared ahead of time as a `SRC_URI` entry and mirrored into the downloads
+  directory first. For a self-contained C/C++ tarball that is routine, but it
+  collides badly with modern language ecosystems whose toolchains expect to
+  resolve dependencies themselves at build time: every cargo crate, Go module,
+  npm package, or pip wheel has to be enumerated, pinned, and fetched up front
+  instead. A single Rust application can pull in several hundred crates plus a
+  dozen git dependencies (and their submodules), each of which has to be listed
+  in the recipe and re-pinned on every upgrade — a large, brittle surface that
+  exists only to satisfy the fetch/build network split. `[yoe]` allows network
+  access during the build itself, so it hands off to the native toolchains
+  (`cargo`, `go`, etc.) and lets them resolve and fetch dependencies the way they
+  normally do — no enumerating or pre-pinning each transitive dependency in unit
+  metadata.
+- **BitBake is relatively slow.** It is written in Python, and the cost lands
+  before any compilation begins: parsing the metadata across a full set of
+  layers and computing the task/signature graph takes from many seconds to
+  minutes on every invocation. `[yoe]`'s engine is Go and resolves at the
+  coarser unit grain, so the resolve-and-plan phase is comparatively cheap.
+
 **Key differences:**
 
 |                     | Yocto                                        | `[yoe]`                                       |
@@ -436,6 +461,38 @@ floor is set by the GNU userland itself: glibc + coreutils + perl-base + bash +
 dpkg + apt are ~60–80 MB combined before anything application-specific is
 installed. Dropping perl-base or coreutils breaks dpkg maintainer scripts (see
 Emdebian, below), so this floor is structural, not a tuning problem.
+
+### Chisel and "chiselled" Ubuntu
+
+[Chisel](https://github.com/canonical/chisel) is Canonical's own response to this
+size floor. It is a Go tool that carves prebuilt Ubuntu `.deb`s into named
+**slices** — YAML-declared subsets of a package's files — and extracts only those
+paths into a target root, talking directly to the Ubuntu archive (no `dpkg`/`apt`
+on the host). The result is a "distroless"-style image several times smaller than
+a standard Ubuntu base: no shell, no package manager, only the runtime files a
+service needs. Slice definitions live in per-release branches of
+[`chisel-releases`](https://github.com/canonical/chisel-releases), curated by
+Canonical; chisel runs at build time (notably inside Rockcraft to build OCI
+"rocks") and is not shipped on the device.
+
+Chisel is directly relevant to `[yoe]` because **Alpine is where `[yoe]` starts,
+not where it ends — Debian support is on the roadmap**, alongside the
+`deb_pkg`-style consumption path sketched above. Once `[yoe]` is pulling Debian
+binaries, the fat-`.deb` problem chisel attacks becomes `[yoe]`'s problem too:
+Debian's one-big-package layout bundles docs, headers, and locales an embedded
+image does not want. Chisel is the proven prior art for trimming that — file-level
+slicing of binary packages — and is worth studying as either inspiration or a
+direct ingredient for a Debian-flavored `[yoe]` target.
+
+The contrast is still instructive. Chisel reaches "small" by **carving prebuilt
+binaries after the fact**: it never builds from source, depends on the Ubuntu
+archive and Canonical-maintained slice definitions, and is `.deb`/Ubuntu-only
+(no apk or RPM, none planned). `[yoe]`'s source-built apks — and Alpine's already
+granular `-dev`/`-doc` splits — reach small the other way, by only building and
+packaging what is declared. The natural synthesis for a Debian-based `[yoe]`
+target is to borrow chisel's slicing idea while keeping `[yoe]`'s
+content-addressed, fetch-at-build-time engine rather than adopting the
+Ubuntu-archive coupling wholesale.
 
 ### Embedded Debian efforts
 

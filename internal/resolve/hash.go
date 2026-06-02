@@ -130,6 +130,19 @@ func UnitHash(unit *yoestar.Unit, arch string, depHashes map[string]string, srcI
 	fmt.Fprintf(h, "provides:%s\n", strings.Join(unit.Provides, ","))
 	fmt.Fprintf(h, "replaces:%s\n", strings.Join(unit.Replaces, ","))
 	fmt.Fprintf(h, "runtime_deps:%s\n", strings.Join(unit.RuntimeDeps, ","))
+	// Per-distro deps additions. Gated on the consuming
+	// effectiveDistro entry being non-empty so units without any
+	// distro_deps stay cache-neutral (and a unit that uses
+	// distro_deps for alpine but not debian doesn't invalidate its
+	// debian-side cache by adding an alpine entry later).
+	if effectiveDistro != "" {
+		if extra := unit.DistroDeps[effectiveDistro]; len(extra) > 0 {
+			fmt.Fprintf(h, "distro_deps:%s:%s\n", effectiveDistro, strings.Join(extra, ","))
+		}
+		if extra := unit.DistroRuntimeDeps[effectiveDistro]; len(extra) > 0 {
+			fmt.Fprintf(h, "distro_runtime_deps:%s:%s\n", effectiveDistro, strings.Join(extra, ","))
+		}
+	}
 	fmt.Fprintf(h, "services:%s\n", strings.Join(unit.Services, ","))
 	fmt.Fprintf(h, "conffiles:%s\n", strings.Join(unit.Conffiles, ","))
 	hashStringMap(h, "environment", unit.Environment)
@@ -150,9 +163,11 @@ func UnitHash(unit *yoestar.Unit, arch string, depHashes map[string]string, srcI
 		hashFilesDir(h, filesDir)
 	}
 
-	// Dependencies — include their hashes for transitivity
-	deps := make([]string, len(unit.Deps))
-	copy(deps, unit.Deps)
+	// Dependencies — include their hashes for transitivity.
+	// DepsForDistro folds in any distro_deps[effectiveDistro] so a
+	// debian-only build dep contributes to the debian hash but not
+	// the alpine one.
+	deps := append([]string{}, unit.DepsForDistro(effectiveDistro)...)
 	sort.Strings(deps)
 	for _, dep := range deps {
 		if dh, ok := depHashes[dep]; ok {

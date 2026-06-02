@@ -195,6 +195,45 @@ func kwStringList(kwargs []starlark.Tuple, key string) []string {
 	return nil
 }
 
+// kwStringListMap parses a kwarg shaped like
+// `{"alpine": ["a", "b"], "debian": ["c"]}` into map[string][]string.
+// Used for distro_deps / distro_runtime_deps where each distro key
+// names additional deps that apply only to that distro's closure.
+func kwStringListMap(kwargs []starlark.Tuple, key string) map[string][]string {
+	for _, kv := range kwargs {
+		if string(kv[0].(starlark.String)) != key {
+			continue
+		}
+		d, ok := kv[1].(*starlark.Dict)
+		if !ok {
+			return nil
+		}
+		m := make(map[string][]string, d.Len())
+		for _, item := range d.Items() {
+			k, ok := item[0].(starlark.String)
+			if !ok {
+				continue
+			}
+			list, ok := item[1].(*starlark.List)
+			if !ok {
+				continue
+			}
+			var values []string
+			iter := list.Iterate()
+			var v starlark.Value
+			for iter.Next(&v) {
+				if s, ok := v.(starlark.String); ok {
+					values = append(values, string(s))
+				}
+			}
+			iter.Done()
+			m[string(k)] = values
+		}
+		return m
+	}
+	return nil
+}
+
 func kwStringMap(kwargs []starlark.Tuple, key string) map[string]string {
 	for _, kv := range kwargs {
 		if string(kv[0].(starlark.String)) == key {
@@ -227,7 +266,10 @@ var reservedUnitKwargs = map[string]bool{
 	"apk_checksum": true,
 	"passthrough_apk": true,
 	"tag": true, "branch": true, "patches": true, "deps": true,
-	"runtime_deps": true, "container": true, "container_arch": true,
+	"runtime_deps": true,
+	"distro_deps":        true,
+	"distro_runtime_deps": true,
+	"container": true, "container_arch": true,
 	"sandbox": true, "shell": true, "tasks": true, "provides": true,
 	"replaces": true,
 	"services": true, "conffiles": true, "environment": true,
@@ -646,6 +688,8 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 		Patches:     kwStringList(kwargs, "patches"),
 		Deps:        kwStringList(kwargs, "deps"),
 		RuntimeDeps: kwStringList(kwargs, "runtime_deps"),
+		DistroDeps:        kwStringListMap(kwargs, "distro_deps"),
+		DistroRuntimeDeps: kwStringListMap(kwargs, "distro_runtime_deps"),
 		Container:     kwString(kwargs, "container"),
 		ContainerArch: kwString(kwargs, "container_arch"),
 		Sandbox:       kwBool(kwargs, "sandbox"),

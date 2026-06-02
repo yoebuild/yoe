@@ -93,6 +93,44 @@ distro affinity automatically — an alpine `.apk` literally is not a debian
 materialized `*Unit`. You don't write that tag; the feed builtin writes it for
 you.
 
+### Per-distro dep additions
+
+A source unit often works fine in both backends but needs different package
+*names* for the same role. Alpine packages setuptools as `py3-setuptools`;
+debian splits it across `python3-setuptools` and friends. Alpine bundles
+headers + library in one apk (`zlib`); debian splits them (`zlib1g-dev` for
+build, `zlib1g` for runtime). The unit's behavior is the same; the dep names
+aren't.
+
+`distro_deps` and `distro_runtime_deps` express that without resorting to two
+tagged copies of the same unit or per-project conditionals that bake one
+distro's names in at registration time and break the other distro's closure
+walks:
+
+```python
+unit(
+    name = "meson",
+    ...
+    deps = ["samurai", "toolchain"],
+    distro_deps = {
+        "alpine": ["python3", "py3-setuptools"],
+        "debian": ["python3.11", "python3-setuptools"],
+    },
+)
+```
+
+Effective deps at any consuming closure = `deps + distro_deps[consumer_distro]`.
+A unit with no `distro_deps` entry for the consumer's distro just gets plain
+`deps` — no error, no fallback to some other distro's list. Same shape for
+`runtime_deps` / `distro_runtime_deps`.
+
+Reach for `distro_deps` when one source unit can satisfy both backends with
+different dep names. Reach for the `distro` tag instead when the build itself
+only makes sense for one libc family (musl-only configure flags, distro-
+specific patches), or when the two backends warrant materially different build
+recipes — then maintain two tagged units rather than one unit with branching
+build steps.
+
 ## Choosing a distro
 
 The picks are bounded today:

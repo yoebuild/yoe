@@ -656,15 +656,17 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 				if !visibleToDistro(unit, d) {
 					continue
 				}
-				// Walk both Deps (build-time) and RuntimeDeps. For
-				// debian-style split packages, build-time consumers
-				// need the runtime closure of each build dep to be
-				// materialized so AssembleSysroot can stage every
-				// piece (libpython3.11-stdlib, libpython3.11-minimal,
+				// Walk both Deps (build-time) and RuntimeDeps for
+				// the consuming distro, including any distro_deps /
+				// distro_runtime_deps additions. For debian-style
+				// split packages, build-time consumers need the
+				// runtime closure of each build dep to be materialized
+				// so AssembleSysroot can stage every piece
+				// (libpython3.11-stdlib, libpython3.11-minimal,
 				// libssl3, libexpat1, ...) — not just the wrapper deb
 				// the unit names directly. Alpine's monolithic apks
 				// converge in one hop; debian's fan-out walks deeper.
-				edges := append(append([]string{}, unit.Deps...), unit.RuntimeDeps...)
+				edges := append(append([]string{}, unit.DepsForDistro(d)...), unit.RuntimeDepsForDistro(d)...)
 				for _, dep := range edges {
 					resolved := eng.resolveProvidesForDistro(dep, d)
 					if eng.findVisibleByName(resolved, d) != nil {
