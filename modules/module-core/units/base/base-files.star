@@ -55,7 +55,7 @@ def base_files(name = "base-files", users = None):
     unit(
         name = name,
         version = "1.0.0",
-        release = 10,
+        release = 11,
         scope = "machine",
         license = "MIT",
         description = "Base filesystem skeleton: users, groups, dirs, inittab, boot config",
@@ -66,10 +66,20 @@ def base_files(name = "base-files", users = None):
         tasks = [
             task("build", steps = (
                 [
+                    # FHS filesystem skeleton. The /var subtree (/var/tmp,
+                    # /var/log, /var/cache, /var/lib, /var/spool) is
+                    # standard on every distro and required by package
+                    # maintainer scripts: Debian's update-initramfs
+                    # mktemps under /var/tmp, and many postinsts write
+                    # /var/log and /var/lib/<pkg>. /tmp and /var/tmp are
+                    # world-writable with the sticky bit (1777) per FHS.
                     "mkdir -p $DESTDIR/etc $DESTDIR/root $DESTDIR/proc $DESTDIR/sys"
                     + " $DESTDIR/dev $DESTDIR/tmp $DESTDIR/run $DESTDIR/var/run"
+                    + " $DESTDIR/var/tmp $DESTDIR/var/log $DESTDIR/var/cache"
+                    + " $DESTDIR/var/lib $DESTDIR/var/spool"
                     + " $DESTDIR/boot/extlinux"
                     + " $DESTDIR/etc/apk/keys",
+                    "chmod 1777 $DESTDIR/tmp $DESTDIR/var/tmp",
                 ]
                 + _runlevel_commands()
                 + users_commands(users)

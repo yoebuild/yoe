@@ -22,24 +22,35 @@ unit(
     container_arch = "target",
     tasks = [
         task("build", steps=[
-            # Run setup.py under whichever interpreter the sysroot
-            # actually has. Alpine ships /usr/bin/python3; Debian
-            # ships /usr/bin/python3.11 with no python3 symlink
-            # (update-alternatives postinst doesn't run here).
-            # `command -v` picks the first one present.
-            #
-            # --single-version-externally-managed bypasses debian's
-            # _distutils_hack/distutils-precedence patch that
-            # otherwise redirects --prefix=/usr installs to
-            # /usr/local to protect dpkg-managed paths. Without it
-            # meson lands at /usr/local/bin/meson, which isn't on
+            # Run setup.py under the interpreter shipped in the build
+            # sysroot — never the toolchain container's own python3.
+            # Several Debian build packages (cmake, dpkg-dev, …) pull
+            # /usr/bin/python3 into the container, so a bare
+            # `command -v python3` finds the *container* python, which
+            # has no setuptools and no path into the sysroot's
+            # dist-packages. Search /build/sysroot/usr/bin explicitly:
+            # Alpine ships python3 there; Debian ships python3.NN with
+            # no python3 symlink (update-alternatives postinst doesn't
+            # run here).
+            "PY=''; "
+            + "for c in /build/sysroot/usr/bin/python3 /build/sysroot/usr/bin/python3.[0-9] /build/sysroot/usr/bin/python3.[0-9][0-9]; do "
+            + "[ -x \"$c\" ] && { PY=\"$c\"; break; }; done; "
+            + "[ -n \"$PY\" ] || { echo 'meson: no python3 in build sysroot' >&2; exit 1; }; "
+            # $PREFIX/$DESTDIR are expanded by distutils itself, not the
+            # shell — the single quotes are intentional.
+            + "INSTALL_OPTS='--prefix=$PREFIX --root=$DESTDIR'; "
+            # Debian's setuptools (identified by its dist-packages
+            # sys.path layout) needs --install-layout=deb plus
+            # --single-version-externally-managed to bypass the
+            # _distutils_hack/distutils-precedence patch that otherwise
+            # redirects --prefix=/usr installs to /usr/local. Without
+            # it meson lands at /usr/local/bin/meson, which isn't on
             # the build sysroot's PATH, and downstream consumers
             # (kmod's `meson setup build` step) fail with
-            # `meson: not found`. The flag is a no-op on alpine
-            # where there's no such redirect.
-            "if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python3.11; fi; "
-            + "INSTALL_OPTS='--prefix=$PREFIX --root=$DESTDIR'; "
-            + "if [ \"$PY\" = python3.11 ]; then INSTALL_OPTS=\"$INSTALL_OPTS --install-layout=deb --single-version-externally-managed --record /dev/null\"; fi; "
+            # `meson: not found`. No-op on Alpine, which has no such
+            # redirect and uses the site-packages layout.
+            + "if \"$PY\" -c 'import sys; sys.exit(0 if any(\"dist-packages\" in p for p in sys.path) else 1)'; then "
+            + "INSTALL_OPTS=\"$INSTALL_OPTS --install-layout=deb --single-version-externally-managed --record /dev/null\"; fi; "
             + "\"$PY\" setup.py install $INSTALL_OPTS",
         ]),
     ],

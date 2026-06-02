@@ -644,6 +644,27 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	}
 	tctxData := BuildTemplateContext(unit, opts.Arch, opts.Machine, console, projectName, projectVersion)
 
+	// Debian image assembly reads the project repo's Packages index as
+	// mmdebstrap's copy: source. Regenerate it from the current pool
+	// before assembling so the index can never lag the pool: the index
+	// is otherwise only rewritten when a unit publishes a .deb, so an
+	// image-only rebuild (nothing published) reuses whatever the last
+	// publish left. A stale stanza for a .deb that has since been
+	// removed makes apt resolve to a version whose file no longer
+	// exists and abort the whole rootfs ("Failed to stat ... No such
+	// file or directory"). GenerateDebianIndex scans the pool, so a
+	// refresh here always matches what is actually on disk.
+	if unit.Class == "image" && opts.EffectiveDistro == "debian" {
+		if err := repo.GenerateDebianIndex(repo.DebRepoOptions{
+			RepoDir:    repo.RepoDistroDir(proj, opts.ProjectDir, "debian"),
+			Suite:      repo.DebianSuite,
+			Components: []string{"main"},
+			Arches:     []string{"amd64", "arm64"},
+		}); err != nil {
+			return fmt.Errorf("refresh debian index: %w", err)
+		}
+	}
+
 	// Execute tasks
 	for ti, t := range unit.Tasks {
 		fmt.Fprintf(w, "  [%d/%d] task: %s\n", ti+1, len(unit.Tasks), t.Name)
@@ -739,14 +760,17 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	// Package the output and publish to the local repo. Then stage
 	// destdir for downstream units' per-unit sysroots.
 	//
-	// Branch by Unit.Distro: debian-tagged units land in the Debian
-	// pool as .deb; everything else goes through the APK path. Source
-	// units that need to ship to both alpine and debian images (R14a
-	// build-twice) are not yet wired — for v1 they'd need a separate
-	// per-distro unit entry. Most synthetic feed units are tagged by
-	// the feed, and project units typically target one distro.
+	// Branch by the consuming image's effective distro, not the unit's
+	// own Distro tag. A source unit visible to every distro (Distro
+	// unset) builds once per distro that reaches it (the build-twice
+	// model) and packages in that distro's native format: .deb for a
+	// Debian image, .apk otherwise — so module-core's bash becomes a
+	// .deb in a Debian closure and a .apk in an Alpine closure. Feed
+	// passthrough units only ever appear in their own distro's closure,
+	// so EffectiveDistro matches their tag and the branch is unchanged
+	// for them.
 	if unit.Class != "image" && unit.Class != "container" {
-		switch unit.Distro {
+		switch opts.EffectiveDistro {
 		case "debian":
 			if err := packageDeb(unit, destDir, srcDir, buildDir, opts, proj, w); err != nil {
 				return fmt.Errorf("packaging deb: %w", err)
@@ -836,7 +860,7 @@ func packageDeb(unit *yoestar.Unit, destDir, srcDir, buildDir string, opts Optio
 			Maintainer:   "Yoe <build@yoe.local>",
 			Description:  unit.Description,
 			Depends:      strings.Join(unit.RuntimeDeps, ", "),
-			Provides:     strings.Join(unit.Provides, ", "),
+			Provides:     debProvides(unit.Provides, unit.Version),
 		}
 		if c.Description == "" {
 			c.Description = unit.Name
@@ -857,7 +881,7 @@ func packageDeb(unit *yoestar.Unit, destDir, srcDir, buildDir string, opts Optio
 	repoDir := repo.RepoDistroDir(proj, opts.ProjectDir, "debian")
 	publishOpts := repo.DebRepoOptions{
 		RepoDir:    repoDir,
-		Suite:      "bookworm",
+		Suite:      repo.DebianSuite,
 		Components: []string{"main"},
 		Arches:     []string{"amd64", "arm64"},
 	}
@@ -865,6 +889,36 @@ func packageDeb(unit *yoestar.Unit, destDir, srcDir, buildDir string, opts Optio
 		return fmt.Errorf("PublishDeb: %w", err)
 	}
 	return nil
+}
+
+// debProvides emits a unit's Provides as versioned self-provides:
+// "libssl3" with unit version 3.4.1 becomes "libssl3 (= 3.4.1)". apt
+// enforces that an unversioned Provides cannot satisfy a versioned
+// Depends (e.g. a feed package's "libssl3 (>= 3.0.0)"), so a
+// source-built unit that owns a SONAME-style virtual must declare the
+// version it provides or apt rejects the closure as unmet. An entry
+// that already carries an explicit "(...)" version is passed through
+// untouched. The Alpine path is intentionally not versioned this way —
+// apk resolves library deps through auto-generated SONAME provides, and
+// the manual names there only claim Alpine's package names to avoid
+// file conflicts.
+func debProvides(provides []string, version string) string {
+	if len(provides) == 0 {
+		return ""
+	}
+	out := make([]string, 0, len(provides))
+	for _, p := range provides {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if strings.Contains(p, "(") {
+			out = append(out, p) // already versioned/qualified
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s (= %s)", p, version))
+	}
+	return strings.Join(out, ", ")
 }
 
 func debArchForYoe(yoeArch string) string {
@@ -1102,9 +1156,25 @@ func cacheValid(proj *yoestar.Project, projectDir string, unit *yoestar.Unit, sc
 	if unit.Class == "image" || unit.Class == "container" {
 		return true
 	}
+	repoBase := repo.RepoDistroDir(proj, projectDir, distro)
+
+	// Debian units publish a .deb into the pool, not an .apk into an
+	// arch dir. Confirm the pooled .deb exists; without this branch the
+	// .apk stat below always misses and every debian.main passthrough
+	// (and every source .deb) looks stale, rebuilding on every run. The
+	// pool layout is pool/<component>/<initial>/<source>/<file>, so glob
+	// three levels deep for the package filename.
+	if distro == "debian" {
+		debName := filepath.Base(unit.PassthroughDeb)
+		if debName == "." || debName == "" {
+			debName = fmt.Sprintf("%s_%s_%s.deb", unit.Name, unit.Version, debArchForYoe(arch))
+		}
+		matches, _ := filepath.Glob(filepath.Join(repoBase, "pool", "*", "*", "*", debName))
+		return len(matches) > 0
+	}
+
 	archDir := RepoArchDir(unit, arch)
 	apkName := fmt.Sprintf("%s-%s-r%d.apk", unit.Name, unit.Version, unit.Release)
-	repoBase := repo.RepoDistroDir(proj, projectDir, distro)
 	if _, err := os.Stat(filepath.Join(repoBase, archDir, apkName)); err == nil {
 		return true
 	}

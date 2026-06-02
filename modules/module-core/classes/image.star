@@ -1,3 +1,42 @@
+# Debian's Essential + Priority:required userland. mmdebstrap
+# --variant=custom installs nothing implicitly, but every Debian
+# maintainer script assumes this base is present: libc6's own preinst
+# calls sed; countless postinsts call grep, awk (mawk), find
+# (findutils), and gzip; deb-systemd-helper enables services
+# (init-system-helpers). Seeding it into every Debian image's closure
+# means the rootfs always has the toolset apt and dpkg expect, instead
+# of failing deep in a maintainer script with "<tool>: not found" (exit
+# 127). Closure resolution dedups any names an image also lists.
+#
+# Terminfo and clear/tput are deliberately NOT seeded (no ncurses-base /
+# ncurses-bin): module-core's source-built ncurses already ships those
+# files, and pulling Debian's split packages alongside it makes both
+# own /usr/bin/clear, which dpkg refuses to unpack.
+_DEBIAN_ESSENTIAL = [
+    "base-files",
+    "base-passwd",
+    "bash",
+    "bsdutils",
+    "coreutils",
+    "dash",
+    "debianutils",
+    "diffutils",
+    "dpkg",
+    "findutils",
+    "grep",
+    "gzip",
+    "hostname",
+    "init-system-helpers",
+    "libc-bin",
+    "login",
+    "mawk",
+    "perl-base",
+    "sed",
+    "sysvinit-utils",
+    "tar",
+    "util-linux",
+]
+
 def image(name, artifacts=[], hostname=None, timezone="", locale="",
           partitions=[], scope="machine",
           container="toolchain", container_arch="target", deps=[],
@@ -47,6 +86,8 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
     all_artifacts = list(artifacts)
     if effective_distro == "alpine":
         all_artifacts = all_artifacts + list(ctx.machine_config.packages)
+    elif effective_distro == "debian":
+        all_artifacts = all_artifacts + _DEBIAN_ESSENTIAL
 
     # Resolve provides (e.g., "linux" → "linux-rpi4")
     explicit = []
@@ -196,7 +237,7 @@ def _assemble_debian_rootfs(packages, hostname, timezone, locale):
     """Install packages into the rootfs with a single mmdebstrap run.
 
     mmdebstrap drives apt + dpkg in one pass: it resolves the package
-    list against the project's local Debian repo ($REPO/debian, with the
+    list against the project's local Debian repo ($REPO, with the
     Packages/Release index the repo emitter writes), unpacks every .deb,
     and runs maintainer scripts so the rootfs boots into a fully
     configured dpkg state — populated /var/lib/dpkg/status, postinst-
@@ -245,7 +286,20 @@ esac
 
 mkdir -p $DESTDIR/rootfs
 
-mmdebstrap --mode=root --variant=custom --architectures="$debarch" --include="%s" --aptopt='APT::Get::Install-Recommends "false"' --aptopt='Acquire::Check-Valid-Until "false"' bookworm "$DESTDIR/rootfs" "deb [trusted=yes] copy:$REPO/debian bookworm main"
+mmdebstrap --mode=root --variant=custom --architectures="$debarch" --include="%s" --aptopt='APT::Get::Install-Recommends "false"' --aptopt='Acquire::Check-Valid-Until "false"' bookworm "$DESTDIR/rootfs" "deb [trusted=yes] copy:$REPO bookworm main"
+
+# Fail loudly on a half-configured rootfs. mmdebstrap runs dpkg with
+# --force-depends during the essential bootstrap, so a broken dependency
+# graph (e.g. a Packages index missing Pre-Depends edges) degrades to
+# warnings and a subtly broken image rather than a hard error. Gate on
+# it: every package must reach "ii" (installed/installed). chroot is
+# native here — foreign-arch builds run in an arch-matched container.
+broken=$(chroot $DESTDIR/rootfs dpkg-query -W -f='${db:Status-Abbrev} ${binary:Package}\n' | grep -v '^ii ' || true)
+if [ -n "$broken" ]; then
+    echo "debian rootfs: packages not fully installed/configured:" >&2
+    echo "$broken" >&2
+    exit 1
+fi
 
 mkdir -p $DESTDIR/rootfs/etc%s
 """ % (pkg_list, extra), privileged = True)
