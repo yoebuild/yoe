@@ -77,13 +77,30 @@ def base_files(name = "base-files", users = None):
 
     unit(
         name = name,
-        version = "1.0.0",
+        # yoe ships its own base-files in place of the distro's. On
+        # Debian that means the real Debian packages (libc6, dbus, …)
+        # apply their versioned constraints against *this* package:
+        # libc6 carries `Breaks: base-files (< 13.3~)` and dbus carries
+        # `Depends: base-files (>= 13.4~)`. A low version (1.0.0) sorts
+        # below that floor, so apt rejects it and the rootfs solve
+        # fails. Track Debian's base-files major (currently 13 in
+        # trixie) and stay one ahead so those constraints are satisfied;
+        # bump again if Debian's base-files reaches 14. Inert on Alpine,
+        # where nothing constrains base-files' version.
+        version = "14.0",
         release = 14,
         scope = "machine",
         license = "MIT",
         description = "Base filesystem skeleton: users, groups, dirs, inittab, boot config",
         deps = deps,
-        runtime_deps = ["openrc"],
+        # openrc is yoe's init system on Alpine, and the /etc/runlevels
+        # symlinks this unit lays down are OpenRC's. Debian images boot
+        # systemd instead (the closure already pulls systemd, udev, and
+        # systemd-resolved), so pulling openrc there is wrong twice
+        # over: it has no role as init, and openrc's `Depends: insserv`
+        # collides with systemd-sysv's `Conflicts: insserv`, making the
+        # rootfs apt solve unsatisfiable. Scope the dep to alpine.
+        distro_runtime_deps = {"alpine": ["openrc"]},
         container = "toolchain",
         container_arch = "target",
         tasks = [
