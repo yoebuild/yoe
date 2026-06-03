@@ -13,6 +13,19 @@ Generate a complete Starlark `.star` unit from an upstream source URL or a
 natural language description. The output is a ready-to-build unit that follows
 existing conventions in the project's modules.
 
+## Before You Build From Source: Check the Alpine Feed
+
+If the thing you need is a tool or library Alpine already ships — a cross
+toolchain, a niche build tool, a runtime you don't want to maintain — **do not
+write a from-source unit.** `module-alpine` exposes all of Alpine `main` and
+`community` as lazily-materialized feeds (`alpine.main`, `alpine.community`).
+Pull the package by name and route it with `prefer_modules` in PROJECT.star;
+no per-package file is generated. See the `pulling-alpine-packages` skill for
+the workflow. Write a from-source unit only when Alpine doesn't ship the
+package, ships the wrong version, or the build *is* the product (kernel,
+bootloader, busybox, base-files, project libraries you will patch via
+`yoe dev`).
+
 ## Workflow
 
 ### Step 1: Determine the Source
@@ -48,11 +61,22 @@ conventions and verify the information is current.
 Fetch and inspect the upstream source to determine:
 
 1. **Build system** — look for these files in priority order:
-   - `configure.ac` / `Makefile.am` → autotools class
-   - `CMakeLists.txt` → cmake class
-   - `go.mod` → go class (go_binary)
+   - `configure.ac` / `Makefile.am` → autotools class (`autotools`)
+   - `CMakeLists.txt` → cmake class (`cmake`)
+   - `go.mod` → go class (`go_binary`)
+   - `package.json` with a Bun lockfile / Bun runtime → bun class (`bun_app`)
+   - `package.json` with npm/Node → nodejs class (`nodejs_app`)
+   - Python project (`pyproject.toml` / `requirements.txt`) → python class
+     (`python_venv`, takes a `pip_packages` list)
+   - Upstream ships a prebuilt binary release (no compile) → binary class
+     (`binary`, fetches a release artifact by URL + `sha256`)
    - `Makefile` only → custom build steps with `unit()`
    - `meson.build` → custom build steps (no meson class yet)
+
+   The `bun_app`, `nodejs_app`, `python_venv`, and `binary` classes are the
+   "app mode" classes — use them for application payloads (services, tools
+   shipped as an interpreted app or a prebuilt binary) rather than libraries
+   compiled into the system.
 
 2. **Version** — latest stable release tag or version string
 

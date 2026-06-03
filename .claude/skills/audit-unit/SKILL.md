@@ -87,9 +87,30 @@ at install time. Verify:
 To check linked libraries after a successful build:
 
 ```bash
-# Inside the container, check what the built binaries link against
-find build/<unit>/destdir -type f -executable | head -5
+# Inside the container, check what the built binaries link against. The build
+# tree is segmented by distro: build/<distro>/<unit>/ (e.g. build/alpine/...,
+# build/debian/...), and <unit> carries its arch suffix.
+find build/<distro>/<unit>/destdir -type f -executable | head -5
 ```
+
+### Step 3d: Check for per-distro / per-machine build forks
+
+yoe's rule is **one unit, one artifact; resolve variation at runtime**. A unit
+should produce a single binary that every project and machine shares.
+
+- Flag as a **warning** any field that forks the build by machine or project
+  (per-machine `configure_args`, per-project flags) where a runtime mechanism
+  would do — an init script that detects what's installed, a conditional config
+  file, a `replaces:` annotation. Forking multiplies the cache surface and
+  breaks binary reuse.
+- Building **twice along the distro axis is expected, not a fork.** A source
+  unit consumed by both an Alpine (musl) image and a Debian (glibc) image
+  necessarily builds once per libc — musl- and glibc-linked binaries cannot
+  share at the ABI level. That is the one legitimate split; do not flag it.
+- If the same package is also pulled from an Alpine feed for some images
+  (via `prefer_modules`) while built from source for others, confirm that is
+  intentional (usually to get a shared-library soversion Alpine ships) rather
+  than an accident.
 
 ### Step 4: Check Build Configuration
 

@@ -51,6 +51,12 @@ last 100 lines:
 Read build/<distro>/<unit>/build.log (last 100 lines)
 ```
 
+Shortcut: `yoe log [unit]` prints the build log for the most recent failure (or
+a named unit) without hunting for the path, and `yoe log -e [unit]` opens it in
+your editor. The underlying file is still `build/<distro>/<unit>/build.log` —
+reach for it directly when you need a specific distro's log or want to read a
+slice with the Read tool.
+
 If the error references earlier output (e.g., a missing header first used
 hundreds of lines up), read more context as needed.
 
