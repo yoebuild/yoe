@@ -19,12 +19,12 @@ import (
 //   - the cleartext Release body on success
 //   - ErrNoSignature if release lacks a clearsigned block
 //   - ErrUntrustedKey if the signing key isn't in keyring
-//   - ErrValidUntilMissing if the cleartext lacks a Valid-Until field
-//   - ErrValidUntilExpired if Valid-Until has passed
+//   - ErrValidUntilExpired if a present Valid-Until has passed
 //
-// Callers that only want to extract the body (e.g. the resolver path)
-// should still consult Valid-Until via ParseValidUntil; passing through
-// VerifyInRelease is the canonical path.
+// A missing Valid-Until is accepted (Debian stable main omits it); the
+// signature is the trust anchor and Valid-Until is enforced only when
+// present, matching apt's default. Callers wanting a hard freshness
+// bound should consult Valid-Until via ParseValidUntil themselves.
 func VerifyInRelease(release, keyring []byte) ([]byte, error) {
 	block, _ := clearsign.Decode(release)
 	if block == nil {
@@ -49,10 +49,14 @@ func VerifyInRelease(release, keyring []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !hasValidUntil {
-		return nil, ErrValidUntilMissing
-	}
-	if time.Now().After(validUntil) {
+	// Enforce Valid-Until only when present, matching apt's default.
+	// Debian's stable / oldstable main InRelease carries no Valid-Until
+	// — the suite is indefinitely valid between point releases — so
+	// requiring it would make Debian stable main unusable. The detached
+	// signature verified above is the trust anchor; Valid-Until is an
+	// additional freshness bound that the security and updates suites do
+	// ship, and an expired one there is still rejected.
+	if hasValidUntil && time.Now().After(validUntil) {
 		return nil, &ValidUntilExpiredError{ValidUntil: validUntil, Now: time.Now()}
 	}
 
@@ -114,11 +118,6 @@ func signingFingerprint(block *clearsign.Block) string {
 
 // ErrNoSignature is returned when the input has no clearsigned block.
 var ErrNoSignature = errSentinel("dpkg verify: input has no PGP clearsigned block")
-
-// ErrValidUntilMissing is returned when an InRelease cleartext lacks a
-// Valid-Until field. apt-secure expects Valid-Until on production
-// archives, so yoe enforces it.
-var ErrValidUntilMissing = errSentinel("dpkg verify: InRelease has no Valid-Until field")
 
 type errSentinel string
 

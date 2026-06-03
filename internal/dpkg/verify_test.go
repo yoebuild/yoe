@@ -42,11 +42,17 @@ func TestVerifyInRelease_UntrustedKey(t *testing.T) {
 }
 
 func TestVerifyInRelease_ValidUntilMissing(t *testing.T) {
+	// Debian stable/oldstable main InRelease omits Valid-Until; the
+	// signature is the trust anchor, so verification must succeed and
+	// return the body rather than rejecting on the missing field.
 	release := mustRead(t, "testdata/InRelease.no-valid-until")
 	keyring := mustRead(t, "testdata/keyring.gpg")
-	_, err := VerifyInRelease(release, keyring)
-	if !errors.Is(err, ErrValidUntilMissing) {
-		t.Errorf("expected ErrValidUntilMissing, got %v", err)
+	body, err := VerifyInRelease(release, keyring)
+	if err != nil {
+		t.Fatalf("missing Valid-Until should verify on signature alone, got %v", err)
+	}
+	if len(body) == 0 {
+		t.Error("expected a non-empty Release body")
 	}
 }
 
