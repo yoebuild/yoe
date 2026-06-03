@@ -202,10 +202,44 @@ one of these places:
 
 ## Known limitations
 
-Two structural properties of the debian backend that users will encounter
-regardless of yoe version. Neither is a bug or a transitional gap — both are
-deliberate trade-offs that the architecture chose, and changing either one is a
+Three structural properties of the debian backend that users will encounter
+regardless of yoe version. None is a bug or a transitional gap — all are
+deliberate trade-offs that the architecture chose, and changing any one is a
 substantial follow-up rather than routine work.
+
+- **`mmdebstrap --variant=custom` installs the resolved closure, not Debian's
+  base system.** To keep images content-addressed and minimal, yoe tells
+  `mmdebstrap` to install exactly the closure yoe resolved (`--variant=custom`)
+  rather than the implicit Essential / Priority:required base that `debootstrap`
+  and the stock mmdebstrap variants pull in. An image therefore contains only
+  what its closure names plus apt's hard-dependency expansion — there is no
+  rescue userland, no `Priority: standard` set, unless an image lists it. Three
+  consequences follow. All are handled automatically during assembly, but they
+  are visible in the log and shape what an image must declare:
+
+  - **The Essential / required userland is seeded explicitly.** Debian
+    maintainer scripts assume `sed`, `grep`, `awk`, `find`, `gzip`, `login`, and
+    the rest of the Priority:required toolset are present — `libc6`'s own preinst
+    calls `sed`. Custom variant pulls none of it implicitly, so the image class
+    seeds a fixed Essential + required baseline into every Debian image's closure.
+    A package whose maintainer script reaches for a tool outside that baseline
+    must add the tool to the image.
+  - **usr-merge is established before extraction.** Custom variant skips the
+    `/bin`→`/usr/bin` merge the normal variants set up. A setup-hook creates the
+    merged-usr symlinks against the empty target before any package unpacks;
+    without it the `usrmerge` package's post-hoc conversion fails inside the
+    build chroot.
+  - **Configuration is one unordered `dpkg --install --force-depends` pass.** The
+    whole closure unpacks and then configures, instead of the staged
+    configure-essentials-first bootstrap `debootstrap` performs. The assembly log
+    shows benign `ignoring pre-dependency problem` warnings (e.g. systemd
+    Pre-Depends on a `libc6` that is unpacked but not yet configured) — dpkg
+    proceeds and the configure pass resolves them. A tool provided through
+    `update-alternatives` (notably `awk` via `mawk`) can be needed before its
+    provider's postinst registers the link, so the image class pre-stages those
+    links. A final `dpkg-query` audit fails the build loudly if any package is
+    left half-configured, so a genuinely broken closure never ships as a subtly
+    incomplete image.
 
 - **Some upstream `.deb` postinsts assume network access.** yoe runs
   `mmdebstrap` under `--network=none` for hash stability and
