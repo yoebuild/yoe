@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`yoe log` and `yoe diagnose` work on feed-based projects again.** They no
+  longer fail with an `undefined: alpine_feed` error, now find the build log for
+  images and other machine-specific units, and follow the distro you selected in
+  `local.star`.
 - **Debian images build reliably again.** Image assembly no longer aborts with a
   `mount: must be superuser` error partway through building the root filesystem
   and bootable disk, so Debian images such as the dev-image complete instead of

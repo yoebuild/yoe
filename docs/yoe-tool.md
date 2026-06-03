@@ -961,6 +961,12 @@ yoe log openssl -e       # open openssl build log in $EDITOR
 
 The `-e` / `--edit` flag opens the log in your editor (defaults to `vi`).
 
+The log is located under the project's effective distro (the same cascade
+`yoe build` uses — an image's own distro, then your `local.star` selection, then
+the project default), so it finds the right log in a multi-distro project. It
+also works for images and other machine-specific units, not just architecture-
+wide libraries and tools.
+
 ### `yoe diagnose`
 
 Launches Claude Code to diagnose a build failure. With no arguments, diagnoses

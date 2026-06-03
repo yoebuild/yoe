@@ -758,21 +758,63 @@ func findProjectRootForLocal(dir string) (string, error) {
 	}
 }
 
-// loadDistroForCWD resolves the project's effective distro (without
-// per-image scope) for CLI subcommands that need to navigate the
-// per-distro build/<distro>/ subtree (e.g. `yoe log`, `yoe diagnose`).
-// Loads PROJECT.star once and returns DefaultDistroOverride ->
-// DefaultDistro -> error.
-func loadDistroForCWD(dir string) (string, error) {
-	proj, err := yoestar.LoadProject(dir)
+// unitBuildDirForCWD resolves the build directory for a named unit in the
+// current project, for CLI subcommands that navigate the build tree (e.g.
+// `yoe log`, `yoe diagnose`). It mirrors how the TUI locates a unit's build
+// dir so the CLI and TUI agree, resolving two things the build path also
+// resolves:
+//
+//   - the effective distro (build/<distro>/), honoring the cascade
+//     image.distro -> local.star default_distro_override -> defaults.distro;
+//   - the unit's build scope (<name>.<scopeDir>), where arch-scoped units use
+//     the arch and machine-scoped units — images, kernels — use the machine.
+//
+// Hardcoding the arch (the old behavior) never found a machine-scoped unit's
+// log, and loading the project without projectLoadOpts() crashed with
+// "undefined: alpine_feed" on any project whose modules declare a feed.
+func unitBuildDirForCWD(dir, unitName string) (string, error) {
+	opts := projectLoadOpts()
+	// Honor the developer's local.star machine/distro override so we navigate
+	// the same build/<distro>/<name>.<scope>/ subtree `yoe build` wrote to.
+	var ov yoestar.LocalOverrides
+	if absDir, aerr := filepath.Abs(dir); aerr == nil {
+		if root, rerr := findProjectRootForLocal(absDir); rerr == nil {
+			if loaded, lerr := yoestar.LoadLocalOverrides(root); lerr == nil {
+				ov = loaded
+			}
+		}
+	}
+	machine := ov.Machine
+	if machine != "" {
+		opts = append(opts, yoestar.WithMachine(machine))
+	}
+	proj, err := yoestar.LoadProject(dir, opts...)
 	if err != nil {
 		return "", fmt.Errorf("loading project to resolve distro: %w", err)
 	}
-	d, err := proj.EffectiveDistro()
+	if ov.DefaultDistroOverride != "" {
+		proj.DefaultDistroOverride = ov.DefaultDistroOverride
+	}
+	if machine == "" {
+		machine = proj.Defaults.Machine
+	}
+	arch, err := resolveTargetArch(proj, machine)
 	if err != nil {
 		return "", err
 	}
-	return d, nil
+	// An image may pin its own distro; fall back to the project-level
+	// effective distro for non-image units.
+	distro, err := proj.EffectiveDistroForImage(unitName)
+	if err != nil {
+		if distro, err = proj.EffectiveDistro(); err != nil {
+			return "", err
+		}
+	}
+	scopeDir := arch
+	if u := proj.LookupUnit(distro, unitName); u != nil {
+		scopeDir = build.ScopeDir(u, arch, machine)
+	}
+	return build.UnitBuildDir(dir, scopeDir, unitName, distro), nil
 }
 
 func defaultArch(proj *yoestar.Project) string {
@@ -912,12 +954,12 @@ func cmdLog(args []string) {
 	var logPath string
 
 	if unitName != "" {
-		distro, derr := loadDistroForCWD(dir)
+		buildDir, derr := unitBuildDirForCWD(dir, unitName)
 		if derr != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", derr)
 			os.Exit(1)
 		}
-		logPath = filepath.Join(build.UnitBuildDir(dir, build.Arch(), unitName, distro), "build.log")
+		logPath = filepath.Join(buildDir, "build.log")
 	} else {
 		logPath = findLatestBuildLog(dir)
 	}
@@ -960,12 +1002,12 @@ func cmdDiagnose(args []string) {
 
 	var logPath string
 	if unitName != "" {
-		distro, derr := loadDistroForCWD(dir)
+		buildDir, derr := unitBuildDirForCWD(dir, unitName)
 		if derr != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", derr)
 			os.Exit(1)
 		}
-		logPath = filepath.Join(build.UnitBuildDir(dir, build.Arch(), unitName, distro), "build.log")
+		logPath = filepath.Join(buildDir, "build.log")
 	} else {
 		logPath = findLatestBuildLog(dir)
 	}
