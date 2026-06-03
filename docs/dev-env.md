@@ -80,12 +80,12 @@ cycle.
 
 `yoe deploy <unit> <host>` builds the package for `<unit>`, exposes the
 project's repo over an HTTP feed (reusing a running `yoe serve` if one is up),
-and installs `<unit>` on the device over SSH. It follows the project's
-effective distro: an Alpine target gets the feed written into
-`/etc/apk/repositories` and an `apk del`+`apk add` to land the rebuild; a
-Debian target gets `/etc/apt/sources.list.d/yoe-dev.list` plus a high-priority
-pin and an `apt-get install --reinstall --allow-downgrades`. Combined with
-local-path sources, the loop is:
+and installs `<unit>` on the device over SSH. It follows the project's effective
+distro: an Alpine target gets the feed written into `/etc/apk/repositories` and
+an `apk del`+`apk add` to land the rebuild; a Debian target gets
+`/etc/apt/sources.list.d/yoe-dev.list` plus a high-priority pin and an
+`apt-get install --reinstall --allow-downgrades`. Combined with local-path
+sources, the loop is:
 
 ```
 edit code → yoe deploy myapp dev-pi → service running on the device

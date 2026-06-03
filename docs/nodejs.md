@@ -165,9 +165,9 @@ automatically.
 
 ## `nodejs-image`
 
-`module-alpine/images/nodejs-image.star` boots into a userland with `node`, `npm`,
-the dev-image diagnostic tools, and the `nodejs-hello` demo pre-installed. Run
-`yoe build nodejs-image && yoe run nodejs-image` to get a QEMU VM where
-`nodejs-hello "..."` renders an ASCII-art banner — useful as a smoke test that
-`nodejs_app` works end-to-end on your machine before you spend npm's download
-budget on a real app.
+`module-alpine/images/nodejs-image.star` boots into a userland with `node`,
+`npm`, the dev-image diagnostic tools, and the `nodejs-hello` demo
+pre-installed. Run `yoe build nodejs-image && yoe run nodejs-image` to get a
+QEMU VM where `nodejs-hello "..."` renders an ASCII-art banner — useful as a
+smoke test that `nodejs_app` works end-to-end on your machine before you spend
+npm's download budget on a real app.

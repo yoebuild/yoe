@@ -107,8 +107,8 @@ should produce a single binary that every project and machine shares.
   unit consumed by both an Alpine (musl) image and a Debian (glibc) image
   necessarily builds once per libc — musl- and glibc-linked binaries cannot
   share at the ABI level. That is the one legitimate split; do not flag it.
-- If the same package is also pulled from an Alpine feed for some images
-  (via `prefer_modules`) while built from source for others, confirm that is
+- If the same package is also pulled from an Alpine feed for some images (via
+  `prefer_modules`) while built from source for others, confirm that is
   intentional (usually to get a shared-library soversion Alpine ships) rather
   than an accident.
 

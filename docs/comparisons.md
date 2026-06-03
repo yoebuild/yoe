@@ -129,9 +129,9 @@ of why `[yoe]` replaces BitBake rather than wrapping it:
   in the recipe and re-pinned on every upgrade — a large, brittle surface that
   exists only to satisfy the fetch/build network split. `[yoe]` allows network
   access during the build itself, so it hands off to the native toolchains
-  (`cargo`, `go`, etc.) and lets them resolve and fetch dependencies the way they
-  normally do — no enumerating or pre-pinning each transitive dependency in unit
-  metadata.
+  (`cargo`, `go`, etc.) and lets them resolve and fetch dependencies the way
+  they normally do — no enumerating or pre-pinning each transitive dependency in
+  unit metadata.
 - **BitBake is relatively slow.** It is written in Python, and the cost lands
   before any compilation begins: parsing the metadata across a full set of
   layers and computing the task/signature graph takes from many seconds to
@@ -464,34 +464,34 @@ Emdebian, below), so this floor is structural, not a tuning problem.
 
 ### Chisel and "chiselled" Ubuntu
 
-[Chisel](https://github.com/canonical/chisel) is Canonical's own response to this
-size floor. It is a Go tool that carves prebuilt Ubuntu `.deb`s into named
-**slices** — YAML-declared subsets of a package's files — and extracts only those
-paths into a target root, talking directly to the Ubuntu archive (no `dpkg`/`apt`
-on the host). The result is a "distroless"-style image several times smaller than
-a standard Ubuntu base: no shell, no package manager, only the runtime files a
-service needs. Slice definitions live in per-release branches of
-[`chisel-releases`](https://github.com/canonical/chisel-releases), curated by
-Canonical; chisel runs at build time (notably inside Rockcraft to build OCI
-"rocks") and is not shipped on the device.
+[Chisel](https://github.com/canonical/chisel) is Canonical's own response to
+this size floor. It is a Go tool that carves prebuilt Ubuntu `.deb`s into named
+**slices** — YAML-declared subsets of a package's files — and extracts only
+those paths into a target root, talking directly to the Ubuntu archive (no
+`dpkg`/`apt` on the host). The result is a "distroless"-style image several
+times smaller than a standard Ubuntu base: no shell, no package manager, only
+the runtime files a service needs. Slice definitions live in per-release
+branches of [`chisel-releases`](https://github.com/canonical/chisel-releases),
+curated by Canonical; chisel runs at build time (notably inside Rockcraft to
+build OCI "rocks") and is not shipped on the device.
 
 Chisel is directly relevant to `[yoe]` because **Alpine is where `[yoe]` starts,
 not where it ends — Debian support is on the roadmap**, alongside the
 `deb_pkg`-style consumption path sketched above. Once `[yoe]` is pulling Debian
 binaries, the fat-`.deb` problem chisel attacks becomes `[yoe]`'s problem too:
 Debian's one-big-package layout bundles docs, headers, and locales an embedded
-image does not want. Chisel is the proven prior art for trimming that — file-level
-slicing of binary packages — and is worth studying as either inspiration or a
-direct ingredient for a Debian-flavored `[yoe]` target.
+image does not want. Chisel is the proven prior art for trimming that —
+file-level slicing of binary packages — and is worth studying as either
+inspiration or a direct ingredient for a Debian-flavored `[yoe]` target.
 
 The contrast is still instructive. Chisel reaches "small" by **carving prebuilt
 binaries after the fact**: it never builds from source, depends on the Ubuntu
 archive and Canonical-maintained slice definitions, and is `.deb`/Ubuntu-only
-(no apk or RPM, none planned). `[yoe]`'s source-built apks — and Alpine's already
-granular `-dev`/`-doc` splits — reach small the other way, by only building and
-packaging what is declared. The natural synthesis for a Debian-based `[yoe]`
-target is to borrow chisel's slicing idea while keeping `[yoe]`'s
-content-addressed, fetch-at-build-time engine rather than adopting the
+(no apk or RPM, none planned). `[yoe]`'s source-built apks — and Alpine's
+already granular `-dev`/`-doc` splits — reach small the other way, by only
+building and packaging what is declared. The natural synthesis for a
+Debian-based `[yoe]` target is to borrow chisel's slicing idea while keeping
+`[yoe]`'s content-addressed, fetch-at-build-time engine rather than adopting the
 Ubuntu-archive coupling wholesale.
 
 ### Embedded Debian efforts

@@ -239,14 +239,14 @@ splits util-linux: `libmount` and `libblkid` are separate apks. When apk's
 solver tries to install both yoe's util-linux and Alpine's libmount/libblkid, it
 fails because both packages own the same library paths.
 
-**First attempt: `prefer_modules = {"alpine": {"util-linux": "alpine.main"}}`.** Forces the
-Alpine prebuilt instead of yoe's source-built version (pin syntax names the
-synthetic module, not the parent — `alpine.main` rather than `alpine`). Resolves
-the library conflict. But Alpine's `util-linux` apk is a _meta_ package — it
-ships nothing on disk; the actual binaries live in `util-linux-misc`,
-`util-linux-login`, the libraries in `libuuid`/`libmount`/`libblkid`, and the
-headers + unversioned `.so` symlinks needed at compile time live in
-`util-linux-dev`.
+**First attempt: `prefer_modules = {"alpine": {"util-linux": "alpine.main"}}`.**
+Forces the Alpine prebuilt instead of yoe's source-built version (pin syntax
+names the synthetic module, not the parent — `alpine.main` rather than
+`alpine`). Resolves the library conflict. But Alpine's `util-linux` apk is a
+_meta_ package — it ships nothing on disk; the actual binaries live in
+`util-linux-misc`, `util-linux-login`, the libraries in
+`libuuid`/`libmount`/`libblkid`, and the headers + unversioned `.so` symlinks
+needed at compile time live in `util-linux-dev`.
 
 After pulling subpackages in via `runtime_deps`, the next layer: `e2fsprogs`
 (yoe-source-built) needs `libuuid` headers + the unversioned `libuuid.so`

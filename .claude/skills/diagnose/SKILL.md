@@ -146,16 +146,16 @@ fixing a missing header reveals a missing library).
 
 ## Key Paths
 
-| Path                                | Contents                            |
-| ----------------------------------- | ----------------------------------- |
-| `build/<distro>/<unit>/build.log`   | Full build output                   |
-| `build/<distro>/<unit>/src/`        | Extracted source tree               |
-| `build/<distro>/<unit>/destdir/`    | Install staging directory           |
-| `build/<distro>/<unit>/sysroot/`    | Shared sysroot (deps' headers/libs) |
-| `modules/**/units/**/<unit>.star`   | Unit definition                     |
+| Path                              | Contents                            |
+| --------------------------------- | ----------------------------------- |
+| `build/<distro>/<unit>/build.log` | Full build output                   |
+| `build/<distro>/<unit>/src/`      | Extracted source tree               |
+| `build/<distro>/<unit>/destdir/`  | Install staging directory           |
+| `build/<distro>/<unit>/sysroot/`  | Shared sysroot (deps' headers/libs) |
+| `modules/**/units/**/<unit>.star` | Unit definition                     |
 
-`<distro>` is `alpine`, `debian`, etc.; `<unit>` carries its arch suffix
-(e.g. `openssl.x86_64`).
+`<distro>` is `alpine`, `debian`, etc.; `<unit>` carries its arch suffix (e.g.
+`openssl.x86_64`).
 
 ## What NOT to Do
 

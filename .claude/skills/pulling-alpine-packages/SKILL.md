@@ -34,7 +34,7 @@ lazily** the first time a build's closure references it. You do not generate a
 
 Do **not** use this for components where we want git-source tracking and the
 `yoe dev` patch workflow (kernels, U-Boot, OP-TEE, project libraries, anything
-likely to need local patches), nor where the build *is* the product (toolchain,
+likely to need local patches), nor where the build _is_ the product (toolchain,
 busybox, base-files, init).
 
 ## Workflow
@@ -101,11 +101,11 @@ The live `module-alpine` checkout is under
 `testdata/<project>/cache/modules/module-alpine/` (for test builds,
 `testdata/e2e-project/cache/modules/module-alpine/`). Any change there — a
 refreshed APKINDEX, a new `*-enable.star` companion — must be **committed and
-pushed upstream**: the next `yoe build` does `git fetch && git checkout
-FETCH_HEAD` in the cache and silently discards uncommitted or un-pushed local
-edits. Pause and confirm the push landed before re-running anything that
-triggers a module sync. **Never do the upstream commit/push yourself — the user
-manages those repos.**
+pushed upstream**: the next `yoe build` does
+`git fetch && git checkout FETCH_HEAD` in the cache and silently discards
+uncommitted or un-pushed local edits. Pause and confirm the push landed before
+re-running anything that triggers a module sync. **Never do the upstream
+commit/push yourself — the user manages those repos.**
 
 ## Enabling a service from a pulled package
 
@@ -130,12 +130,12 @@ on demand.
 
 - **Generating a `.star` file to consume a package.** Not needed — the feed
   exposes every `main`/`community` package lazily. Just name it in `deps`.
-  (`scripts/gen-unit.py` in the module-alpine repo is for *maintaining*
+  (`scripts/gen-unit.py` in the module-alpine repo is for _maintaining_
   module-alpine itself, driven by that repo's own `create-alpine-unit` skill,
   not for consuming a package from a project.)
 - **Adding a `prefer_modules` entry for a feed-only package.** Unnecessary —
   synthetics already lose to real modules, so a package with no source-unit
-  competitor resolves without routing. Use `prefer_modules` only to *override* a
+  competitor resolves without routing. Use `prefer_modules` only to _override_ a
   source unit with the feed's build.
 - **Forgetting to push after `yoe update-feeds` or adding a companion.** A
   local-only commit in the cache survives exactly until the next `yoe build`'s

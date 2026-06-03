@@ -241,20 +241,19 @@ set of orthogonal channels: mDNS for discovery, HTTP for the package pull, and
 SSH for orchestration. The delivery mechanism is one — the per-distro package
 format is two:
 
-- **Alpine images** consume an apk repo at `repo/<project>/alpine/<arch>/`
-  with the project's RSA-signed `APKINDEX`. `yoe device repo add` writes the
-  matching `/etc/apk/repositories` entry; `apk add` / `apk upgrade` then work
-  on-device against the project's own feed.
+- **Alpine images** consume an apk repo at `repo/<project>/alpine/<arch>/` with
+  the project's RSA-signed `APKINDEX`. `yoe device repo add` writes the matching
+  `/etc/apk/repositories` entry; `apk add` / `apk upgrade` then work on-device
+  against the project's own feed.
 - **Debian images** consume a Debian-format repo at
   `repo/<project>/debian/dists/<suite>/`. The project's GPG key signs the
-  `InRelease`; image assembly stages
-  `/etc/apt/sources.list.d/<project>.sources` (deb822 format) referencing the
-  keyring via `Signed-By:`. `apt update` and `apt install` on the device verify
-  against the project key only, so other apt sources can't smuggle packages
-  into the project's namespace.
+  `InRelease`; image assembly stages `/etc/apt/sources.list.d/<project>.sources`
+  (deb822 format) referencing the keyring via `Signed-By:`. `apt update` and
+  `apt install` on the device verify against the project key only, so other apt
+  sources can't smuggle packages into the project's namespace.
 
-Same project key, same HTTP transport, same mDNS + SSH channels — the apk vs
-apt split is on-device tooling, not on-workstation infrastructure.
+Same project key, same HTTP transport, same mDNS + SSH channels — the apk vs apt
+split is on-device tooling, not on-workstation infrastructure.
 
 ![Feed server topology](assets/feed-server-topology.png)
 
@@ -277,9 +276,9 @@ Every unit's build directory is a regular git repo, living under
 consumed by both an Alpine and a Debian image keep two destdirs (one built
 against musl, one against glibc) so each image gets the right libc without
 clobbering its peer between builds. Upstream source is checked out at the
-version pinned by the unit and tagged `upstream`; any patches the unit
-declares are applied as commits on top; your local edits become further
-commits. There's no separate workspace, no mode to enter:
+version pinned by the unit and tagged `upstream`; any patches the unit declares
+are applied as commits on top; your local edits become further commits. There's
+no separate workspace, no mode to enter:
 
 ![Source modification flow](assets/source-mod-flow.png)
 

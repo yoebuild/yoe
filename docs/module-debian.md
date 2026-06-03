@@ -193,9 +193,9 @@ one of these places:
 - Bootloader install — `extlinux` / `syslinux-common` must be present in the
   toolchain-glibc Dockerfile so `_install_syslinux_debian` can find
   `/usr/lib/SYSLINUX/mbr.bin`.
-- Init startup — kernel and systemd-sysv pull in /sbin/init transitively; if
-  the kernel boots but init doesn't run, check that `init` (the symlink
-  package) is in the closure.
+- Init startup — kernel and systemd-sysv pull in /sbin/init transitively; if the
+  kernel boots but init doesn't run, check that `init` (the symlink package) is
+  in the closure.
 - SSH not running on first boot — Debian's `openssh-server` package enables
   itself via systemd preset; verify with `systemctl status ssh` on the device
   console.
@@ -216,23 +216,22 @@ substantial follow-up rather than routine work.
   rescue userland, no `Priority: standard` set, unless an image lists it. Three
   consequences follow. All are handled automatically during assembly, but they
   are visible in the log and shape what an image must declare:
-
   - **The Essential / required userland is seeded explicitly.** Debian
     maintainer scripts assume `sed`, `grep`, `awk`, `find`, `gzip`, `login`, and
-    the rest of the Priority:required toolset are present — `libc6`'s own preinst
-    calls `sed`. Custom variant pulls none of it implicitly, so the image class
-    seeds a fixed Essential + required baseline into every Debian image's closure.
-    A package whose maintainer script reaches for a tool outside that baseline
-    must add the tool to the image.
+    the rest of the Priority:required toolset are present — `libc6`'s own
+    preinst calls `sed`. Custom variant pulls none of it implicitly, so the
+    image class seeds a fixed Essential + required baseline into every Debian
+    image's closure. A package whose maintainer script reaches for a tool
+    outside that baseline must add the tool to the image.
   - **usr-merge is established before extraction.** Custom variant skips the
     `/bin`→`/usr/bin` merge the normal variants set up. A setup-hook creates the
     merged-usr symlinks against the empty target before any package unpacks;
     without it the `usrmerge` package's post-hoc conversion fails inside the
     build chroot.
-  - **Configuration is one unordered `dpkg --install --force-depends` pass.** The
-    whole closure unpacks and then configures, instead of the staged
-    configure-essentials-first bootstrap `debootstrap` performs. The assembly log
-    shows benign `ignoring pre-dependency problem` warnings (e.g. systemd
+  - **Configuration is one unordered `dpkg --install --force-depends` pass.**
+    The whole closure unpacks and then configures, instead of the staged
+    configure-essentials-first bootstrap `debootstrap` performs. The assembly
+    log shows benign `ignoring pre-dependency problem` warnings (e.g. systemd
     Pre-Depends on a `libc6` that is unpacked but not yet configured) — dpkg
     proceeds and the configure pass resolves them. A tool provided through
     `update-alternatives` (notably `awk` via `mawk`) can be needed before its
@@ -242,17 +241,16 @@ substantial follow-up rather than routine work.
     incomplete image.
 
 - **Some upstream `.deb` postinsts assume network access.** yoe runs
-  `mmdebstrap` under `--network=none` for hash stability and
-  reproducibility — a configure pass that reaches out to a DNS resolver, a
-  metadata server, or a license-prompt download produces different output
-  depending on what's reachable when, which would break the content-addressed
-  cache. Packages whose postinsts do this (`cloud-init` provisioning, telemetry
-  agents, license-prompt downloaders, a small set of enterprise-software
-  installers) fail loudly during image assembly. The narrow set this affects
-  isn't appropriate for embedded images anyway; replace with a from-source
-  `module-core` unit if equivalent functionality is needed, or carry the package
-  and provide the configuration it would have fetched via the project rootfs
-  overlay.
+  `mmdebstrap` under `--network=none` for hash stability and reproducibility — a
+  configure pass that reaches out to a DNS resolver, a metadata server, or a
+  license-prompt download produces different output depending on what's
+  reachable when, which would break the content-addressed cache. Packages whose
+  postinsts do this (`cloud-init` provisioning, telemetry agents, license-prompt
+  downloaders, a small set of enterprise-software installers) fail loudly during
+  image assembly. The narrow set this affects isn't appropriate for embedded
+  images anyway; replace with a from-source `module-core` unit if equivalent
+  functionality is needed, or carry the package and provide the configuration it
+  would have fetched via the project rootfs overlay.
 
 - **One Debian suite per project, enforced at evaluation.** Every
   `debian_feed(...)` call in a project must agree on its `suite` kwarg; the

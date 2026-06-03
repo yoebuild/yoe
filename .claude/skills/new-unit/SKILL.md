@@ -19,12 +19,11 @@ If the thing you need is a tool or library Alpine already ships — a cross
 toolchain, a niche build tool, a runtime you don't want to maintain — **do not
 write a from-source unit.** `module-alpine` exposes all of Alpine `main` and
 `community` as lazily-materialized feeds (`alpine.main`, `alpine.community`).
-Pull the package by name and route it with `prefer_modules` in PROJECT.star;
-no per-package file is generated. See the `pulling-alpine-packages` skill for
-the workflow. Write a from-source unit only when Alpine doesn't ship the
-package, ships the wrong version, or the build *is* the product (kernel,
-bootloader, busybox, base-files, project libraries you will patch via
-`yoe dev`).
+Pull the package by name and route it with `prefer_modules` in PROJECT.star; no
+per-package file is generated. See the `pulling-alpine-packages` skill for the
+workflow. Write a from-source unit only when Alpine doesn't ship the package,
+ships the wrong version, or the build _is_ the product (kernel, bootloader,
+busybox, base-files, project libraries you will patch via `yoe dev`).
 
 ## Workflow
 
@@ -73,10 +72,10 @@ Fetch and inspect the upstream source to determine:
    - `Makefile` only → custom build steps with `unit()`
    - `meson.build` → custom build steps (no meson class yet)
 
-   The `bun_app`, `nodejs_app`, `python_venv`, and `binary` classes are the
-   "app mode" classes — use them for application payloads (services, tools
-   shipped as an interpreted app or a prebuilt binary) rather than libraries
-   compiled into the system.
+   The `bun_app`, `nodejs_app`, `python_venv`, and `binary` classes are the "app
+   mode" classes — use them for application payloads (services, tools shipped as
+   an interpreted app or a prebuilt binary) rather than libraries compiled into
+   the system.
 
 2. **Version** — latest stable release tag or version string
 

@@ -377,8 +377,8 @@ An image's effective distro is resolved through a three-level cascade: the
 image's own `distro = "..."` field wins if set; otherwise the project's
 `local.star` `default_distro_override` (per-developer, not committed) wins if
 set; otherwise the project's `defaults.distro` in `PROJECT.star` is used; if
-none of the three is set the image errors at evaluation. The cascade lets a developer
-experiment with a different distro locally without editing committed
+none of the three is set the image errors at evaluation. The cascade lets a
+developer experiment with a different distro locally without editing committed
 configuration.
 
 Including effective distro in the hash gives every source-declared unit the
