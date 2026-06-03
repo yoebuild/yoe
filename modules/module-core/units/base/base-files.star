@@ -52,10 +52,33 @@ def base_files(name = "base-files", users = None):
     if "toolchain" not in deps:
         deps.append("toolchain")
 
+    # When root is intentionally passwordless (dev images), follow that
+    # policy through to SSH on Debian so passwordless root login works
+    # like the serial console — mirroring what module-core's openssh
+    # init script does on Alpine. Debian's openssh-server is a feed
+    # passthrough carrying sshd's strict upstream defaults
+    # (PermitRootLogin prohibit-password, PermitEmptyPasswords no), so a
+    # permissive sshd_config.d drop-in is the equivalent knob. Gated on
+    # $DISTRO=debian at build time; the Alpine path handles its own case
+    # through the openssh unit. Omitted entirely when root has a real
+    # password, so production images keep sshd's strict defaults.
+    ssh_dev_steps = []
+    root_passwordless = False
+    for u in users:
+        if u["uid"] == 0 and not u["password"]:
+            root_passwordless = True
+    if root_passwordless:
+        ssh_dev_steps = [
+            "if [ x$DISTRO = xdebian ]; then" +
+            " mkdir -p $DESTDIR/etc/ssh/sshd_config.d &&" +
+            " printf 'PermitRootLogin yes\\nPermitEmptyPasswords yes\\n'" +
+            " > $DESTDIR/etc/ssh/sshd_config.d/10-yoe-dev.conf; fi",
+        ]
+
     unit(
         name = name,
         version = "1.0.0",
-        release = 11,
+        release = 14,
         scope = "machine",
         license = "MIT",
         description = "Base filesystem skeleton: users, groups, dirs, inittab, boot config",
@@ -74,16 +97,37 @@ def base_files(name = "base-files", users = None):
                     # /var/log and /var/lib/<pkg>. /tmp and /var/tmp are
                     # world-writable with the sticky bit (1777) per FHS.
                     "mkdir -p $DESTDIR/etc $DESTDIR/root $DESTDIR/proc $DESTDIR/sys"
-                    + " $DESTDIR/dev $DESTDIR/tmp $DESTDIR/run $DESTDIR/var/run"
+                    + " $DESTDIR/dev $DESTDIR/tmp $DESTDIR/run $DESTDIR/run/lock"
                     + " $DESTDIR/var/tmp $DESTDIR/var/log $DESTDIR/var/cache"
                     + " $DESTDIR/var/lib $DESTDIR/var/spool"
                     + " $DESTDIR/boot/extlinux"
                     + " $DESTDIR/etc/apk/keys",
                     "chmod 1777 $DESTDIR/tmp $DESTDIR/var/tmp",
+                    # /var/run and /var/lock are symlinks into /run, the
+                    # convention every modern distro relies on — dbus,
+                    # systemd, and OpenRC all place runtime sockets and
+                    # pidfiles under /run. A real /var/run directory
+                    # splits them: a socket created at
+                    # /run/dbus/system_bus_socket is then invisible at
+                    # /var/run/dbus, and clients that resolve the
+                    # /var/run path (NetworkManager reaching the system
+                    # bus) fail with "No such file or directory".
+                    "ln -sf /run $DESTDIR/var/run",
+                    "ln -sf /run/lock $DESTDIR/var/lock",
                 ]
                 + _runlevel_commands()
                 + users_commands(users)
                 + [
+                    # Root's login shell is bash on Debian (the distro
+                    # convention; bash is in every Debian image's
+                    # essential set) but stays the busybox /bin/sh
+                    # default on Alpine. users_commands wrote /bin/sh
+                    # above; rewrite root's entry to bash when this
+                    # build targets Debian. $DISTRO is the consuming
+                    # image's effective distro, set by the build.
+                    "if [ x$DISTRO = xdebian ]; then" +
+                    " sed -i '/^root:/ s#:/bin/sh$#:/bin/bash#'" +
+                    " $DESTDIR/etc/passwd; fi",
                     install_template("inittab.tmpl", "$DESTDIR/etc/inittab"),
                     install_template("os-release.tmpl", "$DESTDIR/etc/os-release"),
                     install_file("extlinux.conf",
@@ -100,6 +144,7 @@ def base_files(name = "base-files", users = None):
                     # paths come in via $YOE_KEYS_DIR / $YOE_KEY_NAME.
                     "cp \"$YOE_KEYS_DIR/$YOE_KEY_NAME\" \"$DESTDIR/etc/apk/keys/$YOE_KEY_NAME\"",
                 ]
+                + ssh_dev_steps
             )),
         ],
     )

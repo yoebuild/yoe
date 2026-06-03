@@ -581,6 +581,12 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		"NPROC":           NProc(),
 		"ARCH":            opts.Arch,
 		"MACHINE":         opts.Machine,
+		// The consuming image's effective distro, so a build-twice
+		// source unit can branch on it (e.g. base-files giving root a
+		// bash login shell on Debian but the busybox /bin/sh on
+		// Alpine). Already a unit-hash input, so this only surfaces what
+		// the cache key already distinguishes.
+		"DISTRO": opts.EffectiveDistro,
 		"CONSOLE":         console,
 		"HOME":            "/tmp",
 		"PATH":            "/build/sysroot/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
