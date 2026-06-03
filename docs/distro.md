@@ -161,6 +161,20 @@ much each package format does at install time (apk extracts; dpkg also runs
 maintainer scripts), so it widens with package count and on foreign-arch targets
 where those scripts run under emulation.
 
+**Footprint.** The two backends differ sharply in size. The minimal boot + SSH
+image — the platform floor for a device you can log into, with no developer
+tooling on either side (kernel, init, libc, shell, package manager, `sshd`,
+DHCP, one login user) — is about **85 MB on Alpine and ~405 MB on Debian** on a
+`qemu-x86_64` target (Debian trixie), roughly 4.8×. Most of the gap is the stock
+`linux-image-amd64` kernel, which ships a driver for every machine it might ever
+run on; Alpine here boots a kernel yoe built from source and tailored to the
+target, so its module tree is a few megabytes rather than ~107 MB. A production
+Debian image can swap in a tailored kernel too — out of the box, the distro
+kernel brings everything. The remainder is the platform itself: glibc and its
+multiarch libraries, systemd, the full apt/dpkg stack, complete coreutils
+instead of busybox applets. Alpine's musl + busybox + OpenRC base is simply
+lighter, and on a device that difference compounds.
+
 If you don't have a hard reason for debian — a vendor-supplied binary, a
 glibc-only library, a fleet already running debian — start with alpine. The
 defaults work, the cache hits land, and the boot-and-SSH path has miles on it.
