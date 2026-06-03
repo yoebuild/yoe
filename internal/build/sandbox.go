@@ -75,6 +75,19 @@ func RunSimple(cfg *SandboxConfig, command string) error {
 	for k, v := range cfg.Env {
 		envExports = append(envExports, fmt.Sprintf("export %s=%q", k, v))
 	}
+	// Privileged (NoUser) runs are container-native image-assembly steps —
+	// mmdebstrap, mkfs, mount, losetup, chroot, mcopy, extlinux — never
+	// source compilation. The build env prepends /build/sysroot/usr/bin to
+	// PATH so source units find their freshly built toolchain, but under
+	// root that shadows the container's own tools with the sysroot's
+	// target-arch copies. The sysroot's mount/umount are setuid binaries
+	// owned by the host build user, so the setuid bit drops the effective
+	// uid below root and `mount` fails with "must be superuser" even inside
+	// the privileged container. Force the container's native PATH for these
+	// steps (this export comes last, so it wins over cfg.Env's PATH).
+	if cfg.NoUser {
+		envExports = append(envExports, `export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"`)
+	}
 	fullCmd := strings.Join(envExports, "; ")
 	if fullCmd != "" {
 		fullCmd += "; "

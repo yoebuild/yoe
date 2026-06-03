@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Debian images build reliably again.** Image assembly no longer aborts with a
+  `mount: must be superuser` error partway through building the root filesystem
+  and bootable disk, so Debian images such as the dev-image complete instead of
+  failing.
+- **`yoe tui displays distro in status header`**
 - **`yoe build` takes a `--distro` flag.** When the same image name exists in
   more than one distro (say a `base-image` from both the Alpine and Debian
   modules), you can now pick which one to build for a single command —
