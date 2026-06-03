@@ -8,6 +8,7 @@
 
 ## Next
 
+- Update Alpine to v3.23
 - Should image settings only show images for configured distro?
 - Can we start yoe without a distro setting and select distro based on image
   distro field?
