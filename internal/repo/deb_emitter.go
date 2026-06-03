@@ -26,14 +26,6 @@ import (
 // publish + regenerate cycle.
 var debPublishMu sync.Mutex
 
-// DebianSuite is the single Debian codename yoe publishes today. The
-// repo emitter stamps it into Release/InRelease, image assembly reads
-// the matching dists/<suite>/ index, and the on-target deploy writes it
-// into the apt sources.list line — so they all share this constant and
-// cannot drift apart. When the suite becomes project-configurable, this
-// is the seam to replace.
-const DebianSuite = "bookworm"
-
 // DebRepoOptions configures the project's Debian-format repo emitter.
 type DebRepoOptions struct {
 	// RepoDir is the repo root: per-project we expect this caller to

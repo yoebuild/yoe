@@ -449,6 +449,36 @@ func (p *Project) EffectiveDistro() (string, error) {
 	return "", fmt.Errorf("project has no defaults.distro (set defaults.distro on project)")
 }
 
+// DebianSuite returns the Debian release codename the project targets,
+// read from its debian_feed(...) declarations — the single source of the
+// codename that the project repo emitter (dists/<suite>/), image
+// assembly (the mmdebstrap target), and the on-device apt sources.list
+// all stamp. Every Debian feed in a project must agree on the suite (the
+// toolchain container pins one Debian release, and libc from a different
+// release can't safely mix), so this also enforces the one-suite-per-
+// project rule. Errors when no debian_feed is present: a Debian image
+// build needs one to source the codename.
+func (p *Project) DebianSuite() (string, error) {
+	if p == nil {
+		return "", fmt.Errorf("DebianSuite: nil project")
+	}
+	suite := ""
+	for _, sm := range p.SyntheticModules {
+		if sm == nil || sm.Suite == "" {
+			continue // not a Debian feed
+		}
+		if suite == "" {
+			suite = sm.Suite
+		} else if sm.Suite != suite {
+			return "", fmt.Errorf("project declares multiple Debian suites (%q and %q); one Debian suite per project", suite, sm.Suite)
+		}
+	}
+	if suite == "" {
+		return "", fmt.Errorf("no debian_feed declares a suite; a Debian image build needs a debian_feed(...) in a module")
+	}
+	return suite, nil
+}
+
 // QEMUPorts returns the port mappings from the machine's QEMU config, or nil.
 func (m *Machine) QEMUPorts() []string {
 	if m.QEMU == nil {

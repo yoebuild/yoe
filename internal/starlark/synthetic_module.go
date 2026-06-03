@@ -31,6 +31,14 @@ type SyntheticModule struct {
 	// view (R17) to group feeds under their parent.
 	Parent string
 
+	// Suite is the Debian release codename this feed declares
+	// (debian_feed's `suite` kwarg, e.g. "bookworm"). Empty for
+	// non-Debian feeds — alpine_feed leaves it unset. Project.DebianSuite
+	// reads it as the single source of the codename the repo emitter,
+	// image assembly, and the on-device apt sources.list all stamp, so
+	// the suite lives only in the module's debian_feed(...) call.
+	Suite string
+
 	// Priority is the resolver-priority index of this synthetic module.
 	// Synthetic modules rank below every non-feed module per R5; the
 	// loader assigns each registered synthetic an index that is

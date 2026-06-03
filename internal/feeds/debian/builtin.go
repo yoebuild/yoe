@@ -129,6 +129,7 @@ func buildSyntheticModule(eng *yoestar.Engine, composedName, parent, indexRoot s
 	return &yoestar.SyntheticModule{
 		Name:   composedName,
 		Parent: parent,
+		Suite:  args.suite,
 		Lookup: func(name string) (*yoestar.Unit, error) {
 			return s.lookup(composedName, name)
 		},

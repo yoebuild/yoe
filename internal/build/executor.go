@@ -606,6 +606,20 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		"REPO":            filepath.Join("/project", repoRelPath(proj, opts.ProjectDir), opts.EffectiveDistro),
 	}
 
+	// Expose the Debian release codename to the build as $SUITE so the
+	// image class's mmdebstrap invocation targets the same suite the repo
+	// emitter stamps, both sourced from the project's debian_feed. Only
+	// meaningful for Debian; an alpine build has no debian_feed and skips
+	// it. Errors loudly if a Debian build can't resolve a suite — the
+	// rootfs assembly can't proceed without one.
+	if opts.EffectiveDistro == "debian" {
+		suite, serr := proj.DebianSuite()
+		if serr != nil {
+			return fmt.Errorf("resolving debian suite: %w", serr)
+		}
+		env["SUITE"] = suite
+	}
+
 	// Expose the project's signing key info so units that need to ship the
 	// public key (e.g., base-files installs it under /etc/apk/keys/) can
 	// find it without hard-coding paths. YOE_KEYS_DIR is a directory; the
@@ -661,9 +675,13 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	// file or directory"). GenerateDebianIndex scans the pool, so a
 	// refresh here always matches what is actually on disk.
 	if unit.Class == "image" && opts.EffectiveDistro == "debian" {
+		suite, serr := proj.DebianSuite()
+		if serr != nil {
+			return fmt.Errorf("refresh debian index: %w", serr)
+		}
 		if err := repo.GenerateDebianIndex(repo.DebRepoOptions{
 			RepoDir:    repo.RepoDistroDir(proj, opts.ProjectDir, "debian"),
-			Suite:      repo.DebianSuite,
+			Suite:      suite,
 			Components: []string{"main"},
 			Arches:     []string{"amd64", "arm64"},
 		}); err != nil {
@@ -884,10 +902,14 @@ func packageDeb(unit *yoestar.Unit, destDir, srcDir, buildDir string, opts Optio
 
 	// Publish into the project pool and regenerate the per-arch
 	// Packages + Release + InRelease at repo/<project>/debian/.
+	suite, err := proj.DebianSuite()
+	if err != nil {
+		return fmt.Errorf("packaging deb: %w", err)
+	}
 	repoDir := repo.RepoDistroDir(proj, opts.ProjectDir, "debian")
 	publishOpts := repo.DebRepoOptions{
 		RepoDir:    repoDir,
-		Suite:      repo.DebianSuite,
+		Suite:      suite,
 		Components: []string{"main"},
 		Arches:     []string{"amd64", "arm64"},
 	}

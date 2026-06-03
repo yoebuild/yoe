@@ -14,7 +14,6 @@ import (
 	"github.com/yoebuild/yoe/internal/build"
 	"github.com/yoebuild/yoe/internal/device"
 	"github.com/yoebuild/yoe/internal/feed"
-	"github.com/yoebuild/yoe/internal/repo"
 	"github.com/yoebuild/yoe/internal/resolve"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
@@ -119,15 +118,22 @@ func (m model) startDeployCmd() tea.Cmd {
 		}
 
 		installVerb := "apk del + apk add"
+		suite := ""
 		if distro == "debian" {
 			installVerb = "apt-get install --reinstall"
+			// Suite stamps the apt sources.list line; read it from the
+			// project's debian_feed. Only for Debian — an alpine project
+			// has no debian_feed and ignores the suite.
+			if suite, err = proj.DebianSuite(); err != nil {
+				return deployDoneMsg{err: err}
+			}
 		}
 		emit(fmt.Sprintf("→ ssh %s — %s %s", target.Host, installVerb, unitName))
 		err = device.Deploy(ctx, device.DeployInput{
 			Target:  target,
 			Unit:    unitName,
 			Distro:  distro,
-			Suite:   repo.DebianSuite, // ignored for alpine targets
+			Suite:   suite,
 			FeedURL: feedURL,
 			Out:     lineWriter{emit: emit},
 		})
