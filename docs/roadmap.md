@@ -8,6 +8,8 @@
 
 ## Next
 
+- Script on both Alpine and Debian to add upstream feeds for runtime
+  development.
 - Custom Linux kernel in Debian.
 - Build container packages and deploy to target.
 - vcpkg (seems popular, Rust uses it)
