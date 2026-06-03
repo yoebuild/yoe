@@ -161,6 +161,41 @@ alpine_feed(
 	}
 }
 
+func TestPeekModuleInfo_TolerantOfDebianFeed(t *testing.T) {
+	// Same contract as the alpine_feed peek test: without a no-op stub
+	// for debian_feed, Starlark's compile-time resolver aborts the peek
+	// before module_info runs. The loader then falls back to the
+	// directory basename ("module-debian") and the synthetic feeds end
+	// up with Parent = "module-debian", surfacing the wrong distro name
+	// in the TUI's Default Distro picker.
+	dir := t.TempDir()
+	src := `module_info(name = "debian", description = "test")
+
+debian_feed(
+    name = "main",
+    url = "https://deb.debian.org/debian",
+    suite = "bookworm",
+    component = "main",
+    arches = ["amd64"],
+    index = "feeds/main",
+    keyring = "keys/k.gpg",
+)
+`
+	if err := os.WriteFile(filepath.Join(dir, "MODULE.star"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info := peekModuleInfo(dir)
+	if info == nil {
+		t.Fatal("peekModuleInfo returned nil")
+	}
+	if info.Name != "debian" {
+		t.Errorf("Name = %q, want %q", info.Name, "debian")
+	}
+	if info.Description != "test" {
+		t.Errorf("Description = %q", info.Description)
+	}
+}
+
 // writeProjectFiles materializes a {relpath: content} map under root.
 func writeProjectFiles(root string, files map[string]string) error {
 	for rel, content := range files {

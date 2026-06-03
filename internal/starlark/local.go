@@ -39,6 +39,12 @@ type LocalOverrides struct {
 	// ParallelBuilds caps how many units `yoe build` builds concurrently.
 	// Zero means "not set" — the build picks its own default.
 	ParallelBuilds int
+	// DefaultDistroOverride is the per-developer effective-distro
+	// override. Wins over PROJECT.star's default_distro but loses to
+	// an explicit image-level distro. Empty means "no override; honor
+	// PROJECT.star". Populated by the TUI Setup → Default Distro
+	// picker.
+	DefaultDistroOverride string
 }
 
 // LoadLocalOverrides reads <projectDir>/local.star if it exists and
@@ -103,6 +109,8 @@ func LoadLocalOverrides(projectDir string) (LocalOverrides, error) {
 				captured.FlashDevice = string(v)
 			case "query":
 				captured.Query = string(v)
+			case "default_distro_override":
+				captured.DefaultDistroOverride = string(v)
 			case "qemu_memory":
 				captured.QEMUMemory = string(v)
 			case "qemu_display":
@@ -150,6 +158,9 @@ func WriteLocalOverrides(projectDir string, ov LocalOverrides) error {
 	}
 	if ov.Query != "" {
 		fmt.Fprintf(&b, "    query = %q,\n", ov.Query)
+	}
+	if ov.DefaultDistroOverride != "" {
+		fmt.Fprintf(&b, "    default_distro_override = %q,\n", ov.DefaultDistroOverride)
 	}
 	if ov.QEMUMemory != "" {
 		fmt.Fprintf(&b, "    qemu_memory = %q,\n", ov.QEMUMemory)

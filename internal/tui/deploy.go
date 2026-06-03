@@ -87,12 +87,17 @@ func (m model) startDeployCmd() tea.Cmd {
 		defer cancel()
 		// Build the runtime closure, not just the leaf unit, so the device's
 		// apk add can resolve every dep against the feed.
-		closure := resolve.RuntimeClosure(proj, []string{unitName})
+		distro, err := proj.EffectiveDistro()
+		if err != nil {
+			return deployDoneMsg{err: fmt.Errorf("deploy: %w", err)}
+		}
+		closure := resolve.RuntimeClosure(proj, []string{unitName}, distro)
 		if err := build.BuildUnits(proj, closure, build.Options{
-			Ctx:        ctx,
-			ProjectDir: projectDir,
-			Arch:       arch,
-			Machine:    machine,
+			Ctx:             ctx,
+			ProjectDir:      projectDir,
+			Arch:            arch,
+			Machine:         machine,
+			EffectiveDistro: distro,
 		}, buildOut); err != nil {
 			return deployDoneMsg{err: fmt.Errorf("build %s: %w", unitName, err)}
 		}
@@ -112,10 +117,23 @@ func (m model) startDeployCmd() tea.Cmd {
 			return deployDoneMsg{err: err}
 		}
 
-		emit(fmt.Sprintf("→ ssh %s — apk del + apk add %s", target.Host, unitName))
+		installVerb := "apk del + apk add"
+		suite := ""
+		if distro == "debian" {
+			installVerb = "apt-get install --reinstall"
+			// Suite stamps the apt sources.list line; read it from the
+			// project's debian_feed. Only for Debian — an alpine project
+			// has no debian_feed and ignores the suite.
+			if suite, err = proj.DebianSuite(); err != nil {
+				return deployDoneMsg{err: err}
+			}
+		}
+		emit(fmt.Sprintf("→ ssh %s — %s %s", target.Host, installVerb, unitName))
 		err = device.Deploy(ctx, device.DeployInput{
 			Target:  target,
 			Unit:    unitName,
+			Distro:  distro,
+			Suite:   suite,
 			FeedURL: feedURL,
 			Out:     lineWriter{emit: emit},
 		})

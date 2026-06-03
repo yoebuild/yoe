@@ -1,24 +1,71 @@
 package starlark
 
-import "go.starlark.net/starlark"
+import (
+	"fmt"
+	"iter"
+
+	"go.starlark.net/starlark"
+)
 
 // Project represents an evaluated PROJECT.star.
 type Project struct {
-	Name      string
-	Version   string
-	Defaults  Defaults
-	Cache     CacheConfig
-	Sources   SourcesConfig
-	Modules   []ModuleRef
-	Machines  map[string]*Machine
-	Units     map[string]*Unit
+	Name     string
+	Version  string
+	Defaults Defaults
+	Cache    CacheConfig
+	Sources  SourcesConfig
+	Modules  []ModuleRef
+	Machines map[string]*Machine
 
-	// PreferModules pins a unit name to a specific module, overriding the
-	// default last-module-wins shadow resolution. Set in PROJECT.star via
-	// `prefer_modules = {"xz": "alpine", ...}`. The keyed unit registers
-	// only from the named module; same-named units from other modules are
-	// silently shadowed even if they have higher module priority.
-	PreferModules map[string]string
+	// UnitsByModule is the primary unit storage: [moduleName][unitName]*Unit.
+	// Every unit registers under its declaring module's canonical name; same-
+	// named units from different modules (e.g. libcap2 from alpine.main and
+	// debian.main) coexist as separate entries here. Module name is the
+	// canonical name from module_info(name=...) for real modules or the
+	// synthetic module's Name (alpine.main, debian.main) for feed-materialized
+	// units. The project root's units register under the empty string "".
+	UnitsByModule map[string]map[string]*Unit
+
+	// DistroViews maps a consuming image's effective distro to a per-distro
+	// resolved view: [distro][unitName]*Unit. Precomputed at load time after
+	// all registrations and prefer_modules pins settle. Read-only after
+	// construction; LookupUnit consults this for O(1) per-distro lookup.
+	// A distro key is present whenever any unit is registered for it (either
+	// tagged or materialized), even if the view is sparse.
+	DistroViews map[string]map[string]*Unit
+
+	// DefaultDistro is the project-wide effective-distro fallback used by
+	// image units that don't set their own `distro` field. The cascade
+	// resolves an image's effective distro as:
+	//     image.distro -> DefaultDistroOverride -> DefaultDistro -> error
+	// See EffectiveDistroForImage.
+	DefaultDistro string
+
+	// DefaultDistroOverride is the per-developer default-distro override
+	// from local.star (not committed). Wins over DefaultDistro but loses
+	// to an explicit image-level `distro`. Empty means "no override".
+	// Surfaced via the TUI Default Distro picker.
+	DefaultDistroOverride string
+
+	// PreferModules pins a unit name to a specific module per distro,
+	// overriding the default module-priority resolution at closure-walk
+	// time. Outer key is the consuming image's effective distro; inner
+	// key is the unit name; value is the pinned module name. Example
+	// PROJECT.star:
+	//
+	//	prefer_modules = {
+	//	    "alpine": {"xz": "alpine.main", "zstd": "alpine.main"},
+	//	    "debian": {"libssl3": "debian.main"},
+	//	}
+	//
+	// A pin only fires for closures whose effective distro matches the
+	// outer key — pinning xz to alpine.main has no effect on a debian
+	// closure walk. Pins are consulted by lookupOrMaterialize before
+	// the default catalog lookup, so a pinned synthetic module wins
+	// even when a higher-priority real module would otherwise satisfy
+	// the name. Empty value (or missing key) leaves resolution to the
+	// default module-priority order.
+	PreferModules map[string]map[string]string
 
 	// Provides maps a virtual package name (e.g. "linux") to the concrete
 	// unit name that provides it after override resolution. Populated by
@@ -185,6 +232,253 @@ type QEMUConfig struct {
 	Ports    []string // host:guest port mappings for user-mode networking
 }
 
+// EffectiveDistroForImage returns the effective distro for the named
+// image after applying the cascade:
+//
+//	image.distro -> DefaultDistroOverride -> DefaultDistro -> error
+//
+// When multiple modules ship same-named images (alpine.dev-image AND
+// debian.dev-image), variant selection consults the project's
+// effective distro first: the variant whose Distro matches the
+// project default (or override) wins, even when a higher-priority
+// module ships a different-distro variant. Only when the project
+// default has no visible variant does AnyUnit's module-priority
+// pick decide — that's the "debian-only image inside an alpine
+// project" case where the user explicitly named the cross-distro
+// image.
+//
+// Error: the named image isn't an image-class unit, isn't in the
+// project, or has no resolvable distro after the cascade.
+func (p *Project) EffectiveDistroForImage(imageName string) (string, error) {
+	if p == nil {
+		return "", fmt.Errorf("EffectiveDistroForImage: nil project")
+	}
+	// Prefer the variant visible in the project's effective-distro
+	// view so an alpine project picks alpine.dev-image even when
+	// module-debian sits at higher module priority and also ships a
+	// dev-image.
+	projDistro := p.DefaultDistroOverride
+	if projDistro == "" {
+		projDistro = p.DefaultDistro
+	}
+	var u *Unit
+	if projDistro != "" {
+		u = p.LookupUnit(projDistro, imageName)
+	}
+	if u == nil {
+		u = p.AnyUnit(imageName)
+	}
+	if u == nil {
+		return "", fmt.Errorf("EffectiveDistroForImage: unit %q not found", imageName)
+	}
+	if u.Class != "image" {
+		return "", fmt.Errorf("EffectiveDistroForImage: unit %q is not an image (class=%q)", imageName, u.Class)
+	}
+	if u.Distro != "" {
+		return u.Distro, nil
+	}
+	if p.DefaultDistroOverride != "" {
+		return p.DefaultDistroOverride, nil
+	}
+	if p.DefaultDistro != "" {
+		return p.DefaultDistro, nil
+	}
+	return "", fmt.Errorf("image %q has no distro and project has no defaults.distro (set distro on the image or defaults.distro on project)", imageName)
+}
+
+// SetFlatUnits is a test helper that registers a name→*Unit map under
+// the project-root module key in UnitsByModule. Production code never
+// calls this — the loader builds UnitsByModule through per-module
+// registration. Tests that hand-construct a Project use this to
+// populate the catalog without going through the loader.
+func (p *Project) SetFlatUnits(units map[string]*Unit) {
+	if p == nil {
+		return
+	}
+	if p.UnitsByModule == nil {
+		p.UnitsByModule = make(map[string]map[string]*Unit, 1)
+	}
+	p.UnitsByModule[""] = units
+}
+
+// LookupUnit returns the unit visible to a closure walk in the given
+// distro, or nil if no such unit exists. Consults the precomputed
+// DistroViews built at load time — O(1) per lookup, no module-priority
+// rescan, no synthetic walk. For callers without a distro context
+// (TUI list-all, single-unit CLI helpers), pass the project's
+// effective distro; for image-scoped consumers, pass
+// EffectiveDistroForImage(imageName).
+//
+// When DistroViews is entirely empty — hand-constructed test
+// fixtures skip the buildDistroViews pass that the loader runs —
+// LookupUnit falls through to AnyUnit so unit tests keep working
+// without per-test view wiring. Once a project has ANY DistroViews
+// entry the fallback turns off, so "unknown distro" returns nil
+// rather than silently matching some other distro's variant.
+func (p *Project) LookupUnit(distro, name string) *Unit {
+	if p == nil {
+		return nil
+	}
+	if view, ok := p.DistroViews[distro]; ok {
+		if u, ok := view[name]; ok {
+			return u
+		}
+		return nil
+	}
+	if len(p.DistroViews) > 0 {
+		return nil
+	}
+	return p.AnyUnit(name)
+}
+
+// AnyUnit returns the unit registered under `name` from the highest-
+// priority module that has one, or nil if no module has one. Used by
+// callers that need to inspect a unit before knowing its consuming
+// distro — most notably EffectiveDistroForImage, which reads the
+// image's own Distro field to compute the very distro a LookupUnit
+// call would need. Module priority (highest ModuleIndex wins;
+// project root is strictly above any declared module) mirrors the
+// shadow-resolution semantics of the legacy flat catalog so "the
+// unit named X" is unambiguous when modules overlap.
+func (p *Project) AnyUnit(name string) *Unit {
+	if p == nil {
+		return nil
+	}
+	var best *Unit
+	for _, byName := range p.UnitsByModule {
+		u, ok := byName[name]
+		if !ok {
+			continue
+		}
+		if best == nil || u.ModuleIndex > best.ModuleIndex {
+			best = u
+		}
+	}
+	return best
+}
+
+// AllUnits returns an iterator over every (name, *Unit) pair across
+// every module in UnitsByModule. Used by callers that need to enumerate
+// the catalog regardless of distro (TUI search, diagnostic dumps). The
+// same name may yield multiple times when different modules registered
+// it for different distros — consumers that want one entry per name
+// should deduplicate themselves or use DistroViews[distro] iteration.
+func (p *Project) AllUnits() iter.Seq2[string, *Unit] {
+	return func(yield func(string, *Unit) bool) {
+		if p == nil {
+			return
+		}
+		for _, byName := range p.UnitsByModule {
+			for name, u := range byName {
+				if !yield(name, u) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// ResolveProvidesForDistro finds the unit that provides `virtual` whose
+// Distro matches `effectiveDistro`. When effectiveDistro is non-empty,
+// the fallback to the global proj.Provides table is FILTERED: a global
+// provider whose Distro tag conflicts with the walk's distro is treated
+// as a miss (untagged providers still satisfy the lookup since they're
+// distro-neutral).
+//
+// Used by the closure walker to dispatch a virtual reference like
+// Container="toolchain" to the concrete container unit matching the
+// consuming image's effective distro — R9 dispatch via the provides
+// table plus R21a's per-unit visibility filter.
+//
+// Returns "" when no provider exists for the effective distro. Empty
+// effectiveDistro mirrors the global table (no distro filtering).
+func (p *Project) ResolveProvidesForDistro(virtual, effectiveDistro string) string {
+	if p == nil || virtual == "" {
+		return ""
+	}
+	// First: a unit with the same name visible in the per-distro view
+	// wins (R21a tagged-wins on direct name lookup). Untagged units
+	// satisfy every distro; tagged units only their own.
+	if effectiveDistro != "" {
+		if u := p.LookupUnit(effectiveDistro, virtual); u != nil && (u.Distro == effectiveDistro || u.Distro == "") {
+			if u.Distro == effectiveDistro {
+				return u.Name
+			}
+		}
+	}
+	// Second: walk units tagged for effectiveDistro for a Provides match.
+	if effectiveDistro != "" {
+		for _, byName := range p.UnitsByModule {
+			for _, u := range byName {
+				if u.Distro != effectiveDistro {
+					continue
+				}
+				for _, v := range u.Provides {
+					if v == virtual {
+						return u.Name
+					}
+				}
+			}
+		}
+	}
+	// Fall back to the global mapping. Untagged providers serve every
+	// distro; cross-distro tagged providers reach this fall-through
+	// when the closure walker has no per-distro alternative yet.
+	return p.Provides[virtual]
+}
+
+
+// EffectiveDistro returns the project's effective distro without an
+// image scope: DefaultDistroOverride -> DefaultDistro -> error.
+//
+// Used by callers that operate on a single unit rather than an image
+// (`yoe deploy <unit>`, TUI single-unit deploy) — they still need a
+// distro to filter the runtime closure walk per R21a, but the unit
+// itself doesn't carry a distro driver. The project's default is the
+// best the caller can do.
+func (p *Project) EffectiveDistro() (string, error) {
+	if p == nil {
+		return "", fmt.Errorf("EffectiveDistro: nil project")
+	}
+	if p.DefaultDistroOverride != "" {
+		return p.DefaultDistroOverride, nil
+	}
+	if p.DefaultDistro != "" {
+		return p.DefaultDistro, nil
+	}
+	return "", fmt.Errorf("project has no defaults.distro (set defaults.distro on project)")
+}
+
+// DebianSuite returns the Debian release codename the project targets,
+// read from its debian_feed(...) declarations — the single source of the
+// codename that the project repo emitter (dists/<suite>/), image
+// assembly (the mmdebstrap target), and the on-device apt sources.list
+// all stamp. Every Debian feed in a project must agree on the suite (the
+// toolchain container pins one Debian release, and libc from a different
+// release can't safely mix), so this also enforces the one-suite-per-
+// project rule. Errors when no debian_feed is present: a Debian image
+// build needs one to source the codename.
+func (p *Project) DebianSuite() (string, error) {
+	if p == nil {
+		return "", fmt.Errorf("DebianSuite: nil project")
+	}
+	suite := ""
+	for _, sm := range p.SyntheticModules {
+		if sm == nil || sm.Suite == "" {
+			continue // not a Debian feed
+		}
+		if suite == "" {
+			suite = sm.Suite
+		} else if sm.Suite != suite {
+			return "", fmt.Errorf("project declares multiple Debian suites (%q and %q); one Debian suite per project", suite, sm.Suite)
+		}
+	}
+	if suite == "" {
+		return "", fmt.Errorf("no debian_feed declares a suite; a Debian image build needs a debian_feed(...) in a module")
+	}
+	return suite, nil
+}
+
 // QEMUPorts returns the port mappings from the machine's QEMU config, or nil.
 func (m *Machine) QEMUPorts() []string {
 	if m.QEMU == nil {
@@ -202,6 +496,18 @@ type Unit struct {
 	Scope       string // "arch" (default), "machine", or "noarch"
 	Description string
 	License     string
+
+	// Distro carries two semantics by class:
+	//   - On a class=="image" unit it drives toolchain selection,
+	//     packaging format, repo subtree, and build-dir prefix.
+	//   - On any other class it is a compatibility tag: the closure
+	//     walker filters out units whose Distro is set and !=
+	//     consuming-image effective distro. An empty Distro means
+	//     "visible to every distro" (the common case).
+	// The hash key includes the image's effective distro (driven by the
+	// image), NOT the unit's compatibility tag — adding a tag to an
+	// existing unit must stay cache-neutral.
+	Distro string
 
 	// Source
 	Source  string // URL or git repo
@@ -222,9 +528,26 @@ type Unit struct {
 	// The path is relative to the unit's srcDir.
 	PassthroughAPK string
 
+	// PassthroughDeb is the Debian sibling of PassthroughAPK: a .deb
+	// file fetched as the unit's source whose bytes flow into the
+	// project's pool/ verbatim (mirror-verbatim per R15). When set,
+	// the build executor skips dpkg-deb --build and just copies the
+	// upstream .deb into the project repo's pool/.
+	PassthroughDeb string
+
 	// Dependencies
 	Deps        []string
 	RuntimeDeps []string
+
+	// Per-consumer-distro dep additions. Combined with Deps /
+	// RuntimeDeps at closure walk and build time via
+	// DepsForDistro / RuntimeDepsForDistro. Lets a single source
+	// unit express that it needs python3 on alpine but python3.11
+	// on debian, libzstd1 on debian but zstd on alpine, etc. —
+	// without baking one distro's names in at registration time and
+	// breaking closure walks for the other distro.
+	DistroDeps        map[string][]string
+	DistroRuntimeDeps map[string][]string
 
 	// Build
 	Container     string // default container for all tasks
@@ -319,4 +642,47 @@ var validArchitectures = map[string]bool{
 	"arm64":   true,
 	"riscv64": true,
 	"x86_64":  true,
+}
+
+// DepsForDistro returns the build-time deps that apply to a closure
+// walk in the given distro: unit.Deps (always) plus any
+// distro_deps[distro] additions. Returns Deps unchanged when no
+// per-distro entry exists for the target. Pass "" for distro-less
+// callers (TUI list-all) — they get plain Deps and may miss
+// per-distro additions, which is fine for a search-as-you-type
+// surface.
+func (u *Unit) DepsForDistro(distro string) []string {
+	if u == nil {
+		return nil
+	}
+	if distro == "" || len(u.DistroDeps) == 0 {
+		return u.Deps
+	}
+	extra, ok := u.DistroDeps[distro]
+	if !ok || len(extra) == 0 {
+		return u.Deps
+	}
+	out := make([]string, 0, len(u.Deps)+len(extra))
+	out = append(out, u.Deps...)
+	out = append(out, extra...)
+	return out
+}
+
+// RuntimeDepsForDistro is the runtime-deps sibling of
+// DepsForDistro. Same merge rule: RuntimeDeps + DistroRuntimeDeps[distro].
+func (u *Unit) RuntimeDepsForDistro(distro string) []string {
+	if u == nil {
+		return nil
+	}
+	if distro == "" || len(u.DistroRuntimeDeps) == 0 {
+		return u.RuntimeDeps
+	}
+	extra, ok := u.DistroRuntimeDeps[distro]
+	if !ok || len(extra) == 0 {
+		return u.RuntimeDeps
+	}
+	out := make([]string, 0, len(u.RuntimeDeps)+len(extra))
+	out = append(out, u.RuntimeDeps...)
+	out = append(out, extra...)
+	return out
 }

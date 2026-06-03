@@ -17,9 +17,16 @@ import (
 
 // Prepare sets up the build source directory for a unit:
 // 1. Fetches source (from cache or network)
-// 2. Extracts into build/<unit>/src/ as a git repo with yoe/pin tag
-//    marking the pinned commit
+// 2. Extracts into build/<distro>/<unit>.<scope>/src/ as a git repo with the
+//    yoe/pin tag marking the pinned commit
 // 3. Applies patches from the unit as git commits
+//
+// distro is the consuming image's effective distro; it segregates source
+// trees the same way the build/destdir/sysroot directories are segregated,
+// so an alpine and a debian consumer of the same source unit each have an
+// independent checkout (matters for dev mode and for distro-specific
+// patches). Must be non-empty — the executor always knows the distro by
+// the time it calls Prepare.
 //
 // cachedSourceState is the unit's BuildMeta.SourceState from the previous
 // build (empty for first-time builds). When it's in the dev* family, the
@@ -27,8 +34,11 @@ import (
 // untouched and logs a warning so .star edits surface explicitly. The
 // "commits beyond upstream" fallback covers manually-committed src dirs
 // from before the dev-mode toggle existed.
-func Prepare(projectDir, scopeDir string, unit *yoestar.Unit, cachedSourceState string, w io.Writer) (string, error) {
-	srcDir := filepath.Join(projectDir, "build", unit.Name+"."+scopeDir, "src")
+func Prepare(projectDir, scopeDir, distro string, unit *yoestar.Unit, cachedSourceState string, w io.Writer) (string, error) {
+	if distro == "" {
+		return "", fmt.Errorf("source.Prepare: distro must not be empty (unit %q)", unit.Name)
+	}
+	srcDir := filepath.Join(projectDir, "build", distro, unit.Name+"."+scopeDir, "src")
 
 	// If the cached state says dev* and the src dir still exists, the
 	// user is actively editing it — never overwrite.
@@ -236,6 +246,12 @@ func prepareNonGitSource(cachedPath, destDir, sourceURL string) error {
 		// (GNU tar handles the multi-stream concatenation correctly);
 		// passing it through extractTarball here would only see the
 		// signature segment.
+		return copyBareSource(cachedPath, destDir, urlBasename(sourceURL))
+	case strings.HasSuffix(cachedPath, ".deb"):
+		// .deb files are ar archives carrying control.tar + data.tar (gz /
+		// xz / zst). Bare-copy so the install task can shell to
+		// `dpkg-deb --fsys-tarfile <file>.deb | tar -xpf - -C $DESTDIR`,
+		// which knows how to unwrap the ar framing.
 		return copyBareSource(cachedPath, destDir, urlBasename(sourceURL))
 	}
 

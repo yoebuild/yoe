@@ -197,6 +197,19 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		return nil, fmt.Errorf("evaluating %s: %w", projFile, err)
 	}
 
+	// Layer local.star's per-developer overrides on top of the
+	// project's committed defaults. Today only DefaultDistroOverride
+	// flows through here; the other fields (machine, image, qemu_*,
+	// parallel_builds) are consumed by their own callsites via
+	// LoadLocalOverrides directly.
+	if proj := eng.Project(); proj != nil {
+		if ov, err := LoadLocalOverrides(root); err == nil {
+			if ov.DefaultDistroOverride != "" {
+				proj.DefaultDistroOverride = ov.DefaultDistroOverride
+			}
+		}
+	}
+
 	// Sync modules + walk their MODULE.star for transitive deps in an
 	// iterated sync↔peek fixpoint. Each round: (1) sync the current set,
 	// (2) peek each module for its declared `module_info(deps=...)`,
@@ -320,11 +333,21 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		)
 	}
 
+	var (
+		defaultDistro         string
+		defaultDistroOverride string
+	)
+	if proj := eng.Project(); proj != nil {
+		defaultDistro = proj.DefaultDistro
+		defaultDistroOverride = proj.DefaultDistroOverride
+	}
 	ctxFields := starlark.StringDict{
-		"arch":            starlark.String(arch),
-		"machine":         starlark.String(machine),
-		"project_version": starlark.String(projectVersion),
-		"provides":        provides,
+		"arch":                    starlark.String(arch),
+		"machine":                 starlark.String(machine),
+		"project_version":         starlark.String(projectVersion),
+		"provides":                provides,
+		"default_distro":          starlark.String(defaultDistro),
+		"default_distro_override": starlark.String(defaultDistroOverride),
 	}
 	if activeMachine != nil {
 		ctxFields["machine_config"] = buildMachineConfigStruct(activeMachine)
@@ -429,6 +452,16 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 				existingName := string(existing.(starlark.String))
 				// Look up the existing unit to compare module priority.
 				existingUnit := eng.Units()[existingName]
+				// Two units providing the same virtual but with different
+				// Distro tags are not a collision per R21a — each is
+				// visible only to its own distro's closure, and the
+				// closure walker dispatches via ResolveProvidesForDistro.
+				// The single-keyed proj.Provides table picks one as the
+				// global default; the distro-aware lookup overrides it
+				// per-walk.
+				if existingUnit != nil && u.Distro != "" && existingUnit.Distro != "" && u.Distro != existingUnit.Distro {
+					continue
+				}
 				if existingUnit == nil || u.ModuleIndex == existingUnit.ModuleIndex {
 					if !eng.allowDuplicateProvides {
 						return nil, fmt.Errorf("virtual package %q provided by both %q and %q",
@@ -489,7 +522,7 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	}
 
 	proj.Machines = eng.Machines()
-	proj.Units = eng.Units()
+	proj.UnitsByModule = eng.UnitsByModule()
 	proj.ResolvedModules = resolvedForProject
 	proj.Diagnostics.Shadows = eng.Shadows()
 
@@ -531,9 +564,11 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	// Compute duplicate-provides diagnostics: every virtual claimed by
 	// more than one unit. The active provider in proj.Provides is the
 	// winner; the rest go in Others. Sorted by virtual name and then by
-	// unit name so the diagnostics tab is deterministic.
+	// unit name so the diagnostics tab is deterministic. Walk the
+	// per-module catalog so cross-distro siblings each contribute
+	// their own Provides claims.
 	virtToUnits := map[string][]string{}
-	for _, u := range proj.Units {
+	for _, u := range proj.AllUnits() {
 		for _, virt := range u.Provides {
 			if virt == "" {
 				continue
@@ -565,8 +600,11 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		})
 	}
 
-	// Validate: units with tasks must have container and container_arch.
-	for name, u := range proj.Units {
+	// Validate: units with tasks must have container and
+	// container_arch. Walk every registered unit (across modules)
+	// since the requirement applies to all variants, not just the
+	// project default's view.
+	for name, u := range proj.AllUnits() {
 		if len(u.Tasks) == 0 {
 			continue // metadata-only units
 		}
@@ -589,20 +627,58 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	// would fail with "depends on X, which does not exist" unless we
 	// materialize those names here. Iterate to fixpoint in case a
 	// newly-materialized unit pulls in further synthetic deps.
+	//
+	// Distro-aware: an untagged unit consumed by both alpine and
+	// debian closures needs each dep materialized in each distro
+	// context, because the synthetic feed for that distro is the
+	// only thing that can satisfy alpine vs debian package names
+	// (e.g. py3-setuptools vs python3-setuptools). Without this, the
+	// first walk wins eng.units[name] for one distro and the other
+	// distro's BuildDAG silently drops the dep as missing.
+	distroSet := map[string]struct{}{}
+	if proj := eng.Project(); proj != nil {
+		if proj.DefaultDistro != "" {
+			distroSet[proj.DefaultDistro] = struct{}{}
+		}
+		if proj.DefaultDistroOverride != "" {
+			distroSet[proj.DefaultDistroOverride] = struct{}{}
+		}
+	}
+	for _, u := range eng.Units() {
+		if u.Class == "image" && u.Distro != "" {
+			distroSet[u.Distro] = struct{}{}
+		}
+	}
 	for {
 		added := 0
-		for name, unit := range eng.Units() {
-			for _, dep := range unit.Deps {
-				resolved := eng.resolveProvides(dep)
-				if _, ok := eng.Units()[resolved]; ok {
+		for d := range distroSet {
+			for name, unit := range eng.Units() {
+				if !visibleToDistro(unit, d) {
 					continue
 				}
-				u, err := eng.lookupOrMaterialize(resolved)
-				if err != nil {
-					return nil, fmt.Errorf("materializing build-time dep %q of unit %q: %w", dep, name, err)
-				}
-				if u != nil {
-					added++
+				// Walk both Deps (build-time) and RuntimeDeps for
+				// the consuming distro, including any distro_deps /
+				// distro_runtime_deps additions. For debian-style
+				// split packages, build-time consumers need the
+				// runtime closure of each build dep to be materialized
+				// so AssembleSysroot can stage every piece
+				// (libpython3.11-stdlib, libpython3.11-minimal,
+				// libssl3, libexpat1, ...) — not just the wrapper deb
+				// the unit names directly. Alpine's monolithic apks
+				// converge in one hop; debian's fan-out walks deeper.
+				edges := append(append([]string{}, unit.DepsForDistro(d)...), unit.RuntimeDepsForDistro(d)...)
+				for _, dep := range edges {
+					resolved := eng.resolveProvidesForDistro(dep, d)
+					if eng.findVisibleByName(resolved, d) != nil {
+						continue
+					}
+					u, err := eng.lookupOrMaterialize(resolved, d)
+					if err != nil {
+						return nil, fmt.Errorf("materializing dep %q of unit %q (distro %q): %w", dep, name, d, err)
+					}
+					if u != nil {
+						added++
+					}
 				}
 			}
 		}
@@ -621,7 +697,121 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		return nil, err
 	}
 
+	// Refresh UnitsByModule after the build-time dep fixpoint may
+	// have materialized additional synthetic units. The eng map is
+	// the source of truth; reassign so proj.UnitsByModule reflects
+	// every materialization that happened during this load.
+	proj.UnitsByModule = eng.UnitsByModule()
+
+	// Build the per-distro views (R14b). Each consuming image's
+	// effective distro gets its own pre-resolved [name → *Unit] map
+	// so closure-walk and BuildDAG lookups are O(1) without
+	// re-running prefer_modules + module-priority + R21a visibility
+	// on every probe. Cross-distro same-name collisions resolve here
+	// once, not on every closure walk.
+	proj.DistroViews = buildDistroViews(proj)
+
 	return proj, nil
+}
+
+// buildDistroViews precomputes a per-distro resolved [name → *Unit]
+// map from UnitsByModule. For each (name, distro) pair, applies:
+//
+//  1. prefer_modules[distro][name] pin (if set and the pinned module
+//     has a visible unit for this name) — pin wins.
+//  2. Module priority: highest-priority module's unit visible to the
+//     distro wins. Untagged units are visible to every distro; tagged
+//     units only their own.
+//
+// A distro is included in the result if any unit in UnitsByModule is
+// either untagged or tagged for that distro. The project's
+// DefaultDistro and DefaultDistroOverride are also included so
+// callers can rely on those keys existing even if no unit references
+// the distro yet.
+func buildDistroViews(proj *Project) map[string]map[string]*Unit {
+	if proj == nil {
+		return nil
+	}
+	// Collect every distinct distro seen across registered units, plus
+	// the project-level fallbacks.
+	distros := map[string]struct{}{}
+	if proj.DefaultDistro != "" {
+		distros[proj.DefaultDistro] = struct{}{}
+	}
+	if proj.DefaultDistroOverride != "" {
+		distros[proj.DefaultDistroOverride] = struct{}{}
+	}
+	for d := range proj.PreferModules {
+		distros[d] = struct{}{}
+	}
+	allNames := map[string]struct{}{}
+	for _, byName := range proj.UnitsByModule {
+		for name, u := range byName {
+			allNames[name] = struct{}{}
+			if u.Distro != "" {
+				distros[u.Distro] = struct{}{}
+			}
+		}
+	}
+
+	views := make(map[string]map[string]*Unit, len(distros))
+	for distro := range distros {
+		view := make(map[string]*Unit, len(allNames))
+		for name := range allNames {
+			if u := resolveForDistro(proj, distro, name); u != nil {
+				view[name] = u
+			}
+		}
+		views[distro] = view
+	}
+	return views
+}
+
+// resolveForDistro picks the right unit for (distro, name) from
+// UnitsByModule. Applies prefer_modules pins first, then falls back
+// to module priority (highest ModuleIndex wins) + R21a visibility.
+// Returns nil when no candidate exists.
+func resolveForDistro(proj *Project, distro, name string) *Unit {
+	// Pin check.
+	if pins, ok := proj.PreferModules[distro]; ok {
+		if pinned, ok := pins[name]; ok && pinned != "" {
+			if byName, ok := proj.UnitsByModule[pinned]; ok {
+				if u, ok := byName[name]; ok && unitVisibleToDistro(u, distro) {
+					return u
+				}
+			}
+		}
+	}
+	// Default: highest-priority module's unit visible to distro.
+	var best *Unit
+	for _, byName := range proj.UnitsByModule {
+		u, ok := byName[name]
+		if !ok {
+			continue
+		}
+		if !unitVisibleToDistro(u, distro) {
+			continue
+		}
+		if best == nil || u.ModuleIndex > best.ModuleIndex {
+			best = u
+		}
+	}
+	return best
+}
+
+// unitVisibleToDistro mirrors the closure walker's visibleToDistro
+// for use from buildDistroViews (which is in the same package but
+// can't import a private walker helper without rearranging).
+// Untagged units are visible to every distro; tagged units only
+// their own.
+func unitVisibleToDistro(u *Unit, distro string) bool {
+	if u == nil {
+		return false
+	}
+	if distro == "" {
+		return true
+	}
+	return u.Distro == "" || u.Distro == distro
 }
 
 // validatePreferModules walks proj.PreferModules and errors when a
@@ -652,32 +842,35 @@ func validatePreferModules(proj *Project) error {
 // validatePreferModules (at end of load) and the early preflight in
 // LoadProjectFromRoot (before resolve_closure runs, so the user sees
 // the helpful fixit instead of a confusing "unresolved name" from
-// the closure walk).
-func preflightPreferModules(prefer map[string]string, known map[string]struct{}) error {
-	for unit, modName := range prefer {
-		if modName == "" {
-			continue
-		}
-		if _, ok := known[modName]; ok {
-			continue
-		}
-		suggestions := suggestModuleNames(modName, known)
-		hint := ""
-		switch len(suggestions) {
-		case 0:
-			// nothing to suggest
-		case 1:
-			hint = fmt.Sprintf(" Did you mean %q?", suggestions[0])
-		default:
-			quoted := make([]string, len(suggestions))
-			for i, s := range suggestions {
-				quoted[i] = fmt.Sprintf("%q", s)
+// the closure walk). Walks the nested-per-distro shape and errors on
+// the first pin whose module name doesn't appear in the known set.
+func preflightPreferModules(prefer map[string]map[string]string, known map[string]struct{}) error {
+	for distro, pins := range prefer {
+		for unit, modName := range pins {
+			if modName == "" {
+				continue
 			}
-			hint = fmt.Sprintf(" Did you mean one of: %s?", strings.Join(quoted, ", "))
+			if _, ok := known[modName]; ok {
+				continue
+			}
+			suggestions := suggestModuleNames(modName, known)
+			hint := ""
+			switch len(suggestions) {
+			case 0:
+				// nothing to suggest
+			case 1:
+				hint = fmt.Sprintf(" Did you mean %q?", suggestions[0])
+			default:
+				quoted := make([]string, len(suggestions))
+				for i, s := range suggestions {
+					quoted[i] = fmt.Sprintf("%q", s)
+				}
+				hint = fmt.Sprintf(" Did you mean one of: %s?", strings.Join(quoted, ", "))
+			}
+			return fmt.Errorf(
+				`prefer_modules[%q] entry %q: %q — module %q not found.%s See docs/module-alpine.md "alpine_feed: declaring a whole repo as one module entry" for the alpine → alpine.main/alpine.community migration.`,
+				distro, unit, modName, modName, hint)
 		}
-		return fmt.Errorf(
-			`prefer_modules entry %q: %q — module %q not found.%s See docs/module-alpine.md "alpine_feed: declaring a whole repo as one module entry" for the alpine → alpine.main/alpine.community migration.`,
-			unit, modName, modName, hint)
 	}
 	return nil
 }
@@ -867,6 +1060,7 @@ func peekModuleInfo(modulePath string) *ModuleInfo {
 		"module_info": moduleInfo,
 		"module":      moduleBuiltin,
 		"alpine_feed": noop,
+		"debian_feed": noop,
 	})
 	return info
 }

@@ -13,11 +13,11 @@ unit(
     version = "0.1.0",
     license = "Apache-2.0",
     description = "Tiny Qt 6 Quick demo rendered to /dev/fb0 via qmlscene",
-    container = "toolchain-musl",
+    container = "toolchain",
     container_arch = "target",
     sandbox = True,
     shell = "bash",
-    deps = ["toolchain-musl"],
+    deps = ["toolchain"],
     # qt6-qtdeclarative ships /usr/lib/qt6/bin/qmlscene plus libQt6Qml /
     # libQt6Quick. qt6-qtbase-x11 (an Alpine packaging quirk — it owns
     # libQt6Gui, libQt6Widgets, and *every* QPA platform plugin

@@ -66,7 +66,7 @@ func TestUpdateSearch_CtrlU_ClearsInput(t *testing.T) {
 		queryCompletions: []string{"in:", "module:"},
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units:    map[string]*yoestar.Unit{},
+			UnitsByModule:    map[string]map[string]*yoestar.Unit{"": {}},
 		},
 	}
 	updated, _ := m.updateSearch(tea.KeyMsg{Type: tea.KeyCtrlU})
@@ -120,7 +120,7 @@ func TestViewModulesTab_RendersSyntheticModules(t *testing.T) {
 	m := model{
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
-			Units:    map[string]*yoestar.Unit{},
+			UnitsByModule:    map[string]map[string]*yoestar.Unit{"": {}},
 			ResolvedModules: []yoestar.ResolvedModule{
 				{Name: "module-core", URL: "https://example.com/core.git"},
 			},
@@ -168,7 +168,7 @@ func TestViewModulesTab_FeedsDoNotPushTopOffScreen(t *testing.T) {
 	m := model{
 		proj: &yoestar.Project{
 			Defaults:        yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
-			Units:           map[string]*yoestar.Unit{},
+			UnitsByModule:           map[string]map[string]*yoestar.Unit{"": {}},
 			ResolvedModules: mods,
 			SyntheticModules: []*yoestar.SyntheticModule{
 				{Name: "alpine.main", Parent: "alpine",
@@ -198,11 +198,11 @@ func TestViewModulesTab_FeedsDoNotPushTopOffScreen(t *testing.T) {
 func TestUnitFromFeed(t *testing.T) {
 	m := model{
 		proj: &yoestar.Project{
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"musl":     {Name: "musl", Module: "alpine.main"},
 				"hello":    {Name: "hello", Module: "module-core", DefinedIn: "/tmp/module-core"},
 				"rootunit": {Name: "rootunit"},
-			},
+			}},
 			SyntheticModules: []*yoestar.SyntheticModule{
 				{Name: "alpine.main", Parent: "alpine"},
 			},
@@ -229,10 +229,10 @@ func TestViewUnitsTab_HelpBarOmitsEditForFeedUnits(t *testing.T) {
 	m := model{
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"musl":  {Name: "musl", Class: "unit", Module: "alpine.main"},
 				"hello": {Name: "hello", Class: "unit", Module: "module-core", DefinedIn: "/tmp/module-core"},
-			},
+			}},
 			SyntheticModules: []*yoestar.SyntheticModule{
 				{Name: "alpine.main", Parent: "alpine"},
 			},
@@ -263,7 +263,7 @@ func TestViewUnitsTab_CompletionsRenderUnderQueryLine(t *testing.T) {
 	m := model{
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
-			Units:    map[string]*yoestar.Unit{},
+			UnitsByModule:    map[string]map[string]*yoestar.Unit{"": {}},
 		},
 		queryEditing:     true,
 		queryInput:       "o",
@@ -285,18 +285,19 @@ func TestViewUnitsTab_CompletionsRenderUnderQueryLine(t *testing.T) {
 
 func TestRefreshUnitSize_PicksUpFreshlyWrittenMeta(t *testing.T) {
 	projDir := t.TempDir()
-	// build/foo.x86_64/build.json
-	buildDir := filepath.Join(projDir, "build", "foo.x86_64")
+	// build/<distro>/foo.x86_64/build.json per R14a.
+	buildDir := filepath.Join(projDir, "build", "alpine", "foo.x86_64")
 	writeMeta(t, buildDir, 4096)
 
 	m := &model{
 		projectDir: projDir,
 		arch:       "x86_64",
+		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit"},
-			},
+			}},
 		},
 	}
 	if m.unitSize["foo"] != 0 {
@@ -313,9 +314,10 @@ func TestRefreshUnitSize_UnknownUnit_NoOp(t *testing.T) {
 	m := &model{
 		projectDir: t.TempDir(),
 		arch:       "x86_64",
+		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units:    map[string]*yoestar.Unit{},
+			UnitsByModule:    map[string]map[string]*yoestar.Unit{"": {}},
 		},
 	}
 	// Should not panic, should not allocate spurious entries.
@@ -365,17 +367,18 @@ func TestSrcStateToken_AllStates(t *testing.T) {
 
 func TestUnitSourceState_ReadsBuildMeta(t *testing.T) {
 	projDir := t.TempDir()
-	buildDir := filepath.Join(projDir, "build", "foo.x86_64")
+	buildDir := filepath.Join(projDir, "build", "alpine", "foo.x86_64")
 	writeMetaWithSourceState(t, buildDir, "dev-mod", "v1.0-3-gabc1234")
 
 	m := model{
 		projectDir: projDir,
 		arch:       "x86_64",
+		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -392,11 +395,12 @@ func TestUnitSourceState_NoBuildMeta_ReturnsEmpty(t *testing.T) {
 	m := model{
 		projectDir: t.TempDir(),
 		arch:       "x86_64",
+		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -407,16 +411,17 @@ func TestUnitSourceState_NoBuildMeta_ReturnsEmpty(t *testing.T) {
 
 func TestRenderSrcCell_DevMod_RendersYellow(t *testing.T) {
 	projDir := t.TempDir()
-	buildDir := filepath.Join(projDir, "build", "foo.x86_64")
+	buildDir := filepath.Join(projDir, "build", "alpine", "foo.x86_64")
 	writeMetaWithSourceState(t, buildDir, "dev-mod", "")
 	m := model{
 		projectDir: projDir,
 		arch:       "x86_64",
+		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -437,11 +442,12 @@ func TestRenderSrcCell_Image_RendersBlank(t *testing.T) {
 	m := model{
 		projectDir: t.TempDir(),
 		arch:       "x86_64",
+		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"my-img": {Name: "my-img", Class: "image"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -481,12 +487,13 @@ func TestDetailSourceLine_ImageReturnsEmpty(t *testing.T) {
 	m := model{
 		projectDir: t.TempDir(),
 		arch:       "x86_64",
+		distro:     "alpine",
 		detailUnit: "my-img",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"my-img": {Name: "my-img", Class: "image"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -497,17 +504,18 @@ func TestDetailSourceLine_ImageReturnsEmpty(t *testing.T) {
 
 func TestDetailSourceLine_DevModSurfacesDescribe(t *testing.T) {
 	projDir := t.TempDir()
-	buildDir := filepath.Join(projDir, "build", "foo.x86_64")
+	buildDir := filepath.Join(projDir, "build", "alpine", "foo.x86_64")
 	writeMetaWithSourceState(t, buildDir, "dev-mod", "v3.4.1-3-gabc1234")
 	m := model{
 		projectDir: projDir,
 		arch:       "x86_64",
+		distro:     "alpine",
 		detailUnit: "foo",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit", Source: "https://example.com/foo.git"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -528,7 +536,7 @@ func TestDetailSourceLine_DevModSurfacesDescribe(t *testing.T) {
 
 func TestDetailSourceLine_BranchTrackingHint(t *testing.T) {
 	projDir := t.TempDir()
-	buildDir := filepath.Join(projDir, "build", "foo.x86_64")
+	buildDir := filepath.Join(projDir, "build", "alpine", "foo.x86_64")
 	srcDir := filepath.Join(buildDir, "src")
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -560,12 +568,13 @@ func TestDetailSourceLine_BranchTrackingHint(t *testing.T) {
 	m := model{
 		projectDir: projDir,
 		arch:       "x86_64",
+		distro:     "alpine",
 		detailUnit: "foo",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit", Source: "https://example.com/foo.git", Tag: "v1.36.1", Branch: "main"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -580,17 +589,18 @@ func TestDetailSourceLine_BranchTrackingHint(t *testing.T) {
 
 func TestDetailSourceLine_PinShowsTag(t *testing.T) {
 	projDir := t.TempDir()
-	buildDir := filepath.Join(projDir, "build", "foo.x86_64")
+	buildDir := filepath.Join(projDir, "build", "alpine", "foo.x86_64")
 	writeMetaWithSourceState(t, buildDir, "pin", "")
 	m := model{
 		projectDir: projDir,
 		arch:       "x86_64",
+		distro:     "alpine",
 		detailUnit: "foo",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit", Source: "https://example.com/foo.git", Tag: "v1.36.1"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -626,11 +636,12 @@ func newModelWithUnit(t *testing.T, projDir, unitName string, state source.State
 	m := model{
 		projectDir: projDir,
 		arch:       "x86_64",
+		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				unitName: {Name: unitName, Class: "unit", Source: "https://example.com/" + unitName + ".git"},
-			},
+			}},
 		},
 		unitSrcStates:   map[string]source.State{unitName: state},
 		moduleSrcStates: map[string]source.State{},
@@ -674,11 +685,12 @@ func TestOpenSourcePromptForUnit_Image_NoOpsWithMessage(t *testing.T) {
 	m := model{
 		projectDir: t.TempDir(),
 		arch:       "x86_64",
+		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"my-img": {Name: "my-img", Class: "image"},
-			},
+			}},
 		},
 		unitSrcStates:   map[string]source.State{},
 		moduleSrcStates: map[string]source.State{},
@@ -1007,8 +1019,8 @@ func TestViewSourcePrompt_RendersHeaderAndOptions(t *testing.T) {
 // size, and symlinks are flagged so the renderer can dim them.
 func TestRefreshDetailFiles_WalksDestdir(t *testing.T) {
 	projDir := t.TempDir()
-	// build/foo.x86_64/destdir/...
-	destDir := filepath.Join(projDir, "build", "foo.x86_64", "destdir")
+	// build/<distro>/foo.x86_64/destdir/... per R14a.
+	destDir := filepath.Join(projDir, "build", "alpine", "foo.x86_64", "destdir")
 	if err := os.MkdirAll(filepath.Join(destDir, "usr", "bin"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -1028,12 +1040,13 @@ func TestRefreshDetailFiles_WalksDestdir(t *testing.T) {
 	m := &model{
 		projectDir: projDir,
 		arch:       "x86_64",
+		distro:     "alpine",
 		detailUnit: "foo",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit"},
-			},
+			}},
 		},
 	}
 	m.refreshDetailFiles()
@@ -1079,7 +1092,7 @@ func TestRefreshDetailFiles_WalksDestdir(t *testing.T) {
 // the partition size and would dominate the listing.
 func TestRefreshDetailFiles_ImageWalksRootfs(t *testing.T) {
 	projDir := t.TempDir()
-	destDir := filepath.Join(projDir, "build", "img.x86_64", "destdir")
+	destDir := filepath.Join(projDir, "build", "alpine", "img.x86_64", "destdir")
 	rootfs := filepath.Join(destDir, "rootfs")
 	if err := os.MkdirAll(filepath.Join(rootfs, "etc"), 0o755); err != nil {
 		t.Fatalf("mkdir rootfs: %v", err)
@@ -1097,12 +1110,13 @@ func TestRefreshDetailFiles_ImageWalksRootfs(t *testing.T) {
 	m := &model{
 		projectDir: projDir,
 		arch:       "x86_64",
+		distro:     "alpine",
 		detailUnit: "img",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"img": {Name: "img", Class: "image"},
-			},
+			}},
 		},
 	}
 	m.refreshDetailFiles()

@@ -66,11 +66,14 @@ var OnNotify func(string)
 // DefaultContainerImage returns the Docker image tag for the toolchain-musl
 // container unit using the host architecture. Used by callers outside the build
 // executor (QEMU, shell, etc.) that need a container but don't have a per-unit
-// resolution context.
-func DefaultContainerImage(units map[string]*yoestar.Unit) string {
+// resolution context. AnyUnit suffices here — toolchain-musl is module-alpine's
+// container unit and only exists under one module.
+func DefaultContainerImage(proj *yoestar.Project) string {
 	arch := HostArch()
-	if cu, ok := units["toolchain-musl"]; ok {
-		return fmt.Sprintf("yoe/toolchain-musl:%s-%s", cu.Version, arch)
+	if proj != nil {
+		if cu := proj.AnyUnit("toolchain-musl"); cu != nil {
+			return fmt.Sprintf("yoe/toolchain-musl:%s-%s", cu.Version, arch)
+		}
 	}
 	return fmt.Sprintf("yoe/toolchain-musl:15-%s", arch)
 }

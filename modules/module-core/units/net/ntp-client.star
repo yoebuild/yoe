@@ -4,8 +4,9 @@ unit(
     license = "MIT",
     description = "One-shot busybox NTP sync at boot for boards without an RTC",
     services = ["ntp-client"],
+    deps = ["toolchain"],
     runtime_deps = ["busybox", "openrc"],
-    container = "toolchain-musl",
+    container = "toolchain",
     container_arch = "target",
     tasks = [
         task("build", steps = [

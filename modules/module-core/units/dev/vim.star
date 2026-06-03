@@ -5,10 +5,10 @@ unit(
     tag = "v9.1.0",
     license = "Vim",
     description = "Vi IMproved text editor",
-    deps = ["ncurses", "toolchain-musl"],
+    deps = ["ncurses", "toolchain"],
     runtime_deps = ["ncurses"],
     replaces = ["busybox"],
-    container = "toolchain-musl",
+    container = "toolchain",
     container_arch = "target",
     tasks = [
         task("build", steps=[

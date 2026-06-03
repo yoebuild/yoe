@@ -134,7 +134,7 @@ automatically.
 
 ## `python-image`
 
-`module-core/images/python-image.star` boots into a userland with `python3`,
+`module-alpine/images/python-image.star` boots into a userland with `python3`,
 `pip`, the dev-image diagnostic tools, and the `python-hello` demo
 pre-installed. Run `yoe build python-image && yoe run python-image` to get a
 QEMU VM where `python-hello "..."` renders an ASCII-art banner — useful as a

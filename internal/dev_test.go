@@ -19,7 +19,7 @@ func TestDevExtract(t *testing.T) {
 	setupDevTestProject(t, dir)
 
 	// Create a fake build/openssh/src git repo simulating a fetched source
-	srcDir := filepath.Join(dir, "build", "x86_64", "openssh", "src")
+	srcDir := filepath.Join(dir, "build", "alpine", "openssh.x86_64", "src")
 	os.MkdirAll(srcDir, 0755)
 
 	// Init git repo with upstream content
@@ -67,7 +67,7 @@ func TestDevExtract_NoCommits(t *testing.T) {
 	dir := t.TempDir()
 	setupDevTestProject(t, dir)
 
-	srcDir := filepath.Join(dir, "build", "x86_64", "openssh", "src")
+	srcDir := filepath.Join(dir, "build", "alpine", "openssh.x86_64", "src")
 	os.MkdirAll(srcDir, 0755)
 
 	run(t, srcDir, "git", "init")
@@ -92,7 +92,7 @@ func TestDevDiff(t *testing.T) {
 	dir := t.TempDir()
 	setupDevTestProject(t, dir)
 
-	srcDir := filepath.Join(dir, "build", "x86_64", "openssh", "src")
+	srcDir := filepath.Join(dir, "build", "alpine", "openssh.x86_64", "src")
 	os.MkdirAll(srcDir, 0755)
 
 	run(t, srcDir, "git", "init")
@@ -122,7 +122,7 @@ func TestDevStatus(t *testing.T) {
 	setupDevTestProject(t, dir)
 
 	// openssh: has local commits
-	srcDir := filepath.Join(dir, "build", "x86_64", "openssh", "src")
+	srcDir := filepath.Join(dir, "build", "alpine", "openssh.x86_64", "src")
 	os.MkdirAll(srcDir, 0755)
 	run(t, srcDir, "git", "init")
 	run(t, srcDir, "git", "config", "user.email", "test@test.com")
@@ -223,7 +223,7 @@ func setupPinnedSrc(t *testing.T, projectDir, unitName string) (srcDir, upstream
 	run(t, upstream, "git", "commit", "-q", "-m", "upstream commit")
 
 	// Yoe-style pinned src: clone, tag upstream, drop origin.
-	srcDir = filepath.Join(projectDir, "build", unitName+".x86_64", "src")
+	srcDir = filepath.Join(projectDir, "build", "alpine", unitName+".x86_64", "src")
 	if err := os.MkdirAll(filepath.Dir(srcDir), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestDevToUpstream_PinToDev(t *testing.T) {
 	srcDir, upstreamURL := setupPinnedSrc(t, dir, "openssh")
 
 	unit := &yoestar.Unit{Name: "openssh", Source: upstreamURL}
-	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
+	if err := DevToUpstream(dir, "x86_64", "alpine", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
 	// Origin set?
@@ -270,7 +270,7 @@ func TestDevToUpstream_NonGitSource(t *testing.T) {
 	setupPinnedSrc(t, dir, "openssh")
 
 	unit := &yoestar.Unit{Name: "openssh", Source: "https://example.com/openssh.tar.gz"}
-	err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{})
+	err := DevToUpstream(dir, "x86_64", "alpine", unit, DevUpstreamOpts{})
 	if err == nil {
 		t.Fatal("expected DevToUpstream to refuse a non-git source")
 	}
@@ -286,7 +286,7 @@ func TestDevToUpstream_Idempotent(t *testing.T) {
 	run(t, srcDir, "git", "remote", "add", "origin", "https://stale.example.com/x.git")
 
 	unit := &yoestar.Unit{Name: "openssh", Source: upstreamURL}
-	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
+	if err := DevToUpstream(dir, "x86_64", "alpine", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
 	out, _ := gitCmd(srcDir, "remote", "get-url", "origin")
@@ -299,10 +299,10 @@ func TestDevToPin_CleanDev(t *testing.T) {
 	dir := t.TempDir()
 	srcDir, upstreamURL := setupPinnedSrc(t, dir, "openssh")
 	unit := &yoestar.Unit{Name: "openssh", Source: upstreamURL, Tag: "yoe/pin"}
-	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
+	if err := DevToUpstream(dir, "x86_64", "alpine", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
-	if err := DevToPin(dir, "x86_64", unit, false); err != nil {
+	if err := DevToPin(dir, "x86_64", "alpine", unit, false); err != nil {
 		t.Fatalf("DevToPin: %v", err)
 	}
 	// Src dir should exist and be a fresh pin clone (re-cloned by Prepare).
@@ -322,7 +322,7 @@ func TestDevToPin_RefusesDevModWithoutForce(t *testing.T) {
 	dir := t.TempDir()
 	srcDir, upstreamURL := setupPinnedSrc(t, dir, "openssh")
 	unit := &yoestar.Unit{Name: "openssh", Source: upstreamURL}
-	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
+	if err := DevToUpstream(dir, "x86_64", "alpine", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
 	// Add a local commit beyond upstream.
@@ -332,7 +332,7 @@ func TestDevToPin_RefusesDevModWithoutForce(t *testing.T) {
 	run(t, srcDir, "git", "add", "-A")
 	run(t, srcDir, "git", "commit", "-q", "-m", "local")
 
-	err := DevToPin(dir, "x86_64", unit, false)
+	err := DevToPin(dir, "x86_64", "alpine", unit, false)
 	if err == nil {
 		t.Fatal("expected DevToPin to refuse dev-mod without force=true")
 	}
@@ -345,7 +345,7 @@ func TestDevToPin_ForceDiscardsDevMod(t *testing.T) {
 	dir := t.TempDir()
 	srcDir, upstreamURL := setupPinnedSrc(t, dir, "openssh")
 	unit := &yoestar.Unit{Name: "openssh", Source: upstreamURL, Tag: "yoe/pin"}
-	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
+	if err := DevToUpstream(dir, "x86_64", "alpine", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(srcDir, "extra.c"), []byte("// extra\n"), 0o644); err != nil {
@@ -354,7 +354,7 @@ func TestDevToPin_ForceDiscardsDevMod(t *testing.T) {
 	run(t, srcDir, "git", "add", "-A")
 	run(t, srcDir, "git", "commit", "-q", "-m", "local")
 
-	if err := DevToPin(dir, "x86_64", unit, true); err != nil {
+	if err := DevToPin(dir, "x86_64", "alpine", unit, true); err != nil {
 		t.Fatalf("DevToPin force=true: %v", err)
 	}
 	// Src dir re-clones at the pinned ref; the local commit is gone.
@@ -370,7 +370,7 @@ func TestDevToPin_ForceDiscardsDevMod(t *testing.T) {
 // doesn't depend on import paths from the build package.
 func readUnitState(t *testing.T, projectDir, unitName string) string {
 	t.Helper()
-	path := filepath.Join(projectDir, "build", unitName+".x86_64", "build.json")
+	path := filepath.Join(projectDir, "build", "alpine", unitName+".x86_64", "build.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return ""
@@ -408,7 +408,7 @@ func setupDevModUnit(t *testing.T, dir, unitName, starBody string) (srcDir, star
 	}
 
 	unit = &yoestar.Unit{Name: unitName, Source: upstreamURL, DefinedIn: defDir}
-	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
+	if err := DevToUpstream(dir, "x86_64", "alpine", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
 	// Add a local commit beyond upstream → state is dev-mod.
@@ -430,7 +430,7 @@ func TestDevPromoteToPin_HEADWithoutTag_WritesSHA(t *testing.T) {
 )
 `
 	srcDir, starPath, unit := setupDevModUnit(t, dir, "openssh", starBody)
-	if err := DevPromoteToPin(dir, "x86_64", unit); err != nil {
+	if err := DevPromoteToPin(dir, "x86_64", "alpine", unit); err != nil {
 		t.Fatalf("DevPromoteToPin: %v", err)
 	}
 	headSha, _ := gitCmd(srcDir, "rev-parse", "HEAD")
@@ -459,7 +459,7 @@ func TestDevPromoteToPin_HEADWithTag_WritesTagName(t *testing.T) {
 	// tag name (more readable than a SHA).
 	run(t, srcDir, "git", "tag", "v1.1.0")
 
-	if err := DevPromoteToPin(dir, "x86_64", unit); err != nil {
+	if err := DevPromoteToPin(dir, "x86_64", "alpine", unit); err != nil {
 		t.Fatalf("DevPromoteToPin: %v", err)
 	}
 	got, _ := os.ReadFile(starPath)
@@ -482,7 +482,7 @@ func TestDevPromoteToPin_SkipsYoePinMarker(t *testing.T) {
 	run(t, srcDir, "git", "tag", "-f", "yoe/pin")
 	run(t, srcDir, "git", "tag", "v1.1.0")
 
-	if err := DevPromoteToPin(dir, "x86_64", unit); err != nil {
+	if err := DevPromoteToPin(dir, "x86_64", "alpine", unit); err != nil {
 		t.Fatalf("DevPromoteToPin: %v", err)
 	}
 	got, _ := os.ReadFile(starPath)
@@ -507,7 +507,7 @@ func TestDevPromoteToPin_PreservesBranchField(t *testing.T) {
 	headSha, _ := gitCmd(srcDir, "rev-parse", "HEAD")
 	wantSha := strings.TrimSpace(headSha)
 
-	if err := DevPromoteToPin(dir, "x86_64", unit); err != nil {
+	if err := DevPromoteToPin(dir, "x86_64", "alpine", unit); err != nil {
 		t.Fatalf("DevPromoteToPin: %v", err)
 	}
 	got, _ := os.ReadFile(starPath)
@@ -529,7 +529,7 @@ func TestDevPromoteToPin_RefusesNonDev(t *testing.T) {
 	unit := &yoestar.Unit{Name: "foo", Source: upstreamURL, DefinedIn: defDir}
 	// Stay in pin state — DevToUpstream not called.
 
-	err := DevPromoteToPin(dir, "x86_64", unit)
+	err := DevPromoteToPin(dir, "x86_64", "alpine", unit)
 	if err == nil {
 		t.Fatal("expected error pinning from pin state")
 	}
@@ -537,13 +537,13 @@ func TestDevPromoteToPin_RefusesNonDev(t *testing.T) {
 		t.Errorf("error should mention dev requirement: %v", err)
 	}
 	// Also test from dev-dirty (uncommitted edits).
-	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
+	if err := DevToUpstream(dir, "x86_64", "alpine", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(srcDir, "dirty.c"), []byte("// dirty\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err = DevPromoteToPin(dir, "x86_64", unit)
+	err = DevPromoteToPin(dir, "x86_64", "alpine", unit)
 	if err == nil {
 		t.Fatal("expected error pinning from dev-dirty")
 	}
@@ -651,7 +651,7 @@ func TestDevToUpstream_BranchDeclared_ChecksOutBranchHead(t *testing.T) {
 		Tag:    "yoe/pin", // the local yoe-pin marker stands in for the pin tag
 		Branch: "main",
 	}
-	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
+	if err := DevToUpstream(dir, "x86_64", "alpine", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
 
@@ -708,7 +708,7 @@ func TestDevToUpstream_PreservesExistingLocalBranch(t *testing.T) {
 		Tag:    "yoe/pin",
 		Branch: "main",
 	}
-	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
+	if err := DevToUpstream(dir, "x86_64", "alpine", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
 
@@ -737,7 +737,7 @@ func TestDevToUpstream_TagOnly_LeavesWorkingTreeAtPin(t *testing.T) {
 		Tag:    "upstream",
 		// No Branch — today's behavior preserved.
 	}
-	if err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{}); err != nil {
+	if err := DevToUpstream(dir, "x86_64", "alpine", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
 
@@ -757,7 +757,7 @@ func TestDevToUpstream_BranchWithoutTag_Rejects(t *testing.T) {
 		Branch: "main",
 		// No Tag — malformed.
 	}
-	err := DevToUpstream(dir, "x86_64", unit, DevUpstreamOpts{})
+	err := DevToUpstream(dir, "x86_64", "alpine", unit, DevUpstreamOpts{})
 	if err == nil {
 		t.Fatal("expected DevToUpstream to refuse a branch-only unit")
 	}

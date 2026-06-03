@@ -2,9 +2,10 @@
 name: diagnose
 description: >
   This skill should be used when the user asks to "diagnose a build failure",
-  "debug a unit", "fix a build", "why did the build fail", "/diagnose", or
-  mentions a unit that failed to build. Iteratively analyzes build logs,
-  identifies root causes, applies fixes, and rebuilds until the unit succeeds.
+  "debug a unit", "debug <unit>", "debug some unit", "fix a build", "why did the
+  build fail", "/diagnose", or mentions a unit that failed to build. Iteratively
+  analyzes build logs, identifies root causes, applies fixes, and rebuilds until
+  the unit succeeds.
 ---
 
 # Diagnose Build Failures
@@ -21,23 +22,40 @@ unit or source, and rebuilds until the unit succeeds.
 
 ## Diagnosis Workflow
 
-### Step 1: Identify the Failing Unit
+### Step 1: Find the Build Log First
 
-If the user specifies a unit name, use that. If not, find the most recent
-failure by checking build output or looking for units with no cache marker:
-
-```
-ls build/*/build.log -lt | head -5
-```
-
-### Step 2: Read the Build Log
-
-The build log lives at `build/<unit>/build.log`. Read the **end** of the log
-first — the error is almost always in the last 100 lines:
+**Always start by locating the build log in the build directory** — it is the
+single most useful artifact and almost always pinpoints the failure. The build
+tree is segmented by distro:
 
 ```
-Read build/<unit>/build.log (last 100 lines)
+build/<distro>/<unit>/build.log
 ```
+
+where `<distro>` is `alpine`, `debian`, etc. and `<unit>` is the unit name with
+its arch suffix (e.g. `openssl.x86_64`).
+
+**If you don't know which distro the failure is in, ask the user** before
+guessing — the same unit can build under multiple distros, and reading the wrong
+log wastes a cycle. Once you know the distro, find the most recent failure:
+
+```
+ls -lt build/<distro>/*/build.log | head -5
+```
+
+If the user specified a unit name, go straight to its log under the chosen
+distro. Read the **end** of the log first — the error is almost always in the
+last 100 lines:
+
+```
+Read build/<distro>/<unit>/build.log (last 100 lines)
+```
+
+Shortcut: `yoe log [unit]` prints the build log for the most recent failure (or
+a named unit) without hunting for the path, and `yoe log -e [unit]` opens it in
+your editor. The underlying file is still `build/<distro>/<unit>/build.log` —
+reach for it directly when you need a specific distro's log or want to read a
+slice with the Read tool.
 
 If the error references earlier output (e.g., a missing header first used
 hundreds of lines up), read more context as needed.
@@ -71,7 +89,7 @@ Common failure categories in order of likelihood:
    path. Check `configure_args` in the unit and verify paths reference
    `/build/sysroot`.
 4. **Source/patch conflict** — patch doesn't apply, or source version changed.
-   Check `build/<unit>/src/` for `.rej` files or git errors in the log.
+   Check `build/<distro>/<unit>/src/` for `.rej` files or git errors in the log.
 5. **Toolchain mismatch** — wrong compiler flags, missing tools. Check the build
    environment and Dockerfile.
 6. **Parallel build race** — intermittent failure in `make -j`. Look for "No
@@ -96,10 +114,11 @@ Always explain what was found and what the fix is before applying it.
 
 ### Step 6: Rebuild with --force
 
-After applying the fix, rebuild the specific unit:
+After applying the fix, rebuild the specific unit. Target the same distro whose
+log you diagnosed so the rebuild lands in the right tree:
 
 ```bash
-yoe build --force <unit>
+yoe build --force --distro <distro> <unit>
 ```
 
 Use `--force` (not `--clean`) to skip the cache but preserve the source tree.
@@ -129,18 +148,21 @@ fixing a missing header reveals a missing library).
 
 | Path                              | Contents                            |
 | --------------------------------- | ----------------------------------- |
-| `build/<unit>/build.log`          | Full build output                   |
-| `build/<unit>/src/`               | Extracted source tree               |
-| `build/<unit>/destdir/`           | Install staging directory           |
-| `build/sysroot/`                  | Shared sysroot (deps' headers/libs) |
+| `build/<distro>/<unit>/build.log` | Full build output                   |
+| `build/<distro>/<unit>/src/`      | Extracted source tree               |
+| `build/<distro>/<unit>/destdir/`  | Install staging directory           |
+| `build/<distro>/<unit>/sysroot/`  | Shared sysroot (deps' headers/libs) |
 | `modules/**/units/**/<unit>.star` | Unit definition                     |
+
+`<distro>` is `alpine`, `debian`, etc.; `<unit>` carries its arch suffix (e.g.
+`openssl.x86_64`).
 
 ## What NOT to Do
 
-- Do not modify files in `build/sysroot/` directly — it's populated
-  automatically from built artifacts.
-- Do not modify source files in `build/<unit>/src/` as a permanent fix — changes
-  there are lost on rebuild. Instead, create a patch in the unit.
+- Do not modify files in `build/<distro>/<unit>/sysroot/` directly — it's
+  populated automatically from built artifacts.
+- Do not modify source files in `build/<distro>/<unit>/src/` as a permanent fix
+  — changes there are lost on rebuild. Instead, create a patch in the unit.
 - Do not skip the build log. Always read it before proposing a fix.
 - Do not take shortcuts to make the build pass (e.g., disabling features,
   removing configure checks) without explaining the trade-off and getting user

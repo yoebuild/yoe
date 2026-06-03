@@ -36,7 +36,7 @@ def nodejs_app(name, version,
                services = [], conffiles = [],
                license = "", description = "",
                tasks = [], scope = "",
-               container = "toolchain-musl", container_arch = "target",
+               container = "toolchain", container_arch = "target",
                **kwargs):
     if not install_path:
         install_path = "/usr/lib/node-apps/" + name

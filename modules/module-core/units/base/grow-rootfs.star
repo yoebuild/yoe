@@ -7,8 +7,9 @@ unit(
     # Alpine ships sfdisk and partx as separate top-level apks (NOT
     # subpackages of util-linux — util-linux-misc has fdisk but not
     # sfdisk). e2fsprogs supplies resize2fs.
+    deps = ["toolchain"],
     runtime_deps = ["openrc", "sfdisk", "partx", "e2fsprogs"],
-    container = "toolchain-musl",
+    container = "toolchain",
     container_arch = "target",
     tasks = [
         task("build", steps = [

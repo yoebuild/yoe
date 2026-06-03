@@ -28,7 +28,7 @@ func makeTestEngine() *Engine {
 
 func TestClosure_TransitiveResolution(t *testing.T) {
 	e := makeTestEngine()
-	got, err := e.closure([]string{"openssh"})
+	got, err := e.closure([]string{"openssh"}, "alpine")
 	if err != nil {
 		t.Fatalf("closure: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestClosure_TransitiveResolution(t *testing.T) {
 func TestClosure_ProvidesResolution(t *testing.T) {
 	e := makeTestEngine()
 	// Root "linux" should resolve via provides → "linux-generic".
-	got, err := e.closure([]string{"linux"})
+	got, err := e.closure([]string{"linux"}, "alpine")
 	if err != nil {
 		t.Fatalf("closure: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestClosure_ProvidesResolution(t *testing.T) {
 
 func TestClosure_UnresolvedName(t *testing.T) {
 	e := makeTestEngine()
-	_, err := e.closure([]string{"never-heard-of-it"})
+	_, err := e.closure([]string{"never-heard-of-it"}, "alpine")
 	if err == nil {
 		t.Fatal("want error for unresolved name")
 	}
@@ -84,7 +84,7 @@ func TestClosure_MaterializesSynthetic(t *testing.T) {
 	}
 	e.syntheticModules = []*SyntheticModule{sm}
 
-	got, err := e.closure([]string{"openssh-server"})
+	got, err := e.closure([]string{"openssh-server"}, "alpine")
 	if err != nil {
 		t.Fatalf("closure: %v", err)
 	}
@@ -120,24 +120,27 @@ func TestClosure_PointerStability(t *testing.T) {
 	}
 	e.syntheticModules = []*SyntheticModule{sm}
 
-	_, err := e.closure([]string{"feed-pkg"})
+	_, err := e.closure([]string{"feed-pkg"}, "alpine")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = e.closure([]string{"feed-pkg"})
+	_, err = e.closure([]string{"feed-pkg"}, "alpine")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// First closure call materializes (1 Lookup). Second call hits
-	// e.units directly (0 additional Lookups).
+	// First closure call materializes via the synthetic walk
+	// (Lookup #1 — e.units empty initially, synthetic returns the
+	// untagged feed-pkg, walker registers it under the bare name).
+	// Second call hits e.units[feed-pkg] on the fast path — no
+	// Lookup.
 	if lookupCount != 1 {
-		t.Errorf("lookupCount = %d, want 1 (second closure should hit e.units cache)", lookupCount)
+		t.Errorf("lookupCount = %d, want 1 across two closure calls", lookupCount)
 	}
 }
 
 func TestClosure_EmptyRoots(t *testing.T) {
 	e := makeTestEngine()
-	got, err := e.closure(nil)
+	got, err := e.closure(nil, "alpine")
 	if err != nil {
 		t.Fatalf("closure(nil): %v", err)
 	}
@@ -155,7 +158,7 @@ func TestClosure_Cycle(t *testing.T) {
 	e.units["a"] = &Unit{Name: "a", RuntimeDeps: []string{"b"}}
 	e.units["b"] = &Unit{Name: "b", RuntimeDeps: []string{"a"}}
 
-	got, err := e.closure([]string{"a"})
+	got, err := e.closure([]string{"a"}, "alpine")
 	if err != nil {
 		t.Fatalf("closure: %v", err)
 	}

@@ -7,7 +7,9 @@ import (
 
 func TestValidatePreferModules_KnownNamePasses(t *testing.T) {
 	proj := &Project{
-		PreferModules: map[string]string{"xz": "alpine"},
+		PreferModules: map[string]map[string]string{
+			"alpine": {"xz": "alpine"},
+		},
 		ResolvedModules: []ResolvedModule{
 			{Name: "alpine"},
 			{Name: "module-core"},
@@ -20,7 +22,9 @@ func TestValidatePreferModules_KnownNamePasses(t *testing.T) {
 
 func TestValidatePreferModules_SyntheticNamePasses(t *testing.T) {
 	proj := &Project{
-		PreferModules: map[string]string{"openssh": "alpine.main"},
+		PreferModules: map[string]map[string]string{
+			"alpine": {"openssh": "alpine.main"},
+		},
 		SyntheticModules: []*SyntheticModule{
 			{Name: "alpine.main"},
 			{Name: "alpine.community"},
@@ -36,21 +40,15 @@ func TestValidatePreferModules_UnknownSuggestsQualifiedFeed(t *testing.T) {
 	// only "alpine.main" and "alpine.community" exist. Error message
 	// should name BOTH candidates.
 	proj := &Project{
-		PreferModules: map[string]string{"xz": "alpine"},
-		ResolvedModules: []ResolvedModule{
-			{Name: "module-core"},
-			{Name: "alpine"}, // parent module exists, but no units
-		},
+		ResolvedModules: []ResolvedModule{{Name: "module-core"}},
 		SyntheticModules: []*SyntheticModule{
 			{Name: "alpine.main"},
 			{Name: "alpine.community"},
 		},
+		PreferModules: map[string]map[string]string{
+			"alpine": {"xz": "alpine"},
+		},
 	}
-	// "alpine" IS in known — passes. Now drop it to simulate
-	// post-cutover where module_info(name="alpine") still exists but
-	// imagine the user typed "Alpine" (case-sensitive miss).
-	proj.ResolvedModules = []ResolvedModule{{Name: "module-core"}}
-	proj.PreferModules = map[string]string{"xz": "alpine"}
 
 	err := validatePreferModules(proj)
 	if err == nil {
@@ -69,7 +67,9 @@ func TestValidatePreferModules_UnknownSuggestsQualifiedFeed(t *testing.T) {
 
 func TestValidatePreferModules_UnknownNoCandidates(t *testing.T) {
 	proj := &Project{
-		PreferModules:    map[string]string{"foo": "completely-unrelated"},
+		PreferModules: map[string]map[string]string{
+			"alpine": {"foo": "completely-unrelated"},
+		},
 		ResolvedModules:  []ResolvedModule{{Name: "module-core"}},
 		SyntheticModules: nil,
 	}

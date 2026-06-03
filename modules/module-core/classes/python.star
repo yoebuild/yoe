@@ -29,7 +29,7 @@ def python_venv(name, version, pip_packages,
                 services = [], conffiles = [],
                 license = "", description = "",
                 tasks = [], scope = "",
-                container = "toolchain-musl", container_arch = "target",
+                container = "toolchain", container_arch = "target",
                 **kwargs):
     if not pip_packages:
         fail("python_venv %s: pip_packages must not be empty" % name)

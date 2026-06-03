@@ -1,0 +1,23 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Suite: stable
+Codename: bookworm
+Date: Sat, 27 May 2020 00:00:00 UTC
+Valid-Until: Mon, 28 May 2020 00:00:00 UTC
+Components: main
+Architectures: amd64 arm64
+SHA256:
+ abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890 12345 main/binary-arm64/Packages
+
+-----BEGIN PGP SIGNATURE-----
+
+iQEzBAEBCgAdFiEEFQMGei5b5qH0jRPS+0o7OSPdsBUFAmoXX3YACgkQ+0o7OSPd
+sBUhKAgAuaALdQHQ2JnGeBWrlAfc0N16W22v178Qcu0GvmyYiF9IbGWDTNCLtJOR
+zPYbIubVhrPpqBYQX/A/bN0tmFx2D/dDf00Ic09KGcRuHH290/Kr1OkWqBftthcs
+QSXfh6Y1QqzyKHaWMBGdVRpG8dBYt3zGEKHwwETw/ROfsww+tLKghIINt1TexcCQ
+Knixw/C0iNOQ8f6zRzAsDYKGxJzhhIrefi4gt5yz0wTe5S0DOtSwSp1nCOgMcQcQ
+SH3aLUtYpIuXB8YTaEu3wH1D97IEzsa5q70p33UlSBbDMMvmMTJ5Lyw9UY2GLZnM
+ut8QgZ0edNZBeFPsvH5tJwwaMyJzyw==
+=WUm1
+-----END PGP SIGNATURE-----

@@ -75,6 +75,19 @@ func RunSimple(cfg *SandboxConfig, command string) error {
 	for k, v := range cfg.Env {
 		envExports = append(envExports, fmt.Sprintf("export %s=%q", k, v))
 	}
+	// Privileged (NoUser) runs are container-native image-assembly steps —
+	// mmdebstrap, mkfs, mount, losetup, chroot, mcopy, extlinux — never
+	// source compilation. The build env prepends /build/sysroot/usr/bin to
+	// PATH so source units find their freshly built toolchain, but under
+	// root that shadows the container's own tools with the sysroot's
+	// target-arch copies. The sysroot's mount/umount are setuid binaries
+	// owned by the host build user, so the setuid bit drops the effective
+	// uid below root and `mount` fails with "must be superuser" even inside
+	// the privileged container. Force the container's native PATH for these
+	// steps (this export comes last, so it wins over cfg.Env's PATH).
+	if cfg.NoUser {
+		envExports = append(envExports, `export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"`)
+	}
 	fullCmd := strings.Join(envExports, "; ")
 	if fullCmd != "" {
 		fullCmd += "; "
@@ -228,14 +241,20 @@ func StageSysroot(destDir, buildDir string) error {
 }
 
 // AssembleSysroot merges the sysroot-stage dirs of all transitive deps
-// into a unit's private sysroot.
-func AssembleSysroot(sysrootDir string, dag *resolve.DAG, unit string, projectDir string, arch string) error {
+// into a unit's private sysroot. distro is the consuming image's
+// effective distro — it locates each dep's UnitBuildDir under
+// build/<distro>/. The DAG already expands a build-time dep's runtime
+// closure into additional build edges (per BuildDAG's
+// appendRuntimeClosureOfDeps), so split feed packages like Debian's
+// python3.11 → python3.11-minimal → libpython3.11-stdlib all appear
+// in TransitiveDeps without an extra runtime walk here.
+func AssembleSysroot(sysrootDir string, dag *resolve.DAG, unit string, projectDir string, arch, distro string) error {
 	os.RemoveAll(sysrootDir)
 	if err := os.MkdirAll(sysrootDir, 0755); err != nil {
 		return err
 	}
 	for _, dep := range dag.TransitiveDeps(unit) {
-		stageDir := filepath.Join(UnitBuildDir(projectDir, arch, dep), "sysroot-stage")
+		stageDir := filepath.Join(UnitBuildDir(projectDir, arch, dep, distro), "sysroot-stage")
 		if _, err := os.Stat(stageDir); err != nil {
 			continue // dep has no staged output (e.g., image)
 		}
@@ -265,6 +284,25 @@ func NProc() string {
 	return strings.TrimSpace(string(out))
 }
 
+// multiarchTuple maps a yoe arch name to debian's multiarch tuple
+// for /usr/lib/<tuple>/ paths. Used by the build env so debian feed
+// packages' .so / .pc files (which live under
+// /usr/lib/x86_64-linux-gnu/ on amd64) are visible to pkg-config /
+// ld / rtld during compile-from-source units. The tuple is empty
+// for unknown arches — the caller's path-join still works; the
+// resulting `/usr/lib//pkgconfig` entry is harmless noise.
+func multiarchTuple(arch string) string {
+	switch arch {
+	case "x86_64":
+		return "x86_64-linux-gnu"
+	case "arm64":
+		return "aarch64-linux-gnu"
+	case "riscv64":
+		return "riscv64-linux-gnu"
+	}
+	return ""
+}
+
 // Arch returns the current machine architecture in Yoe format.
 func Arch() string {
 	out, err := exec.Command("uname", "-m").Output()
@@ -282,8 +320,21 @@ func Arch() string {
 
 // UnitBuildDir returns the build directory for a unit.
 // The scopeDir is "noarch", an architecture name, or a machine name,
-// determined by the unit's scope field.
-// Layout: build/<name>.<scopeDir>/  (e.g., build/busybox.arm64/)
-func UnitBuildDir(projectDir, scopeDir, unitName string) string {
-	return filepath.Join(projectDir, "build", unitName+"."+scopeDir)
+// determined by the unit's scope field. distro is the consuming
+// image's effective distro — it disambiguates source units that
+// participate in both Alpine and Debian closures so each variant
+// keeps its own destdir.
+// Layout: build/<distro>/<name>.<scopeDir>/
+// (e.g., build/alpine/busybox.arm64/).
+//
+// An empty distro is a programmer error and panics. Every caller in
+// the build path knows the consuming distro — either from
+// opts.EffectiveDistro, proj.EffectiveDistro(), or
+// proj.EffectiveDistroForImage(name) — and must thread it through
+// rather than silently writing to a legacy distro-less directory.
+func UnitBuildDir(projectDir, scopeDir, unitName, distro string) string {
+	if distro == "" {
+		panic("UnitBuildDir: distro must not be empty (R14a)")
+	}
+	return filepath.Join(projectDir, "build", distro, unitName+"."+scopeDir)
 }

@@ -28,7 +28,79 @@ In particular:
   same host. `yoe` does not attempt any of this today.
 
 If the question is "can a rogue unit damage the host?", the honest answer is
-**yes, easily**. The rest of this page explains why, and what limits exist.
+**yes, easily**. The rest of this page explains why, what limits exist today,
+how this will be improved in the future.
+
+## Architecture: Starlark for declaration, Go for execution (planned)
+
+> **Status:** Planned. Today, `run(..., host=True)` and
+> `run(..., privileged=True)` are accessible from Starlark and are used
+> extensively by the in-tree classes (`container.star` shells `docker build` on
+> the host; `image.star` runs `dpkg --configure -a` with `privileged=True` to
+> chown the rootfs). A rogue unit can therefore reach the host shell and
+> root-in-container directly from a class body. The planned cutover restricts
+> every host call and every privileged-container call to Go code paths, removing
+> those kwargs from the Starlark surface. See
+> [docs/specs/2026-05-20-starlark-unprivileged-only.md](https://github.com/yoebuild/yoe/blob/main/docs/specs/2026-05-20-starlark-unprivileged-only.md)
+> for the spec and current implementation status.
+
+The architectural rule yoe is converging on:
+
+> **All host-shell execution and all privileged-container execution happens in
+> Go code. Starlark declares what work to do; Go decides whether to run it, in
+> which sandbox, and with what privileges.**
+
+Concretely:
+
+- **Starlark units** declare data — name, version, source URL, runtime deps,
+  install task steps — and assemble that data into `*Unit` structs through
+  builtins (`unit()`, `image()`, `container()`, …).
+- **Go code** consumes those structs and decides everything that actually
+  touches the host or runs privileged: which container to spawn, which sandbox
+  profile to apply, which paths to mount, which capabilities to drop, whether to
+  shell out to `docker buildx` or `dpkg --configure -a`.
+- **The `run(...)` Starlark builtin survives** for unprivileged in-container
+  shell steps — the install task body of a feed unit extracts a tarball, the
+  build task of an autotools unit runs `./configure && make`. These run in the
+  per-unit bwrap sandbox where the worst a rogue command can do is corrupt its
+  own destdir.
+
+### Why this matters: a small Go audit surface for arbitrary Starlark
+
+Starlark has no I/O primitives of its own. It can't open files, can't spawn
+processes, can't make network calls. Every operation that escapes the Starlark
+interpreter does so through a Go-side builtin the embedding program registered.
+yoe's embedding registers a small, enumerable set: `unit`, `image`, `container`,
+`machine`, `task`, `run`, `alpine_feed`, `debian_feed`, `resolve_closure`, and a
+handful of supporting builders. The complete list lives in
+`internal/starlark/builtins.go`.
+
+Once every Go-side builtin is audited — does it sandbox the work it spawns? does
+it refuse to escape the build directory? does it drop privileges before running
+shell? — **the answer for every possible Starlark unit is the same answer**. A
+new module a user imports next year cannot expand the attack surface beyond what
+the existing Go builtins permit. The Starlark code is data; the policy lives in
+Go.
+
+Contrast with Python or JavaScript embeddings, where the unit author can call
+`subprocess.run`, `os.system`, `fetch`, `eval`, `import os` — the language's
+standard library is the attack surface, and there is no enumerable list of
+escape hatches an auditor can walk to be sure they've seen everything. A
+pure-data DSL like Starlark inverts this: a security review enumerates the
+embedded builtins, audits each one in Go, and is done. Adding a new builtin is a
+deliberate choice the maintainer makes; adding a new Starlark unit cannot expand
+what the system is capable of.
+
+This is the single biggest leverage point in yoe's security model. The build
+container, signing chain, repo trust, and on-target apk verification all sit on
+top of "Starlark is data, Go is policy." Once the transition is complete, the
+threat model changes from "every imported module is `curl | sh`" to "every
+imported module is data fed to an audited Go program" — still not zero-trust,
+but the audit surface stops growing with the number of imports.
+
+The remainder of this page describes the current state (where some of this is
+already true and some isn't) and what the build container actually protects you
+against today.
 
 ## How a build actually runs
 
@@ -253,20 +325,6 @@ These are explicit gaps, not unintentional bugs. PRs welcome.
 - **Add a `--paranoid` mode that refuses `host = True` and
   `privileged = True`.** Useful for CI builds and for projects that want to fail
   loudly when a module tries to escape the container.
-- **On-disk parsed-index cache poisoning.** Once feeds-as-modules ships (see
-  `docs/specs/2026-05-13-feeds-as-modules.md` R21), each module's parsed
-  APKINDEX is serialized to `feeds/<section>/<arch>/APKINDEX.cache` alongside
-  the source index. The cache is gitignored and trusted on load (after header
-  - source-hash check). An attacker with filesystem write access to the module
-    checkout can plant a cache file with a matching header and arbitrary body,
-    bypassing the source-index parse. Mitigations to consider when this becomes
-    load-bearing: (a) move the cache to a process-owned location
-    (`$XDG_CACHE_HOME/yoe/`) separate from the module checkout; (b) HMAC the
-    cache body keyed to a per-install secret; (c) accept the equivalence ("cache
-    trust = module-checkout filesystem-write trust") and document. Today's
-    threat model already assumes module-checkout filesystem access implies
-    trust, so (c) is the de-facto state — but the cache makes the attack
-    mechanic cheap (no source-file edit needed), so worth revisiting.
 - **In-tree signing keys + APKINDEX share the same access-control gate.**
   `module-alpine`'s `keys/` directory and `feeds/*/APKINDEX` live in the same
   git repo under the same maintainer write access. A compromised maintainer

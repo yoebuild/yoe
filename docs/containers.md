@@ -19,8 +19,7 @@ for any other yoe image that wants to add a container runtime.
 
 A `dev-image`-style base plus the Docker userspace.
 
-- Defined in
-  [`modules/module-core/images/docker-image.star`](../modules/module-core/images/docker-image.star).
+- Defined in `module-alpine/images/docker-image.star`.
 - Adds `docker` and the `docker-init` OpenRC service to the dev-image artifact
   list. The Alpine `docker` meta-apk pulls in `docker-engine`, `docker-cli`,
   `docker-cli-buildx`, `containerd`, `runc`, `libseccomp`, and `iptables`
@@ -35,8 +34,7 @@ A `dev-image`-style base plus the Docker userspace.
 `bubblewrap`, `qemu-system-x86_64`, and `grow-rootfs` for first-boot partition
 expansion.
 
-- Defined in
-  [`modules/module-core/images/selfhost-image.star`](../modules/module-core/images/selfhost-image.star).
+- Defined in `module-alpine/images/selfhost-image.star`.
 - Targets the Raspberry Pi 5 self-host workflow described in
   [selfhost.md](selfhost.md): flash, boot, `yoe build` on the device with no
   workstation in the loop.

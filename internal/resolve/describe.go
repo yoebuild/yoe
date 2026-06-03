@@ -8,19 +8,22 @@ import (
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
-// Describe prints detailed information about a unit.
+// Describe prints detailed information about a unit. AnyUnit
+// suffices — describe surfaces source/version metadata that's
+// stable across modules (the distro-specific build artifact, if
+// any, lives off-Project).
 func Describe(w io.Writer, proj *yoestar.Project, name string, arch string) error {
-	unit, ok := proj.Units[name]
-	if !ok {
+	unit := proj.AnyUnit(name)
+	if unit == nil {
 		return fmt.Errorf("unit %q not found", name)
 	}
 
-	dag, err := BuildDAG(proj)
+	dag, err := BuildDAG(proj, "")
 	if err != nil {
 		return err
 	}
 
-	hashes, err := ComputeAllHashes(dag, arch, "", nil)
+	hashes, err := ComputeAllHashes(dag, arch, "", nil, "")
 	if err != nil {
 		return err
 	}
@@ -65,7 +68,7 @@ func Describe(w io.Writer, proj *yoestar.Project, name string, arch string) erro
 
 // Refs prints what depends on a given unit (reverse dependencies).
 func Refs(w io.Writer, proj *yoestar.Project, name string, direct bool) error {
-	dag, err := BuildDAG(proj)
+	dag, err := BuildDAG(proj, "")
 	if err != nil {
 		return err
 	}
@@ -82,7 +85,10 @@ func Refs(w io.Writer, proj *yoestar.Project, name string, direct bool) error {
 		}
 		fmt.Fprintf(w, "Direct dependents of %s:\n", name)
 		for _, rdep := range node.Rdeps {
-			r := proj.Units[rdep]
+			r := proj.AnyUnit(rdep)
+			if r == nil {
+				continue
+			}
 			fmt.Fprintf(w, "  %s [%s]\n", rdep, r.Class)
 		}
 	} else {
@@ -96,7 +102,10 @@ func Refs(w io.Writer, proj *yoestar.Project, name string, direct bool) error {
 		}
 		fmt.Fprintf(w, "All dependents of %s (transitive):\n", name)
 		for _, rdep := range rdeps {
-			r := proj.Units[rdep]
+			r := proj.AnyUnit(rdep)
+			if r == nil {
+				continue
+			}
 			fmt.Fprintf(w, "  %s [%s]\n", rdep, r.Class)
 		}
 	}
@@ -106,7 +115,7 @@ func Refs(w io.Writer, proj *yoestar.Project, name string, direct bool) error {
 
 // Graph prints the dependency graph in text or DOT format.
 func Graph(w io.Writer, proj *yoestar.Project, format string, filter string) error {
-	dag, err := BuildDAG(proj)
+	dag, err := BuildDAG(proj, "")
 	if err != nil {
 		return err
 	}

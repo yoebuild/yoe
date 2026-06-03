@@ -13,13 +13,33 @@ import (
 )
 
 // RepoDir returns the local package repository path for a project.
-// Repos are scoped per project: repo/<project-name>/.
+// Repos are scoped per project: repo/<project-name>/. This is the
+// project-wide base that the feed server serves under /<project>/;
+// per-distro emitters and consumers should use RepoDistroDir instead.
 // This prevents stale packages from one project contaminating another's APKINDEX.
 func RepoDir(proj *yoestar.Project, projectDir string) string {
 	if proj != nil && proj.Name != "" {
 		return filepath.Join(projectDir, "repo", proj.Name)
 	}
 	return filepath.Join(projectDir, "repo")
+}
+
+// RepoDistroDir returns the per-distro subtree under a project's repo:
+// repo/<project>/<distro>/. APK emitters publish per-arch APKINDEX
+// trees under repo/<project>/alpine/<arch>/; Debian emitters publish
+// dists/<suite>/InRelease + pool/... under repo/<project>/debian/.
+// Splitting at the distro level lets a single project hold both kinds
+// of feed without name collisions and lets device-side apk + apt
+// reference unambiguous URLs (e.g. /<proj>/alpine/<arch>,
+// /<proj>/debian).
+//
+// An empty distro is a programmer error and panics — every emitter
+// and image-assembly consumer knows which backend it's targeting.
+func RepoDistroDir(proj *yoestar.Project, projectDir, distro string) string {
+	if distro == "" {
+		panic("RepoDistroDir: distro must not be empty (R14)")
+	}
+	return filepath.Join(RepoDir(proj, projectDir), distro)
 }
 
 // Publish copies an .apk file into the per-arch subdirectory of the local
@@ -228,8 +248,13 @@ func Clean(proj *yoestar.Project, repoDir string, signer *artifact.Signer, w io.
 		return fmt.Errorf("Clean requires a loaded project")
 	}
 
-	keep := make(map[string]struct{}, len(proj.Units))
-	for _, u := range proj.Units {
+	// AllUnits iterates UnitsByModule directly, so cross-module
+	// same-name variants (alpine.main + debian.main both defining
+	// libssl3) each contribute their own apk filename to the keep
+	// set — neither is treated as stale just because the other
+	// satisfies the same name in some closure.
+	keep := map[string]struct{}{}
+	for _, u := range proj.AllUnits() {
 		if u.Version == "" {
 			continue
 		}

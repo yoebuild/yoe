@@ -9,8 +9,8 @@ unit(
     # script bundled by `make install`); we install a real one tailored to
     # this distro and need apk to let us take ownership of that path.
     replaces = ["busybox"],
-    deps = ["toolchain-musl"],
-    container = "toolchain-musl",
+    deps = ["toolchain"],
+    container = "toolchain",
     container_arch = "target",
     tasks = [
         task("build", steps = [

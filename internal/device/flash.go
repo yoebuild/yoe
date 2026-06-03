@@ -21,8 +21,11 @@ func Flash(proj *yoestar.Project, unitName, devicePath, projectDir string, dryRu
 		return fmt.Errorf("flash currently supports Linux only")
 	}
 
-	unit, ok := proj.Units[unitName]
-	if !ok {
+	// Flash reads the image's class to validate the request, then
+	// drives device-level I/O. AnyUnit suffices: an image registered
+	// under any module identifies as an image regardless of distro.
+	unit := proj.AnyUnit(unitName)
+	if unit == nil {
 		return fmt.Errorf("unit %q not found", unitName)
 	}
 	if unit.Class != "image" {
@@ -34,7 +37,11 @@ func Flash(proj *yoestar.Project, unitName, devicePath, projectDir string, dryRu
 		return fmt.Errorf("default machine %q not found", proj.Defaults.Machine)
 	}
 
-	imgPath := findImage(projectDir, machine.Name, unitName)
+	distro, err := proj.EffectiveDistroForImage(unitName)
+	if err != nil {
+		return fmt.Errorf("resolving distro for %q: %w", unitName, err)
+	}
+	imgPath := findImage(projectDir, machine.Name, unitName, distro)
 	if imgPath == "" {
 		return fmt.Errorf("no built image found for %q on machine %q — run yoe build %s first", unitName, machine.Name, unitName)
 	}
@@ -148,8 +155,8 @@ func newCLIProgress(w io.Writer) func(written, total int64) {
 	}
 }
 
-func findImage(projectDir, scopeDir, unitName string) string {
-	dir := filepath.Join(projectDir, "build", unitName+"."+scopeDir, "destdir")
+func findImage(projectDir, scopeDir, unitName, distro string) string {
+	dir := filepath.Join(projectDir, "build", distro, unitName+"."+scopeDir, "destdir")
 	imgPath := filepath.Join(dir, unitName+".img")
 	if _, err := os.Stat(imgPath); err == nil {
 		return imgPath

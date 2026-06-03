@@ -18,6 +18,7 @@ import (
 	"github.com/yoebuild/yoe/internal/build"
 	"github.com/yoebuild/yoe/internal/device"
 	"github.com/yoebuild/yoe/internal/feeds/alpine"
+	"github.com/yoebuild/yoe/internal/feeds/debian"
 	"github.com/yoebuild/yoe/internal/module"
 	"github.com/yoebuild/yoe/internal/repo"
 	"github.com/yoebuild/yoe/internal/resolve"
@@ -186,23 +187,25 @@ func printUsage() {
 }
 
 // cmdUpdateFeeds is the entry point for the `yoe update-feeds`
-// subcommand. Runs inside a module repo, finds every alpine_feed()
-// call in MODULE.star, fetches each declared feed's APKINDEX from
-// upstream, verifies the signature against the feed's declared
-// `keys=[...]`, and atomically writes the decompressed index to
-// disk. The maintainer reviews `git diff` and commits manually.
+// subcommand. Runs inside a module repo, peeks MODULE.star for
+// alpine_feed() and debian_feed() calls, then runs the matching
+// updater(s) in sequence. A module declaring both runs both.
+// Verifies each feed's signature against its declared keys/keyring;
+// writes only — the maintainer reviews `git diff` and commits
+// manually.
 func cmdUpdateFeeds(args []string) {
 	fs := flag.NewFlagSet("update-feeds", flag.ExitOnError)
 	var (
-		archCSV    = fs.String("arch", "", "comma-separated arches to fetch (default: every arch with an existing on-disk feed dir, falling back to all supported)")
-		moduleDir  = fs.String("module-dir", "", "module directory holding MODULE.star (default: cwd)")
+		archCSV          = fs.String("arch", "", "comma-separated arches to fetch (default: every arch with an existing on-disk feed dir, falling back to all supported)")
+		moduleDir        = fs.String("module-dir", "", "module directory holding MODULE.star (default: cwd)")
+		allowKeyUpdate   = fs.String("allow-key-update", "", "append a fingerprint to keys/allowed-fingerprints before verifying (Debian only)")
 	)
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s update-feeds [--arch x86_64,arm64] [--module-dir DIR]\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "Fetch APKINDEX files for every alpine_feed() declared in the current\n")
-		fmt.Fprintf(os.Stderr, "module's MODULE.star. Verifies each feed's signature against its\n")
-		fmt.Fprintf(os.Stderr, "declared keys=[...] using the in-tree trust list. Writes only;\n")
-		fmt.Fprintf(os.Stderr, "review the diff and commit manually.\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s update-feeds [--arch x86_64,arm64] [--module-dir DIR] [--allow-key-update FPR]\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Fetch upstream index files for every alpine_feed()/debian_feed()\n")
+		fmt.Fprintf(os.Stderr, "declared in the current module's MODULE.star. Verifies each feed's\n")
+		fmt.Fprintf(os.Stderr, "signature against the in-tree trust list. Writes only; review the\n")
+		fmt.Fprintf(os.Stderr, "diff and commit manually.\n")
 	}
 	_ = fs.Parse(args)
 
@@ -219,17 +222,48 @@ func cmdUpdateFeeds(args []string) {
 		fmt.Fprintf(os.Stderr, "update-feeds: %s: no MODULE.star here (run inside the module repo)\n", dir)
 		os.Exit(1)
 	}
-	opts := alpine.UpdateOptions{ModuleDir: dir, Out: os.Stdout}
+
+	var arches []string
 	if *archCSV != "" {
 		for _, a := range strings.Split(*archCSV, ",") {
 			a = strings.TrimSpace(a)
 			if a != "" {
-				opts.Arches = append(opts.Arches, a)
+				arches = append(arches, a)
 			}
 		}
 	}
-	if err := alpine.UpdateFeeds(opts); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+
+	alpineDecls, alpineErr := alpine.PeekFeedDecls(dir)
+	debianDecls, debianErr := debian.PeekFeedDecls(dir)
+	if alpineErr != nil && debianErr != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", alpineErr)
+		os.Exit(1)
+	}
+
+	ran := false
+	if len(alpineDecls) > 0 {
+		ran = true
+		opts := alpine.UpdateOptions{ModuleDir: dir, Out: os.Stdout, Arches: arches}
+		if err := alpine.UpdateFeeds(opts); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	if len(debianDecls) > 0 {
+		ran = true
+		opts := debian.UpdateOptions{
+			ModuleDir:      dir,
+			Out:            os.Stdout,
+			Arches:         arches,
+			AllowKeyUpdate: *allowKeyUpdate,
+		}
+		if err := debian.UpdateFeeds(opts); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	if !ran {
+		fmt.Fprintf(os.Stderr, "update-feeds: no alpine_feed() or debian_feed() in %s/MODULE.star\n", dir)
 		os.Exit(1)
 	}
 }
@@ -299,6 +333,7 @@ func cmdBuild(args []string) {
 	dryRun := fs.Bool("dry-run", false, "show what would be built without building")
 	verbose := fs.Bool("verbose", false, "verbose output")
 	machineName := fs.String("machine", "", "target machine")
+	distroName := fs.String("distro", "", "target distro for this build (overrides local.star/defaults; useful when an image name exists in multiple distros)")
 	all := fs.Bool("all", false, "build all units")
 	jobs := fs.Int("jobs", 0, "max units to build in parallel (saved to local.star; default 5)")
 	fs.BoolVar(verbose, "v", false, "verbose output (shorthand)")
@@ -312,6 +347,14 @@ func cmdBuild(args []string) {
 	defer stop()
 
 	proj := loadProjectWithMachine(*machineName)
+	// --distro is a per-invocation distro override. It sits exactly where
+	// local.star's default_distro_override does in the cascade
+	// (image.distro -> override -> defaults.distro), so for a same-named
+	// image across distros it selects which variant builds — without
+	// editing local.star. An image's own explicit distro still wins.
+	if *distroName != "" {
+		proj.DefaultDistroOverride = *distroName
+	}
 	targetArch, err := resolveTargetArch(proj, *machineName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -332,6 +375,35 @@ func cmdBuild(args []string) {
 		ProjectDir: pdir,
 		Arch:       targetArch,
 		Machine:    resolvedMachine,
+	}
+
+	// Derive the consuming distro from the requested target. When the
+	// user names an image, use that image's effective distro so the
+	// per-distro view picks the right variants for cross-distro
+	// same-name collisions. When the user names a non-image unit (or
+	// no name — build everything), fall back to the project default.
+	if len(units) >= 1 {
+		for _, n := range units {
+			if u := proj.LookupUnit(proj.DefaultDistro, n); u != nil && u.Class == "image" {
+				if d, err := proj.EffectiveDistroForImage(n); err == nil {
+					opts.EffectiveDistro = d
+					break
+				}
+			}
+			// Fall back: scan AllUnits for any module's variant
+			// to catch images registered under a non-default distro.
+			for name, u := range proj.AllUnits() {
+				if name == n && u.Class == "image" {
+					if d, err := proj.EffectiveDistroForImage(n); err == nil {
+						opts.EffectiveDistro = d
+					}
+					break
+				}
+			}
+			if opts.EffectiveDistro != "" {
+				break
+			}
+		}
 	}
 
 	// Parallelism precedence: -j flag > local.star parallel_builds >
@@ -453,7 +525,7 @@ func cmdContainerShell() {
 
 	if err := yoe.RunInContainer(yoe.ContainerRunConfig{
 		Shell:       "bash",
-		Image:       yoe.DefaultContainerImage(proj.Units),
+		Image:       yoe.DefaultContainerImage(proj),
 		Command:     bwrapCmd,
 		ProjectDir:  projectDir,
 		Mounts:      mounts,
@@ -592,6 +664,7 @@ func projectLoadOpts() []yoestar.LoadOption {
 		yoestar.WithShowShadows(globalShowShadows),
 		yoestar.WithAllowDuplicateProvides(globalAllowDuplicateProvides),
 		yoestar.WithBuiltin("alpine_feed", alpine.Builtin),
+		yoestar.WithBuiltin("debian_feed", debian.Builtin),
 	}
 	if globalProjectFile != "" {
 		opts = append(opts, yoestar.WithProjectFile(globalProjectFile))
@@ -660,7 +733,7 @@ func loadProjectWithMachine(machineName string) *yoestar.Project {
 		os.Exit(1)
 	}
 	if ovImage != "" {
-		if _, ok := proj.Units[ovImage]; ok {
+		if proj.AnyUnit(ovImage) != nil {
 			proj.Defaults.Image = ovImage
 		} else {
 			fmt.Fprintf(os.Stderr, "Warning: local.star image %q not found in project; ignoring\n", ovImage)
@@ -683,6 +756,65 @@ func findProjectRootForLocal(dir string) (string, error) {
 		}
 		dir = parent
 	}
+}
+
+// unitBuildDirForCWD resolves the build directory for a named unit in the
+// current project, for CLI subcommands that navigate the build tree (e.g.
+// `yoe log`, `yoe diagnose`). It mirrors how the TUI locates a unit's build
+// dir so the CLI and TUI agree, resolving two things the build path also
+// resolves:
+//
+//   - the effective distro (build/<distro>/), honoring the cascade
+//     image.distro -> local.star default_distro_override -> defaults.distro;
+//   - the unit's build scope (<name>.<scopeDir>), where arch-scoped units use
+//     the arch and machine-scoped units — images, kernels — use the machine.
+//
+// Hardcoding the arch (the old behavior) never found a machine-scoped unit's
+// log, and loading the project without projectLoadOpts() crashed with
+// "undefined: alpine_feed" on any project whose modules declare a feed.
+func unitBuildDirForCWD(dir, unitName string) (string, error) {
+	opts := projectLoadOpts()
+	// Honor the developer's local.star machine/distro override so we navigate
+	// the same build/<distro>/<name>.<scope>/ subtree `yoe build` wrote to.
+	var ov yoestar.LocalOverrides
+	if absDir, aerr := filepath.Abs(dir); aerr == nil {
+		if root, rerr := findProjectRootForLocal(absDir); rerr == nil {
+			if loaded, lerr := yoestar.LoadLocalOverrides(root); lerr == nil {
+				ov = loaded
+			}
+		}
+	}
+	machine := ov.Machine
+	if machine != "" {
+		opts = append(opts, yoestar.WithMachine(machine))
+	}
+	proj, err := yoestar.LoadProject(dir, opts...)
+	if err != nil {
+		return "", fmt.Errorf("loading project to resolve distro: %w", err)
+	}
+	if ov.DefaultDistroOverride != "" {
+		proj.DefaultDistroOverride = ov.DefaultDistroOverride
+	}
+	if machine == "" {
+		machine = proj.Defaults.Machine
+	}
+	arch, err := resolveTargetArch(proj, machine)
+	if err != nil {
+		return "", err
+	}
+	// An image may pin its own distro; fall back to the project-level
+	// effective distro for non-image units.
+	distro, err := proj.EffectiveDistroForImage(unitName)
+	if err != nil {
+		if distro, err = proj.EffectiveDistro(); err != nil {
+			return "", err
+		}
+	}
+	scopeDir := arch
+	if u := proj.LookupUnit(distro, unitName); u != nil {
+		scopeDir = build.ScopeDir(u, arch, machine)
+	}
+	return build.UnitBuildDir(dir, scopeDir, unitName, distro), nil
 }
 
 func defaultArch(proj *yoestar.Project) string {
@@ -822,7 +954,12 @@ func cmdLog(args []string) {
 	var logPath string
 
 	if unitName != "" {
-		logPath = filepath.Join(build.UnitBuildDir(dir, build.Arch(), unitName), "build.log")
+		buildDir, derr := unitBuildDirForCWD(dir, unitName)
+		if derr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", derr)
+			os.Exit(1)
+		}
+		logPath = filepath.Join(buildDir, "build.log")
 	} else {
 		logPath = findLatestBuildLog(dir)
 	}
@@ -865,7 +1002,12 @@ func cmdDiagnose(args []string) {
 
 	var logPath string
 	if unitName != "" {
-		logPath = filepath.Join(build.UnitBuildDir(dir, build.Arch(), unitName), "build.log")
+		buildDir, derr := unitBuildDirForCWD(dir, unitName)
+		if derr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", derr)
+			os.Exit(1)
+		}
+		logPath = filepath.Join(buildDir, "build.log")
 	} else {
 		logPath = findLatestBuildLog(dir)
 	}
@@ -1102,7 +1244,16 @@ func cmdRepo(args []string) {
 	}
 
 	proj := loadProject()
-	repoDir := repo.RepoDir(proj, projectDir())
+	// `yoe repo list/info/remove/clean` operates on the per-distro
+	// subtree at repo/<project>/<distro>/. Use the project's
+	// effective distro; cross-distro queries would walk each distro
+	// subtree separately.
+	distro, err := proj.EffectiveDistro()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	repoDir := repo.RepoDistroDir(proj, projectDir(), distro)
 
 	switch args[0] {
 	case "list":
