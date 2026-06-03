@@ -323,6 +323,22 @@ if [ -n "$broken" ]; then
     exit 1
 fi
 
+# Regenerate the initramfs after the whole userland is configured.
+# mmdebstrap runs dpkg as a single --configure pass, so linux-image's
+# postinst fires update-initramfs while coreutils/libattr are still mid-
+# configure. dracut-install copies kernel modules with `cp --preserve=
+# xattr`, which needs libattr in place; run too early it copies nothing
+# and the image ships an initramfs with no virtio/ext4 drivers, so the
+# kernel can't find its root device and hangs in the local-block loop.
+# Everything is configured now — rebuild each kernel's initramfs so the
+# drivers actually land in it.
+for kvdir in $DESTDIR/rootfs/lib/modules/*/; do
+    [ -d "$kvdir" ] || continue
+    kv=$(basename "$kvdir")
+    [ -f "$DESTDIR/rootfs/boot/initrd.img-$kv" ] || continue
+    chroot $DESTDIR/rootfs update-initramfs -u -k "$kv"
+done
+
 mkdir -p $DESTDIR/rootfs/etc%s
 """ % (pkg_list, extra), privileged = True)
 

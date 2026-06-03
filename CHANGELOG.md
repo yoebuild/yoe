@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Debian images boot to disk instead of stalling in the initramfs.** Freshly
+  built Debian images now ship an initramfs that actually contains the storage
+  and filesystem drivers (virtio, ext4, …), so the kernel finds its root device
+  and boots through to userspace rather than hanging at "Waiting for root file
+  system."
 - **`yoe log` and `yoe diagnose` work on feed-based projects again.** They no
   longer fail with an `undefined: alpine_feed` error, now find the build log for
   images and other machine-specific units, and follow the distro you selected in
