@@ -8,6 +8,7 @@
 
 ## Next
 
+- Custom Linux kernel in Debian.
 - Build container packages and deploy to target.
 - vcpkg (seems popular, Rust uses it)
 - Building from console is now confusing with parallel build as to what is
