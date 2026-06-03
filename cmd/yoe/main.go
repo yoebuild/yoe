@@ -333,6 +333,7 @@ func cmdBuild(args []string) {
 	dryRun := fs.Bool("dry-run", false, "show what would be built without building")
 	verbose := fs.Bool("verbose", false, "verbose output")
 	machineName := fs.String("machine", "", "target machine")
+	distroName := fs.String("distro", "", "target distro for this build (overrides local.star/defaults; useful when an image name exists in multiple distros)")
 	all := fs.Bool("all", false, "build all units")
 	jobs := fs.Int("jobs", 0, "max units to build in parallel (saved to local.star; default 5)")
 	fs.BoolVar(verbose, "v", false, "verbose output (shorthand)")
@@ -346,6 +347,14 @@ func cmdBuild(args []string) {
 	defer stop()
 
 	proj := loadProjectWithMachine(*machineName)
+	// --distro is a per-invocation distro override. It sits exactly where
+	// local.star's default_distro_override does in the cascade
+	// (image.distro -> override -> defaults.distro), so for a same-named
+	// image across distros it selects which variant builds — without
+	// editing local.star. An image's own explicit distro still wins.
+	if *distroName != "" {
+		proj.DefaultDistroOverride = *distroName
+	}
 	targetArch, err := resolveTargetArch(proj, *machineName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

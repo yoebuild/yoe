@@ -48,6 +48,18 @@ When unset, yoe resolves the effective distro through a three-level cascade:
 If none of the three is set, image evaluation errors immediately. The distro
 choice is too consequential to pick silently.
 
+`yoe build` also accepts a `--distro` flag that overrides the default for a
+single invocation, sitting at the same level as `default_distro_override` (an
+image's own explicit `distro` still wins). This is mainly useful when the same
+image name is defined in more than one distro — for example a `base-image` in
+both `module-alpine` and `module-debian` — and you want to build a specific
+variant without editing `local.star`:
+
+```sh
+yoe build --distro alpine base-image
+yoe build --distro debian base-image
+```
+
 ### Source-built units are typically distro-neutral, but can be tagged
 
 A unit declared with `unit(...)` (in `module-core` or anywhere else) defaults to

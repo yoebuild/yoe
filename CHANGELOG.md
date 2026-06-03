@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`yoe build` takes a `--distro` flag.** When the same image name exists in
+  more than one distro (say a `base-image` from both the Alpine and Debian
+  modules), you can now pick which one to build for a single command —
+  `yoe build --distro debian base-image` — instead of editing `local.star`.
 - **`yoe deploy` now works for Debian devices, not just Alpine.** Deploy follows
   the project's distro: Alpine targets install over apk as before, and Debian
   targets get the dev feed wired into apt and the unit installed with `apt-get`.
