@@ -2767,6 +2767,7 @@ func (m model) View() string {
 // is identical across them.
 func (m model) renderHomeHeader() string {
 	var b strings.Builder
+	distro := m.distro
 	machine := m.proj.Defaults.Machine
 	image := m.proj.Defaults.Image
 
@@ -2788,7 +2789,8 @@ func (m model) renderHomeHeader() string {
 		renderTabBar(labels, int(m.activeTab)),
 		helpKeyStyle.Render("tab"),
 		helpStyle.Render(": switch"))
-	fmt.Fprintf(&b, "  %s%s  %s%s\n",
+	fmt.Fprintf(&b, "  %s%s  %s%s  %s%s\n",
+		fieldLabelStyle.Render("Distro: "), fieldValueStyle.Render(distro),
 		fieldLabelStyle.Render("Machine: "), fieldValueStyle.Render(machine),
 		fieldLabelStyle.Render("Image: "), fieldValueStyle.Render(image))
 
