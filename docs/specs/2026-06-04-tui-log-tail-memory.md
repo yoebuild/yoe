@@ -60,7 +60,7 @@ backing bytes, re-allocated at 2 Hz. That is the OOM.
 ### Evidence
 
 Both kills name `yoe`, not the terminal, inside the per-surface cgroup that
-makes the journal *look* like the terminal died:
+makes the journal _look_ like the terminal died:
 
 ```
 oom-kill: ...cpuset=user.slice...app-ghostty-surface-transient-3677.scope,task=yoe,pid=168992
@@ -170,11 +170,11 @@ the per-render transient is bounded too.
   seeking. Preserves complete scrollback at ~8 MB per million lines. Rejected
   for now: the detail view's unified scroll+search model assumes a single fully
   materialized `[]string` with absolute line indices (search stores match
-  indices into it; `detailMaxScroll`, match-centering, and the dependency
-  header all index the same slice). Reworking that is a large change to the core
-  TUI rendering/search path and is not interactively verifiable in this
-  environment. A bounded tail removes the OOM with a localized, testable change;
-  the offset index can be a follow-up if longer in-TUI scrollback is wanted.
+  indices into it; `detailMaxScroll`, match-centering, and the dependency header
+  all index the same slice). Reworking that is a large change to the core TUI
+  rendering/search path and is not interactively verifiable in this environment.
+  A bounded tail removes the OOM with a localized, testable change; the offset
+  index can be a follow-up if longer in-TUI scrollback is wanted.
 
 - **Generous flat cap with full re-read each tick.** Simpler, but still rescans
   the whole on-disk file at 2 Hz; the size-skip is cheap and removes the idle
@@ -192,7 +192,7 @@ Touches only `internal/tui/app.go`:
   existing `outputLines = nil` / `logLines = nil`.
 
 Add a unit test (`internal/tui/app_test.go`) for `readFileTail`: fewer than
-`maxLines`, more than `maxLines` (verifies it keeps the *last* N in order), and
+`maxLines`, more than `maxLines` (verifies it keeps the _last_ N in order), and
 a missing file (returns `nil`).
 
 ## Non-goals / limitations
