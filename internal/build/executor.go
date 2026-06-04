@@ -326,13 +326,13 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		built := false
 		if !forceThis && !opts.NoCache && !depRebuilt &&
 			cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hash, effectiveDistro) {
-			fmt.Fprintf(sw, "%-20s [cached] %s\n", name, hash[:12])
+			fmt.Fprintf(sw, "%-20s ⚡ [cached] %s\n", name, hash[:12])
 		} else {
-			fmt.Fprintf(sw, "%-20s [building]\n", name)
+			fmt.Fprintf(sw, "%-20s 🔨 [building]\n", name)
 			notify(name, "building")
 			if err := buildOne(ctx, proj, dag, unit, hash, opts, sw); err != nil {
 				notify(name, "failed")
-				fmt.Fprintf(sw, "%-20s [failed] %v\n", name, err)
+				fmt.Fprintf(sw, "%-20s ❌ [failed] %v\n", name, err)
 				blocked := blockedUnits(dag, name, order)
 				if len(blocked) > 0 {
 					fmt.Fprintf(sw, "  the following units depend on %s and cannot be built:\n", name)
@@ -349,7 +349,7 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 				return
 			}
 			writeCacheMarker(opts.ProjectDir, sd, name, hash, effectiveDistro)
-			fmt.Fprintf(sw, "%-20s [done] %s\n", name, hash[:12])
+			fmt.Fprintf(sw, "%-20s ✅ [done] %s\n", name, hash[:12])
 			notify(name, "done")
 			built = true
 		}
@@ -448,7 +448,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 
 	// Skip if another process is already building this unit.
 	if IsBuildInProgress(opts.ProjectDir, sd, unit.Name, distro) {
-		fmt.Fprintf(w, "  %s: build already in progress, skipping\n", unit.Name)
+		fmt.Fprintf(w, "  ⏭️  %s: build already in progress, skipping\n", unit.Name)
 		return nil
 	}
 
@@ -846,7 +846,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		}
 
 		if err := StageSysroot(destDir, buildDir); err != nil {
-			fmt.Fprintf(w, "  (warning: sysroot staging failed: %v)\n", err)
+			fmt.Fprintf(w, "  ⚠️  (warning: sysroot staging failed: %v)\n", err)
 		}
 	}
 
@@ -877,7 +877,7 @@ func packageAPK(unit *yoestar.Unit, destDir, sysroot, srcDir, buildDir string, o
 			return fmt.Errorf("creating apk: %w", err)
 		}
 	}
-	fmt.Fprintf(w, "  → %s\n", filepath.Base(apkPath))
+	fmt.Fprintf(w, "  📦 %s\n", filepath.Base(apkPath))
 
 	repoDir := repo.RepoDistroDir(proj, opts.ProjectDir, opts.EffectiveDistro)
 	if err := repo.Publish(apkPath, repoDir, archDir, opts.Signer); err != nil {
@@ -938,7 +938,7 @@ func packageDeb(unit *yoestar.Unit, destDir, srcDir, buildDir string, opts Optio
 			return fmt.Errorf("BuildDeb: %w", err)
 		}
 	}
-	fmt.Fprintf(w, "  → %s\n", filepath.Base(debPath))
+	fmt.Fprintf(w, "  📦 %s\n", filepath.Base(debPath))
 
 	// Publish into the project pool and regenerate the per-arch
 	// Packages + Release + InRelease at repo/<project>/<distro>/.

@@ -22,6 +22,9 @@ and this project adheres to
   the output leads with a clear `❌ FAILED: <unit> task: <task>` line before the
   log, so you can tell at a glance which unit failed even when several are
   building in parallel.
+- **Build status lines now carry icons for quick scanning.** Each unit reports
+  with an at-a-glance marker — ⚡ cached, 🔨 building, ✅ done, ❌ failed — and
+  freshly packaged artifacts are flagged with 📦.
 
 ## [0.11.4] - 2026-06-04
 
