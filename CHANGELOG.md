@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-06-04
+
 - **`yoe run --boot-test` boots an image and verifies it came up.** It boots
   headless, waits for the login prompt, SSHes in to run a health check, then
   powers off — a one-command pass/fail smoke test for CI or a quick local sanity
