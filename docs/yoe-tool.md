@@ -223,6 +223,16 @@ value. `yoe config show` prints the value currently in effect. `-j 1` forces a
 fully sequential build, which is handy when reading interleaved verbose output.
 Precedence is `-j` flag → `local.star` → the built-in default of 5.
 
+**When a build fails:** the failing unit's build log is the record of what its
+build steps actually did. yoe prints the tail of that log inline at the point of
+failure, so the underlying error (a configure rejection, a compiler message, a
+missing header) is visible directly in the output — including when the build ran
+somewhere ephemeral like CI, where the log file does not survive the run. The
+full log path is printed alongside the tail; `yoe log <unit>` reprints it, and
+`yoe log <unit> -e` opens it in `$EDITOR`. In verbose mode (`-v`) the log is
+streamed to the terminal as the build runs, so only the path is noted on
+failure.
+
 ### `yoe flash`
 
 Writes a built image to a block device or SD card.
