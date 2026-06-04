@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Source downloads no longer fail intermittently with "gzip: invalid
+  header."** Some download mirrors serve a `.tar.gz` in a way that made yoe save
+  an already-decompressed archive under a compressed name, so a build would
+  break or succeed depending on which mirror you happened to reach. Downloads
+  are now fetched verbatim, so a unit that builds once builds every time.
+
 ## [0.11.0] - 2026-06-03
 
 - **Debian Trixie support.** yoe can now build Debian images alongside Alpine.
