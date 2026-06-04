@@ -16,7 +16,7 @@ project(
     # so module-core wins over module-bsp and the Alpine/Jetson prebuilts.
     modules = [
         module("https://github.com/yoebuild/module-alpine.git",
-              ref = "main"),
+              ref = "3.21"),
         module("https://github.com/yoebuild/module-debian.git",
               ref = "trixie"),
         module("https://github.com/yoebuild/module-ubuntu.git",
