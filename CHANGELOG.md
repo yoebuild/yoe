@@ -8,158 +8,40 @@ and this project adheres to
 
 ## [Unreleased]
 
-- **Debian images boot to disk instead of stalling in the initramfs.** Freshly
-  built Debian images now ship an initramfs that actually contains the storage
-  and filesystem drivers (virtio, ext4, …), so the kernel finds its root device
-  and boots through to userspace rather than hanging at "Waiting for root file
-  system."
-- **`yoe log` and `yoe diagnose` work on feed-based projects again.** They no
-  longer fail with an `undefined: alpine_feed` error, now find the build log for
-  images and other machine-specific units, and follow the distro you selected in
-  `local.star`.
-- **Debian images build reliably again.** Image assembly no longer aborts with a
-  `mount: must be superuser` error partway through building the root filesystem
-  and bootable disk, so Debian images such as the dev-image complete instead of
-  failing.
-- **`yoe tui displays distro in status header`**
+## [0.11.0] - 2026-06-03
+
+- **Debian Trixie support.** yoe can now build Debian images alongside Alpine.
+  Set `defaults.distro = "debian"` to target a whole project at Debian, or tag
+  an individual `image(...)` with `distro = "debian"`, and yoe builds it through
+  the Debian backend — glibc toolchain, `.deb` packaging, a signed apt repo, and
+  a fully configured, bootable rootfs. `base-image` and `dev-image` are
+  available for Debian out of the box.
+- **`yoe deploy`, `run`, and `flash` work for Debian targets.** Deploy wires the
+  project's dev feed into apt and installs with `apt-get` (Alpine still installs
+  over apk); `run` and `flash` locate Debian images. `apt-get install` and
+  `apt-get upgrade` work offline against your project repo, which apt verifies
+  with the project's own GPG key. The edit-deploy loop is identical on both
+  distros. (not fully tested yet)
 - **`yoe build` takes a `--distro` flag.** When the same image name exists in
   more than one distro (say a `base-image` from both the Alpine and Debian
-  modules), you can now pick which one to build for a single command —
+  modules), pick which one to build for a single command —
   `yoe build --distro debian base-image` — instead of editing `local.star`.
-- **`yoe deploy` now works for Debian devices, not just Alpine.** Deploy follows
-  the project's distro: Alpine targets install over apk as before, and Debian
-  targets get the dev feed wired into apt and the unit installed with `apt-get`.
-  Rebuilds with the same version still land — a rolled-back pin downgrades
-  cleanly — so the edit-deploy loop is identical on both.
-- **Debian images build faster and boot fully configured.** Debian image
-  assembly now installs the whole package set in a single pass with `mmdebstrap`
-  instead of starting a fresh container for every package, and package
-  maintainer scripts now run during assembly — so users, groups, alternatives,
-  and service enablement are set up in the image rather than skipped.
-- **The project's Debian package repository now produces a valid apt index.**
-  Package descriptions with multiple paragraphs are formatted correctly, so
-  `apt update` against a project repo — on a device or during image assembly —
-  no longer fails to parse the package list.
-- **Fixed an intermittent startup failure in multi-distro projects.** `yoe`
-  could occasionally refuse to start with an error like
-  `unit "optee-k3" depends on "python3-minimal", which does not exist`, then
-  start fine on the next try. Projects that mix Alpine and Debian now start
-  reliably.
-- **`distro_deps` and `distro_runtime_deps` on `unit(...)`.** One source unit
-  can now satisfy both alpine and debian closures even when the package names
-  differ between distros (alpine's `py3-setuptools` vs debian's
-  `python3-setuptools`, alpine's `zlib` vs debian's split `zlib1g-dev` /
-  `zlib1g`). Effective deps at any consuming closure walk are
-  `deps + distro_deps[consumer_distro]`, resolved per-consumer rather than at
-  unit-registration time, so a debian-shaped name in one branch doesn't break
-  alpine closures that also reach the unit.
-- **Hand-written `module-core` units now dispatch their build container per
-  distro.** 23 units (meson, samurai, strace, vim, kmod, openssl, zlib, zstd,
-  linux, file's friends, …) had `container = "toolchain-musl"` baked in as a
-  literal, so a project that flipped `defaults.distro` to debian still tried to
-  compile them inside the musl toolchain. They now use the virtual `"toolchain"`
-  reference — same pattern every class in `module-core` already used — which
-  dispatches through the provides table to `toolchain-musl` for alpine closures
-  and `toolchain-glibc` for debian closures.
-- **Alpine images (`base-image`, `dev-image`, `bun-image`, `docker-image`,
-  `jukebox-image`, `nodejs-image`, `python-image`, `qt-image`, `selfhost-image`)
-  moved from `module-core` to `module-alpine`, and `base-image` + `dev-image`
-  now also exist in `module-debian`.** Each image is tagged with its distro, so
-  setting `defaults.distro = "debian"` on your project picks the Debian
-  `base-image` and `dev-image` automatically — no PROJECT.star surgery required
-  to switch backends. `module-core` keeps the distro-neutral classes and the
-  multi-distro infrastructure.
-- **`yoe run` and `yoe flash` find your built images again.** Both commands (and
-  the TUI's flash action) were looking under the old pre-distro-split
-  `build/<image>.<machine>/` path while the executor writes to
-  `build/<distro>/<image>.<machine>/`, so every freshly built image looked
-  "missing."
-- **Building a single source unit by name (`yoe build file`) now picks the
-  toolchain matching the project's default distro.** Previously untagged units
-  routed through the global provides table, which silently picked whichever
-  toolchain sorted first — so an Alpine project could end up compiling inside
-  the glibc toolchain against a musl sysroot and fail at the first link.
-- **Alpine and Debian prebuilt units now build cleanly.** Source preparation was
-  writing the fetched `.apk` / `.deb` into the old pre-distro-split
-  `build/<unit>.<scope>/src/` path while the install task looked inside the new
-  `build/<distro>/<unit>.<scope>/src/` location, so every prebuilt-from- feed
-  unit failed with `tar: Cannot open: No such file or directory`. Both sides now
-  agree on the per-distro layout.
-- **TUI Default Distro picker shows "debian" instead of "module-debian".** The
-  picker was surfacing the on-disk module directory name as the distro choice
-  whenever a module declared its feed via `debian_feed(...)`. Fixed; the picker
-  now lists the canonical distro name declared in `MODULE.star`.
-- **Build Debian images with `distro = "debian"` on any image.** Set the field
-  on an `image(...)` call (or rely on `defaults.distro` for whole-project Debian
-  targets) and yoe routes that image through the new Debian backend: closure
-  walks pick `toolchain-glibc` instead of toolchain-musl, source units get
-  packaged as `.deb`, the project repo emits a signed Debian-format archive, and
-  rootfs assembly runs `dpkg --configure -a` inside the toolchain container
-  before booting.
-- **`apt-get install` and `apt-get upgrade` now work offline against your
-  project repo.** Deployed Debian images carry the project's GPG key scoped via
-  `Signed-By:` in a deb822 `.sources` entry, so device-side apt verifies your
-  packages without trusting any other source.
-- **Project repos now host Debian-format signed package archives alongside the
-  existing APK tree.** Building a Debian artifact populates
-  `repo/<project>/debian/` with `pool/<component>/...` + per-arch
-  `Packages.{gz}` + a Valid-Until-stamped `InRelease`. Pointing a device at the
-  URL is a regular apt source — no special tooling.
-- **New `debian_feed(...)` declares a Debian package feed alongside
-  `alpine_feed`.** One call materializes a synthetic module
-  (`<parent>.<component>` — e.g. `debian.main`) whose units the resolver pulls
-  lazily as the image closure references them; `yoe update-feeds` inside a
-  module repo refreshes the in-tree `Packages` files via signed `InRelease`. See
-  `docs/module-debian.md` for the maintainer playbook.
-- **Source units shared between Alpine and Debian images now cache separately.**
-  A unit referenced from both an Alpine and a Debian image used to clobber its
-  own build directory between the two; the build cache now keys on the consuming
-  image's effective distro so each variant builds and stays available.
-- **Build directories now live under `build/<distro>/<unit>.<scope>/`.** Each
-  distro keeps its own destdir so a unit shared by Alpine and Debian images
-  doesn't overwrite itself between builds. Old `build/<unit>.<scope>/`
-  directories are stranded and need to be removed manually; the next `yoe build`
-  writes to the new layout.
-- **`yoe clean <unit>` works again.** The previous implementation constructed
-  paths that never matched the actual build directory, so per-unit clean was a
-  silent no-op. The fix walks every distro subtree so a unit referenced from
-  multiple images is cleaned in one step.
-- **Cross-distro projects with same-named units now resolve correctly.** When
-  Alpine's and Debian's package feeds both define a unit (e.g. `libssl3`), each
-  consuming image picks its own variant from a precomputed per-distro view.
-  Previously, the second walk's variant could be invisible because the catalog
-  held only one slot per name. The new module-keyed catalog (`UnitsByModule`)
-  and precomputed `DistroViews` make each distro's resolution independent.
-  Available to in-tree code via `proj.LookupUnit(distro, name)` and
-  `proj.AllUnits()` iterator; `BuildDAG(proj, distro)` consumes the per-distro
-  view so `yoe build <image>` automatically selects the right distro context
-  from the named image.
-- **`prefer_modules` is now scoped per distro.** The new shape is
-  `prefer_modules = {"alpine": {"xz": "alpine.main"}, "debian": {...}}` — a pin
-  only fires for closures whose effective distro matches the outer key. The
-  prior flat form (`{"xz": "alpine.main"}`) is removed; existing pins need to be
-  rewrapped under their consuming distro key. Mixed-distro projects no longer
-  need to drop pins to keep one backend resolving — an alpine pin doesn't bleed
-  into a debian closure walk and vice versa.
-- **TUI Setup has a Default Distro picker.** Press `s` on the home screen,
-  navigate to "Default Distro", and pick from the distros provided by your
-  loaded synthetic-feed modules (`alpine`, `debian`, …) or `(none)` to clear the
-  override. The selection persists to `local.star` as `default_distro_override`
-  and takes effect immediately — the TUI re-walks the build cache against the
-  new effective distro so cached/building/failed status reflects the right
-  per-distro subtree.
-- **APK repos now live under `repo/<project>/alpine/<arch>/`.** Per-arch
-  `APKINDEX.tar.gz` trees, the project public key, and the `keys/` directory all
-  moved one level deeper so an Alpine and a Debian project can coexist under the
-  same `repo/<project>/` root without name collisions. Update any external
-  pipelines or hardcoded URLs (feed-server clients, deploy scripts,
-  `/etc/apk/repositories` entries) — the next `yoe build` writes to the new
-  layout and old `repo/<project>/<arch>/` trees are stranded.
-- **A new `defaults.distro` field on `project(...)` plus the `distro` tag on
-  each image select which backend an image targets.** Mixed-distro projects
-  work: tag images individually, untagged units stay visible to every distro,
-  and `local.star`'s `default_distro_override` lets a developer flip the
-  project-wide default without touching PROJECT.star.
+- **The TUI shows and selects the default distro.** The status header displays
+  the active distro, and TUI Setup (press `s`) has a Default Distro picker that
+  persists to `local.star` and re-walks the build cache immediately so status
+  reflects the chosen backend.
+- **`yoe log` and `yoe diagnose` work on feed-based projects again.** They no
+  longer fail with an `undefined: alpine_feed` error and now find the build log
+  for images and other machine-specific units.
+- **Repository and build layout are now split by distro.** So Alpine and Debian
+  artifacts can coexist, APK repos moved to `repo/<project>/alpine/<arch>/`,
+  Debian repos live under `repo/<project>/debian/`, and build output moved to
+  `build/<distro>/<unit>.<scope>/`. Update any hardcoded repo URLs and
+  `/etc/apk/repositories` entries; old `repo/<project>/<arch>/` and
+  `build/<unit>.<scope>/` directories are stranded and can be removed.
+  `prefer_modules` is now keyed by distro:
+  `prefer_modules = {"alpine": {"xz": "alpine.main"}, "debian": {...}}` — rewrap
+  any existing flat pins under their distro key.
 
 ## [0.10.15] - 2026-05-26
 
