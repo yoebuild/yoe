@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	yoe "github.com/yoebuild/yoe/internal"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
@@ -105,6 +106,18 @@ type QEMUOptions struct {
 	// grow-rootfs to actually have free space to extend into.
 	// Empty string disables the copy (yoe run uses disk.img directly).
 	DiskSize string
+	// BootTest turns `yoe run` into a non-interactive smoke test: boot the
+	// image headless, wait for the serial console to reach the login
+	// prompt, SSH in and run a health command, then power off. The process
+	// exits 0 on success and non-zero on any failure (timeout, early QEMU
+	// exit, no SSH). Used by CI to catch boot/runtime regressions a build
+	// can't. Requires qemu-system on the host (the container fallback can't
+	// forward the guest SSH port back to the host).
+	BootTest bool
+	// BootTestTimeout bounds the whole boot test (boot + SSH). Zero selects
+	// defaultBootTestTimeout. Generous by default because a host without
+	// /dev/kvm falls back to TCG emulation, which boots several times slower.
+	BootTestTimeout time.Duration
 }
 
 // RunQEMU launches an image in QEMU.
@@ -169,11 +182,18 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 
 	// Try host QEMU first
 	if _, err := exec.LookPath(qemuBin); err == nil {
-		fmt.Fprintf(w, "Starting QEMU (host): %s %s\n", qemuBin, machine.Arch)
 		if machine.Arch == detectHostArch() && !kvmAvailable() {
 			fmt.Fprintf(w, "  /dev/kvm not available — using TCG software emulation (slower)\n")
 		}
 		args := buildArgs(imgPath)
+		if opts.BootTest {
+			sshPort, err := sshHostPort(machine, opts)
+			if err != nil {
+				return err
+			}
+			return runBootTest(qemuBin, args, sshPort, opts.BootTestTimeout, w)
+		}
+		fmt.Fprintf(w, "Starting QEMU (host): %s %s\n", qemuBin, machine.Arch)
 		cmd := exec.Command(qemuBin, args...)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
@@ -197,6 +217,14 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 	}
 
 	// Fall back to container
+	if opts.BootTest {
+		// The boot test SSHes into the guest over a host-side port forward.
+		// Inside the build container QEMU's user-net forwards land on the
+		// container's loopback, not the host's, so the SSH probe can't reach
+		// the guest — and that's exactly the port-mapping tangle host QEMU
+		// avoids. Require qemu-system on the host rather than emulate it.
+		return fmt.Errorf("boot-test requires %s on the host PATH (the container fallback can't forward the guest SSH port back to the host); install qemu-system for %s", qemuBin, machine.Arch)
+	}
 	fmt.Fprintf(w, "Starting QEMU (container): %s %s\n", qemuBin, machine.Arch)
 	rel, err := filepath.Rel(projectDir, imgPath)
 	if err != nil {

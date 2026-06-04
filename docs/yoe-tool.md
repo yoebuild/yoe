@@ -286,7 +286,20 @@ yoe run qt-image --display
 
 # Run headless in the background
 yoe run --daemon
+
+# Run the Debian build of an image that exists in several distros
+yoe run dev-image --distro debian
+
+# Boot smoke test: boot headless, wait for the login prompt, SSH in and run
+# a health check, then power off — exits non-zero on any failure
+yoe run --boot-test dev-image
+yoe run --boot-test --timeout 90s --machine qemu-arm64 dev-image
 ```
+
+When an image name exists in more than one distro (e.g. `dev-image` ships in
+both the Alpine and Debian modules), `--distro` selects which built image to
+run, mirroring `yoe build --distro`. Without it the project's effective distro
+(the `local.star` override, then `defaults.distro`) decides.
 
 **What happens:**
 
@@ -353,6 +366,19 @@ local-overrides (`qemu_ports` in `local.star`) come first, then `--port` flags
 on the command line. In both lists, an entry whose guest port matches one in the
 machine's defaults _replaces_ that default instead of adding a duplicate — the
 same rule `--port` already follows for qemu-in-qemu.
+
+**Boot smoke test (`--boot-test`).** This turns `yoe run` into a non-interactive
+pass/fail check, for CI or a quick local sanity test. yoe boots the image
+headless, watches the serial console until it reaches the login prompt, then
+SSHes into the guest over the `2222→22` forward (as `root`, which dev images
+leave passwordless), runs a health command, and powers the guest off. It exits
+`0` only if every stage succeeds; a boot that never reaches the prompt, a guest
+that exits early, or an unreachable SSH all fail the run. `--timeout` bounds the
+whole sequence (default 5 minutes — generous so an unaccelerated TCG boot still
+finishes); the boot uses KVM when `/dev/kvm` is available and falls back to TCG
+otherwise. The test requires `qemu-system-*` on the host PATH: it runs QEMU on
+the host so the guest's SSH forward lands on the host loopback where the probe
+can reach it, rather than inside the build container.
 
 **QEMU settings sub-screen.** Open Setup with `s`, move to **QEMU settings**,
 press Enter. The sub-screen lays out three sections:
