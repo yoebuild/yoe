@@ -130,9 +130,9 @@ on demand.
 
 - **Generating a `.star` file to consume a package.** Not needed — the feed
   exposes every `main`/`community` package lazily. Just name it in `deps`.
-  (`scripts/gen-unit.py` in the module-alpine repo is for _maintaining_
-  module-alpine itself, driven by that repo's own `create-alpine-unit` skill,
-  not for consuming a package from a project.)
+  (Maintaining module-alpine itself — refreshing the checked-in APKINDEX after
+  Alpine ships a release — is `yoe update-feeds` run in that repo, not anything
+  a consuming project does.)
 - **Adding a `prefer_modules` entry for a feed-only package.** Unnecessary —
   synthetics already lose to real modules, so a package with no source-unit
   competitor resolves without routing. Use `prefer_modules` only to _override_ a

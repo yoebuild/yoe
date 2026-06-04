@@ -143,9 +143,6 @@ func resolveRuntimeDeps(entry Entry, providers Providers) ([]string, error) {
 // emitting every soname as a yoe-side virtual would clutter the
 // provides map and conflict with the bare-name registrations the
 // resolver actually uses.
-//
-// Mirrors the equivalent filter in gen-unit.py so the synthetic units
-// produce the same provides set as today's generated alpine_pkg files.
 func filterProvides(provides []string) []string {
 	if len(provides) == 0 {
 		return nil

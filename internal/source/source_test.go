@@ -543,13 +543,15 @@ func createTestZip(t *testing.T, path string, entries []zipEntry) {
 }
 
 func TestAPKChecksumVerify(t *testing.T) {
-	// Use a real Alpine apk from the cache populated by module-alpine's
-	// gen-unit.py runs. Skip cleanly when it isn't there (CI without
-	// the cache).
+	// Use a real Alpine apk fixture. Skip cleanly when it isn't there
+	// (CI without the cache). To populate it locally:
+	//   mkdir -p ~/.cache/module-alpine-gen/v3.21/main/x86_64 && \
+	//   curl -sLo ~/.cache/module-alpine-gen/v3.21/main/x86_64/musl-1.2.5-r11.apk \
+	//     https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/musl-1.2.5-r11.apk
 	apkPath := filepath.Join(os.Getenv("HOME"),
 		".cache/module-alpine-gen/v3.21/main/x86_64/musl-1.2.5-r11.apk")
 	if _, err := os.Stat(apkPath); err != nil {
-		t.Skip("test apk not in cache; run gen-unit.py first")
+		t.Skip("test apk not in cache; see comment above to populate it")
 	}
 	apk, err := os.ReadFile(apkPath)
 	if err != nil {
