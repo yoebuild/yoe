@@ -98,7 +98,7 @@ func (e *Engine) SetExtraBuiltins(specs map[string]BuiltinFactory) {
 }
 
 // SetActiveArch records the arch the loader has settled on for this
-// evaluation pass. Lazy feed lookups (alpine_feed, debian_feed) consult
+// evaluation pass. Lazy feed lookups (alpine_feed, apt_feed) consult
 // this when materializing units so per-arch APKINDEX entries can be
 // filtered without threading arch through every call.
 func (e *Engine) SetActiveArch(arch string) { e.activeArch = arch }
@@ -165,7 +165,7 @@ func (e *Engine) SetCurrentModule(name string, index int) {
 
 // CurrentModule returns the name of the module currently being
 // evaluated, or "" when running at the project root. Used by feed
-// builtins (alpine_feed, debian_feed) to compose synthetic module
+// builtins (alpine_feed, apt_feed) to compose synthetic module
 // names like "alpine.main".
 func (e *Engine) CurrentModule() string { return e.currentModule }
 

@@ -10,7 +10,7 @@ import (
 // to the bare package name that satisfies it. The resolver picks the
 // first Possibility in each Relation that the providers know about.
 //
-// Implementations live with the caller: debian_feed wraps a merged
+// Implementations live with the caller: apt_feed wraps a merged
 // view across every registered feed (cross-feed deps — security
 // packages depending on main libraries). Tests pass a *ProvidesTable
 // wrapped via TableProviders.
@@ -48,10 +48,15 @@ func (t TableProviders) Resolve(token string) (string, bool) {
 // extracted into a partial rootfs.
 //
 // Returns the package-metadata portion of a synthetic unit. The caller
-// (debian_feed's Lookup wrapper) adds feed-specific transport fields —
+// (apt_feed's Lookup wrapper) adds feed-specific transport fields —
 // Source URL, container, install task — before handing the unit to the
 // build executor.
-func MaterializeUnit(entry Entry, providers Providers, moduleName string) (*yoestar.Unit, error) {
+//
+// distro stamps the unit's Distro tag ("debian", "ubuntu", …) so the
+// closure-walk visibility filter keeps the unit inside its own distro's
+// closures. It is the apt_feed's `distro` kwarg, passed through here so
+// the same materializer serves every apt-family distro.
+func MaterializeUnit(entry Entry, providers Providers, moduleName, distro string) (*yoestar.Unit, error) {
 	if providers == nil {
 		return nil, fmt.Errorf("dpkg: materialize %s: nil Providers", entry.Package)
 	}
@@ -92,7 +97,7 @@ func MaterializeUnit(entry Entry, providers Providers, moduleName string) (*yoes
 		RuntimeDeps: runtimeDeps,
 		Provides:    provides,
 		Module:      moduleName,
-		Distro:      "debian",
+		Distro:      distro,
 	}
 	return u, nil
 }

@@ -8,6 +8,16 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Ubuntu is now a selectable distro alongside Alpine and Debian.** Point a
+  project at `module-ubuntu` and set the distro to `ubuntu` (per image, or via
+  the default-distro override) to build images from Ubuntu's package archive.
+  Ubuntu and Debian images can live side by side in one project without their
+  packages colliding.
+- **The `debian_feed(...)` builtin is now `apt_feed(...)` and takes a `distro`.**
+  One builtin serves every apt-based distro; pass `distro = "debian"` or
+  `distro = "ubuntu"`. It also accepts an optional `arch_urls` map so a single
+  feed can pull amd64 from one mirror and arm64 from another — needed for
+  Ubuntu, whose ports architectures live on a separate host.
 - **Build failures now name the unit and task that broke.** When a build fails,
   the output leads with a clear `❌ FAILED: <unit> task: <task>` line before the
   log, so you can tell at a glance which unit failed even when several are

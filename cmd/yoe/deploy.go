@@ -73,13 +73,13 @@ func cmdDeploy(args []string) {
 		fmt.Fprintf(os.Stderr, "Error: resolve effective distro: %v\n", err)
 		os.Exit(1)
 	}
-	// The suite is only meaningful for Debian targets (it stamps the apt
-	// sources.list line); alpine deploys ignore it. Read it from the
-	// project's debian_feed only when deploying Debian, so an alpine-only
-	// project — which has no debian_feed — doesn't error.
+	// The suite is only meaningful for apt-family targets (it stamps the
+	// apt sources.list line); alpine deploys ignore it. Read it from the
+	// project's apt_feed only when deploying an apt distro, so an
+	// alpine-only project — which has no apt_feed — doesn't error.
 	suite := ""
-	if deployDistro == "debian" {
-		if suite, err = proj.DebianSuite(); err != nil {
+	if yoestar.IsAptFamily(deployDistro) {
+		if suite, err = proj.SuiteForDistro(deployDistro); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}

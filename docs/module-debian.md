@@ -12,7 +12,7 @@ browse the bootstrap keyring, the in-tree `Packages` snapshots, or to send a PR
 adding a new feed/component.
 
 > **Implementation details:** how Debian debs pass through yoe's pipeline
-> (`debian_feed`, the InRelease verify path, mmdebstrap-driven image assembly,
+> (`apt_feed`, the InRelease verify path, mmdebstrap-driven image assembly,
 > the project repo emitter) live in
 > [`docs/specs/2026-05-25-module-debian.md`](https://github.com/yoebuild/yoe/blob/main/docs/specs/2026-05-25-module-debian.md)
 > and the matching plan under `docs/plans/`. This doc is the "when to reach for
@@ -84,7 +84,7 @@ fleet-specific; pick a value that matches your update cadence and ability to
 push fresh InRelease files when needed.
 
 Repository URLs must be HTTPS. yoe validates this at project evaluation time; an
-`http://` URL in a `debian_feed(...)` call fails fast with a clear error.
+`http://` URL in a `apt_feed(...)` call fails fast with a clear error.
 Plaintext mirrors expose the trust chain to MITM injection — the bootstrap
 keyring's job is to verify what the mirror says, but the mirror can't be trusted
 to deliver bytes faithfully without TLS.
@@ -95,7 +95,7 @@ The flow mirrors `module-alpine`'s. Inside a checked-out `module-debian`:
 
 1. **Refresh in-tree `Packages` snapshots.** Run `yoe update-feeds` inside the
    module directory. The command peeks `MODULE.star` for every
-   `debian_feed(...)` call, fetches each declared suite's `InRelease` from the
+   `apt_feed(...)` call, fetches each declared suite's `InRelease` from the
    pinned mirror, verifies it against `keys/debian-archive-keyring.gpg` with
    Valid-Until enforcement, fetches per-arch `Packages.gz`, decompresses, and
    atomically writes the result into `feeds/<component>/<arch>/Packages`. Writes
@@ -115,7 +115,7 @@ The flow mirrors `module-alpine`'s. Inside a checked-out `module-debian`:
 In `MODULE.star`:
 
 ```python
-debian_feed(
+apt_feed(
     name = "main",
     url = "https://deb.debian.org/debian",
     suite = "bookworm",
@@ -139,7 +139,7 @@ synthetic modules differ from real modules, lazy-Lookup contract, and the
 working-set sizes the resolver operates at).
 
 Multiple feeds compose: declaring `debian.main` plus security and updates
-overlays (each with its own `debian_feed(...)` call, same suite, different
+overlays (each with its own `apt_feed(...)` call, same suite, different
 component or apt-overlay URL) gives apt-equivalent priority resolution on the
 project side. The closure walker consults each in declaration order; first match
 wins.
@@ -253,7 +253,7 @@ substantial follow-up rather than routine work.
   would have fetched via the project rootfs overlay.
 
 - **One Debian suite per project, enforced at evaluation.** Every
-  `debian_feed(...)` call in a project must agree on its `suite` kwarg; the
+  `apt_feed(...)` call in a project must agree on its `suite` kwarg; the
   resolver errors at load time if it sees `bookworm` and `trixie` declared in
   the same project. The constraint exists because the toolchain container
   (`@module-debian//containers/toolchain-glibc`) pins one Debian release, and

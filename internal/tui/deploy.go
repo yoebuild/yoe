@@ -119,12 +119,12 @@ func (m model) startDeployCmd() tea.Cmd {
 
 		installVerb := "apk del + apk add"
 		suite := ""
-		if distro == "debian" {
+		if yoestar.IsAptFamily(distro) {
 			installVerb = "apt-get install --reinstall"
 			// Suite stamps the apt sources.list line; read it from the
-			// project's debian_feed. Only for Debian — an alpine project
-			// has no debian_feed and ignores the suite.
-			if suite, err = proj.DebianSuite(); err != nil {
+			// project's apt_feed for this distro. Only for apt-family
+			// distros — an alpine project has no apt_feed and ignores it.
+			if suite, err = proj.SuiteForDistro(distro); err != nil {
 				return deployDoneMsg{err: err}
 			}
 		}

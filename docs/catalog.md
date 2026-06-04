@@ -35,7 +35,7 @@ same concept.
 **Synthetic module.** A registration in the catalog that names a feed
 (`alpine.main`, `debian.main`, …) and provides a `Lookup(name) → *Unit`
 callback. The callback runs only when something asks for a name the feed exposes
-— registration is eager (one call per `alpine_feed()` / `debian_feed()` in
+— registration is eager (one call per `alpine_feed()` / `apt_feed()` in
 MODULE.star), but per-name `*Unit` allocation is lazy.
 
 **Materialization.** The act of allocating a `*Unit` for a name a synthetic
@@ -76,7 +76,7 @@ catalog by the end of the loader's evaluation phase, regardless of whether any
 image references them.
 
 **Synthetic units (feed-materialized).** A `MODULE.star` calls
-`alpine_feed(...)` or `debian_feed(...)`. The builtin does NOT allocate one
+`alpine_feed(...)` or `apt_feed(...)`. The builtin does NOT allocate one
 `*Unit` per upstream package; it registers one **`SyntheticModule`** with a
 `Lookup(name) → *Unit` callback. The 60k-entry upstream index sits
 parsed-but-unmaterialized on disk and in a single `archCache` struct. A `*Unit`
@@ -261,7 +261,7 @@ come before dependents, and hand the result to the DAG builder.
 ### Why "lazy"
 
 The synthetic feeds are registered eagerly during module evaluation — one
-`alpine_feed()` or `debian_feed()` call per repo section. But each call only
+`alpine_feed()` or `apt_feed()` call per repo section. But each call only
 registers the `SyntheticModule` (a name + a `Lookup` callback + the in-tree
 `APKINDEX` / `Packages` path); no `*Unit` structures exist yet. The 50,000-entry
 Debian catalog is on disk as text and in the `archCache` after first parse, but
@@ -302,7 +302,7 @@ name; the returned pointer is then catalog-stable.
 ### The SyntheticModule contract
 
 The `Lookup` callback the cycle calls is supplied by whichever feed builtin
-registered the synthetic module (`alpine_feed` or `debian_feed`). The shape:
+registered the synthetic module (`alpine_feed` or `apt_feed`). The shape:
 
 ```go
 type SyntheticModule struct {
@@ -392,7 +392,7 @@ per-distro paths on disk (`build/alpine/openssl.target/` vs
 a debian build never reads back a musl-linked binary the alpine build produced.
 
 For feed-materialized units, the `Distro` field on the materialized `*Unit` is
-set by the feed (`"alpine"` for `alpine_feed`, `"debian"` for `debian_feed`);
+set by the feed (`"alpine"` for `alpine_feed`, `"debian"` for `apt_feed`);
 the unit's hash naturally differs across distros because the unit itself
 differs. For untagged source-built units, the consumer's effective distro is
 what disambiguates — the unit definition is the same, but the cache key isn't.
@@ -444,7 +444,7 @@ So every invocation re-runs the loader in this order:
    clone paths, evaluate each `MODULE.star` in priority order.
 2. **Eager registration.** Classes (`classes/*.star`), source-declared units
    (`units/*.star`), machines (`machines/*.star`), and synthetic modules (each
-   `alpine_feed(...)` / `debian_feed(...)` call) all register during this phase.
+   `alpine_feed(...)` / `apt_feed(...)` call) all register during this phase.
    No `archCache` parse yet — the feed builtin only stores the on-disk index
    path and the callback.
 3. **Image evaluation.** Every `image(...)` call in every module fires

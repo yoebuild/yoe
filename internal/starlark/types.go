@@ -96,7 +96,7 @@ type Project struct {
 	Diagnostics Diagnostics
 
 	// SyntheticModules carries the entries registered via `alpine_feed(...)`
-	// (and the eventual debian_feed) during MODULE.star evaluation. Each
+	// (and the eventual apt_feed) during MODULE.star evaluation. Each
 	// is a deferred-materialization source for the resolver — the closure
 	// walk (U7) calls Lookup on these when a referenced name isn't already
 	// in proj.Units. Ordered by Priority ascending (lowest first); within
@@ -449,32 +449,47 @@ func (p *Project) EffectiveDistro() (string, error) {
 	return "", fmt.Errorf("project has no defaults.distro (set defaults.distro on project)")
 }
 
-// DebianSuite returns the Debian release codename the project targets,
-// read from its debian_feed(...) declarations — the single source of the
-// codename that the project repo emitter (dists/<suite>/), image
+// AptFamilyDistros is the set of distros that use the apt/dpkg/glibc
+// backend (mmdebstrap rootfs assembly, .deb packaging, apt sources on
+// device). Ubuntu rides Debian's machinery, so both share this family;
+// only the feed identity, suite, and mirror differ. Anything not in this
+// set (e.g. "alpine") takes the apk path.
+var AptFamilyDistros = map[string]bool{
+	"debian": true,
+	"ubuntu": true,
+}
+
+// IsAptFamily reports whether distro uses the apt/dpkg backend.
+func IsAptFamily(distro string) bool {
+	return AptFamilyDistros[distro]
+}
+
+// SuiteForDistro returns the release codename a given apt-family distro
+// targets, read from the matching apt_feed(...) declaration — the source
+// of the codename that the project repo emitter (dists/<suite>/), image
 // assembly (the mmdebstrap target), and the on-device apt sources.list
-// all stamp. Every Debian feed in a project must agree on the suite (the
-// toolchain container pins one Debian release, and libc from a different
-// release can't safely mix), so this also enforces the one-suite-per-
-// project rule. Errors when no debian_feed is present: a Debian image
-// build needs one to source the codename.
-func (p *Project) DebianSuite() (string, error) {
+// all stamp. Every feed for a distro must agree on the suite (the
+// toolchain container pins one release, and libc from a different release
+// can't safely mix), so this also enforces one-suite-per-distro. Errors
+// when no feed for distro declares a suite: an apt-family image build
+// needs one to source the codename.
+func (p *Project) SuiteForDistro(distro string) (string, error) {
 	if p == nil {
-		return "", fmt.Errorf("DebianSuite: nil project")
+		return "", fmt.Errorf("SuiteForDistro: nil project")
 	}
 	suite := ""
 	for _, sm := range p.SyntheticModules {
-		if sm == nil || sm.Suite == "" {
-			continue // not a Debian feed
+		if sm == nil || sm.Suite == "" || sm.Distro != distro {
+			continue // not an apt feed for this distro
 		}
 		if suite == "" {
 			suite = sm.Suite
 		} else if sm.Suite != suite {
-			return "", fmt.Errorf("project declares multiple Debian suites (%q and %q); one Debian suite per project", suite, sm.Suite)
+			return "", fmt.Errorf("project declares multiple %s suites (%q and %q); one suite per distro", distro, suite, sm.Suite)
 		}
 	}
 	if suite == "" {
-		return "", fmt.Errorf("no debian_feed declares a suite; a Debian image build needs a debian_feed(...) in a module")
+		return "", fmt.Errorf("no apt_feed declares a suite for distro %q; an %s image build needs an apt_feed(distro=%q, ...) in a module", distro, distro, distro)
 	}
 	return suite, nil
 }

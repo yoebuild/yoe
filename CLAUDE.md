@@ -75,7 +75,7 @@ architecture description live under `docs/` (start with `docs/intro.md` and
   opt-out (not an opt-in), and the bar for adding one is high.
 - **Distro modules ship a feed + a companion enable layer.** A module that wraps
   an upstream distro (Alpine, Debian, …) declares its packages via one
-  `alpine_feed(...)` / `debian_feed(...)` call per repo section, not via
+  `alpine_feed(...)` / `apt_feed(...)` call per repo section, not via
   thousands of per-package `.star` files. Each feed registers a synthetic module
   (`alpine.main`, `alpine.community`) whose units materialize lazily — working
   memory tracks closure size, not catalog size. Service-enable units

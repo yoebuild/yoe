@@ -1194,7 +1194,7 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "e":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
-			// Feed-materialized units (alpine_feed / debian_feed) have
+			// Feed-materialized units (alpine_feed / apt_feed) have
 			// no .star file — the help bar already hides "e" for them,
 			// so swallow the keypress silently rather than printing a
 			// "could not find" message.
@@ -1520,7 +1520,7 @@ func (m model) modulesViewportHeight() int {
 // syntheticModulesSectionLines returns the vertical footprint of the
 // FEEDS section rendered by viewModulesTab beneath the navigable rows
 // (blank+title, column header, one row per synthetic module). Returns 0
-// when no feeds are declared so projects without alpine_feed / debian_feed
+// when no feeds are declared so projects without alpine_feed / apt_feed
 // keep using the full screen height.
 func (m model) syntheticModulesSectionLines() int {
 	if m.proj == nil || len(m.proj.SyntheticModules) == 0 {
@@ -2410,7 +2410,7 @@ func defaultIfEmpty(s, alt string) string {
 // sub-screen. The first entry is "(none)" — selecting it clears the
 // override. The remaining entries are the distinct distros declared
 // by loaded synthetic-feed modules (alpine_feed → "alpine",
-// debian_feed → "debian"), in sorted order. Sourced from the
+// apt_feed → "debian"), in sorted order. Sourced from the
 // project's synthetic modules so yoe core never hardcodes a distro
 // enum; a project that includes only module-alpine sees just
 // "(none)" and "alpine".
@@ -3061,7 +3061,7 @@ func (m model) viewUnitsTab() string {
 					}
 				}
 				// Feed-materialized units (alpine_feed /
-				// debian_feed) have no .star file, so the edit
+				// apt_feed) have no .star file, so the edit
 				// key is dead for them — drop it from the help
 				// bar so the user isn't told to press a key that
 				// won't do anything.
@@ -3553,7 +3553,7 @@ func (m model) viewModulesTab() string {
 		b.WriteString(dimStyle.Render("  (no modules declared in PROJECT.star)\n"))
 	}
 
-	// Synthetic modules (alpine_feed, debian_feed) listed separately
+	// Synthetic modules (alpine_feed, apt_feed) listed separately
 	// after the navigable real-module rows. They're informational —
 	// the user can't sync / dev-mode them, only consult what they
 	// expose. Showing them here makes feeds discoverable from the
@@ -5761,7 +5761,7 @@ func (m model) renderBuildProgress() string {
 }
 
 // unitFromFeed reports whether the named unit was materialized by a
-// synthetic module (alpine_feed / debian_feed) rather than declared in
+// synthetic module (alpine_feed / apt_feed) rather than declared in
 // a .star file. Feed-origin units have no source file to open, so the
 // editor / shell paths short-circuit on them and the help bar omits
 // their keybindings.

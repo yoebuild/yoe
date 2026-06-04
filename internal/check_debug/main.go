@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/yoebuild/yoe/internal/feeds/alpine"
-	"github.com/yoebuild/yoe/internal/feeds/debian"
+	"github.com/yoebuild/yoe/internal/feeds/apt"
 	"github.com/yoebuild/yoe/internal/module"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
@@ -13,7 +13,7 @@ func main() {
 		yoestar.WithModuleSync(module.SyncIfNeeded),
 		yoestar.WithAllowDuplicateProvides(true),
 		yoestar.WithBuiltin("alpine_feed", alpine.Builtin),
-		yoestar.WithBuiltin("debian_feed", debian.Builtin),
+		yoestar.WithBuiltin("apt_feed", apt.Builtin),
 	)
 	if err != nil { fmt.Println("ERR:", err); return }
 	// Find anything with xz in RuntimeDeps across every registered
