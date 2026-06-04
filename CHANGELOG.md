@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Ubuntu packages now reuse the cache instead of rebuilding every run.**
+  Building an Ubuntu image no longer re-fetches and re-extracts every package
+  on each `yoe build`; unchanged packages are reused from the cache, the same
+  as Debian and Alpine.
+
 ## [0.11.5] - 2026-06-04
 
 - **Ubuntu is now a selectable distro alongside Alpine and Debian.** Point a
