@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -170,14 +171,21 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 
 	qemuBin := qemuBinary(machine.Arch)
 
-	// Build common QEMU args (without image path — that differs host vs container)
-	buildArgs := func(imgFile string) []string {
-		kernelPath := ""
-		needsDirectBoot := machine.QEMU == nil || machine.QEMU.Firmware == ""
-		if needsDirectBoot && machine.Kernel.Unit != "" {
-			kernelPath = findKernelImage(projectDir, machine.Arch, machine.Kernel.Unit)
-		}
-		return BuildQEMUArgs(machine, opts, imgFile, kernelPath)
+	// Direct kernel boot (arm64/riscv64 with no firmware) needs the kernel
+	// and, for distros that boot through an initramfs (Debian), the initrd.
+	// Both live in the built image's own /boot, so pull them straight from
+	// the unpacked rootfs beside the .img rather than guessing a separate
+	// kernel-unit destdir — that keeps it distro-agnostic and always matches
+	// the kernel the image actually ships.
+	hostKernel, hostInitrd := "", ""
+	needsDirectBoot := machine.QEMU == nil || machine.QEMU.Firmware == ""
+	if needsDirectBoot && machine.Kernel.Unit != "" {
+		hostKernel, hostInitrd = findBootKernel(imgPath)
+	}
+
+	// Build common QEMU args (without paths — those differ host vs container)
+	buildArgs := func(imgFile, kernelFile, initrdFile string) []string {
+		return BuildQEMUArgs(machine, opts, imgFile, kernelFile, initrdFile)
 	}
 
 	// Try host QEMU first
@@ -185,7 +193,7 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 		if machine.Arch == detectHostArch() && !kvmAvailable() {
 			fmt.Fprintf(w, "  /dev/kvm not available — using TCG software emulation (slower)\n")
 		}
-		args := buildArgs(imgPath)
+		args := buildArgs(imgPath, hostKernel, hostInitrd)
 		if opts.BootTest {
 			sshPort, err := sshHostPort(machine, opts)
 			if err != nil {
@@ -231,7 +239,20 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 		return fmt.Errorf("image path not under project: %w", err)
 	}
 	containerImgPath := filepath.Join("/project", rel)
-	args := buildArgs(containerImgPath)
+	// The kernel and initrd live under the same project tree as the image,
+	// so remap them onto /project the same way — a host path would not
+	// resolve inside the container.
+	toContainer := func(p string) string {
+		if p == "" {
+			return ""
+		}
+		r, err := filepath.Rel(projectDir, p)
+		if err != nil {
+			return p
+		}
+		return filepath.Join("/project", r)
+	}
+	args := buildArgs(containerImgPath, toContainer(hostKernel), toContainer(hostInitrd))
 	fullCmd := qemuBin + " " + strings.Join(args, " ")
 
 	return yoe.RunInContainer(yoe.ContainerRunConfig{
@@ -243,15 +264,32 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 	})
 }
 
-// findKernelImage locates the kernel image (vmlinuz) from a kernel unit's
-// build output.
-func findKernelImage(projectDir, scopeDir, kernelUnit string) string {
-	// Check the unit's destdir for /boot/vmlinuz
-	// Uses the new flat layout: build/<name>.<scope>/destdir/
-	destDir := filepath.Join(projectDir, "build", kernelUnit+"."+scopeDir, "destdir")
-	vmlinuz := filepath.Join(destDir, "boot", "vmlinuz")
-	if _, err := os.Stat(vmlinuz); err == nil {
-		return vmlinuz
+// findBootKernel locates the kernel and any initrd inside a built image's
+// unpacked rootfs (<destdir>/rootfs/boot), which sits beside the .img. It is
+// distro-agnostic: Alpine ships /boot/vmlinuz and mounts the rootfs directly
+// (no initrd), while Debian ships a versioned /boot/vmlinuz-<ver> plus an
+// initrd.img-<ver> it boots through. Direct kernel boot (arm64/riscv64 with
+// no firmware) passes these host paths to -kernel/-initrd. Either return
+// value is empty when nothing matches — an empty kernel disables direct boot,
+// an empty initrd just omits -initrd.
+func findBootKernel(imgPath string) (kernel, initrd string) {
+	bootDir := filepath.Join(filepath.Dir(imgPath), "rootfs", "boot")
+	kernel = firstGlob(bootDir, "vmlinuz", "vmlinuz-*", "Image", "Image-*")
+	initrd = firstGlob(bootDir, "initrd.img", "initrd.img-*", "initramfs", "initramfs-*")
+	return kernel, initrd
+}
+
+// firstGlob returns a file in dir matching the earliest pattern that matches
+// anything, patterns tried in order. A bare name matches that exact file.
+// Within one pattern the lexically greatest match wins, so when several
+// versioned kernels are installed the newest-sorting name is preferred.
+func firstGlob(dir string, patterns ...string) string {
+	for _, pat := range patterns {
+		matches, _ := filepath.Glob(filepath.Join(dir, pat))
+		if len(matches) > 0 {
+			sort.Strings(matches)
+			return matches[len(matches)-1]
+		}
 	}
 	return ""
 }
@@ -386,8 +424,9 @@ func QEMUBinary(arch string) string { return qemuBinary(arch) }
 //
 // imgPath is required; kernelPath may be empty (no `-kernel` argument is
 // emitted) or a placeholder string when the image hasn't been built yet
-// — the caller picks the placeholder.
-func BuildQEMUArgs(machine *yoestar.Machine, opts QEMUOptions, imgPath, kernelPath string) []string {
+// — the caller picks the placeholder. initrdPath adds `-initrd` for distros
+// that boot through an initramfs (Debian); empty omits it (Alpine).
+func BuildQEMUArgs(machine *yoestar.Machine, opts QEMUOptions, imgPath, kernelPath, initrdPath string) []string {
 	a := baseQEMUArgs(machine, opts)
 	a = append(a, "-drive", fmt.Sprintf("file=%s,format=raw,if=virtio", imgPath))
 
@@ -408,6 +447,9 @@ func BuildQEMUArgs(machine *yoestar.Machine, opts QEMUOptions, imgPath, kernelPa
 	needsDirectBoot := machine.QEMU == nil || machine.QEMU.Firmware == ""
 	if needsDirectBoot && machine.Kernel.Unit != "" && kernelPath != "" {
 		a = append(a, "-kernel", kernelPath)
+		if initrdPath != "" {
+			a = append(a, "-initrd", initrdPath)
+		}
 		if machine.Kernel.Cmdline != "" {
 			a = append(a, "-append", machine.Kernel.Cmdline)
 		}

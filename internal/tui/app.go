@@ -4029,12 +4029,16 @@ func (m model) renderQEMUCommandPreview() string {
 	// command actually says.
 	imgPlaceholder := "<image.img>"
 	kernelPlaceholder := ""
+	initrdPlaceholder := ""
 	needsDirectBoot := machine.QEMU == nil || machine.QEMU.Firmware == ""
 	if needsDirectBoot && machine.Kernel.Unit != "" {
-		kernelPlaceholder = "<" + machine.Kernel.Unit + "/vmlinuz>"
+		kernelPlaceholder = "<vmlinuz>"
+		// The actual launcher adds -initrd only for distros that boot
+		// through an initramfs (Debian). The preview can't know the image's
+		// distro, so it leaves the initrd out rather than implying one.
 	}
 
-	args := device.BuildQEMUArgs(machine, opts, imgPlaceholder, kernelPlaceholder)
+	args := device.BuildQEMUArgs(machine, opts, imgPlaceholder, kernelPlaceholder, initrdPlaceholder)
 
 	// Width budget for the wrapper: subtract the 4-char indent so wrapped
 	// continuations align under the first arg. Fall back to 80 if we don't

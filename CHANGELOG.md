@@ -8,6 +8,15 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.11.4] - 2026-06-04
+
+- **`yoe run` now boots arm64 images correctly.** On arm64 (and other
+  direct-kernel-boot targets) the launcher looked for the kernel at the wrong
+  path, so QEMU started with nothing to boot and sat at a blank console. It now
+  takes the kernel — and, for Debian, the initramfs — straight from the image's
+  own `/boot`, so arm64 images boot the same kernel they ship. This also makes
+  `yoe run --boot-test` pass for arm64 images.
+
 ## [0.11.3] - 2026-06-04
 
 - **`yoe run --boot-test` boots an image and verifies it came up.** It boots

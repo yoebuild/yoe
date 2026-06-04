@@ -1,6 +1,8 @@
 package device
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -127,4 +129,98 @@ func containsPair(args []string, flag, value string) bool {
 		}
 	}
 	return false
+}
+
+// writeBoot creates <dir>/rootfs/boot populated with the named files and
+// returns the image path (<dir>/img.img) findBootKernel resolves against.
+func writeBoot(t *testing.T, names ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	bootDir := filepath.Join(dir, "rootfs", "boot")
+	if err := os.MkdirAll(bootDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range names {
+		if err := os.WriteFile(filepath.Join(bootDir, n), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return filepath.Join(dir, "img.img")
+}
+
+func TestFindBootKernel(t *testing.T) {
+	t.Run("alpine: unversioned vmlinuz, no initrd", func(t *testing.T) {
+		img := writeBoot(t, "vmlinuz")
+		kernel, initrd := findBootKernel(img)
+		if filepath.Base(kernel) != "vmlinuz" {
+			t.Errorf("kernel = %q, want .../vmlinuz", kernel)
+		}
+		if initrd != "" {
+			t.Errorf("initrd = %q, want empty (Alpine boots without one)", initrd)
+		}
+	})
+
+	t.Run("debian: versioned vmlinuz + initrd", func(t *testing.T) {
+		img := writeBoot(t,
+			"vmlinuz-6.12.86+deb13-arm64",
+			"initrd.img-6.12.86+deb13-arm64",
+			"config-6.12.86+deb13-arm64",
+			"System.map-6.12.86+deb13-arm64",
+		)
+		kernel, initrd := findBootKernel(img)
+		if filepath.Base(kernel) != "vmlinuz-6.12.86+deb13-arm64" {
+			t.Errorf("kernel = %q, want versioned vmlinuz", kernel)
+		}
+		if filepath.Base(initrd) != "initrd.img-6.12.86+deb13-arm64" {
+			t.Errorf("initrd = %q, want versioned initrd.img", initrd)
+		}
+	})
+
+	t.Run("multiple kernels: newest-sorting wins", func(t *testing.T) {
+		img := writeBoot(t, "vmlinuz-6.1.0-47-arm64", "vmlinuz-6.12.86+deb13-arm64")
+		kernel, _ := findBootKernel(img)
+		if filepath.Base(kernel) != "vmlinuz-6.12.86+deb13-arm64" {
+			t.Errorf("kernel = %q, want the newest-sorting version", kernel)
+		}
+	})
+
+	t.Run("no kernel: both empty", func(t *testing.T) {
+		img := writeBoot(t) // empty /boot
+		kernel, initrd := findBootKernel(img)
+		if kernel != "" || initrd != "" {
+			t.Errorf("expected empty results, got kernel=%q initrd=%q", kernel, initrd)
+		}
+	})
+}
+
+func TestBuildQEMUArgsDirectBoot(t *testing.T) {
+	// arm64 virt with no firmware → direct kernel boot. Debian also needs
+	// -initrd; Alpine passes an empty initrd and must omit the flag.
+	machine := &yoestar.Machine{
+		Arch:   "arm64",
+		Kernel: yoestar.KernelConfig{Unit: "linux", Cmdline: "console=ttyAMA0 root=/dev/vda1 rw"},
+		QEMU:   &yoestar.QEMUConfig{Machine: "virt"},
+	}
+
+	withInitrd := BuildQEMUArgs(machine, QEMUOptions{}, "/img.img", "/boot/vmlinuz-x", "/boot/initrd.img-x")
+	if !containsPair(withInitrd, "-kernel", "/boot/vmlinuz-x") {
+		t.Errorf("expected -kernel, got %v", withInitrd)
+	}
+	if !containsPair(withInitrd, "-initrd", "/boot/initrd.img-x") {
+		t.Errorf("expected -initrd, got %v", withInitrd)
+	}
+	if !containsPair(withInitrd, "-append", "console=ttyAMA0 root=/dev/vda1 rw") {
+		t.Errorf("expected -append cmdline, got %v", withInitrd)
+	}
+
+	noInitrd := BuildQEMUArgs(machine, QEMUOptions{}, "/img.img", "/boot/vmlinuz", "")
+	if slices.Contains(noInitrd, "-initrd") {
+		t.Errorf("expected no -initrd when initrd path is empty, got %v", noInitrd)
+	}
+
+	// No kernel resolved (e.g. image not built) → no -kernel at all.
+	none := BuildQEMUArgs(machine, QEMUOptions{}, "/img.img", "", "")
+	if slices.Contains(none, "-kernel") {
+		t.Errorf("expected no -kernel with empty kernel path, got %v", none)
+	}
 }
