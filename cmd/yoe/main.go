@@ -196,9 +196,9 @@ func printUsage() {
 func cmdUpdateFeeds(args []string) {
 	fs := flag.NewFlagSet("update-feeds", flag.ExitOnError)
 	var (
-		archCSV          = fs.String("arch", "", "comma-separated arches to fetch (default: every arch with an existing on-disk feed dir, falling back to all supported)")
-		moduleDir        = fs.String("module-dir", "", "module directory holding MODULE.star (default: cwd)")
-		allowKeyUpdate   = fs.String("allow-key-update", "", "append a fingerprint to keys/allowed-fingerprints before verifying (Debian only)")
+		archCSV        = fs.String("arch", "", "comma-separated arches to fetch (default: every arch with an existing on-disk feed dir, falling back to all supported)")
+		moduleDir      = fs.String("module-dir", "", "module directory holding MODULE.star (default: cwd)")
+		allowKeyUpdate = fs.String("allow-key-update", "", "append a fingerprint to keys/allowed-fingerprints before verifying (Debian only)")
 	)
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s update-feeds [--arch x86_64,arm64] [--module-dir DIR] [--allow-key-update FPR]\n\n", os.Args[0])
@@ -1145,9 +1145,12 @@ func cmdFlashList(_ []string) {
 func cmdRun(args []string) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	machineName := fs.String("machine", "", "target machine")
+	distroName := fs.String("distro", "", "target distro for this run (overrides local.star/defaults; useful when an image name exists in multiple distros)")
 	memory := fs.String("memory", "", "RAM size, e.g. 8G (overrides the machine's qemu memory; saved to local.star)")
 	display := fs.Bool("display", false, "enable graphical display")
 	daemon := fs.Bool("daemon", false, "run in background")
+	bootTest := fs.Bool("boot-test", false, "boot headless, wait for the login prompt, SSH in and run a health check, then power off; exits non-zero on any failure")
+	bootTimeout := fs.Duration("timeout", 0, "boot-test timeout (e.g. 90s, 5m); 0 uses the default")
 	// 8G default gives grow-rootfs ~6 GiB of slack past the 2 GiB
 	// partition to expand into — enough to exercise the grow path and
 	// hold the Docker image cache during on-target work. Pass an empty
@@ -1177,10 +1180,12 @@ func cmdRun(args []string) {
 	})
 
 	opts := device.QEMUOptions{
-		Ports:    ports,
-		Display:  *display,
-		Daemon:   *daemon,
-		DiskSize: *diskSize,
+		Ports:           ports,
+		Display:         *display,
+		Daemon:          *daemon,
+		DiskSize:        *diskSize,
+		BootTest:        *bootTest,
+		BootTestTimeout: *bootTimeout,
 	}
 
 	// QEMU memory precedence: --memory flag > local.star qemu_memory >
@@ -1219,6 +1224,13 @@ func cmdRun(args []string) {
 	}
 
 	proj := loadProject()
+	// Apply the distro override the same way `yoe build --distro` does, so a
+	// run targets the matching distro's built image when an image name (e.g.
+	// dev-image) exists in more than one distro. Sits at the local.star
+	// override level in the cascade.
+	if *distroName != "" {
+		proj.DefaultDistroOverride = *distroName
+	}
 	unitName := ""
 	if len(positional) > 0 {
 		unitName = positional[0]

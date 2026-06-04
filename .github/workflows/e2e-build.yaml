@@ -10,6 +10,12 @@ name: E2E Build
 # matches its target machine, so there is no QEMU user-mode emulation in the
 # build path. Each cell surfaces as its own CI check, e.g.
 # "E2E Build (alpine / x86_64)".
+#
+# After building, each cell boots the image in QEMU (`yoe run --boot-test`):
+# it waits for the serial console to reach the login prompt, SSHes in and runs
+# a health command, then powers off -- catching boot/runtime regressions a
+# build alone can't. The boot runs KVM-accelerated when the runner exposes
+# /dev/kvm and falls back to slower TCG emulation otherwise.
 on:
   schedule:
     - cron: "0 6 * * *"
@@ -98,3 +104,20 @@ jobs:
             exit 1
           fi
           ls -lh "$img"
+
+      - name: Install QEMU
+        run: |
+          # The runner image ships no qemu-system, and `yoe run` launches
+          # QEMU on the host (host networking keeps the guest SSH forward on
+          # the runner's loopback, where the boot test can reach it). One
+          # package per arch; both are cheap to install on either host.
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-system-arm
+          # When /dev/kvm exists but isn't group-accessible to the runner
+          # user, make it usable so the native-arch boot runs accelerated;
+          # if it's absent, yoe falls back to TCG on its own.
+          [ -e /dev/kvm ] && sudo chmod 666 /dev/kvm || true
+
+      - name: Boot test dev-image
+        working-directory: testdata/e2e-project
+        run: ../../yoe run --boot-test --timeout 5m --distro ${{ matrix.distro }} --machine ${{ matrix.machine }} dev-image

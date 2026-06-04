@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`yoe run --boot-test` boots an image and verifies it came up.** It boots
+  headless, waits for the login prompt, SSHes in to run a health check, then
+  powers off — a one-command pass/fail smoke test for CI or a quick local sanity
+  check. `--timeout` bounds it; `--distro` picks which distro's image to run
+  when the name exists in several.
+
 ## [0.11.2] - 2026-06-04
 
 - **Build failures now show the unit's log right where they happen.** When a
