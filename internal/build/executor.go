@@ -326,13 +326,13 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		built := false
 		if !forceThis && !opts.NoCache && !depRebuilt &&
 			cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hash, effectiveDistro) {
-			fmt.Fprintf(sw, "%-20s [cached] %s\n", name, hash[:12])
+			fmt.Fprintf(sw, "%-20s ⚡ [cached] %s\n", name, hash[:12])
 		} else {
-			fmt.Fprintf(sw, "%-20s [building]\n", name)
+			fmt.Fprintf(sw, "%-20s 🔨 [building]\n", name)
 			notify(name, "building")
 			if err := buildOne(ctx, proj, dag, unit, hash, opts, sw); err != nil {
 				notify(name, "failed")
-				fmt.Fprintf(sw, "%-20s [failed] %v\n", name, err)
+				fmt.Fprintf(sw, "%-20s ❌ [failed] %v\n", name, err)
 				blocked := blockedUnits(dag, name, order)
 				if len(blocked) > 0 {
 					fmt.Fprintf(sw, "  the following units depend on %s and cannot be built:\n", name)
@@ -349,7 +349,7 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 				return
 			}
 			writeCacheMarker(opts.ProjectDir, sd, name, hash, effectiveDistro)
-			fmt.Fprintf(sw, "%-20s [done] %s\n", name, hash[:12])
+			fmt.Fprintf(sw, "%-20s ✅ [done] %s\n", name, hash[:12])
 			notify(name, "done")
 			built = true
 		}
@@ -410,7 +410,12 @@ const buildLogTailLines = 50
 // useless when the build ran somewhere ephemeral like CI, where the runner
 // (and its filesystem) is discarded after the job — so echo the tail inline
 // so the actual error is visible from stdout alone.
-func reportBuildFailure(w io.Writer, logPath string, verbose bool) {
+func reportBuildFailure(w io.Writer, unitName, taskName, logPath string, verbose bool) {
+	// Lead with the failing unit and task. Parallel builds interleave task
+	// lines from several units on the shared writer, and the log path names a
+	// scope dir that may not obviously match the unit, so without this header
+	// the reader cannot tell which unit actually failed.
+	fmt.Fprintf(w, "  ❌ FAILED: %s task: %s\n", unitName, taskName)
 	fmt.Fprintf(w, "  build log: %s\n", logPath)
 	if verbose {
 		return
@@ -443,7 +448,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 
 	// Skip if another process is already building this unit.
 	if IsBuildInProgress(opts.ProjectDir, sd, unit.Name, distro) {
-		fmt.Fprintf(w, "  %s: build already in progress, skipping\n", unit.Name)
+		fmt.Fprintf(w, "  ⏭️  %s: build already in progress, skipping\n", unit.Name)
 		return nil
 	}
 
@@ -643,16 +648,16 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		"REPO":            filepath.Join("/project", repoRelPath(proj, opts.ProjectDir), opts.EffectiveDistro),
 	}
 
-	// Expose the Debian release codename to the build as $SUITE so the
-	// image class's mmdebstrap invocation targets the same suite the repo
-	// emitter stamps, both sourced from the project's debian_feed. Only
-	// meaningful for Debian; an alpine build has no debian_feed and skips
-	// it. Errors loudly if a Debian build can't resolve a suite — the
-	// rootfs assembly can't proceed without one.
-	if opts.EffectiveDistro == "debian" {
-		suite, serr := proj.DebianSuite()
+	// Expose the release codename to the build as $SUITE so the image
+	// class's mmdebstrap invocation targets the same suite the repo
+	// emitter stamps, both sourced from the project's apt_feed. Only
+	// meaningful for apt-family distros (Debian, Ubuntu); an alpine build
+	// has no apt_feed and skips it. Errors loudly if an apt build can't
+	// resolve a suite — the rootfs assembly can't proceed without one.
+	if yoestar.IsAptFamily(opts.EffectiveDistro) {
+		suite, serr := proj.SuiteForDistro(opts.EffectiveDistro)
 		if serr != nil {
-			return fmt.Errorf("resolving debian suite: %w", serr)
+			return fmt.Errorf("resolving %s suite: %w", opts.EffectiveDistro, serr)
 		}
 		env["SUITE"] = suite
 	}
@@ -711,18 +716,18 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	// exists and abort the whole rootfs ("Failed to stat ... No such
 	// file or directory"). GenerateDebianIndex scans the pool, so a
 	// refresh here always matches what is actually on disk.
-	if unit.Class == "image" && opts.EffectiveDistro == "debian" {
-		suite, serr := proj.DebianSuite()
+	if unit.Class == "image" && yoestar.IsAptFamily(opts.EffectiveDistro) {
+		suite, serr := proj.SuiteForDistro(opts.EffectiveDistro)
 		if serr != nil {
-			return fmt.Errorf("refresh debian index: %w", serr)
+			return fmt.Errorf("refresh %s index: %w", opts.EffectiveDistro, serr)
 		}
 		if err := repo.GenerateDebianIndex(repo.DebRepoOptions{
-			RepoDir:    repo.RepoDistroDir(proj, opts.ProjectDir, "debian"),
+			RepoDir:    repo.RepoDistroDir(proj, opts.ProjectDir, opts.EffectiveDistro),
 			Suite:      suite,
 			Components: []string{"main"},
 			Arches:     []string{"amd64", "arm64"},
 		}); err != nil {
-			return fmt.Errorf("refresh debian index: %w", err)
+			return fmt.Errorf("refresh %s index: %w", opts.EffectiveDistro, err)
 		}
 	}
 
@@ -761,7 +766,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 				hostEnv["SRCDIR"] = srcDir
 				hostEnv["SYSROOT"] = sysroot
 				if err := doInstallStep(unit, step.Install, tctxData, hostEnv); err != nil {
-					reportBuildFailure(w, logPath, opts.Verbose)
+					reportBuildFailure(w, unit.Name, t.Name, logPath, opts.Verbose)
 					return fmt.Errorf("task %s: %w", t.Name, err)
 				}
 				continue
@@ -786,7 +791,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 					Stderr:     logW,
 				}
 				if err := RunInSandbox(cfg, step.Command); err != nil {
-					reportBuildFailure(w, logPath, opts.Verbose)
+					reportBuildFailure(w, unit.Name, t.Name, logPath, opts.Verbose)
 					return err
 				}
 			} else if step.Fn != nil {
@@ -809,7 +814,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 				}
 				thread := NewBuildThread(ctx, cfg, RealExecer{})
 				if _, err := starlark.Call(thread, step.Fn, nil, nil); err != nil {
-					reportBuildFailure(w, logPath, opts.Verbose)
+					reportBuildFailure(w, unit.Name, t.Name, logPath, opts.Verbose)
 					return fmt.Errorf("task %s: %w", t.Name, err)
 				}
 			}
@@ -829,8 +834,8 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	// so EffectiveDistro matches their tag and the branch is unchanged
 	// for them.
 	if unit.Class != "image" && unit.Class != "container" {
-		switch opts.EffectiveDistro {
-		case "debian":
+		switch {
+		case yoestar.IsAptFamily(opts.EffectiveDistro):
 			if err := packageDeb(unit, destDir, srcDir, buildDir, opts, proj, w); err != nil {
 				return fmt.Errorf("packaging deb: %w", err)
 			}
@@ -841,7 +846,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		}
 
 		if err := StageSysroot(destDir, buildDir); err != nil {
-			fmt.Fprintf(w, "  (warning: sysroot staging failed: %v)\n", err)
+			fmt.Fprintf(w, "  ⚠️  (warning: sysroot staging failed: %v)\n", err)
 		}
 	}
 
@@ -872,7 +877,7 @@ func packageAPK(unit *yoestar.Unit, destDir, sysroot, srcDir, buildDir string, o
 			return fmt.Errorf("creating apk: %w", err)
 		}
 	}
-	fmt.Fprintf(w, "  → %s\n", filepath.Base(apkPath))
+	fmt.Fprintf(w, "  📦 %s\n", filepath.Base(apkPath))
 
 	repoDir := repo.RepoDistroDir(proj, opts.ProjectDir, opts.EffectiveDistro)
 	if err := repo.Publish(apkPath, repoDir, archDir, opts.Signer); err != nil {
@@ -882,7 +887,7 @@ func packageAPK(unit *yoestar.Unit, destDir, sysroot, srcDir, buildDir string, o
 }
 
 // packageDeb is the debian-side packaging branch. PassthroughDeb units
-// (mirror-verbatim from a debian_feed) copy the upstream .deb into the
+// (mirror-verbatim from a apt_feed) copy the upstream .deb into the
 // project pool. Project source units run dpkg-deb --build over destDir.
 func packageDeb(unit *yoestar.Unit, destDir, srcDir, buildDir string, opts Options, proj *yoestar.Project, w io.Writer) error {
 	pkgDir := filepath.Join(buildDir, "pkg")
@@ -933,15 +938,15 @@ func packageDeb(unit *yoestar.Unit, destDir, srcDir, buildDir string, opts Optio
 			return fmt.Errorf("BuildDeb: %w", err)
 		}
 	}
-	fmt.Fprintf(w, "  → %s\n", filepath.Base(debPath))
+	fmt.Fprintf(w, "  📦 %s\n", filepath.Base(debPath))
 
 	// Publish into the project pool and regenerate the per-arch
-	// Packages + Release + InRelease at repo/<project>/debian/.
-	suite, err := proj.DebianSuite()
+	// Packages + Release + InRelease at repo/<project>/<distro>/.
+	suite, err := proj.SuiteForDistro(opts.EffectiveDistro)
 	if err != nil {
 		return fmt.Errorf("packaging deb: %w", err)
 	}
-	repoDir := repo.RepoDistroDir(proj, opts.ProjectDir, "debian")
+	repoDir := repo.RepoDistroDir(proj, opts.ProjectDir, opts.EffectiveDistro)
 	publishOpts := repo.DebRepoOptions{
 		RepoDir:    repoDir,
 		Suite:      suite,

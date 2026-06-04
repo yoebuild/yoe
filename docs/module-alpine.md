@@ -1,19 +1,24 @@
 # module-alpine — wrapping prebuilt Alpine packages
 
 `module-alpine` is a yoe module that wraps prebuilt Alpine Linux `.apk` files as
-yoe units. Where `module-core` builds packages from upstream source, units in
-this module fetch a binary apk from a pinned Alpine release, verify its sha256,
-and repack it as a yoe artifact. The unit's "build" is just extracting the apk
-into `$DESTDIR`.
+yoe units. Where `module-core` builds packages from upstream source, this module
+fetches a binary apk from a pinned Alpine release, verifies its integrity, and
+repacks it as a yoe artifact. The unit's "build" is just extracting the apk into
+`$DESTDIR`.
+
+It declares Alpine's `main` and `community` repos as two `alpine_feed(...)`
+calls in `MODULE.star`, rather than shipping a `.star` file per package. The
+feed exposes every package in those repos; units materialize lazily as a
+project's runtime closure references them.
 
 The module lives at <https://github.com/yoebuild/module-alpine>. Open it to
-browse the cached `.star` files, the `gen-unit.py` generator, or to send a PR
-adding a new package wrapper.
+browse the checked-in `feeds/**/APKINDEX`, the `alpine_feed` declarations in
+`MODULE.star`, or to send a PR adding a service-enable companion unit.
 
 > **Implementation details:** how Alpine apks pass through yoe's pipeline
-> (signature swap, noarch routing, `gen-unit.py`, the docker-openrc punt) live
-> in [apk-passthrough.md](apk-passthrough.md). This doc is the "when to reach
-> for it" rubric; the other is the "how it works end-to-end" reference.
+> (signature swap, noarch routing, lazy feed materialization, the docker-openrc
+> punt) live in [apk-passthrough.md](apk-passthrough.md). This doc is the "when
+> to reach for it" rubric; the other is the "how it works end-to-end" reference.
 
 ## When to reach for it
 
@@ -40,19 +45,19 @@ targets in the future — see [libc-and-init.md](libc-and-init.md).
 
 ## Alpine release coupling
 
-The Alpine release pinned in `classes/alpine_pkg.star`
+The Alpine release pinned in `MODULE.star` and `classes/alpine_pkg.star`
 (`_ALPINE_RELEASE = "v3.21"` at the time of writing) **must** match the
 `FROM alpine:<release>` line in
-`@module-core//containers/toolchain-musl/Dockerfile`. Both currently point at
+`@module-core//containers/toolchain-musl/Dockerfile`. All currently point at
 `v3.21`.
 
 The coupling is not aesthetic. Three things tie them together:
 
 1. **libc ABI.** Anything compiled in the toolchain container links against the
-   toolchain's musl headers and libc. Anything you fetch via `alpine_pkg` was
-   compiled against a specific Alpine release's musl. Mix versions and you
-   produce images that compile and link cleanly, then crash on first run when
-   the dynamic linker resolves a symbol whose layout has changed.
+   toolchain's musl headers and libc. Anything the feed fetches was compiled
+   against a specific Alpine release's musl. Mix versions and you produce images
+   that compile and link cleanly, then crash on first run when the dynamic
+   linker resolves a symbol whose layout has changed.
 2. **Signing keys.** Every Alpine release ships with a build-host signing key.
    Prebuilt apks are signed by that key, and `apk-tools` inside the target image
    verifies signatures against the keyring baked into the toolchain container at
@@ -67,27 +72,35 @@ When bumping the Alpine release, do all three in lockstep across the yoe repo
 and the [module-alpine repo](https://github.com/yoebuild/module-alpine):
 
 1. Update `FROM alpine:<release>` in
-   `modules/module-core/containers/toolchain-musl/Dockerfile` in the yoe repo.
-2. Update `_ALPINE_RELEASE` in `classes/alpine_pkg.star` in the module-alpine
-   repo.
-3. Update `version` and `sha256` on every unit under `units/` in the
-   module-alpine repo. The version comes from the new release's APKINDEX; the
-   sha256 is the SHA-256 of the apk file itself.
+   `modules/module-core/containers/toolchain-musl/Dockerfile` in the yoe repo,
+   then rebuild the toolchain container so its baked apk-tools keyring matches.
+2. Update `_ALPINE_RELEASE` in `MODULE.star` (the `branch` each `alpine_feed`
+   pins) and in `classes/alpine_pkg.star` in the module-alpine repo.
+3. Run `yoe update-feeds` in the module-alpine repo to refresh every checked-in
+   `feeds/**/APKINDEX` to the new release, then review the diff and commit (see
+   the maintainer playbook below). Every package's version and integrity hash
+   comes from the refreshed, signature-verified APKINDEX — there are no
+   per-package files to hand-edit.
 
 ## alpine_feed: declaring a whole repo as one module entry
 
 `alpine_feed(...)` is a Starlark builtin that turns a checked-in directory of
-APKINDEX files into a lazily-materialized synthetic module. Where `alpine_pkg`
-is one unit per package, one `alpine_feed` call exposes thousands of packages
-from an upstream Alpine repo (main, community, etc.) with a single declaration.
-Units materialize on demand as an image's runtime closure references them, so a
-project pulling 300 packages from a 60k-entry feed pays for 300 unit
-allocations, not 60k.
+APKINDEX files into a lazily-materialized synthetic module. One `alpine_feed`
+call exposes thousands of packages from an upstream Alpine repo (main,
+community, etc.) with a single declaration. Units materialize on demand as an
+image's runtime closure references them, so a project pulling 300 packages from
+a 60k-entry feed pays for 300 unit allocations, not 60k. This is the normal way
+packages come out of `module-alpine` — there are no per-package `.star` files.
 
-A typical declaration in `module-alpine/MODULE.star`:
+The two declarations in `module-alpine/MODULE.star`:
 
 ```python
 module_info(name = "alpine")
+
+_ALPINE_KEYS = [
+    "keys/alpine-devel@lists.alpinelinux.org-6165ee59.rsa.pub",  # x86_64
+    "keys/alpine-devel@lists.alpinelinux.org-616ae350.rsa.pub",  # aarch64
+]
 
 alpine_feed(
     name    = "main",                                # synthetic module is alpine.main
@@ -95,7 +108,7 @@ alpine_feed(
     branch  = "v3.21",                               # Alpine release tag
     section = "main",                                # repo section
     index   = "feeds/main",                          # dir holding <arch>/APKINDEX
-    keys    = ["keys/alpine-devel@lists.alpinelinux.org-6165ee59.rsa.pub"],
+    keys    = _ALPINE_KEYS,
 )
 
 alpine_feed(
@@ -104,23 +117,17 @@ alpine_feed(
     branch  = "v3.21",
     section = "community",
     index   = "feeds/community",
-    keys    = ["keys/alpine-devel@lists.alpinelinux.org-6165ee59.rsa.pub"],
+    keys    = _ALPINE_KEYS,
 )
 ```
+
+Alpine signs each arch's APKINDEX with a separate key, so both are listed —
+`update-feeds` accepts whichever the upstream mirror serves for a given arch.
 
 The composed module name is `<parent>.<feed-name>` — `alpine.main`,
 `alpine.community`. The resolver consults synthetic modules after every real
 module so a from-source override (`module-core/units/openssl.star`, say) wins
 against the feed automatically.
-
-> **Layout migration (planned):** the current `module-alpine` repo still uses
-> per-package `alpine_pkg.star` files under `units/main/` and `units/community/`
-> (~3,751 files generated by `scripts/gen-unit.py`). The cutover to two
-> `alpine_feed()` calls + a small companion layer of `*-enable.star` units is
-> tracked as U13 in
-> [docs/plans/2026-05-26-001-feat-feeds-as-modules-plan.md](https://github.com/yoebuild/yoe/blob/main/docs/plans/2026-05-26-001-feat-feeds-as-modules-plan.md).
-> Until that lands, the builtin is wired and tested but module-alpine's on-disk
-> layout is unchanged.
 
 ## Maintainer playbook: `yoe update-feeds`
 
@@ -189,7 +196,14 @@ Both keys verify during the transition period. Once every active Alpine release
 the module ships has rotated to the new key, drop the old one in a follow-up
 commit.
 
-## Writing a new alpine_pkg unit
+## Hand-writing an alpine_pkg unit (rare)
+
+Normally you never write a per-package unit — you name an Alpine package in
+`deps` and the feed materializes it. Reach for the `alpine_pkg` class directly
+only when you need to pin one specific apk the feed doesn't expose: a revision
+the live mirror has dropped, a package from a different release, or a unit you
+want to hand-tune. The class is what the feed materializer produces under the
+hood, so a hand-written unit and a feed-materialized one behave identically.
 
 ```python
 load("@module-alpine//classes/alpine_pkg.star", "alpine_pkg")
@@ -225,19 +239,27 @@ sha256sum sqlite-libs-3.48.0-r4.apk
 
 Repeat for each architecture you target.
 
-## Dependencies are not auto-imported
+## How dependencies resolve
 
-Alpine packages declare runtime dependencies via the `D:` field in APKINDEX. The
-`alpine_pkg()` class **does not** read or follow those — it requires every
-dependency to be listed explicitly in `runtime_deps`.
+Alpine packages declare runtime dependencies via the `D:` field in APKINDEX,
+including `so:libfoo.so.N` and `cmd:foo` tokens. The two paths handle these
+differently:
 
-This is deliberate. Auto-following Alpine's dep closure would silently import
-dozens of packages (busybox, openrc, ssl-client, …) that yoe either ships from
-`module-core` already or doesn't want at all. Forcing explicit `runtime_deps`
-keeps the imported surface visible and small. When you add a new alpine_pkg,
-look at its `D:` line in APKINDEX and either declare the corresponding yoe units
-in `runtime_deps`, or, for deps you don't need on the target image, just leave
-them out.
+- **Feed-materialized units follow the `D:` closure automatically.** As the feed
+  materializes a unit, it walks each dep token and resolves it through a
+  project-wide providers table built from every feed's APKINDEX — so a
+  `community` package's `so:libcrypto.so.3` finds `main`'s `openssl-libs`
+  without anyone listing it. Only the packages a runtime closure actually
+  reaches are materialized.
+- **Name shadowing keeps the import surface honest.** Because the resolver
+  consults the feed _after_ every real module, a dep that resolves to a bare
+  name yoe already ships from source (`busybox`, `musl`, …) binds to that source
+  unit, not the feed's copy. Auto-following is safe precisely because the things
+  yoe wants to own still win by name.
+- **Hand-written `alpine_pkg` units list `runtime_deps` explicitly.** The
+  Starlark class does not read the `D:` field — when you hand-write a unit (the
+  rare case above), declare the deps you need in `runtime_deps` and leave out
+  the ones you don't.
 
 ## Override with a from-source unit
 

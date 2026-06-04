@@ -71,7 +71,7 @@ Starlark has no I/O primitives of its own. It can't open files, can't spawn
 processes, can't make network calls. Every operation that escapes the Starlark
 interpreter does so through a Go-side builtin the embedding program registered.
 yoe's embedding registers a small, enumerable set: `unit`, `image`, `container`,
-`machine`, `task`, `run`, `alpine_feed`, `debian_feed`, `resolve_closure`, and a
+`machine`, `task`, `run`, `alpine_feed`, `apt_feed`, `resolve_closure`, and a
 handful of supporting builders. The complete list lives in
 `internal/starlark/builtins.go`.
 

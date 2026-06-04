@@ -1,4 +1,4 @@
-package debian
+package apt
 
 import (
 	"bufio"
@@ -22,7 +22,7 @@ type UpdateOptions struct {
 	// ModuleDir is the directory containing MODULE.star. Fetched
 	// Packages files land under
 	// ModuleDir/<Index>/<deb-arch>/Packages, matching the layout
-	// debian_feed's Lookup expects.
+	// apt_feed Lookup expects.
 	ModuleDir string
 
 	// Arches limits the fetch to a subset of yoe-canonical arches
@@ -47,7 +47,7 @@ type UpdateOptions struct {
 
 // UpdateFeeds is the body of the `yoe update-feeds` command's Debian
 // branch. Reads MODULE.star in opts.ModuleDir, enumerates every
-// debian_feed call, fetches each declared suite's InRelease + per-arch
+// apt_feed call, fetches each declared suite's InRelease + per-arch
 // Packages files from upstream, verifies the InRelease signature
 // against the module's keyring (subject to R25's fingerprint
 // allow-list and R24's Valid-Until enforcement), decompresses
@@ -72,7 +72,7 @@ func UpdateFeeds(opts UpdateOptions) error {
 		return err
 	}
 	if len(decls) == 0 {
-		return fmt.Errorf("update-feeds: no debian_feed() calls in %s/MODULE.star", opts.ModuleDir)
+		return fmt.Errorf("update-feeds: no apt_feed() calls in %s/MODULE.star", opts.ModuleDir)
 	}
 
 	if opts.AllowKeyUpdate != "" {
@@ -183,7 +183,7 @@ func pickArches(opts UpdateOptions, d FeedDecl) []string {
 // ModuleDir/<Index>/<deb-arch>/Packages.
 func fetchPackages(opts UpdateOptions, d FeedDecl, yoeArch, debArch string) (int64, error) {
 	url := fmt.Sprintf("%s/dists/%s/%s/binary-%s/Packages.gz",
-		strings.TrimSuffix(d.URL, "/"), d.Suite, d.Component, debArch)
+		strings.TrimSuffix(d.baseURLFor(yoeArch), "/"), d.Suite, d.Component, debArch)
 	fmt.Fprintf(opts.Out, "  %s: fetching %s\n", yoeArch, url)
 
 	gz, err := httpGet(opts.HTTPClient, url)
@@ -227,7 +227,7 @@ func httpGet(client *http.Client, url string) ([]byte, error) {
 
 func readKeyring(moduleDir, rel string) ([]byte, error) {
 	if rel == "" {
-		return nil, fmt.Errorf("debian_feed must declare keyring=... for signature verification")
+		return nil, fmt.Errorf("apt_feed must declare keyring=... for signature verification")
 	}
 	p := rel
 	if !filepath.IsAbs(p) {

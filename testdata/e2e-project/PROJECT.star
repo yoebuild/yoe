@@ -16,9 +16,11 @@ project(
     # so module-core wins over module-bsp and the Alpine/Jetson prebuilts.
     modules = [
         module("https://github.com/yoebuild/module-alpine.git",
-              ref = "main"),
+              ref = "3.21"),
         module("https://github.com/yoebuild/module-debian.git",
               ref = "trixie"),
+        module("https://github.com/yoebuild/module-ubuntu.git",
+              ref = "26.04"),
         module("https://github.com/yoebuild/module-jetson.git",
               ref = "main"),
         module("github.com/yoebuild/yoe",
@@ -95,6 +97,14 @@ project(
             # /usr/lib/<tuple>/libkmod.so.2. Pin to Debian so libkmod2
             # and the kmod tools come from one source.
             "kmod": "debian.main",
+        },
+        # Ubuntu derives from Debian and splits the same library families,
+        # so the same module-core collisions apply — pin the same units to
+        # ubuntu.main so each lib and its consumers come from one source.
+        "ubuntu": {
+            "util-linux": "ubuntu.main",
+            "zstd": "ubuntu.main",
+            "kmod": "ubuntu.main",
         },
     },
 )

@@ -84,13 +84,23 @@ func (m *markerScanner) Write(p []byte) (int, error) {
 // console to reach the login prompt, SSHes in over the host:22 forward and
 // runs a health command, then powers the guest off. It returns nil only
 // when every stage succeeds within timeout.
-func runBootTest(qemuBin string, args []string, sshPort int, timeout time.Duration, w io.Writer) error {
+func runBootTest(qemuBin string, args []string, sshPort int, timeout time.Duration, w io.Writer) (err error) {
 	if timeout <= 0 {
 		timeout = defaultBootTestTimeout
 	}
 	deadline := time.Now().Add(timeout)
 
-	fmt.Fprintf(w, "Boot test: %s (timeout %s, ssh 127.0.0.1:%d)\n", qemuBin, timeout, sshPort)
+	// Mirror the "✅ Boot test: PASS" marker on every failure path. The
+	// verdict goes to w here; the caller still prints the detailed reason
+	// via the returned error, so this line stays reason-free to avoid
+	// duplicating it.
+	defer func() {
+		if err != nil {
+			fmt.Fprintln(w, "❌ Boot test: FAIL")
+		}
+	}()
+
+	fmt.Fprintf(w, "🚀 Boot test: %s (timeout %s, ssh 127.0.0.1:%d)\n", qemuBin, timeout, sshPort)
 
 	// CommandContext kills QEMU when ctx is cancelled — on success, on any
 	// failure path, and on timeout — so no guest is left running.
@@ -129,7 +139,7 @@ func runBootTest(qemuBin string, args []string, sshPort int, timeout time.Durati
 
 	select {
 	case <-scanner.found:
-		fmt.Fprintf(w, "\nBoot test: reached login prompt; connecting over SSH...\n")
+		fmt.Fprintf(w, "\n🔑 Boot test: reached login prompt; connecting over SSH...\n")
 	case <-qemuDone:
 		return fmt.Errorf("boot-test: QEMU exited before reaching the login prompt: %w", qemuErr)
 	case <-time.After(time.Until(deadline)):
@@ -142,10 +152,10 @@ func runBootTest(qemuBin string, args []string, sshPort int, timeout time.Durati
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "Boot test: SSH health check passed:\n%s\n", strings.TrimRight(out, "\n"))
+	fmt.Fprintf(w, "🩺 Boot test: SSH health check passed:\n%s\n", strings.TrimRight(out, "\n"))
 
 	// Success — cancel() (deferred) powers the guest off.
-	fmt.Fprintln(w, "Boot test: PASS")
+	fmt.Fprintln(w, "✅ Boot test: PASS")
 	return nil
 }
 

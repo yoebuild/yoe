@@ -18,7 +18,7 @@ import (
 	"github.com/yoebuild/yoe/internal/build"
 	"github.com/yoebuild/yoe/internal/device"
 	"github.com/yoebuild/yoe/internal/feeds/alpine"
-	"github.com/yoebuild/yoe/internal/feeds/debian"
+	"github.com/yoebuild/yoe/internal/feeds/apt"
 	"github.com/yoebuild/yoe/internal/module"
 	"github.com/yoebuild/yoe/internal/repo"
 	"github.com/yoebuild/yoe/internal/resolve"
@@ -188,7 +188,7 @@ func printUsage() {
 
 // cmdUpdateFeeds is the entry point for the `yoe update-feeds`
 // subcommand. Runs inside a module repo, peeks MODULE.star for
-// alpine_feed() and debian_feed() calls, then runs the matching
+// alpine_feed() and apt_feed() calls, then runs the matching
 // updater(s) in sequence. A module declaring both runs both.
 // Verifies each feed's signature against its declared keys/keyring;
 // writes only — the maintainer reviews `git diff` and commits
@@ -202,7 +202,7 @@ func cmdUpdateFeeds(args []string) {
 	)
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s update-feeds [--arch x86_64,arm64] [--module-dir DIR] [--allow-key-update FPR]\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "Fetch upstream index files for every alpine_feed()/debian_feed()\n")
+		fmt.Fprintf(os.Stderr, "Fetch upstream index files for every alpine_feed()/apt_feed()\n")
 		fmt.Fprintf(os.Stderr, "declared in the current module's MODULE.star. Verifies each feed's\n")
 		fmt.Fprintf(os.Stderr, "signature against the in-tree trust list. Writes only; review the\n")
 		fmt.Fprintf(os.Stderr, "diff and commit manually.\n")
@@ -234,8 +234,8 @@ func cmdUpdateFeeds(args []string) {
 	}
 
 	alpineDecls, alpineErr := alpine.PeekFeedDecls(dir)
-	debianDecls, debianErr := debian.PeekFeedDecls(dir)
-	if alpineErr != nil && debianErr != nil {
+	aptDecls, aptErr := apt.PeekFeedDecls(dir)
+	if alpineErr != nil && aptErr != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", alpineErr)
 		os.Exit(1)
 	}
@@ -249,21 +249,21 @@ func cmdUpdateFeeds(args []string) {
 			os.Exit(1)
 		}
 	}
-	if len(debianDecls) > 0 {
+	if len(aptDecls) > 0 {
 		ran = true
-		opts := debian.UpdateOptions{
+		opts := apt.UpdateOptions{
 			ModuleDir:      dir,
 			Out:            os.Stdout,
 			Arches:         arches,
 			AllowKeyUpdate: *allowKeyUpdate,
 		}
-		if err := debian.UpdateFeeds(opts); err != nil {
+		if err := apt.UpdateFeeds(opts); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 	}
 	if !ran {
-		fmt.Fprintf(os.Stderr, "update-feeds: no alpine_feed() or debian_feed() in %s/MODULE.star\n", dir)
+		fmt.Fprintf(os.Stderr, "update-feeds: no alpine_feed() or apt_feed() in %s/MODULE.star\n", dir)
 		os.Exit(1)
 	}
 }
@@ -664,7 +664,7 @@ func projectLoadOpts() []yoestar.LoadOption {
 		yoestar.WithShowShadows(globalShowShadows),
 		yoestar.WithAllowDuplicateProvides(globalAllowDuplicateProvides),
 		yoestar.WithBuiltin("alpine_feed", alpine.Builtin),
-		yoestar.WithBuiltin("debian_feed", debian.Builtin),
+		yoestar.WithBuiltin("apt_feed", apt.Builtin),
 	}
 	if globalProjectFile != "" {
 		opts = append(opts, yoestar.WithProjectFile(globalProjectFile))

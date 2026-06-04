@@ -17,6 +17,10 @@ unit(
         # python3.11. Reference it explicitly so the build step
         # below can shell out to `python3.11` and find it.
         "debian": ["python3.11", "python3-setuptools"],
+        # Ubuntu (resolute) ships the interpreter as python3.14; the
+        # build step globs for python3.NN in the sysroot, so only the
+        # package name differs from Debian.
+        "ubuntu": ["python3.14", "python3-setuptools"],
     },
     container = "toolchain",
     container_arch = "target",

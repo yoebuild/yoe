@@ -19,10 +19,13 @@ autotools(
     distro_deps = {
         "alpine": ["zlib", "zstd"],
         "debian": ["zlib1g-dev", "libzstd-dev"],
+        # Ubuntu shares Debian's apt package names for these libraries.
+        "ubuntu": ["zlib1g-dev", "libzstd-dev"],
     },
     distro_runtime_deps = {
         "alpine": ["zlib", "zstd"],
         "debian": ["zlib1g", "libzstd1"],
+        "ubuntu": ["zlib1g", "libzstd1"],
     },
     configure_args = [
         "--enable-zlib",

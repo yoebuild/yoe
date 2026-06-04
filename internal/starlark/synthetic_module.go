@@ -2,7 +2,7 @@ package starlark
 
 // SyntheticModule is a module-priority entry whose units are materialized
 // on demand rather than enumerated up front. Used by `alpine_feed(...)`
-// (U6) and `debian_feed(...)` (sibling Debian plan) to absorb upstream
+// (U6) and `apt_feed(...)` (sibling Debian plan) to absorb upstream
 // package indices into yoe's resolver without paying the cost of
 // allocating a *Unit for every name in a multi-thousand-entry catalog.
 //
@@ -31,13 +31,21 @@ type SyntheticModule struct {
 	// view (R17) to group feeds under their parent.
 	Parent string
 
-	// Suite is the Debian release codename this feed declares
-	// (debian_feed's `suite` kwarg, e.g. "bookworm"). Empty for
-	// non-Debian feeds — alpine_feed leaves it unset. Project.DebianSuite
-	// reads it as the single source of the codename the repo emitter,
-	// image assembly, and the on-device apt sources.list all stamp, so
-	// the suite lives only in the module's debian_feed(...) call.
+	// Suite is the release codename this feed declares (apt_feed's
+	// `suite` kwarg, e.g. "bookworm", "resolute"). Empty for non-apt
+	// feeds — alpine_feed leaves it unset. Project.SuiteForDistro reads
+	// it as the source of the codename the repo emitter, image assembly,
+	// and the on-device apt sources.list all stamp, matched to the
+	// feed's Distro so a project with both a Debian and an Ubuntu feed
+	// resolves the right suite per distro.
 	Suite string
+
+	// Distro is the apt-family distro this feed targets (apt_feed's
+	// `distro` kwarg, e.g. "debian", "ubuntu"). Empty for non-apt feeds.
+	// Matches the Distro tag stamped on the feed's materialized units;
+	// SuiteForDistro uses it to pick this feed's suite for a given
+	// distro's build.
+	Distro string
 
 	// Priority is the resolver-priority index of this synthetic module.
 	// Synthetic modules rank below every non-feed module per R5; the
@@ -68,7 +76,7 @@ type SyntheticModule struct {
 
 // RegisterSyntheticModule records sm for the loader to attach to the
 // project's module list. Safe for concurrent use — alpine_feed and
-// debian_feed both call this from inside Starlark evaluation, which
+// apt_feed both call this from inside Starlark evaluation, which
 // runs single-threaded per module, but engines may serve multiple
 // projects sequentially in tests.
 //

@@ -8,6 +8,36 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.11.5] - 2026-06-04
+
+- **Ubuntu is now a selectable distro alongside Alpine and Debian.** Point a
+  project at `module-ubuntu` and set the distro to `ubuntu` (per image, or via
+  the default-distro override) to build images from Ubuntu's package archive.
+  Ubuntu and Debian images can live side by side in one project without their
+  packages colliding. _(Still debugging, not ready for use)_.
+- **The `debian_feed(...)` builtin is now `apt_feed(...)` and takes a
+  `distro`.** One builtin serves every apt-based distro; pass
+  `distro = "debian"` or `distro = "ubuntu"`. It also accepts an optional
+  `arch_urls` map so a single feed can pull amd64 from one mirror and arm64 from
+  another — needed for Ubuntu, whose ports architectures live on a separate
+  host.
+- **Build failures now name the unit and task that broke.** When a build fails,
+  the output leads with a clear `❌ FAILED: <unit> task: <task>` line before the
+  log, so you can tell at a glance which unit failed even when several are
+  building in parallel.
+- **Build status lines now carry icons for quick scanning.** Each unit reports
+  with an at-a-glance marker — ⚡ cached, 🔨 building, ✅ done, ❌ failed — and
+  freshly packaged artifacts are flagged with 📦.
+- **Fixed source units failing to build in projects that mix two distros.** When
+  a project combined distros that share image names (such as Debian and Ubuntu,
+  which both ship `dev-image`), a source unit's build-time `-dev` dependencies
+  could be silently dropped for one of the distros, leaving it to build against
+  an empty sysroot and fail (for example, "zlib support requested but not
+  found"). Both distros' build dependencies now resolve correctly.
+- **Boot smoke test output now carries status emojis.** A `--boot-test` run
+  flags each stage at a glance — 🚀 launch, 🔑 reaching the login prompt and
+  connecting over SSH, 🩺 health check, and a final ✅ pass or ❌ fail.
+
 ## [0.11.4] - 2026-06-04
 
 - **`yoe run` now boots arm64 images correctly.** On arm64 (and other

@@ -163,7 +163,7 @@ alpine_feed(
 
 func TestPeekModuleInfo_TolerantOfDebianFeed(t *testing.T) {
 	// Same contract as the alpine_feed peek test: without a no-op stub
-	// for debian_feed, Starlark's compile-time resolver aborts the peek
+	// for apt_feed, Starlark's compile-time resolver aborts the peek
 	// before module_info runs. The loader then falls back to the
 	// directory basename ("module-debian") and the synthetic feeds end
 	// up with Parent = "module-debian", surfacing the wrong distro name
@@ -171,7 +171,7 @@ func TestPeekModuleInfo_TolerantOfDebianFeed(t *testing.T) {
 	dir := t.TempDir()
 	src := `module_info(name = "debian", description = "test")
 
-debian_feed(
+apt_feed(
     name = "main",
     url = "https://deb.debian.org/debian",
     suite = "bookworm",

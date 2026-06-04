@@ -356,7 +356,7 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 
 	// Phase 1c: Evaluate each module's MODULE.star fully (not just the
 	// module_info peek used for the dep walk). This is where alpine_feed,
-	// debian_feed, and other feed-declaring builtins run — they register
+	// apt_feed, and other feed-declaring builtins run — they register
 	// SyntheticModules against the engine. Runs after machines + ctx
 	// build so the feed builtins see the active arch.
 	//
@@ -526,7 +526,7 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	proj.ResolvedModules = resolvedForProject
 	proj.Diagnostics.Shadows = eng.Shadows()
 
-	// Synthetic modules (alpine_feed, debian_feed): rank strictly below
+	// Synthetic modules (alpine_feed, apt_feed): rank strictly below
 	// every real module per R5. Assign Priority in registration order so
 	// the first-registered synthetic outranks later ones, mirroring the
 	// real-module "last-wins among modules" convention (1..N): synthetic
@@ -623,7 +623,7 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	// image-phase closure walk pulls in runtime_deps; build-time deps
 	// (`deps = [...]` on source-built units) are separate. A
 	// source-built unit may declare a build-time dep on a name now
-	// served only by alpine_feed / debian_feed, and BuildDAG below
+	// served only by alpine_feed / apt_feed, and BuildDAG below
 	// would fail with "depends on X, which does not exist" unless we
 	// materialize those names here. Iterate to fixpoint in case a
 	// newly-materialized unit pulls in further synthetic deps.
@@ -644,9 +644,24 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 			distroSet[proj.DefaultDistroOverride] = struct{}{}
 		}
 	}
-	for _, u := range eng.Units() {
-		if u.Class == "image" && u.Distro != "" {
-			distroSet[u.Distro] = struct{}{}
+	// Scan every image variant in the per-module catalog, not just the
+	// bare-name winners in eng.Units(): when two modules define the same
+	// image name under different distros (module-debian and module-ubuntu
+	// both ship base-image/dev-image/ssh-image), only the higher-priority
+	// module's variant survives in eng.units. Deriving distroSet from the
+	// shadowed map would drop the losing distro entirely, so this
+	// fixpoint never materializes its feed-only build deps (e.g. a source
+	// unit's distro_deps["debian"] = ["zlib1g-dev"]). The dep then
+	// resolves to nothing at BuildDAG time and is silently dropped,
+	// leaving an empty sysroot. A build can still select the shadowed
+	// distro via --distro or per-image resolution, so every distro any
+	// image targets must be pre-materialized regardless of which variant
+	// won the bare name.
+	for _, byName := range eng.UnitsByModule() {
+		for _, u := range byName {
+			if u.Class == "image" && u.Distro != "" {
+				distroSet[u.Distro] = struct{}{}
+			}
 		}
 	}
 	for {
@@ -1045,7 +1060,7 @@ func peekModuleInfo(modulePath string) *ModuleInfo {
 			}
 			return moduleRefValue{ref: ref}, nil
 		})
-	// alpine_feed / debian_feed / etc. are no-ops during the peek —
+	// alpine_feed / apt_feed / etc. are no-ops during the peek —
 	// we only need to capture module_info(). Without these stubs
 	// Starlark's compile-time resolver aborts before module_info()
 	// runs, falling back to the basename and breaking synthetic
@@ -1060,7 +1075,7 @@ func peekModuleInfo(modulePath string) *ModuleInfo {
 		"module_info": moduleInfo,
 		"module":      moduleBuiltin,
 		"alpine_feed": noop,
-		"debian_feed": noop,
+		"apt_feed":    noop,
 	})
 	return info
 }

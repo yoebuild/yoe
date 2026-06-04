@@ -1,21 +1,25 @@
-// Package debian implements the `debian_feed(...)` Starlark builtin.
+// Package apt implements the `apt_feed(...)` Starlark builtin.
 //
-// debian_feed is the Debian analog of alpine_feed: it turns an in-tree
-// directory of decompressed Packages files into a lazily-materialized
-// SyntheticModule that yoe's resolver consults alongside real modules.
-// One call registers one synthetic module per component, named
-// "<parent>.<component>" — e.g. "debian.main", "debian.contrib".
-// The suite kwarg picks which on-disk Packages file is parsed but does
-// not appear in the module's identity (one Debian suite per project,
-// enforced at evaluation).
+// apt_feed is the dpkg/apt-family analog of alpine_feed: it turns an
+// in-tree directory of decompressed Packages files into a
+// lazily-materialized SyntheticModule that yoe's resolver consults
+// alongside real modules. One call registers one synthetic module per
+// component, named "<parent>.<component>" — e.g. "debian.main",
+// "ubuntu.main". The suite kwarg picks which on-disk Packages file is
+// parsed but does not appear in the module's identity (one suite per
+// distro per project, enforced at evaluation).
+//
+// The same builtin serves every apt-based distro; the required `distro`
+// kwarg ("debian", "ubuntu", …) is stamped onto each materialized
+// unit's Distro tag. The closure-walk visibility filter then keeps a
+// feed's units inside their own distro's closures only — that is what
+// lets a project declare both a Debian and an Ubuntu feed without the
+// two colliding, and lets an image select among distros.
 //
 // Wire it from cmd/yoe (or tests) via:
 //
-//	yoestar.WithBuiltin("debian_feed", debian.Builtin)
-//
-// Synthesized units carry Distro = "debian" so the closure-walk
-// visibility filter (R21a) keeps them inside debian closures only.
-package debian
+//	yoestar.WithBuiltin("apt_feed", apt.Builtin)
+package apt
 
 import (
 	"fmt"
@@ -60,20 +64,22 @@ var archMap = map[string]string{
 }
 
 // Builtin is the BuiltinFactory passed to yoestar.WithBuiltin. The
-// returned *starlark.Builtin captures the engine so each debian_feed
+// returned *starlark.Builtin captures the engine so each apt_feed
 // call registers a SyntheticModule against it.
 func Builtin(eng *yoestar.Engine) *starlark.Builtin {
-	return starlark.NewBuiltin("debian_feed", makeDebianFeed(eng))
+	return starlark.NewBuiltin("apt_feed", makeAptFeed(eng))
 }
 
-// makeDebianFeed produces the debian_feed function. Parameters:
+// makeAptFeed produces the apt_feed function. Parameters:
 //
-//	debian_feed(
+//	apt_feed(
 //	    name      = "main",                         # feed name; becomes <parent>.<name>
+//	    distro    = "debian",                       # apt-family distro tag stamped on units
 //	    url       = "https://deb.debian.org/debian",
-//	    suite     = "bookworm",                     # Debian release codename
-//	    component = "main",                         # main / contrib / non-free
-//	    arches    = ["amd64", "arm64"],             # Debian arches present in the index
+//	    arch_urls = {"arm64": "http://ports..."},   # optional per-arch mirror override
+//	    suite     = "bookworm",                     # release codename
+//	    component = "main",                         # main / contrib / non-free / universe
+//	    arches    = ["amd64", "arm64"],             # arches present in the index
 //	    index     = "feeds/main",                   # in-tree dir holding <arch>/Packages
 //	    keyring   = "keys/debian-archive-keyring.gpg",
 //	)
@@ -82,20 +88,20 @@ func Builtin(eng *yoestar.Engine) *starlark.Builtin {
 // Inside `index`, the loader expects one subdirectory per Debian arch
 // containing a decompressed `Packages` file; the active arch's index
 // is parsed lazily on first Lookup.
-func makeDebianFeed(eng *yoestar.Engine) func(*starlark.Thread, *starlark.Builtin, starlark.Tuple, []starlark.Tuple) (starlark.Value, error) {
+func makeAptFeed(eng *yoestar.Engine) func(*starlark.Thread, *starlark.Builtin, starlark.Tuple, []starlark.Tuple) (starlark.Value, error) {
 	return func(thread *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		args, err := parseKwargs(kwargs)
 		if err != nil {
-			return nil, fmt.Errorf("debian_feed: %w", err)
+			return nil, fmt.Errorf("apt_feed: %w", err)
 		}
 
 		parent := eng.CurrentModule()
 		if parent == "" {
-			return nil, fmt.Errorf("debian_feed: must be called from a module's MODULE.star (not the project root)")
+			return nil, fmt.Errorf("apt_feed: must be called from a module's MODULE.star (not the project root)")
 		}
 		// Composed name: <parent>.<component>, matching alpine_feed's
 		// one-segment shape. The suite is feed configuration, not
-		// module identity (one Debian suite per project).
+		// module identity (one suite per distro per project).
 		composedName := parent + "." + args.name
 
 		var moduleDir string
@@ -111,13 +117,13 @@ func makeDebianFeed(eng *yoestar.Engine) func(*starlark.Thread, *starlark.Builti
 
 		sm := buildSyntheticModule(eng, composedName, parent, indexRoot, args)
 		if err := eng.RegisterSyntheticModule(sm); err != nil {
-			return nil, fmt.Errorf("debian_feed %q: %w", composedName, err)
+			return nil, fmt.Errorf("apt_feed %q: %w", composedName, err)
 		}
 		return starlark.None, nil
 	}
 }
 
-func buildSyntheticModule(eng *yoestar.Engine, composedName, parent, indexRoot string, args debianFeedArgs) *yoestar.SyntheticModule {
+func buildSyntheticModule(eng *yoestar.Engine, composedName, parent, indexRoot string, args aptFeedArgs) *yoestar.SyntheticModule {
 	s := &archState{
 		indexRoot: indexRoot,
 		eng:       eng,
@@ -130,6 +136,7 @@ func buildSyntheticModule(eng *yoestar.Engine, composedName, parent, indexRoot s
 		Name:   composedName,
 		Parent: parent,
 		Suite:  args.suite,
+		Distro: args.distro,
 		Lookup: func(name string) (*yoestar.Unit, error) {
 			return s.lookup(composedName, name)
 		},
@@ -146,7 +153,7 @@ type archState struct {
 	indexRoot string
 	eng       *yoestar.Engine
 	byArch    map[string]*archCache
-	feedArgs  debianFeedArgs
+	feedArgs  aptFeedArgs
 }
 
 type archCache struct {
@@ -161,13 +168,13 @@ func (s *archState) cacheFor(arch string) (*archCache, error) {
 	}
 	debArch, ok := archMap[arch]
 	if !ok {
-		return nil, fmt.Errorf("debian_feed: unsupported arch %q (supported: %s)",
+		return nil, fmt.Errorf("apt_feed: unsupported arch %q (supported: %s)",
 			arch, strings.Join(supportedArches(), ", "))
 	}
 	indexPath := filepath.Join(s.indexRoot, debArch, "Packages")
 	entries, err := dpkg.ParseIndexFile(indexPath)
 	if err != nil {
-		return nil, fmt.Errorf("debian_feed: load %s: %w", indexPath, err)
+		return nil, fmt.Errorf("apt_feed: load %s: %w", indexPath, err)
 	}
 	table := dpkg.BuildProvidesTable(entries)
 	byName := make(map[string]*dpkg.Entry, len(entries))
@@ -182,7 +189,7 @@ func (s *archState) cacheFor(arch string) (*archCache, error) {
 func (s *archState) lookup(moduleName, name string) (*yoestar.Unit, error) {
 	arch := s.eng.ActiveArch()
 	if arch == "" {
-		return nil, fmt.Errorf("debian_feed: no active arch (machine not loaded?)")
+		return nil, fmt.Errorf("apt_feed: no active arch (machine not loaded?)")
 	}
 	c, err := s.cacheFor(arch)
 	if err != nil {
@@ -193,7 +200,7 @@ func (s *archState) lookup(moduleName, name string) (*yoestar.Unit, error) {
 		return nil, nil // miss — resolver continues to the next module
 	}
 	providers := newMultiFeedProviders(s.eng, arch, c.provides)
-	u, err := dpkg.MaterializeUnit(*entry, providers, moduleName)
+	u, err := dpkg.MaterializeUnit(*entry, providers, moduleName, s.feedArgs.distro)
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +216,7 @@ func (s *archState) lookup(moduleName, name string) (*yoestar.Unit, error) {
 // the upstream Packages entry; internal/source/fetch.go compares the
 // downloaded bytes against this hash before yoe writes anything into
 // pool/, and a mismatch refuses to publish the project InRelease.
-func (s *archState) populateBuildFields(u *yoestar.Unit, entry *dpkg.Entry, _ string) {
+func (s *archState) populateBuildFields(u *yoestar.Unit, entry *dpkg.Entry, arch string) {
 	asset := filepath.Base(entry.Filename)
 	if asset == "." || asset == "" {
 		// fall back to a Debian-conventional filename if the upstream
@@ -217,7 +224,7 @@ func (s *archState) populateBuildFields(u *yoestar.Unit, entry *dpkg.Entry, _ st
 		asset = fmt.Sprintf("%s_%s_%s.deb", entry.Package, entry.Version, entry.Architecture)
 	}
 	u.Source = fmt.Sprintf("%s/%s",
-		strings.TrimSuffix(s.feedArgs.url, "/"),
+		strings.TrimSuffix(s.feedArgs.baseURLFor(arch), "/"),
 		entry.Filename,
 	)
 	u.SHA256 = entry.SHA256
@@ -240,7 +247,7 @@ func (s *archState) populateBuildFields(u *yoestar.Unit, entry *dpkg.Entry, _ st
 	}
 }
 
-// multiFeedProviders implements dpkg.Providers across every debian_feed
+// multiFeedProviders implements dpkg.Providers across every apt_feed
 // registered against an engine. The local feed's table wins ties;
 // siblings are consulted in registration order. Closes the cross-feed
 // gap (a bookworm-security package depending on libssl3 in bookworm-main).
@@ -301,10 +308,12 @@ func (s *archState) names() []string {
 	return out
 }
 
-// debianFeedArgs is the parsed kwargs from a debian_feed call.
-type debianFeedArgs struct {
+// aptFeedArgs is the parsed kwargs from an apt_feed call.
+type aptFeedArgs struct {
 	name      string
+	distro    string
 	url       string
+	archURLs  map[string]string
 	suite     string
 	component string
 	arches    []string
@@ -312,8 +321,22 @@ type debianFeedArgs struct {
 	keyring   string
 }
 
-func parseKwargs(kwargs []starlark.Tuple) (debianFeedArgs, error) {
-	var a debianFeedArgs
+// baseURLFor returns the mirror base URL serving deb downloads for a
+// given yoe-canonical arch. A per-arch override in archURLs wins;
+// otherwise the feed's default url is used. This is what lets one feed
+// span Ubuntu's split archive — amd64/i386 on archive.ubuntu.com,
+// arm64 and the other ports arches on ports.ubuntu.com — while Debian,
+// whose single mirror serves every arch, sets no override and stays
+// cache-identical.
+func (a aptFeedArgs) baseURLFor(arch string) string {
+	if u, ok := a.archURLs[arch]; ok && u != "" {
+		return u
+	}
+	return a.url
+}
+
+func parseKwargs(kwargs []starlark.Tuple) (aptFeedArgs, error) {
+	var a aptFeedArgs
 	for _, kv := range kwargs {
 		k, ok := kv[0].(starlark.String)
 		if !ok {
@@ -324,9 +347,17 @@ func parseKwargs(kwargs []starlark.Tuple) (debianFeedArgs, error) {
 			if v, ok := kv[1].(starlark.String); ok {
 				a.name = string(v)
 			}
+		case "distro":
+			if v, ok := kv[1].(starlark.String); ok {
+				a.distro = string(v)
+			}
 		case "url":
 			if v, ok := kv[1].(starlark.String); ok {
 				a.url = string(v)
+			}
+		case "arch_urls":
+			if d, ok := kv[1].(*starlark.Dict); ok {
+				a.archURLs = stringDictFrom(d)
 			}
 		case "suite":
 			if v, ok := kv[1].(starlark.String); ok {
@@ -353,6 +384,9 @@ func parseKwargs(kwargs []starlark.Tuple) (debianFeedArgs, error) {
 	if a.name == "" {
 		return a, fmt.Errorf("name is required")
 	}
+	if a.distro == "" {
+		return a, fmt.Errorf("distro is required (e.g. \"debian\" or \"ubuntu\")")
+	}
 	if a.url == "" {
 		return a, fmt.Errorf("url is required")
 	}
@@ -369,6 +403,21 @@ func parseKwargs(kwargs []starlark.Tuple) (debianFeedArgs, error) {
 		return a, fmt.Errorf("arches is required")
 	}
 	return a, nil
+}
+
+// stringDictFrom converts a Starlark dict of {arch: url} into a Go map,
+// keeping only string→string entries. Used for the optional arch_urls
+// kwarg.
+func stringDictFrom(d *starlark.Dict) map[string]string {
+	out := make(map[string]string, d.Len())
+	for _, item := range d.Items() {
+		k, kok := item[0].(starlark.String)
+		v, vok := item[1].(starlark.String)
+		if kok && vok {
+			out[string(k)] = string(v)
+		}
+	}
+	return out
 }
 
 func stringListFrom(list *starlark.List) []string {

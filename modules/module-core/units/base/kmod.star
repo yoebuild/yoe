@@ -19,10 +19,13 @@ unit(
     distro_deps = {
         "alpine": ["xz"],
         "debian": ["liblzma-dev"],
+        # Ubuntu shares Debian's apt package names for liblzma.
+        "ubuntu": ["liblzma-dev"],
     },
     distro_runtime_deps = {
         "alpine": ["xz"],
         "debian": ["liblzma5"],
+        "ubuntu": ["liblzma5"],
     },
     container = "toolchain",
     container_arch = "target",

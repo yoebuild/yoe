@@ -1,4 +1,4 @@
-package debian
+package apt
 
 import (
 	"fmt"
@@ -9,22 +9,33 @@ import (
 	"go.starlark.net/syntax"
 )
 
-// FeedDecl is one debian_feed(...) call recorded by PeekFeedDecls.
+// FeedDecl is one apt_feed(...) call recorded by PeekFeedDecls.
 // Carries the kwargs the live builtin parses plus the absolute paths
 // the maintainer playbook needs to fetch and write feed contents.
 type FeedDecl struct {
-	Name      string   // feed name (becomes <parent>.<suite>.<name>)
-	URL       string   // mirror root URL, e.g. https://deb.debian.org/debian
-	Suite     string   // Debian release codename, e.g. bookworm
-	Component string   // archive component, e.g. main / contrib / non-free
-	Arches    []string // Debian arch tokens present in the index
-	Index     string   // in-module directory holding <arch>/Packages
-	Keyring   string   // GPG keyring file for signature verification (relative to MODULE.star)
+	Name      string            // feed name (becomes <parent>.<name>)
+	Distro    string            // apt-family distro tag, e.g. debian / ubuntu
+	URL       string            // mirror root URL, e.g. https://deb.debian.org/debian
+	ArchURLs  map[string]string // optional per-arch mirror overrides (yoe arch → base URL); for Ubuntu's split archive/ports mirrors
+	Suite     string            // release codename, e.g. bookworm / resolute
+	Component string            // archive component, e.g. main / contrib / universe
+	Arches    []string          // arch tokens present in the index
+	Index     string            // in-module directory holding <arch>/Packages
+	Keyring   string            // GPG keyring file for signature verification (relative to MODULE.star)
+}
+
+// baseURLFor returns the mirror base URL for a yoe-canonical arch: a
+// per-arch override from ArchURLs when present, else the default URL.
+func (d FeedDecl) baseURLFor(yoeArch string) string {
+	if u, ok := d.ArchURLs[yoeArch]; ok && u != "" {
+		return u
+	}
+	return d.URL
 }
 
 // PeekFeedDecls evaluates the MODULE.star at modulePath in an
 // isolated thread with stub module_info / module builtins and a
-// recording debian_feed. Returns every debian_feed call in declaration
+// recording apt_feed. Returns every apt_feed call in declaration
 // order.
 //
 // Used by `yoe update-feeds` so the command can run inside a module
@@ -42,7 +53,7 @@ func PeekFeedDecls(modulePath string) ([]FeedDecl, error) {
 			return starlark.None, nil
 		})
 
-	feed := starlark.NewBuiltin("debian_feed",
+	feed := starlark.NewBuiltin("apt_feed",
 		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 			d := FeedDecl{}
 			for _, kv := range kwargs {
@@ -55,9 +66,17 @@ func PeekFeedDecls(modulePath string) ([]FeedDecl, error) {
 					if v, ok := kv[1].(starlark.String); ok {
 						d.Name = string(v)
 					}
+				case "distro":
+					if v, ok := kv[1].(starlark.String); ok {
+						d.Distro = string(v)
+					}
 				case "url":
 					if v, ok := kv[1].(starlark.String); ok {
 						d.URL = string(v)
+					}
+				case "arch_urls":
+					if dict, ok := kv[1].(*starlark.Dict); ok {
+						d.ArchURLs = stringDictFrom(dict)
 					}
 				case "suite":
 					if v, ok := kv[1].(starlark.String); ok {
@@ -82,10 +101,10 @@ func PeekFeedDecls(modulePath string) ([]FeedDecl, error) {
 				}
 			}
 			if d.Name == "" {
-				return nil, fmt.Errorf("debian_feed: name is required")
+				return nil, fmt.Errorf("apt_feed: name is required")
 			}
 			if seenName[d.Name] {
-				return nil, fmt.Errorf("debian_feed: duplicate feed name %q in this module", d.Name)
+				return nil, fmt.Errorf("apt_feed: duplicate feed name %q in this module", d.Name)
 			}
 			seenName[d.Name] = true
 			decls = append(decls, d)
@@ -96,13 +115,13 @@ func PeekFeedDecls(modulePath string) ([]FeedDecl, error) {
 	predeclared := starlark.StringDict{
 		"module_info": noop,
 		"module":      noop,
-		"debian_feed": feed,
+		"apt_feed":    feed,
 		// Tolerate alpine_feed calls in the same MODULE.star so a
 		// module that ships both types can be peeked without errors.
 		"alpine_feed": noop,
 	}
 	if _, err := starlark.ExecFileOptions(&syntax.FileOptions{}, thread, file, nil, predeclared); err != nil {
-		return nil, fmt.Errorf("debian: peek %s: %w", file, err)
+		return nil, fmt.Errorf("apt: peek %s: %w", file, err)
 	}
 	sort.SliceStable(decls, func(i, j int) bool { return decls[i].Name < decls[j].Name })
 	return decls, nil

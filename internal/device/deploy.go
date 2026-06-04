@@ -71,9 +71,12 @@ func Deploy(ctx context.Context, in DeployInput) error {
 	switch in.Distro {
 	case "alpine":
 		script = alpineDeployScript(repoBase, in.Unit)
-	case "debian":
+	case "debian", "ubuntu":
+		// Ubuntu rides Debian's apt machinery; the on-device install
+		// path (apt sources.list + apt-get install) is identical, only
+		// the suite and served pool differ.
 		if in.Suite == "" {
-			return fmt.Errorf("suite is required for debian deploy")
+			return fmt.Errorf("suite is required for %s deploy", in.Distro)
 		}
 		host, err := feedHost(repoBase)
 		if err != nil {
@@ -81,7 +84,7 @@ func Deploy(ctx context.Context, in DeployInput) error {
 		}
 		script = debianDeployScript(repoBase, in.Suite, host, in.Unit)
 	default:
-		return fmt.Errorf("unsupported distro %q (want alpine or debian)", in.Distro)
+		return fmt.Errorf("unsupported distro %q (want alpine, debian, or ubuntu)", in.Distro)
 	}
 
 	return ssh(ctx, in.Target, script, in.Out, in.Out)

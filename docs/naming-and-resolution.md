@@ -459,8 +459,9 @@ A `feed` is a third kind of module entry, alongside `directory` (local override)
 and `remote` (git clone). It absorbs an upstream package repo as a single
 declaration whose units materialize lazily on demand.
 
-`alpine_feed(...)` is the only feed builtin today (`debian_feed` is on the
-roadmap):
+Two feed builtins exist: `alpine_feed(...)` for Alpine's apk archive and
+`apt_feed(...)` for the apt/dpkg family (Debian and Ubuntu share it, picked
+apart by the `distro` kwarg):
 
 ```python
 # module-alpine/MODULE.star
@@ -473,6 +474,21 @@ alpine_feed(
     section = "main",
     index   = "feeds/main",              # dir holding <arch>/APKINDEX
     keys    = ["keys/alpine-devel@lists.alpinelinux.org-6165ee59.rsa.pub"],
+)
+
+# module-ubuntu/MODULE.star
+module_info(name = "ubuntu")
+
+apt_feed(
+    name      = "main",                  # synthetic module is ubuntu.main
+    distro    = "ubuntu",                # stamped on every materialized unit
+    url       = "http://archive.ubuntu.com/ubuntu",
+    arch_urls = {"arm64": "http://ports.ubuntu.com/ubuntu-ports"},
+    suite     = "resolute",
+    component = "main",
+    arches    = ["amd64", "arm64"],
+    index     = "feeds/main",            # dir holding <arch>/Packages
+    keyring   = "keys/ubuntu-archive-keyring.gpg",
 )
 ```
 

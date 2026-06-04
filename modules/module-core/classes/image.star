@@ -37,6 +37,15 @@ _DEBIAN_ESSENTIAL = [
     "util-linux",
 ]
 
+# Distros that use the apt/dpkg/glibc backend (mmdebstrap rootfs
+# assembly, .deb packaging). Ubuntu rides Debian's machinery, so both
+# resolve the same Essential base and assembly path; only the feed,
+# suite, and mirror differ. Mirrors yoestar.IsAptFamily on the Go side.
+_APT_DISTROS = ["debian", "ubuntu"]
+
+def _is_apt_distro(d):
+    return d in _APT_DISTROS
+
 def image(name, artifacts=[], hostname=None, timezone="", locale="",
           partitions=[], scope="machine",
           container="toolchain", container_arch="target", deps=[],
@@ -86,7 +95,7 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
     all_artifacts = list(artifacts)
     if effective_distro == "alpine":
         all_artifacts = all_artifacts + list(ctx.machine_config.packages)
-    elif effective_distro == "debian":
+    elif _is_apt_distro(effective_distro):
         all_artifacts = all_artifacts + _DEBIAN_ESSENTIAL
 
     # Resolve provides (e.g., "linux" → "linux-rpi4")
@@ -117,7 +126,7 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
     # Distro-specific rootfs assembly. Alpine images run apk add to
     # populate the rootfs; Debian images extract each .deb's data.tar
     # then run dpkg --configure -a in toolchain-glibc.
-    if effective_distro == "debian":
+    if _is_apt_distro(effective_distro):
         rootfs_fn = lambda: _assemble_debian_rootfs(resolved, hostname, timezone, locale)
         disk_fn = lambda: _create_disk_image_debian(name, all_partitions)
     else:
