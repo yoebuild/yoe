@@ -91,6 +91,16 @@ jobs:
           restore-keys: |
             yoe-cache-${{ matrix.distro }}-${{ matrix.arch }}-
 
+      # The build's implicit module sync only clones missing modules; it does
+      # not advance an already-cached module to the latest commit on its branch
+      # ref. Since the build cache (restored above) persists module checkouts
+      # across runs, a branch-pinned module (e.g. module-debian @ trixie) would
+      # stay frozen at whatever commit it was first cloned at. An explicit sync
+      # fast-forwards every cached module to its pinned ref before building.
+      - name: Sync modules
+        working-directory: testdata/e2e-project
+        run: ../../yoe module sync
+
       - name: Build dev-image
         working-directory: testdata/e2e-project
         run: ../../yoe build -j "$(nproc)" --distro ${{ matrix.distro }} --machine ${{ matrix.machine }} dev-image
