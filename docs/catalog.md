@@ -76,8 +76,8 @@ catalog by the end of the loader's evaluation phase, regardless of whether any
 image references them.
 
 **Synthetic units (feed-materialized).** A `MODULE.star` calls
-`alpine_feed(...)` or `apt_feed(...)`. The builtin does NOT allocate one
-`*Unit` per upstream package; it registers one **`SyntheticModule`** with a
+`alpine_feed(...)` or `apt_feed(...)`. The builtin does NOT allocate one `*Unit`
+per upstream package; it registers one **`SyntheticModule`** with a
 `Lookup(name) → *Unit` callback. The 60k-entry upstream index sits
 parsed-but-unmaterialized on disk and in a single `archCache` struct. A `*Unit`
 for a specific name appears in the catalog only when something asks for it (see
@@ -392,10 +392,10 @@ per-distro paths on disk (`build/alpine/openssl.target/` vs
 a debian build never reads back a musl-linked binary the alpine build produced.
 
 For feed-materialized units, the `Distro` field on the materialized `*Unit` is
-set by the feed (`"alpine"` for `alpine_feed`, `"debian"` for `apt_feed`);
-the unit's hash naturally differs across distros because the unit itself
-differs. For untagged source-built units, the consumer's effective distro is
-what disambiguates — the unit definition is the same, but the cache key isn't.
+set by the feed (`"alpine"` for `alpine_feed`, `"debian"` for `apt_feed`); the
+unit's hash naturally differs across distros because the unit itself differs.
+For untagged source-built units, the consumer's effective distro is what
+disambiguates — the unit definition is the same, but the cache key isn't.
 
 ## Working set in practice
 
@@ -444,9 +444,9 @@ So every invocation re-runs the loader in this order:
    clone paths, evaluate each `MODULE.star` in priority order.
 2. **Eager registration.** Classes (`classes/*.star`), source-declared units
    (`units/*.star`), machines (`machines/*.star`), and synthetic modules (each
-   `alpine_feed(...)` / `apt_feed(...)` call) all register during this phase.
-   No `archCache` parse yet — the feed builtin only stores the on-disk index
-   path and the callback.
+   `alpine_feed(...)` / `apt_feed(...)` call) all register during this phase. No
+   `archCache` parse yet — the feed builtin only stores the on-disk index path
+   and the callback.
 3. **Image evaluation.** Every `image(...)` call in every module fires
    `resolve_closure(artifacts, distro=...)`, which drives BFS through the
    runtime-dep graph. The first time a feed's `Lookup` runs, its `archCache`

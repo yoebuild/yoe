@@ -55,9 +55,9 @@ The coupling is not aesthetic. Three things tie them together:
 
 1. **libc ABI.** Anything compiled in the toolchain container links against the
    toolchain's musl headers and libc. Anything the feed fetches was compiled
-   against a specific Alpine release's musl. Mix versions and you
-   produce images that compile and link cleanly, then crash on first run when
-   the dynamic linker resolves a symbol whose layout has changed.
+   against a specific Alpine release's musl. Mix versions and you produce images
+   that compile and link cleanly, then crash on first run when the dynamic
+   linker resolves a symbol whose layout has changed.
 2. **Signing keys.** Every Alpine release ships with a build-host signing key.
    Prebuilt apks are signed by that key, and `apk-tools` inside the target image
    verifies signatures against the keyring baked into the toolchain container at
@@ -252,10 +252,10 @@ differently:
   without anyone listing it. Only the packages a runtime closure actually
   reaches are materialized.
 - **Name shadowing keeps the import surface honest.** Because the resolver
-  consults the feed *after* every real module, a dep that resolves to a bare
-  name yoe already ships from source (`busybox`, `musl`, …) binds to that
-  source unit, not the feed's copy. Auto-following is safe precisely because the
-  things yoe wants to own still win by name.
+  consults the feed _after_ every real module, a dep that resolves to a bare
+  name yoe already ships from source (`busybox`, `musl`, …) binds to that source
+  unit, not the feed's copy. Auto-following is safe precisely because the things
+  yoe wants to own still win by name.
 - **Hand-written `alpine_pkg` units list `runtime_deps` explicitly.** The
   Starlark class does not read the `D:` field — when you hand-write a unit (the
   rare case above), declare the deps you need in `runtime_deps` and leave out

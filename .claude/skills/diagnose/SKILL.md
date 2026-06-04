@@ -22,7 +22,7 @@ A failed `yoe build` leaves everything you need under
 `sysroot/` that holds the deps that were staged for this unit. **Read those
 artifacts first.** Do not re-run the build to "see the error" — the error is
 already captured, and a yoe build can take minutes per unit and re-sync modules.
-Rebuilding is the *last* step (verification of a fix), never the first step of
+Rebuilding is the _last_ step (verification of a fix), never the first step of
 diagnosis. If the artifacts are missing or you genuinely can't tell which build
 produced them, ask the user rather than kicking off a rebuild to regenerate
 them.
@@ -49,7 +49,7 @@ build/<distro>/<unit>.<arch>/executor.log  per-unit task summary: which task fai
 where `<distro>` is `alpine`, `debian`, etc. and `<unit>.<arch>` is e.g.
 `openssl.x86_64` or `file.arm64`. `executor.log` names the failing task and unit
 and tails the build log; `build.log` has the complete output. Read `build.log`'s
-end for the actual error, and skim `executor.log` to confirm *which* task and
+end for the actual error, and skim `executor.log` to confirm _which_ task and
 unit failed (useful when a dep failed rather than the unit you named).
 
 **If you don't know which distro the failure is in, ask the user** before
@@ -70,9 +70,9 @@ Read build/<distro>/<unit>.<arch>/build.log (last 100 lines)
 
 Shortcut: `yoe log [unit]` prints the build log for the most recent failure (or
 a named unit) without hunting for the path, and `yoe log -e [unit]` opens it in
-your editor. The underlying file is still `build/<distro>/<unit>.<arch>/build.log`
-— reach for it directly when you need a specific distro's log or want to read a
-slice with the Read tool.
+your editor. The underlying file is still
+`build/<distro>/<unit>.<arch>/build.log` — reach for it directly when you need a
+specific distro's log or want to read a slice with the Read tool.
 
 If the error references earlier output (e.g., a missing header first used
 hundreds of lines up), read more context as needed.
@@ -93,13 +93,14 @@ find build/<distro>/<unit>.<arch>/sysroot -iname 'lib<name>*' -o -iname '<name>.
 An **empty sysroot, or one missing the expected `lib<name>.so` / `<name>.h`**,
 means the dependency was never staged — the build edge to it was dropped or the
 dep never materialized, not that the dep's own build failed. Cross-check against
-a sibling unit that built successfully (`ls build/<distro>/<other-unit>.<arch>/sysroot/`)
-to see what a populated sysroot looks like. On Debian/apt distros, remember the
-split: configure-time link probes need the **`-dev`** package (headers + the
-unversioned `lib*.so` symlink), while `distro_runtime_deps` only pull the
-runtime `libN` package — a sysroot that has `libfoo1` but not `libfoo-dev` will
-fail every `-lfoo` link test. Whether the missing dep has a build directory at
-all (`ls -d build/<distro>/<depname>.<arch>` exists?) tells you if it was ever
+a sibling unit that built successfully
+(`ls build/<distro>/<other-unit>.<arch>/sysroot/`) to see what a populated
+sysroot looks like. On Debian/apt distros, remember the split: configure-time
+link probes need the **`-dev`** package (headers + the unversioned `lib*.so`
+symlink), while `distro_runtime_deps` only pull the runtime `libN` package — a
+sysroot that has `libfoo1` but not `libfoo-dev` will fail every `-lfoo` link
+test. Whether the missing dep has a build directory at all
+(`ls -d build/<distro>/<depname>.<arch>` exists?) tells you if it was ever
 scheduled.
 
 ### Step 3: Read the Unit
@@ -156,7 +157,7 @@ Always explain what was found and what the fix is before applying it.
 
 ### Step 6: Rebuild with --force (verification only — the one step that rebuilds)
 
-This is the only step that runs a build, and only *after* a fix is applied — it
+This is the only step that runs a build, and only _after_ a fix is applied — it
 verifies the fix, it is not how you reproduce or investigate the failure. Target
 the same distro whose log you diagnosed so the rebuild lands in the right tree:
 
@@ -189,15 +190,15 @@ fixing a missing header reveals a missing library).
 
 ## Key Paths
 
-| Path                                       | Contents                                       |
-| ------------------------------------------ | ---------------------------------------------- |
-| `build/<distro>/<unit>.<arch>/build.log`   | Full build output                              |
-| `build/<distro>/<unit>.<arch>/executor.log`| Per-unit task summary: which task/unit failed  |
-| `build/<distro>/<unit>.<arch>/build.json`  | Status, hash, timing, error for this unit      |
-| `build/<distro>/<unit>.<arch>/src/`        | Extracted source tree                          |
-| `build/<distro>/<unit>.<arch>/destdir/`    | Install staging directory                      |
-| `build/<distro>/<unit>.<arch>/sysroot/`    | This unit's staged deps (headers/libs)         |
-| `modules/**/units/**/<unit>.star`          | Unit definition                                |
+| Path                                        | Contents                                      |
+| ------------------------------------------- | --------------------------------------------- |
+| `build/<distro>/<unit>.<arch>/build.log`    | Full build output                             |
+| `build/<distro>/<unit>.<arch>/executor.log` | Per-unit task summary: which task/unit failed |
+| `build/<distro>/<unit>.<arch>/build.json`   | Status, hash, timing, error for this unit     |
+| `build/<distro>/<unit>.<arch>/src/`         | Extracted source tree                         |
+| `build/<distro>/<unit>.<arch>/destdir/`     | Install staging directory                     |
+| `build/<distro>/<unit>.<arch>/sysroot/`     | This unit's staged deps (headers/libs)        |
+| `modules/**/units/**/<unit>.star`           | Unit definition                               |
 
 `<distro>` is `alpine`, `debian`, etc.; the unit directory carries its arch
 suffix (e.g. `openssl.x86_64`, `file.arm64`). The `sysroot/` is per-unit — it
@@ -213,7 +214,8 @@ sysroot is itself a diagnosis (see Step 2).
 - Do not skip the build log. Always read it before proposing a fix.
 - Do not rebuild to reproduce the failure. The failed build already wrote
   `build.log`, `executor.log`, `src/`, `destdir/`, and `sysroot/` — diagnose
-  from those. The only rebuild is Step 6, to verify a fix you already identified.
+  from those. The only rebuild is Step 6, to verify a fix you already
+  identified.
 - Do not take shortcuts to make the build pass (e.g., disabling features,
   removing configure checks) without explaining the trade-off and getting user
   approval.

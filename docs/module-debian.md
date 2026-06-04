@@ -12,8 +12,8 @@ browse the bootstrap keyring, the in-tree `Packages` snapshots, or to send a PR
 adding a new feed/component.
 
 > **Implementation details:** how Debian debs pass through yoe's pipeline
-> (`apt_feed`, the InRelease verify path, mmdebstrap-driven image assembly,
-> the project repo emitter) live in
+> (`apt_feed`, the InRelease verify path, mmdebstrap-driven image assembly, the
+> project repo emitter) live in
 > [`docs/specs/2026-05-25-module-debian.md`](https://github.com/yoebuild/yoe/blob/main/docs/specs/2026-05-25-module-debian.md)
 > and the matching plan under `docs/plans/`. This doc is the "when to reach for
 > it" rubric.
@@ -84,22 +84,22 @@ fleet-specific; pick a value that matches your update cadence and ability to
 push fresh InRelease files when needed.
 
 Repository URLs must be HTTPS. yoe validates this at project evaluation time; an
-`http://` URL in a `apt_feed(...)` call fails fast with a clear error.
-Plaintext mirrors expose the trust chain to MITM injection — the bootstrap
-keyring's job is to verify what the mirror says, but the mirror can't be trusted
-to deliver bytes faithfully without TLS.
+`http://` URL in a `apt_feed(...)` call fails fast with a clear error. Plaintext
+mirrors expose the trust chain to MITM injection — the bootstrap keyring's job
+is to verify what the mirror says, but the mirror can't be trusted to deliver
+bytes faithfully without TLS.
 
 ## Maintainer playbook
 
 The flow mirrors `module-alpine`'s. Inside a checked-out `module-debian`:
 
 1. **Refresh in-tree `Packages` snapshots.** Run `yoe update-feeds` inside the
-   module directory. The command peeks `MODULE.star` for every
-   `apt_feed(...)` call, fetches each declared suite's `InRelease` from the
-   pinned mirror, verifies it against `keys/debian-archive-keyring.gpg` with
-   Valid-Until enforcement, fetches per-arch `Packages.gz`, decompresses, and
-   atomically writes the result into `feeds/<component>/<arch>/Packages`. Writes
-   only — review with `git diff feeds/` and commit when ready.
+   module directory. The command peeks `MODULE.star` for every `apt_feed(...)`
+   call, fetches each declared suite's `InRelease` from the pinned mirror,
+   verifies it against `keys/debian-archive-keyring.gpg` with Valid-Until
+   enforcement, fetches per-arch `Packages.gz`, decompresses, and atomically
+   writes the result into `feeds/<component>/<arch>/Packages`. Writes only —
+   review with `git diff feeds/` and commit when ready.
 2. **Push upstream.** yoe's external-module workflow (CLAUDE.md) fetches a
    pinned ref on every build, so the new `Packages` snapshot needs to land on
    the canonical remote before the next consumer's `yoe build` will see it.
