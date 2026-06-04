@@ -31,6 +31,9 @@ and this project adheres to
   could be silently dropped for one of the distros, leaving it to build against
   an empty sysroot and fail (for example, "zlib support requested but not
   found"). Both distros' build dependencies now resolve correctly.
+- **Boot smoke test output now carries status emojis.** A `--boot-test` run
+  flags each stage at a glance — 🚀 launch, 🔑 reaching the login prompt and
+  connecting over SSH, 🩺 health check, and a final ✅ pass or ❌ fail.
 
 ## [0.11.4] - 2026-06-04
 
