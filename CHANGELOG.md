@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-06-04
+
 - **Build failures now show the unit's log right where they happen.** When a
   unit fails to build, yoe prints the tail of that unit's build log inline
   instead of only pointing at a file on disk, so you can see the actual error
