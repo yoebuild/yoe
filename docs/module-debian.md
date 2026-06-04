@@ -41,7 +41,7 @@ hard-to-build complexity — is identical.
 
 The Debian suite pinned in `MODULE.star` (`_DEBIAN_SUITE = "bookworm"` at the
 time of writing) **must** match the `FROM debian:<release>` line in
-`@module-debian//containers/toolchain-glibc/Dockerfile`. Both currently point at
+`@module-debian//containers/toolchain-debian-13/Dockerfile`. Both currently point at
 `bookworm`.
 
 The coupling matters for three reasons:
@@ -165,7 +165,7 @@ cd testdata/e2e-project
 yoe update-feeds
 
 # 2. Build the image. This pulls every artifact's .deb from the cached
-#    bookworm feed, builds toolchain-glibc on first run, installs the
+#    bookworm feed, builds toolchain-debian-13 on first run, installs the
 #    closure into the rootfs with `mmdebstrap` (apt + dpkg in one pass,
 #    running maintainer scripts), stages the project APT keyring + deb822
 #    sources file, and writes a bootable disk image. Expect ~5–10 min
@@ -191,7 +191,7 @@ one of these places:
 - `mmdebstrap` inside the toolchain container — postinst error in the configure
   log; check whether the package needs network access (see Known limitations).
 - Bootloader install — `extlinux` / `syslinux-common` must be present in the
-  toolchain-glibc Dockerfile so `_install_syslinux_debian` can find
+  toolchain-debian-13 Dockerfile so `_install_syslinux_debian` can find
   `/usr/lib/SYSLINUX/mbr.bin`.
 - Init startup — kernel and systemd-sysv pull in /sbin/init transitively; if the
   kernel boots but init doesn't run, check that `init` (the symlink package) is
@@ -256,7 +256,7 @@ substantial follow-up rather than routine work.
   `apt_feed(...)` call in a project must agree on its `suite` kwarg; the
   resolver errors at load time if it sees `bookworm` and `trixie` declared in
   the same project. The constraint exists because the toolchain container
-  (`@module-debian//containers/toolchain-glibc`) pins one Debian release, and
+  (`@module-debian//containers/toolchain-debian-13`) pins one Debian release, and
   source units built against that toolchain's headers/libs can't safely mix with
   prebuilt packages from a different release's libc. Multi-suite support would
   require a suite axis in the toolchain cache key and parallel toolchain

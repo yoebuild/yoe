@@ -230,7 +230,13 @@ func (s *archState) populateBuildFields(u *yoestar.Unit, entry *dpkg.Entry, arch
 	u.SHA256 = entry.SHA256
 	u.PassthroughAPK = ""    // not an apk
 	u.PassthroughDeb = asset // mirror the upstream .deb into the project pool verbatim
-	u.Container = "toolchain-glibc"
+	// Use the virtual "toolchain" name, not a concrete one: it resolves
+	// per-distro through the provides table to the consuming distro's glibc
+	// toolchain (toolchain-debian-13, toolchain-ubuntu-26.04, …). Each
+	// apt-family toolchain carries its distro+release in its unit name so
+	// their container image tags don't collide, so a literal name here would
+	// only resolve for one distro.
+	u.Container = "toolchain"
 	u.ContainerArch = "target"
 	u.Sandbox = false
 	u.Tasks = []yoestar.Task{

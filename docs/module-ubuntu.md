@@ -41,16 +41,19 @@ shared apt/dpkg/glibc backend; only the feed identity, suite, and mirror differ.
 
 The suite pinned in `MODULE.star` (`_UBUNTU_SUITE`, tracking **Resolute Raccoon
 / 26.04 LTS** at the time of writing) **must** match the `FROM ubuntu:<release>`
-line in `containers/toolchain-glibc/Dockerfile`. The same three couplings Debian
-documents apply: the glibc ABI between toolchain headers and target runtime
-libs, the per-release archive signing key in `keys/ubuntu-archive-keyring.gpg`,
-and the full cache invalidation that a suite bump rolls through every
-source-unit hash. Plan a suite bump for a rebuild cycle.
+line in `containers/toolchain-ubuntu-26.04/Dockerfile`. The same three couplings
+Debian documents apply: the glibc ABI between toolchain headers and target
+runtime libs, the per-release archive signing key in
+`keys/ubuntu-archive-keyring.gpg`, and the full cache invalidation that a suite
+bump rolls through every source-unit hash. Plan a suite bump for a rebuild cycle.
 
-`module-debian` also ships a `toolchain-glibc` under the same unit name. A
-project listing both modules gets deterministic last-module-wins shadowing on
-that name; since both are interchangeable glibc/dpkg toolchains, either can
-assemble either rootfs.
+The Ubuntu and Debian glibc toolchains are **not** interchangeable. apt is not
+forward-compatible across suites, so Debian-trixie's apt crashes when it reads
+Ubuntu-resolute's repository metadata — an Ubuntu rootfs must be assembled by the
+Ubuntu toolchain, and vice versa. Because the container image tag is
+`yoe/<unit-name>:<version>-<arch>`, each toolchain carries its release in its
+name (`toolchain-ubuntu-26.04`, Debian's `toolchain-debian-13`) so the two never
+share a tag and overwrite each other's image.
 
 ## Split mirrors (amd64 + arm64)
 
@@ -103,7 +106,7 @@ NIC up automatically.
 MODULE.star                # apt_feed(distro="ubuntu", ...) declaration
 feeds/main/<arch>/Packages # checked-in catalog snapshots (archive + ports)
 keys/                      # bootstrap keyring + fingerprint allow-list
-containers/toolchain-glibc # Ubuntu/glibc build toolchain (provides "toolchain")
+containers/toolchain-ubuntu-26.04  # Ubuntu/glibc build toolchain (provides "toolchain")
 classes/kernel.star        # ubuntu_kernel() -> linux-image-generic
 images/                    # base-image, ssh-image, dev-image
 ```

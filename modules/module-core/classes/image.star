@@ -125,7 +125,7 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
 
     # Distro-specific rootfs assembly. Alpine images run apk add to
     # populate the rootfs; Debian images extract each .deb's data.tar
-    # then run dpkg --configure -a in toolchain-glibc.
+    # then run dpkg --configure -a in the glibc toolchain container.
     if _is_apt_distro(effective_distro):
         rootfs_fn = lambda: _assemble_debian_rootfs(resolved, hostname, timezone, locale)
         disk_fn = lambda: _create_disk_image_debian(name, all_partitions)
@@ -356,10 +356,10 @@ def _create_disk_image_debian(name, partitions):
 
     Mirrors _create_disk_image's structure (sparse image, sfdisk MBR,
     per-partition mkfs, dd into the disk image) but uses the syslinux
-    files shipped in the toolchain-glibc container at
+    files shipped in the glibc toolchain container at
     /usr/lib/SYSLINUX/mbr.bin instead of the Alpine-style
     /usr/share/syslinux/mbr.bin path. The Debian extlinux binary
-    (also in toolchain-glibc) writes /boot/extlinux/ldlinux.sys
+    (also in the glibc toolchain container) writes /boot/extlinux/ldlinux.sys
     onto the root partition.
 
     Requires a kernel and /boot/extlinux/extlinux.conf in the rootfs.
@@ -459,7 +459,7 @@ def _install_syslinux_debian(img, partitions):
     """Install syslinux MBR + extlinux for a Debian disk image.
 
     Reads mbr.bin from /usr/lib/SYSLINUX/ (Debian path) inside the
-    toolchain-glibc container, then loop-mounts the root partition
+    glibc toolchain container, then loop-mounts the root partition
     and runs extlinux --install. Same loop-device pre-creation pattern
     as _install_syslinux.
     """

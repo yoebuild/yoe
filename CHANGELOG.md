@@ -12,8 +12,11 @@ and this project adheres to
   manages and DHCPs the ethernet port out of the box, so the image is reachable
   over SSH on first boot with no connection profile — matching Debian.
 - **Passwordless root SSH login now works on Ubuntu dev images.** Root could log
-  in on the serial console but SSH rejected the empty password; Ubuntu images now
-  get the same permissive dev-login drop-in Debian already had.
+  in on the serial console but SSH rejected the empty password; Ubuntu images
+  now get the same permissive dev-login drop-in Debian already had.
+- **Ubuntu images build correctly in projects that also use Debian.** The two
+  distros' build toolchains no longer share an identity, which previously could
+  crash an Ubuntu image build; each distro now builds with its own toolchain.
 
 ## [0.11.6] - 2026-06-04
 

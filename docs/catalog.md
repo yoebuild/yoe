@@ -53,7 +53,7 @@ can't blow the call stack.
 
 **Provides resolution.** Replacing a _virtual_ name in a deps list (`linux`,
 `toolchain`, `init`) with the concrete unit that satisfies it (`linux-rpi4`,
-`toolchain-glibc`, `busybox-init`). Driven by the project's `Provides` map plus
+`toolchain-debian-13`, `busybox-init`). Driven by the project's `Provides` map plus
 per-distro filtering (a provides entry tagged for a different distro is
 invisible to the lookup).
 
@@ -222,7 +222,7 @@ For each name dequeued from the BFS frontier:
 
 1. **Resolve provides.** If the name is a virtual like `toolchain`,
    `ResolveProvidesForDistro(distro, name)` substitutes the concrete providing
-   unit's name (e.g. `toolchain-glibc` for distro=debian).
+   unit's name (e.g. `toolchain-debian-13` for distro=debian).
 2. **Check the view.** `LookupUnit(distro, resolved)` reads
    `DistroViews[distro][resolved]`. Hit → return the existing `*Unit`, no
    allocation. (This is the common case after the first walk visits a name.)
@@ -384,7 +384,7 @@ configuration.
 Including effective distro in the hash gives every source-declared unit the
 **build-twice-along-the-libc-axis** property: a single source unit
 (`module-core/openssl`) builds once in `toolchain-musl` for an alpine image and
-once in `toolchain-glibc` for a debian image, producing two distinct binary
+once in `toolchain-debian-13` for a debian image, producing two distinct binary
 outputs with two distinct cache entries. The catalog stores one `*Unit` (in
 `UnitsByModule["module-core"]["openssl"]`); the build artifacts live under
 per-distro paths on disk (`build/alpine/openssl.target/` vs

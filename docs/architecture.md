@@ -155,7 +155,8 @@ Concrete names that match directly skip the registry.
 For multi-distro projects, resolution is also distro-aware: a unit tagged for
 one distro is invisible to images of another, and virtuals like `toolchain`
 route to the matching toolchain unit (`toolchain-musl` for alpine,
-`toolchain-glibc` for debian) via the same `provides` mechanism. See
+`toolchain-debian-13` for debian, `toolchain-ubuntu-26.04` for ubuntu) via the
+same `provides` mechanism. See
 [Naming and Resolution](naming-and-resolution.md) for collision rules, name
 shadowing, and the `replaces` mechanism, and
 [Catalog and Materialization](catalog.md) for the in-memory data structures that
