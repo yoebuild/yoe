@@ -15,6 +15,9 @@ and this project adheres to
   Building an Ubuntu image no longer re-fetches and re-extracts every package
   on each `yoe build`; unchanged packages are reused from the cache, the same
   as Debian and Alpine.
+- **ncurses now builds on Ubuntu.** The terminal library no longer fails to
+  compile under Ubuntu's newer toolchain, so Ubuntu images that pull in ncurses
+  build successfully.
 
 ## [0.11.5] - 2026-06-04
 
