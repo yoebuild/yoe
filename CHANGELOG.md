@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-06-04
+
 - **Source downloads no longer fail intermittently with "gzip: invalid
   header."** Some download mirrors serve a `.tar.gz` in a way that made yoe save
   an already-decompressed archive under a compressed name, so a build would
