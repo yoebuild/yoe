@@ -8,19 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
-- **Core source packages now build on Ubuntu.** `file`, `ca-certificates`,
-  `meson`, and `kmod` learned Ubuntu's package names, so an Ubuntu image no
-  longer fails partway through with errors like "zlib support requested but not
-  found." `ca-certificates` also adapts to whichever Python the distro ships
-  instead of assuming a fixed version.
-
 ## [0.11.5] - 2026-06-04
 
 - **Ubuntu is now a selectable distro alongside Alpine and Debian.** Point a
   project at `module-ubuntu` and set the distro to `ubuntu` (per image, or via
   the default-distro override) to build images from Ubuntu's package archive.
   Ubuntu and Debian images can live side by side in one project without their
-  packages colliding.
+  packages colliding. _(Still debugging, not ready for use)_.
 - **The `debian_feed(...)` builtin is now `apt_feed(...)` and takes a
   `distro`.** One builtin serves every apt-based distro; pass
   `distro = "debian"` or `distro = "ubuntu"`. It also accepts an optional
