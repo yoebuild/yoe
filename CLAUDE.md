@@ -134,6 +134,19 @@ than scanning the directories.
 - **Understand before changing.** Read the relevant code paths end-to-end before
   proposing changes. Build failures often have non-obvious root causes — trace
   the actual problem rather than patching symptoms.
+- **Debug build failures from the on-disk artifacts, not by rebuilding.** A
+  failed `yoe build` already wrote everything you need under
+  `build/<distro>/<unit>.<arch>/`: the full `build.log`, the per-unit
+  `executor.log` (which task/unit failed), `build.json` (status/hash/error), the
+  extracted `src/`, the `destdir/` staging dir, and the per-unit `sysroot/`
+  holding exactly the deps that were staged. Read those first; do not re-run the
+  build to "see the error" — a build can take minutes per unit and re-syncs
+  modules. For a missing-header/missing-library failure, `ls` the unit's
+  `sysroot/` (and check whether `build/<distro>/<dep>.<arch>/` exists at all):
+  an empty or incomplete sysroot is itself the diagnosis — a build edge was
+  dropped or a dep never materialized — and proves it without a rebuild.
+  Rebuilding is the last step, to verify a fix you already identified. The
+  `diagnose` skill encodes this workflow.
 - **Silent failures are bugs.** If something can fail, it should fail loudly
   with a clear error. Never swallow errors or degrade silently in ways that make
   debugging harder later.

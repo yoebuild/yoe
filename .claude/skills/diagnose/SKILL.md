@@ -171,7 +171,7 @@ extract.
 ### Step 7: Check the Result
 
 Read the build output. If the build succeeds, report the fix. If it fails again,
-go back to Step 2 with the new log — the next error may be different (e.g.,
+go back to Step 1 with the new log — the next error may be different (e.g.,
 fixing a missing header reveals a missing library).
 
 ## Iteration Rules
