@@ -644,9 +644,24 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 			distroSet[proj.DefaultDistroOverride] = struct{}{}
 		}
 	}
-	for _, u := range eng.Units() {
-		if u.Class == "image" && u.Distro != "" {
-			distroSet[u.Distro] = struct{}{}
+	// Scan every image variant in the per-module catalog, not just the
+	// bare-name winners in eng.Units(): when two modules define the same
+	// image name under different distros (module-debian and module-ubuntu
+	// both ship base-image/dev-image/ssh-image), only the higher-priority
+	// module's variant survives in eng.units. Deriving distroSet from the
+	// shadowed map would drop the losing distro entirely, so this
+	// fixpoint never materializes its feed-only build deps (e.g. a source
+	// unit's distro_deps["debian"] = ["zlib1g-dev"]). The dep then
+	// resolves to nothing at BuildDAG time and is silently dropped,
+	// leaving an empty sysroot. A build can still select the shadowed
+	// distro via --distro or per-image resolution, so every distro any
+	// image targets must be pre-materialized regardless of which variant
+	// won the bare name.
+	for _, byName := range eng.UnitsByModule() {
+		for _, u := range byName {
+			if u.Class == "image" && u.Distro != "" {
+				distroSet[u.Distro] = struct{}{}
+			}
 		}
 	}
 	for {
