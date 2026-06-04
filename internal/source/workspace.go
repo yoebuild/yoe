@@ -16,10 +16,10 @@ import (
 )
 
 // Prepare sets up the build source directory for a unit:
-// 1. Fetches source (from cache or network)
-// 2. Extracts into build/<distro>/<unit>.<scope>/src/ as a git repo with the
-//    yoe/pin tag marking the pinned commit
-// 3. Applies patches from the unit as git commits
+//  1. Fetches source (from cache or network)
+//  2. Extracts into build/<distro>/<unit>.<scope>/src/ as a git repo with the
+//     yoe/pin tag marking the pinned commit
+//  3. Applies patches from the unit as git commits
 //
 // distro is the consuming image's effective distro; it segregates source
 // trees the same way the build/destdir/sysroot directories are segregated,
@@ -489,6 +489,22 @@ func tagUpstream(srcDir string) error {
 	return nil
 }
 
+// gitCommitEnv augments the process environment with a yoe author and
+// committer identity. yoe creates commits on a source tree when it applies a
+// unit's patches; the committing git invocations (`git am`, `git commit`)
+// fail wherever no global `user.name`/`user.email` is configured — notably on
+// CI runners, which ship git with no identity. Supplying the identity through
+// the environment keeps it out of the cloned repo's `.git/config`, so yoe
+// never rewrites the user's working-tree git settings.
+func gitCommitEnv() []string {
+	return append(os.Environ(),
+		"GIT_AUTHOR_NAME=yoe",
+		"GIT_AUTHOR_EMAIL=yoe@yoe.local",
+		"GIT_COMMITTER_NAME=yoe",
+		"GIT_COMMITTER_EMAIL=yoe@yoe.local",
+	)
+}
+
 func initGitRepo(srcDir string) error {
 	cmds := [][]string{
 		{"git", "init"},
@@ -538,9 +554,12 @@ func applyPatches(projectDir, srcDir string, unit *yoestar.Unit) error {
 			patchPath = abs
 		}
 
-		// Apply with git am (preserves commit message from patch)
+		// Apply with git am (preserves commit message from patch). git am
+		// writes a commit, so it needs a committer identity even though the
+		// author comes from the patch header.
 		cmd := exec.Command("git", "am", "--3way", patchPath)
 		cmd.Dir = srcDir
+		cmd.Env = gitCommitEnv()
 		if out, err := cmd.CombinedOutput(); err != nil {
 			// Fallback to git apply
 			cmd = exec.Command("git", "apply", patchPath)
@@ -558,6 +577,7 @@ func applyPatches(projectDir, srcDir string, unit *yoestar.Unit) error {
 			for _, args := range cmds {
 				c := exec.Command(args[0], args[1:]...)
 				c.Dir = srcDir
+				c.Env = gitCommitEnv()
 				if out, err := c.CombinedOutput(); err != nil {
 					return fmt.Errorf("%s: %s\n%s", strings.Join(args, " "), err, out)
 				}
