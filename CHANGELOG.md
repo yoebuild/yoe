@@ -18,6 +18,9 @@ and this project adheres to
 - **ncurses now builds on Ubuntu.** The terminal library no longer fails to
   compile under Ubuntu's newer toolchain, so Ubuntu images that pull in ncurses
   build successfully.
+- **bash now builds on Ubuntu.** The shell no longer fails to compile under
+  Ubuntu's newer toolchain, so Ubuntu images that pull in bash build
+  successfully.
 
 ## [0.11.5] - 2026-06-04
 

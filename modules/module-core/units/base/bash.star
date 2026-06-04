@@ -18,5 +18,9 @@ autotools(
         "--without-bash-malloc",
         "--disable-nls",
         "--enable-readline",
+        # bash 5.2's K&R-style empty-paren prototypes (extern foo ();) mean
+        # "zero args" under GCC 15's C23 default, breaking REVERSE_LIST and
+        # friends. Pin to gnu17 to restore "unspecified args" semantics.
+        "CFLAGS='-std=gnu17 -g -O2'",
     ],
 )
