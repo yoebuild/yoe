@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.11.4] - 2026-06-04
+
 - **`yoe run` now boots arm64 images correctly.** On arm64 (and other
   direct-kernel-boot targets) the launcher looked for the kernel at the wrong
   path, so QEMU started with nothing to boot and sat at a blank console. It now
