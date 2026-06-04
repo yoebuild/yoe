@@ -8,6 +8,9 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **The unit list now shows cached status the moment yoe opens.** Cached units
+  no longer render as blank lines until the first build; their status is correct
+  on startup.
 - **Ubuntu packages now reuse the cache instead of rebuilding every run.**
   Building an Ubuntu image no longer re-fetches and re-extracts every package
   on each `yoe build`; unchanged packages are reused from the cache, the same

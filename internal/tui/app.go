@@ -592,11 +592,6 @@ type Config struct {
 
 // Run launches the TUI.
 func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
-	dag, err := resolve.BuildDAG(proj, "")
-	if err != nil {
-		return fmt.Errorf("building DAG: %w", err)
-	}
-
 	arch := build.Arch()
 	if m, ok := proj.Machines[proj.Defaults.Machine]; ok {
 		arch = m.Arch
@@ -604,6 +599,18 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	distro, err := proj.EffectiveDistro()
 	if err != nil {
 		return fmt.Errorf("resolving effective distro: %w", err)
+	}
+
+	// Build the DAG against the effective distro's view, matching the
+	// build executor and the in-app recompute path. A distro-less DAG
+	// resolves each unit's deps by its own tag (first-match-wins across
+	// modules), which yields different hashes than the per-distro view
+	// the build path uses — so IsBuildCached would miss on every cached
+	// unit and the status lines would render blank until the first build
+	// recomputed them.
+	dag, err := resolve.BuildDAG(proj, distro)
+	if err != nil {
+		return fmt.Errorf("building DAG: %w", err)
 	}
 	hashes, err := resolve.ComputeAllHashes(dag, arch, proj.Defaults.Machine, build.SrcInputsFn(projectDir, arch, proj.Defaults.Machine, distro), distro)
 	if err != nil {
