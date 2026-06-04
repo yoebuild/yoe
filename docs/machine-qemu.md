@@ -68,9 +68,12 @@ machine(
 ```
 
 There is no bootloader and no boot partition. `yoe qemu` invokes QEMU with
-`-kernel <linux-unit>/destdir/boot/vmlinuz` and passes the machine's `cmdline`
-via `-append`. QEMU loads the image straight into emulated DRAM on the `virt`
-machine and starts the A53 cores at the kernel entry point.
+`-kernel <vmlinuz>` taken from the built image's own `/boot`, and passes the
+machine's `cmdline` via `-append`. The kernel is whichever one the image ships:
+Alpine installs `/boot/vmlinuz` and mounts the rootfs directly, while Debian
+installs a versioned `/boot/vmlinuz-<ver>` alongside an `initrd.img-<ver>` that
+QEMU also receives via `-initrd`. QEMU loads these straight into emulated DRAM
+on the `virt` machine and starts the A53 cores at the kernel entry point.
 
 This is the one place in yoe where direct-kernel boot is the correct path, not a
 shortcut. The `virt` machine has no analog in physical silicon — there is no
@@ -179,7 +182,8 @@ The launcher in `internal/device/qemu.go`:
    still boots.
 3. If the machine has no `firmware`, appends
    `-kernel <vmlinuz> -append <cmdline>` for the direct-boot path (this is what
-   qemu-arm64 uses).
+   qemu-arm64 uses), taking the kernel from the built image's `/boot` and adding
+   `-initrd <initrd.img>` when the image ships one (e.g. Debian).
 4. Tries host QEMU first; falls back to running QEMU inside the `toolchain-musl`
    container with the project bind-mounted at `/project` if the host doesn't
    have it installed.
