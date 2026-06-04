@@ -96,7 +96,11 @@ an open question below; the explicit list is the starting point.
 ## Connection profile provisioning
 
 - **Wired**: none needed — NM's default "auto" behavior DHCPs any unmanaged
-  ethernet.
+  ethernet. **Ubuntu caveat:** Ubuntu's `network-manager` ships a drop-in that
+  restricts NM to wifi/cellular and delegates ethernet to netplan, so on Ubuntu
+  the wired NIC stays unmanaged out of the box. The Ubuntu images carry the
+  `nm-manage-ethernet` unit (an NM `conf.d` drop-in that re-includes ethernet)
+  to restore the zero-config wired-DHCP behavior Debian has by default.
 - **Wifi / cellular**: NM keyfile profiles under
   `/etc/NetworkManager/system-connections/<name>.nmconnection` (mode 0600).
   These are per-device secrets (PSKs, EAP identities, APNs), so they are

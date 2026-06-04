@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Ubuntu images now bring up the wired network automatically.** NetworkManager
+  manages and DHCPs the ethernet port out of the box, so the image is reachable
+  over SSH on first boot with no connection profile — matching Debian.
+
 ## [0.11.6] - 2026-06-04
 
 - **The unit list now shows cached status the moment yoe opens.** Cached units

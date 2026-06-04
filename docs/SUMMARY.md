@@ -26,6 +26,7 @@
 - [Alpine apk Passthrough](apk-passthrough.md)
 - [apk Signing](signing.md)
 - [module-debian](module-debian.md)
+- [module-ubuntu](module-ubuntu.md)
 
 # Reference
 

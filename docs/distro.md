@@ -1,12 +1,13 @@
 # Yoe and distributions
 
-Every yoe image targets exactly one **distro** — alpine, debian, or (in the
-future) something else. The choice determines the package format, the libc
+Every yoe image targets exactly one **distro** — alpine, debian, ubuntu, or (in
+the future) something else. The choice determines the package format, the libc
 family, the toolchain container, the on-target package manager, and which
 prebuilt packages are reachable from the image's closure. This page is the
 orientation guide: what "distro" means inside yoe, when to pick which one, and
 how distros plug into the rest of the system. For per-distro detail, see
-[module-alpine](module-alpine.md) and [module-debian](module-debian.md).
+[module-alpine](module-alpine.md), [module-debian](module-debian.md), and
+[module-ubuntu](module-ubuntu.md).
 
 ## What a distro means in yoe
 
@@ -147,11 +148,11 @@ build steps.
 
 The picks are bounded today:
 
-| Distro | Status       | Release cadence                                                                                                         | Image assembly¹                                                                                                                                            | When it's the right choice                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ------ | ------------ | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Alpine | Production   | New stable branch ~every 6 months; ~2-year security support per branch. `edge` rolls continuously.                      | **~10 s** — a single `apk` extract, near-deterministic run to run.                                                                                         | Default for new projects. Small footprint, well-curated package set, all of yoe's tooling exercised against it. Picks up `module-alpine`'s ~12k main + community packages via passthrough; source-built userland from `module-core` links musl cleanly.                                                                                                                                                                                                                                    |
-| Debian | Experimental | New stable ~every 2 years; ~5-year support including LTS. `testing` and `unstable`/`sid` roll between releases.         | **~100 s** — `mmdebstrap` plus per-package `dpkg` maintainer scripts (and QEMU for a foreign arch); roughly 10× alpine, and noisier run to run (90–120 s). | Reach for it when an image needs glibc (CUDA, vendor drivers, enterprise software that hasn't been musl-ported), the broad apt ecosystem (debian main is ~50k packages), or compatibility with existing debian-based fleet management. End-to-end boot + SSH is not yet verified — treat any production deployment as untested. See [module-debian.md](module-debian.md) for current limitations and workarounds.                                                                          |
-| Ubuntu | Experimental | LTS every 2 years (April of even years), interim releases every 6 months; 5-year LTS support, 10 with Ubuntu Pro / ESM. | **~100 s** — same `mmdebstrap` + `dpkg` path as Debian (Ubuntu rides the shared apt/dpkg backend).                                                         | Reach for it over Debian when you need Ubuntu's commercial hardware enablement (e.g. NVIDIA Jetson L4T is Ubuntu-based), certified-hardware driver stacks, or compatibility with an existing Ubuntu fleet. `module-ubuntu` wraps Ubuntu's archive via `apt_feed(distro = "ubuntu", ...)` and ships its own keyring + glibc toolchain. End-to-end boot + SSH carries the same experimental caveat as Debian. See [module-debian.md](module-debian.md) for the shared backend's limitations. |
+| Distro | Status       | Release cadence                                                                                                         | Image assembly¹                                                                                                                                            | When it's the right choice                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------ | ------------ | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Alpine | Production   | New stable branch ~every 6 months; ~2-year security support per branch. `edge` rolls continuously.                      | **~10 s** — a single `apk` extract, near-deterministic run to run.                                                                                         | Default for new projects. Small footprint, well-curated package set, all of yoe's tooling exercised against it. Picks up `module-alpine`'s ~12k main + community packages via passthrough; source-built userland from `module-core` links musl cleanly.                                                                                                                                                                                                                                                                                                  |
+| Debian | Experimental | New stable ~every 2 years; ~5-year support including LTS. `testing` and `unstable`/`sid` roll between releases.         | **~100 s** — `mmdebstrap` plus per-package `dpkg` maintainer scripts (and QEMU for a foreign arch); roughly 10× alpine, and noisier run to run (90–120 s). | Reach for it when an image needs glibc (CUDA, vendor drivers, enterprise software that hasn't been musl-ported), the broad apt ecosystem (debian main is ~50k packages), or compatibility with existing debian-based fleet management. End-to-end boot + SSH is not yet verified — treat any production deployment as untested. See [module-debian.md](module-debian.md) for current limitations and workarounds.                                                                                                                                        |
+| Ubuntu | Experimental | LTS every 2 years (April of even years), interim releases every 6 months; 5-year LTS support, 10 with Ubuntu Pro / ESM. | **~100 s** — same `mmdebstrap` + `dpkg` path as Debian (Ubuntu rides the shared apt/dpkg backend).                                                         | Reach for it over Debian when you need Ubuntu's commercial hardware enablement (e.g. NVIDIA Jetson L4T is Ubuntu-based), certified-hardware driver stacks, or compatibility with an existing Ubuntu fleet. `module-ubuntu` wraps Ubuntu's archive via `apt_feed(distro = "ubuntu", ...)` and ships its own keyring + glibc toolchain. End-to-end boot + SSH carries the same experimental caveat as Debian. See [module-ubuntu.md](module-ubuntu.md) for Ubuntu specifics and [module-debian.md](module-debian.md) for the shared backend's limitations. |
 
 ¹ Wall-clock to reassemble a working dev image on a `qemu-x86_64` target with
 the full dependency closure already built and cached, so the figure isolates the
@@ -290,8 +291,12 @@ Each distro is delivered as a module that the project pulls in:
 - **`module-debian`** registers `debian.main` synthetic feed, supplies the
   `toolchain-glibc` container unit, and ships the upstream signing keys for
   verifying `InRelease`. Source: [module-debian.md](module-debian.md).
+- **`module-ubuntu`** registers `ubuntu.main` synthetic feed over Ubuntu's split
+  archive/ports mirrors, supplies its own `toolchain-glibc` container unit, and
+  ships the Ubuntu archive keyring. It rides Debian's shared apt/dpkg/glibc
+  backend. Source: [module-ubuntu.md](module-ubuntu.md).
 
-Both modules use the same yoe primitives — `module_info()`, `alpine_feed()` /
+These modules use the same yoe primitives — `module_info()`, `alpine_feed()` /
 `apt_feed()`, `container()`, and a small `units/*-enable.star` companion layer
 for services the maintainer wants exposed at boot. The internal Go support —
 `internal/apkindex`, `internal/feeds/alpine`, `internal/dpkg`,
@@ -321,9 +326,10 @@ existing distros are the reference templates:
 - Debian: `internal/dpkg/`, `internal/feeds/debian/`, `internal/deb/`,
   `internal/repo/deb_emitter.go`.
 
-Ubuntu is the cheapest plausible next distro — it's `.deb`-format with different
-upstream keys and URLs, so a future `module-ubuntu` could mostly shim over
-`apt_feed()` with a different keyring + suite. Fedora / RHEL would need a new
+Ubuntu was the cheapest next distro and is already shipped — it's `.deb`-format
+with different upstream keys and URLs, so `module-ubuntu` mostly shims over
+`apt_feed()` with a different keyring, suite, and split archive/ports mirrors
+(see [module-ubuntu.md](module-ubuntu.md)). Fedora / RHEL would need a new
 format parser (`.rpm`, `repodata`), a new materializer, and a new
 image-assembler branch (`dnf --installroot` instead of `mmdebstrap`); the
 infrastructure is already factored to make this additive rather than invasive.
