@@ -8,6 +8,9 @@
 
 ## Next
 
+- Update landing page to include reflect latest developments.
+- Test deploy with Debian
+- Rust support, put cargo packages in cache dir.
 - Update Alpine to v3.23
 - Should image settings only show images for configured distro?
 - Can we start yoe without a distro setting and select distro based on image
@@ -18,7 +21,7 @@
 - Custom Linux kernel in Debian. The stock Debian kernel is dragging in 1/2G of
   kernel modules.
 - Build container packages and deploy to target.
-- vcpkg (seems popular, Rust uses it)
+- vcpkg (seems popular, Rustdesk uses it)
 - Building from console is now confusing with parallel build as to what is
   happening [1/1] task: build (should also include unit)
 - Option to ignore certain flash devices, save in local.star, and then they are
