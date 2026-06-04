@@ -25,6 +25,12 @@ and this project adheres to
 - **Build status lines now carry icons for quick scanning.** Each unit reports
   with an at-a-glance marker — ⚡ cached, 🔨 building, ✅ done, ❌ failed — and
   freshly packaged artifacts are flagged with 📦.
+- **Fixed source units failing to build in projects that mix two distros.** When
+  a project combined distros that share image names (such as Debian and Ubuntu,
+  which both ship `dev-image`), a source unit's build-time `-dev` dependencies
+  could be silently dropped for one of the distros, leaving it to build against
+  an empty sysroot and fail (for example, "zlib support requested but not
+  found"). Both distros' build dependencies now resolve correctly.
 
 ## [0.11.4] - 2026-06-04
 
