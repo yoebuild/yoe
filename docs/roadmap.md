@@ -8,6 +8,8 @@
 
 ## Next
 
+- Be able to specify distro deps by version if necessary (another optional
+  nested level).
 - Update landing page to include reflect latest developments.
 - Test deploy with Debian
 - Rust support, put cargo packages in cache dir.

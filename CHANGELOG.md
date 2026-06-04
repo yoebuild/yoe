@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Core source packages now build on Ubuntu.** `file`, `ca-certificates`,
+  `meson`, and `kmod` learned Ubuntu's package names, so an Ubuntu image no
+  longer fails partway through with errors like "zlib support requested but not
+  found." `ca-certificates` also adapts to whichever Python the distro ships
+  instead of assuming a fixed version.
+
 ## [0.11.5] - 2026-06-04
 
 - **Ubuntu is now a selectable distro alongside Alpine and Debian.** Point a

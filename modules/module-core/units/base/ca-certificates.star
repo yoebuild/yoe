@@ -15,6 +15,9 @@ unit(
     distro_deps = {
         "alpine": ["python3"],
         "debian": ["python3.11"],
+        # Ubuntu (resolute) ships the interpreter as python3.14; the
+        # build step below discovers whichever python3.NN is staged.
+        "ubuntu": ["python3.14"],
     },
     runtime_deps = ["openssl"],
     # Source-built ca-certificates ships both the cert bundle (cert.pem,
@@ -35,10 +38,16 @@ unit(
             + "-e '/cert = x509.load_der/,/Trusted but expired/{d}' "
             + "mozilla/certdata2pem.py",
 
-            # mozilla/Makefile hardcodes `python3`. On debian the
-            # sysroot only has python3.11 (no python3 symlink), so
-            # rewrite the call to whichever interpreter exists.
-            "if ! command -v python3 >/dev/null 2>&1; then sed -i 's|\\bpython3\\b|python3.11|g' mozilla/Makefile; fi",
+            # mozilla/Makefile hardcodes `python3`. apt-family sysroots
+            # ship python3.NN with no python3 symlink (update-alternatives
+            # postinst doesn't run here), and the version differs per distro
+            # (Debian python3.11, Ubuntu python3.14). Discover whichever
+            # python3.NN is staged and rewrite the call to its basename.
+            "if ! command -v python3 >/dev/null 2>&1; then "
+            + "PY=''; for c in /build/sysroot/usr/bin/python3.[0-9] /build/sysroot/usr/bin/python3.[0-9][0-9]; do "
+            + "[ -x \"$c\" ] && { PY=$(basename \"$c\"); break; }; done; "
+            + "[ -n \"$PY\" ] || { echo 'ca-certificates: no python3 in build sysroot' >&2; exit 1; }; "
+            + "sed -i \"s|\\bpython3\\b|$PY|g\" mozilla/Makefile; fi",
 
             # Generate individual .crt files from certdata.txt
             "make -C mozilla",
