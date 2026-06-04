@@ -196,9 +196,9 @@ func printUsage() {
 func cmdUpdateFeeds(args []string) {
 	fs := flag.NewFlagSet("update-feeds", flag.ExitOnError)
 	var (
-		archCSV          = fs.String("arch", "", "comma-separated arches to fetch (default: every arch with an existing on-disk feed dir, falling back to all supported)")
-		moduleDir        = fs.String("module-dir", "", "module directory holding MODULE.star (default: cwd)")
-		allowKeyUpdate   = fs.String("allow-key-update", "", "append a fingerprint to keys/allowed-fingerprints before verifying (Debian only)")
+		archCSV        = fs.String("arch", "", "comma-separated arches to fetch (default: every arch with an existing on-disk feed dir, falling back to all supported)")
+		moduleDir      = fs.String("module-dir", "", "module directory holding MODULE.star (default: cwd)")
+		allowKeyUpdate = fs.String("allow-key-update", "", "append a fingerprint to keys/allowed-fingerprints before verifying (Debian only)")
 	)
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s update-feeds [--arch x86_64,arm64] [--module-dir DIR] [--allow-key-update FPR]\n\n", os.Args[0])
@@ -298,8 +298,10 @@ func cmdModule(args []string) {
 			os.Exit(1)
 		}
 	case "info":
-		fmt.Fprintf(os.Stderr, "module info: not yet implemented\n")
-		os.Exit(1)
+		if err := yoe.ListModuleInfo(dir, os.Stdout, projectLoadOpts()...); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 	case "check-updates":
 		fmt.Fprintf(os.Stderr, "module check-updates: not yet implemented\n")
 		os.Exit(1)

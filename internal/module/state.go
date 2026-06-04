@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/yoebuild/yoe/internal/source"
 )
@@ -12,9 +13,14 @@ import (
 // Lives at <moduleDir>/.yoe-state.json — sibling of the .git dir, so a
 // `git clean -fdx` against the module clone leaves it alone.
 const stateFile = ".yoe-state.json"
+const syncInfoFile = ".yoe-sync.json"
 
 type modState struct {
 	State string `json:"state"`
+}
+
+type syncInfo struct {
+	LastSync time.Time `json:"last_sync"`
 }
 
 // StatePath returns the on-disk path of the module's state file.
@@ -56,4 +62,49 @@ func WriteState(moduleDir string, state source.State) error {
 		return err
 	}
 	return os.WriteFile(StatePath(moduleDir), data, 0o644)
+}
+
+// SyncInfoPath returns the on-disk path for persisted module sync metadata.
+func SyncInfoPath(moduleDir string) string {
+	return filepath.Join(moduleDir, syncInfoFile)
+}
+
+// WriteSyncInfo records the time yoe last completed a sync for moduleDir.
+func WriteSyncInfo(moduleDir string, lastSync time.Time) error {
+	data, err := json.MarshalIndent(syncInfo{LastSync: lastSync}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(SyncInfoPath(moduleDir), data, 0o644)
+}
+
+// LastSyncTime returns the last completed yoe sync time for moduleDir. Newer
+// clones use .yoe-sync.json; older clones fall back to common git metadata
+// mtimes so `yoe module info` can still show a useful best-effort value.
+func LastSyncTime(moduleDir string) (time.Time, bool) {
+	if data, err := os.ReadFile(SyncInfoPath(moduleDir)); err == nil {
+		var info syncInfo
+		if err := json.Unmarshal(data, &info); err == nil && !info.LastSync.IsZero() {
+			return info.LastSync, true
+		}
+	}
+
+	var latest time.Time
+	for _, rel := range []string{
+		filepath.Join(".git", "FETCH_HEAD"),
+		filepath.Join(".git", "HEAD"),
+		filepath.Join(".git", "index"),
+	} {
+		st, err := os.Stat(filepath.Join(moduleDir, rel))
+		if err != nil {
+			continue
+		}
+		if st.ModTime().After(latest) {
+			latest = st.ModTime()
+		}
+	}
+	if latest.IsZero() {
+		return time.Time{}, false
+	}
+	return latest, true
 }
