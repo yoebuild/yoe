@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Build failures now name the unit and task that broke.** When a build fails,
+  the output leads with a clear `❌ FAILED: <unit> task: <task>` line before the
+  log, so you can tell at a glance which unit failed even when several are
+  building in parallel.
+
 ## [0.11.4] - 2026-06-04
 
 - **`yoe run` now boots arm64 images correctly.** On arm64 (and other

@@ -410,7 +410,12 @@ const buildLogTailLines = 50
 // useless when the build ran somewhere ephemeral like CI, where the runner
 // (and its filesystem) is discarded after the job — so echo the tail inline
 // so the actual error is visible from stdout alone.
-func reportBuildFailure(w io.Writer, logPath string, verbose bool) {
+func reportBuildFailure(w io.Writer, unitName, taskName, logPath string, verbose bool) {
+	// Lead with the failing unit and task. Parallel builds interleave task
+	// lines from several units on the shared writer, and the log path names a
+	// scope dir that may not obviously match the unit, so without this header
+	// the reader cannot tell which unit actually failed.
+	fmt.Fprintf(w, "  ❌ FAILED: %s task: %s\n", unitName, taskName)
 	fmt.Fprintf(w, "  build log: %s\n", logPath)
 	if verbose {
 		return
@@ -761,7 +766,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 				hostEnv["SRCDIR"] = srcDir
 				hostEnv["SYSROOT"] = sysroot
 				if err := doInstallStep(unit, step.Install, tctxData, hostEnv); err != nil {
-					reportBuildFailure(w, logPath, opts.Verbose)
+					reportBuildFailure(w, unit.Name, t.Name, logPath, opts.Verbose)
 					return fmt.Errorf("task %s: %w", t.Name, err)
 				}
 				continue
@@ -786,7 +791,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 					Stderr:     logW,
 				}
 				if err := RunInSandbox(cfg, step.Command); err != nil {
-					reportBuildFailure(w, logPath, opts.Verbose)
+					reportBuildFailure(w, unit.Name, t.Name, logPath, opts.Verbose)
 					return err
 				}
 			} else if step.Fn != nil {
@@ -809,7 +814,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 				}
 				thread := NewBuildThread(ctx, cfg, RealExecer{})
 				if _, err := starlark.Call(thread, step.Fn, nil, nil); err != nil {
-					reportBuildFailure(w, logPath, opts.Verbose)
+					reportBuildFailure(w, unit.Name, t.Name, logPath, opts.Verbose)
 					return fmt.Errorf("task %s: %w", t.Name, err)
 				}
 			}
