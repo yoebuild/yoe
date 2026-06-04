@@ -398,6 +398,43 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 	return nil
 }
 
+// buildLogTailLines bounds how much of a failed unit's build.log is echoed
+// inline. Enough to capture the compiler/configure error and its context
+// without burying the terminal (or a CI log) in the full transcript; the
+// path is always printed so the complete log stays one open away.
+const buildLogTailLines = 50
+
+// reportBuildFailure surfaces a failed unit's build.log at the point of
+// failure. In verbose mode the log was already streamed to the terminal as
+// it ran, so only the path is noted. Otherwise the log lived only on disk —
+// useless when the build ran somewhere ephemeral like CI, where the runner
+// (and its filesystem) is discarded after the job — so echo the tail inline
+// so the actual error is visible from stdout alone.
+func reportBuildFailure(w io.Writer, logPath string, verbose bool) {
+	fmt.Fprintf(w, "  build log: %s\n", logPath)
+	if verbose {
+		return
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		return
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return
+	}
+	if len(lines) > buildLogTailLines {
+		lines = lines[len(lines)-buildLogTailLines:]
+		fmt.Fprintf(w, "  ── build.log (last %d lines) ──\n", buildLogTailLines)
+	} else {
+		fmt.Fprintf(w, "  ── build.log ──\n")
+	}
+	for _, ln := range lines {
+		fmt.Fprintf(w, "  │ %s\n", ln)
+	}
+	fmt.Fprintf(w, "  ──\n")
+}
+
 func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit *yoestar.Unit, hash string, opts Options, w io.Writer) (buildErr error) {
 	sd := ScopeDir(unit, opts.Arch, opts.Machine)
 	distro := opts.EffectiveDistro
@@ -576,20 +613,20 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	}
 
 	env := map[string]string{
-		"PREFIX":          "/usr",
-		"DESTDIR":         "/build/destdir",
-		"NPROC":           NProc(),
-		"ARCH":            opts.Arch,
-		"MACHINE":         opts.Machine,
+		"PREFIX":  "/usr",
+		"DESTDIR": "/build/destdir",
+		"NPROC":   NProc(),
+		"ARCH":    opts.Arch,
+		"MACHINE": opts.Machine,
 		// The consuming image's effective distro, so a build-twice
 		// source unit can branch on it (e.g. base-files giving root a
 		// bash login shell on Debian but the busybox /bin/sh on
 		// Alpine). Already a unit-hash input, so this only surfaces what
 		// the cache key already distinguishes.
-		"DISTRO": opts.EffectiveDistro,
-		"CONSOLE":         console,
-		"HOME":            "/tmp",
-		"PATH":            "/build/sysroot/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"DISTRO":  opts.EffectiveDistro,
+		"CONSOLE": console,
+		"HOME":    "/tmp",
+		"PATH":    "/build/sysroot/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		// Debian's multiarch layout puts arch-specific libs, .pc files,
 		// and the core dynamic loader under /usr/lib/<tuple>/ and
 		// /lib/<tuple>/. Include those alongside the legacy /usr/lib
@@ -691,7 +728,11 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 
 	// Execute tasks
 	for ti, t := range unit.Tasks {
-		fmt.Fprintf(w, "  [%d/%d] task: %s\n", ti+1, len(unit.Tasks), t.Name)
+		// Lead with the unit name (same column as the [building]/[done]
+		// status lines): parallel builds interleave these task lines from
+		// several units on the shared writer, so the name is what tells you
+		// which unit a given task line belongs to.
+		fmt.Fprintf(w, "%-20s [%d/%d] task: %s\n", unit.Name, ti+1, len(unit.Tasks), t.Name)
 		fmt.Fprintf(logW, "  task: %s (%d steps)\n", t.Name, len(t.Steps))
 
 		// Per-task container override
@@ -720,9 +761,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 				hostEnv["SRCDIR"] = srcDir
 				hostEnv["SYSROOT"] = sysroot
 				if err := doInstallStep(unit, step.Install, tctxData, hostEnv); err != nil {
-					if !opts.Verbose {
-						fmt.Fprintf(w, "  build log: %s\n", logPath)
-					}
+					reportBuildFailure(w, logPath, opts.Verbose)
 					return fmt.Errorf("task %s: %w", t.Name, err)
 				}
 				continue
@@ -747,9 +786,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 					Stderr:     logW,
 				}
 				if err := RunInSandbox(cfg, step.Command); err != nil {
-					if !opts.Verbose {
-						fmt.Fprintf(w, "  build log: %s\n", logPath)
-					}
+					reportBuildFailure(w, logPath, opts.Verbose)
 					return err
 				}
 			} else if step.Fn != nil {
@@ -772,9 +809,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 				}
 				thread := NewBuildThread(ctx, cfg, RealExecer{})
 				if _, err := starlark.Call(thread, step.Fn, nil, nil); err != nil {
-					if !opts.Verbose {
-						fmt.Fprintf(w, "  build log: %s\n", logPath)
-					}
+					reportBuildFailure(w, logPath, opts.Verbose)
 					return fmt.Errorf("task %s: %w", t.Name, err)
 				}
 			}

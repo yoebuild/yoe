@@ -8,6 +8,21 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-06-04
+
+- **Build failures now show the unit's log right where they happen.** When a
+  unit fails to build, yoe prints the tail of that unit's build log inline
+  instead of only pointing at a file on disk, so you can see the actual error
+  without opening anything — and so failures are diagnosable from CI output
+  where the log file is thrown away with the runner.
+- **Per-task build lines now name their unit.** During parallel builds the task
+  progress lines from different units interleave; each line now leads with the
+  unit name so you can tell which build it belongs to.
+- **Units with patches build on machines that have no git identity configured.**
+  Applying a unit's patches no longer depends on a global git
+  `user.name`/`user.email`, so builds succeed out of the box on fresh machines
+  and CI runners instead of failing with "empty ident name not allowed."
+
 ## [0.11.1] - 2026-06-04
 
 - **Source downloads no longer fail intermittently with "gzip: invalid
