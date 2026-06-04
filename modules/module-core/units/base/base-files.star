@@ -53,15 +53,16 @@ def base_files(name = "base-files", users = None):
         deps.append("toolchain")
 
     # When root is intentionally passwordless (dev images), follow that
-    # policy through to SSH on Debian so passwordless root login works
-    # like the serial console — mirroring what module-core's openssh
-    # init script does on Alpine. Debian's openssh-server is a feed
-    # passthrough carrying sshd's strict upstream defaults
-    # (PermitRootLogin prohibit-password, PermitEmptyPasswords no), so a
-    # permissive sshd_config.d drop-in is the equivalent knob. Gated on
-    # $DISTRO=debian at build time; the Alpine path handles its own case
-    # through the openssh unit. Omitted entirely when root has a real
-    # password, so production images keep sshd's strict defaults.
+    # policy through to SSH on the apt distros (Debian and Ubuntu) so
+    # passwordless root login works like the serial console — mirroring
+    # what module-core's openssh init script does on Alpine. Their
+    # openssh-server is a feed passthrough carrying sshd's strict upstream
+    # defaults (PermitRootLogin prohibit-password, PermitEmptyPasswords
+    # no), and both ship `Include /etc/ssh/sshd_config.d/*.conf`, so a
+    # permissive drop-in there is the equivalent knob. Gated on the
+    # apt-family $DISTRO values at build time; the Alpine path handles its
+    # own case through the openssh unit. Omitted entirely when root has a
+    # real password, so production images keep sshd's strict defaults.
     ssh_dev_steps = []
     root_passwordless = False
     for u in users:
@@ -69,7 +70,7 @@ def base_files(name = "base-files", users = None):
             root_passwordless = True
     if root_passwordless:
         ssh_dev_steps = [
-            "if [ x$DISTRO = xdebian ]; then" +
+            "if [ x$DISTRO = xdebian ] || [ x$DISTRO = xubuntu ]; then" +
             " mkdir -p $DESTDIR/etc/ssh/sshd_config.d &&" +
             " printf 'PermitRootLogin yes\\nPermitEmptyPasswords yes\\n'" +
             " > $DESTDIR/etc/ssh/sshd_config.d/10-yoe-dev.conf; fi",

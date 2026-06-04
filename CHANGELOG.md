@@ -11,6 +11,9 @@ and this project adheres to
 - **Ubuntu images now bring up the wired network automatically.** NetworkManager
   manages and DHCPs the ethernet port out of the box, so the image is reachable
   over SSH on first boot with no connection profile — matching Debian.
+- **Passwordless root SSH login now works on Ubuntu dev images.** Root could log
+  in on the serial console but SSH rejected the empty password; Ubuntu images now
+  get the same permissive dev-login drop-in Debian already had.
 
 ## [0.11.6] - 2026-06-04
 
