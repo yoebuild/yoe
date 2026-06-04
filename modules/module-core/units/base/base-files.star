@@ -135,14 +135,14 @@ def base_files(name = "base-files", users = None):
                 + _runlevel_commands()
                 + users_commands(users)
                 + [
-                    # Root's login shell is bash on Debian (the distro
-                    # convention; bash is in every Debian image's
-                    # essential set) but stays the busybox /bin/sh
-                    # default on Alpine. users_commands wrote /bin/sh
-                    # above; rewrite root's entry to bash when this
-                    # build targets Debian. $DISTRO is the consuming
-                    # image's effective distro, set by the build.
-                    "if [ x$DISTRO = xdebian ]; then" +
+                    # Root's login shell is bash on the apt distros (the
+                    # distro convention; bash is in every Debian and
+                    # Ubuntu image's essential set) but stays the busybox
+                    # /bin/sh default on Alpine. users_commands wrote
+                    # /bin/sh above; rewrite root's entry to bash when
+                    # this build targets Debian or Ubuntu. $DISTRO is the
+                    # consuming image's effective distro, set by the build.
+                    "if [ x$DISTRO = xdebian ] || [ x$DISTRO = xubuntu ]; then" +
                     " sed -i '/^root:/ s#:/bin/sh$#:/bin/bash#'" +
                     " $DESTDIR/etc/passwd; fi",
                     install_template("inittab.tmpl", "$DESTDIR/etc/inittab"),
