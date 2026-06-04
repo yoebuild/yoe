@@ -11,7 +11,7 @@ unit(
     tasks = [
         task("build", steps=[
             "./bootstrap",
-            "./configure --prefix=$PREFIX --enable-mpers=no --without-libdw",
+            "./configure --prefix=$PREFIX --enable-mpers=no --without-libdw --enable-bundled=yes",
             "make -j$NPROC",
             "make DESTDIR=$DESTDIR install",
         ]),
