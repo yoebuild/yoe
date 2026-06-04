@@ -1226,13 +1226,15 @@ func cacheValid(proj *yoestar.Project, projectDir string, unit *yoestar.Unit, sc
 	}
 	repoBase := repo.RepoDistroDir(proj, projectDir, distro)
 
-	// Debian units publish a .deb into the pool, not an .apk into an
-	// arch dir. Confirm the pooled .deb exists; without this branch the
-	// .apk stat below always misses and every debian.main passthrough
-	// (and every source .deb) looks stale, rebuilding on every run. The
+	// Apt-family units (Debian, Ubuntu, …) publish a .deb into the pool,
+	// not an .apk into an arch dir. Confirm the pooled .deb exists;
+	// without this branch the .apk stat below always misses and every
+	// passthrough (and every source .deb) looks stale, rebuilding on
+	// every run. Keying this off the literal "debian" string instead of
+	// the apt-family set let every Ubuntu package rebuild each run. The
 	// pool layout is pool/<component>/<initial>/<source>/<file>, so glob
 	// three levels deep for the package filename.
-	if distro == "debian" {
+	if yoestar.IsAptFamily(distro) {
 		debName := filepath.Base(unit.PassthroughDeb)
 		if debName == "." || debName == "" {
 			debName = fmt.Sprintf("%s_%s_%s.deb", unit.Name, unit.Version, debArchForYoe(arch))

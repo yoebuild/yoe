@@ -8,6 +8,22 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.11.6] - 2026-06-04
+
+- **The unit list now shows cached status the moment yoe opens.** Cached units
+  no longer render as blank lines until the first build; their status is correct
+  on startup.
+- **Ubuntu packages now reuse the cache instead of rebuilding every run.**
+  Building an Ubuntu image no longer re-fetches and re-extracts every package on
+  each `yoe build`; unchanged packages are reused from the cache, the same as
+  Debian and Alpine.
+- **ncurses now builds on Ubuntu.** The terminal library no longer fails to
+  compile under Ubuntu's newer toolchain, so Ubuntu images that pull in ncurses
+  build successfully.
+- **bash now builds on Ubuntu.** The shell no longer fails to compile under
+  Ubuntu's newer toolchain, so Ubuntu images that pull in bash build
+  successfully.
+
 ## [0.11.5] - 2026-06-04
 
 - **Ubuntu is now a selectable distro alongside Alpine and Debian.** Point a
