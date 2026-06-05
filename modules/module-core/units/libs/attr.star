@@ -17,9 +17,15 @@ unit(
             # *.in, aclocal.m4) older than their sources (configure.ac,
             # Makefile.am), so make's automake/autoconf rules would try to
             # regenerate them with automake-1.16 — absent in the container.
-            # Touch the generated files newer than their sources so make
-            # treats the shipped build system as up to date.
-            "find . \\( -name configure -o -name aclocal.m4 -o -name '*.in' \\) -exec touch {} +",
+            # Touch the generated files newer than their sources so make treats
+            # the shipped build system as up to date. Stamp them all from a
+            # single reference file (touch -r) so every file gets an identical
+            # mtime: a bare `touch` can hand each file a slightly different
+            # nanosecond time, and find's traversal order varies by arch, so
+            # aclocal.m4 could land newer than Makefile.in and still trip the
+            # automake rule (observed on arm64 under QEMU, not x86_64).
+            "touch /tmp/yoe-stamp",
+            "find . \\( -name configure -o -name aclocal.m4 -o -name '*.in' \\) -exec touch -r /tmp/yoe-stamp {} +",
             # --disable-nls keeps the build off gettext; libattr's headers
             # (<attr/libattr.h>) and libattr.so are what coreutils links
             # against to enable `cp --preserve=xattr`.
