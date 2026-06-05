@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.11.8] - 2026-06-05
+
 - **Building Ubuntu images no longer runs the machine out of memory.** Large
   Ubuntu builds could grow to tens of gigabytes and get killed; they now stay
   flat at a few hundred megabytes and complete reliably.
