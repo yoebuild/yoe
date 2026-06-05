@@ -53,8 +53,8 @@ can't blow the call stack.
 
 **Provides resolution.** Replacing a _virtual_ name in a deps list (`linux`,
 `toolchain`, `init`) with the concrete unit that satisfies it (`linux-rpi4`,
-`toolchain-debian-13`, `busybox-init`). Driven by the project's `Provides` map plus
-per-distro filtering (a provides entry tagged for a different distro is
+`toolchain-debian-13`, `busybox-init`). Driven by the project's `Provides` map
+plus per-distro filtering (a provides entry tagged for a different distro is
 invisible to the lookup).
 
 **Distro view.** A precomputed table `DistroViews[distro][name] → *Unit`

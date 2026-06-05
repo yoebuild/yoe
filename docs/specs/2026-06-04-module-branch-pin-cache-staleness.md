@@ -8,10 +8,10 @@ Date: 2026-06-04
 ## Summary
 
 `yoe build` syncs external modules through `module.SyncIfNeeded`, which clones a
-module only when it is **missing** and never updates one that already exists. For
-a module pinned to an immutable ref (a tag, e.g. `module-alpine @ 3.21`) that is
-correct and fast. For a module pinned to a **branch** (a mutable ref, e.g.
-`module-debian @ trixie`) it is a silent footgun: once the module is in the
+module only when it is **missing** and never updates one that already exists.
+For a module pinned to an immutable ref (a tag, e.g. `module-alpine @ 3.21`)
+that is correct and fast. For a module pinned to a **branch** (a mutable ref,
+e.g. `module-debian @ trixie`) it is a silent footgun: once the module is in the
 cache, the checkout is frozen at whatever commit it was first cloned at, and no
 later build ever advances it — even though the branch has moved upstream.
 
@@ -52,12 +52,12 @@ if _, err := os.Stat(filepath.Join(moduleDir, ".git")); err == nil {
 // ... else git clone --depth 1 --branch <ref> ...
 ```
 
-`SyncIfNeeded`'s doc comment states the intent explicitly: *"it does not
-fetch/update modules that already exist — keeping it fast enough to call on every
-build without adding latency."* That tradeoff is right for tag pins (a tag is
-effectively immutable, so re-fetching buys nothing) but wrong for branch pins (a
-branch is a moving pointer; the whole point of pinning to `trixie` rather than a
-tag is to track that branch).
+`SyncIfNeeded`'s doc comment states the intent explicitly: _"it does not
+fetch/update modules that already exist — keeping it fast enough to call on
+every build without adding latency."_ That tradeoff is right for tag pins (a tag
+is effectively immutable, so re-fetching buys nothing) but wrong for branch pins
+(a branch is a moving pointer; the whole point of pinning to `trixie` rather
+than a tag is to track that branch).
 
 `ModuleRef` (`internal/starlark/types.go:182`) carries only a free-form `Ref`
 string — it does not record whether the ref is a branch or a tag — so the build
@@ -69,8 +69,8 @@ This is not a CI-only artifact. Any developer with a warm `cache/modules/` who
 pins a module to a branch gets the frozen checkout: they will keep building
 against a stale module until they manually `yoe module sync`, blow away the
 cache, or trip over a downstream incompatibility. The breakage is silent
-(violates *"silent failures are bugs"*) and the staleness is implicit (violates
-*"explicit over implicit"*). CI is just the place it became reproducible because
+(violates _"silent failures are bugs"_) and the staleness is implicit (violates
+_"explicit over implicit"_). CI is just the place it became reproducible because
 the build cache persists across runs by design.
 
 ### Evidence
@@ -159,8 +159,8 @@ cannot be advanced is a real problem the build should report, not swallow.
 - **Record branch-vs-tag in `ModuleRef` at parse time.** Would let the build
   classify without touching the cached repo, but the project model only has the
   ref string; determining its kind still requires asking git (locally or
-  remotely). The local `show-ref` check needs no schema change and no
-  network — preferred.
+  remotely). The local `show-ref` check needs no schema change and no network —
+  preferred.
 
 - **Always fetch every module on every build (drop the tag fast path).** Simple
   and always correct, but reintroduces a network round-trip per module on every
@@ -185,8 +185,8 @@ cannot be advanced is a real problem the build should report, not swallow.
 Touches only `internal/module/fetch.go`:
 
 - Add `refIsMutable(moduleDir, ref)` (local `git show-ref` check) and
-  `updateToRef(moduleDir, ref, w)` (extracted fetch+checkout helper, with a small
-  `runGit` wrapper for the repeated `exec.Command{Dir,Stderr}` pattern).
+  `updateToRef(moduleDir, ref, w)` (extracted fetch+checkout helper, with a
+  small `runGit` wrapper for the repeated `exec.Command{Dir,Stderr}` pattern).
 - `SyncIfNeeded`: when the module exists, refresh it via `updateToRef` if the
   pin is mutable, else keep the current `continue`.
 - `Sync`: replace its inline fetch+checkout with `updateToRef` so both paths
@@ -205,8 +205,8 @@ pattern already used in `internal/dev_test.go`):
 
 - Commit-SHA pins remain unsupported (the `--branch` clone never accepted them);
   no change here.
-- No change to dev-mode module handling (`internal/module/dev.go`) — that path is
-  user-managed and deliberately not normalized.
+- No change to dev-mode module handling (`internal/module/dev.go`) — that path
+  is user-managed and deliberately not normalized.
 - The CI `Sync modules` step added in option A stays as a belt-and-suspenders
   guarantee for CI determinism; it is harmless once this lands.
 

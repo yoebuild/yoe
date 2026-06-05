@@ -41,8 +41,8 @@ hard-to-build complexity — is identical.
 
 The Debian suite pinned in `MODULE.star` (`_DEBIAN_SUITE = "bookworm"` at the
 time of writing) **must** match the `FROM debian:<release>` line in
-`@module-debian//containers/toolchain-debian-13/Dockerfile`. Both currently point at
-`bookworm`.
+`@module-debian//containers/toolchain-debian-13/Dockerfile`. Both currently
+point at `bookworm`.
 
 The coupling matters for three reasons:
 
@@ -256,9 +256,9 @@ substantial follow-up rather than routine work.
   `apt_feed(...)` call in a project must agree on its `suite` kwarg; the
   resolver errors at load time if it sees `bookworm` and `trixie` declared in
   the same project. The constraint exists because the toolchain container
-  (`@module-debian//containers/toolchain-debian-13`) pins one Debian release, and
-  source units built against that toolchain's headers/libs can't safely mix with
-  prebuilt packages from a different release's libc. Multi-suite support would
-  require a suite axis in the toolchain cache key and parallel toolchain
+  (`@module-debian//containers/toolchain-debian-13`) pins one Debian release,
+  and source units built against that toolchain's headers/libs can't safely mix
+  with prebuilt packages from a different release's libc. Multi-suite support
+  would require a suite axis in the toolchain cache key and parallel toolchain
   containers per suite — feasible but out of scope today. For most projects this
   is the correct constraint: a fleet runs one Debian release at a time.
