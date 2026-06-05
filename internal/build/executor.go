@@ -1117,8 +1117,9 @@ func resolveContainerImage(proj *yoestar.Project, unit *yoestar.Unit, arch, effe
 	}
 
 	// Virtual reference — dereference through Provides to the concrete
-	// container unit, distro-aware per R9. Looks like Container="toolchain"
-	// -> "toolchain-glibc" (debian) or "toolchain-musl" (alpine). Falls
+	// container unit, distro-aware. Looks like Container="toolchain"
+	// -> "toolchain-debian-13" (debian), "toolchain-ubuntu-26.04" (ubuntu),
+	// or "toolchain-musl" (alpine). Falls
 	// through to literal interpretation when no provider exists,
 	// preserving back-compat for Container="toolchain-musl" literal
 	// references.
@@ -1128,7 +1129,7 @@ func resolveContainerImage(proj *yoestar.Project, unit *yoestar.Unit, arch, effe
 
 	// Container unit — look up version and build tag. Resolve in the
 	// distro context: an alpine source unit picks toolchain-musl, a
-	// debian source unit picks toolchain-glibc. Falls back to the
+	// debian source unit picks toolchain-debian-13. Falls back to the
 	// cross-module AnyUnit lookup when nothing matches so the literal-
 	// container path (e.g. container="toolchain-musl") still finds its
 	// container regardless of which distro registered it.

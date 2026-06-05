@@ -95,7 +95,7 @@ func BuildDAG(proj *yoestar.Project, effectiveDistro string) (*DAG, error) {
 		if unit.Class == "image" {
 			deps = append(deps, unit.Artifacts...)
 		}
-		deps = appendContainerDeps(deps, proj, units, unit)
+		deps = appendContainerDeps(deps, proj, units, unit, resolveDistro)
 		// Build-time dep on a feed-materialized split package (e.g.
 		// Debian's python3.11 wrapper) pulls in the package's runtime
 		// closure as additional build-time edges, so the actual
@@ -224,8 +224,7 @@ func appendRuntimeClosureOfDeps(deps []string, units map[string]*yoestar.Unit, s
 // `units` is the per-distro view BuildDAG selected (or proj.Units for
 // distro-less callers); container deps are validated against this same
 // view so the dep edges match the graph nodes.
-func appendContainerDeps(deps []string, proj *yoestar.Project, units map[string]*yoestar.Unit, unit *yoestar.Unit) []string {
-	_ = proj
+func appendContainerDeps(deps []string, proj *yoestar.Project, units map[string]*yoestar.Unit, unit *yoestar.Unit, distro string) []string {
 	seen := make(map[string]bool, len(deps))
 	for _, d := range deps {
 		seen[d] = true
@@ -236,6 +235,15 @@ func appendContainerDeps(deps []string, proj *yoestar.Project, units map[string]
 		}
 		if strings.Contains(container, ":") || strings.Contains(container, "/") {
 			return // external image reference, not a project unit
+		}
+		// A virtual container name (e.g. "toolchain") is not itself a unit;
+		// resolve it through the provides table to the concrete per-distro
+		// container unit (toolchain-debian-13, toolchain-ubuntu-26.04, …)
+		// before checking membership, so the container is scheduled as a
+		// build dep. resolveDeps dedupes by resolved name, so a source unit
+		// that also lists "toolchain" in its deps collapses to one edge.
+		if resolved := proj.ResolveProvidesForDistro(container, distro); resolved != "" {
+			container = resolved
 		}
 		if _, ok := units[container]; !ok {
 			return // not a known unit; leave dep validation untouched
