@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **The attr library builds reliably across architectures.** It no longer
+  intermittently fails to build from a build-system timestamp race that showed
+  up on arm64.
+
 ## [0.11.7] - 2026-06-04
 
 - **Ubuntu images now bring up the wired network automatically.** NetworkManager
