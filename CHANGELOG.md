@@ -8,7 +8,9 @@ and this project adheres to
 
 ## [Unreleased]
 
-## [0.11.8] - 2026-06-05
+## [0.12.0] - 2026-06-05
+
+_Ubuntu support is ready to use in this version._
 
 - **Building Ubuntu images no longer runs the machine out of memory.** Large
   Ubuntu builds could grow to tens of gigabytes and get killed; they now stay
