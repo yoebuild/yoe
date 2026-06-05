@@ -8,6 +8,14 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.11.8] - 2026-06-05
+
+- **Building Ubuntu images no longer runs the machine out of memory.** Large
+  Ubuntu builds could grow to tens of gigabytes and get killed; they now stay
+  flat at a few hundred megabytes and complete reliably.
+- **Fresh Debian and Ubuntu image builds are faster.** The package index is now
+  built once when it is needed instead of being rebuilt after every package, so
+  build time no longer grows sharply with the number of packages.
 - **The attr library builds reliably across architectures.** It no longer
   intermittently fails to build from a build-system timestamp race that showed
   up on arm64.

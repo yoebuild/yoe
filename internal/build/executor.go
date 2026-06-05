@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	yoe "github.com/yoebuild/yoe/internal"
@@ -274,11 +275,22 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		// rebuilt: units actually rebuilt this run, so dependents invalidate
 		// their cache even when input hashes are unchanged. Read/written by
 		// workers, so guarded by mu.
-		rebuilt  = map[string]bool{}
-		started  = map[string]bool{}
-		firstErr error
-		stop     bool // set on first failure or ctx cancel; no new work scheduled
+		rebuilt = map[string]bool{}
+		started = map[string]bool{}
+		// publishedDeb: an apt-family non-image unit published a .deb into
+		// the pool this run. imageRefreshed: an image unit ran its own
+		// pre-assembly index regen. Together they decide whether a single
+		// end-of-build index refresh is needed (deb published but no image
+		// rebuilt it). Guarded by mu.
+		publishedDeb   bool
+		imageRefreshed bool
+		firstErr       error
+		stop           bool // set on first failure or ctx cancel; no new work scheduled
+		// progress counts units reached (cached or built) for the
+		// "[building 34/133]" position indicator in the build log.
+		progress atomic.Int64
 	)
+	total := len(order)
 
 	sem := make(chan struct{}, parallel)
 	var wg sync.WaitGroup
@@ -324,11 +336,12 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		forceThis := (opts.Force || opts.Clean) && (len(requested) == 0 || requested[name])
 
 		built := false
+		n := progress.Add(1)
 		if !forceThis && !opts.NoCache && !depRebuilt &&
 			cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hash, effectiveDistro) {
-			fmt.Fprintf(sw, "%-20s ⚡ [cached] %s\n", name, hash[:12])
+			fmt.Fprintf(sw, "%-20s ⚡ [cached %d/%d units] %s\n", name, n, total, hash[:12])
 		} else {
-			fmt.Fprintf(sw, "%-20s 🔨 [building]\n", name)
+			fmt.Fprintf(sw, "%-20s 🔨 [building %d/%d units]\n", name, n, total)
 			notify(name, "building")
 			if err := buildOne(ctx, proj, dag, unit, hash, opts, sw); err != nil {
 				notify(name, "failed")
@@ -359,6 +372,18 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		mu.Lock()
 		if built {
 			rebuilt[name] = true
+			if yoestar.IsAptFamily(opts.EffectiveDistro) {
+				switch unit.Class {
+				case "image":
+					// buildOne regenerated the index from the pool before
+					// assembly, so the on-disk index is already current.
+					imageRefreshed = true
+				case "container":
+					// containers don't publish .debs
+				default:
+					publishedDeb = true
+				}
+			}
 		}
 		for _, rd := range dag.Nodes[name].Rdeps {
 			if orderSet[rd] {
@@ -394,6 +419,26 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		// The failing unit and its blocked dependents were already
 		// reported to the writer by the worker that hit the error.
 		return firstErr
+	}
+
+	// If .debs were published but no image rebuilt this run, the on-disk
+	// Packages/Release index would otherwise lag the pool (an image
+	// refreshes it before assembly; a direct deb-unit build has no such
+	// step). Regenerate it once from the pool — O(pool), paid a single
+	// time, versus the former per-publish regen that was O(units²).
+	if publishedDeb && !imageRefreshed {
+		suite, err := proj.SuiteForDistro(effectiveDistro)
+		if err != nil {
+			return fmt.Errorf("refresh %s index: %w", effectiveDistro, err)
+		}
+		if err := repo.GenerateDebianIndex(repo.DebRepoOptions{
+			RepoDir:    repo.RepoDistroDir(proj, opts.ProjectDir, effectiveDistro),
+			Suite:      suite,
+			Components: []string{"main"},
+			Arches:     []string{"amd64", "arm64"},
+		}); err != nil {
+			return fmt.Errorf("refresh %s index: %w", effectiveDistro, err)
+		}
 	}
 	return nil
 }

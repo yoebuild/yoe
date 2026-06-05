@@ -5,10 +5,10 @@ name: E2E Build
 # assembly. This is the expensive regression tier, so it runs on a nightly
 # schedule and on demand -- not on every push or pull request.
 #
-# The matrix covers both distros (alpine, debian) on both host architectures
-# (x86_64, arm64). Builds are native -- each job runs on a host whose arch
-# matches its target machine, so there is no QEMU user-mode emulation in the
-# build path. Each cell surfaces as its own CI check, e.g.
+# The matrix covers all three distros (alpine, debian, ubuntu) on both host
+# architectures (x86_64, arm64). Builds are native -- each job runs on a host
+# whose arch matches its target machine, so there is no QEMU user-mode
+# emulation in the build path. Each cell surfaces as its own CI check, e.g.
 # "E2E Build (alpine / x86_64)".
 #
 # After building, each cell boots the image in QEMU (`yoe run --boot-test`):
@@ -35,7 +35,7 @@ jobs:
       # siblings on the first red cell.
       fail-fast: false
       matrix:
-        distro: [alpine, debian]
+        distro: [alpine, debian, ubuntu]
         arch: [x86_64, arm64]
         include:
           - arch: x86_64
