@@ -19,11 +19,11 @@ import (
 )
 
 // debPublishMu serializes PublishDeb across goroutines. Parallel unit
-// builds each finish by calling PublishDeb, which copies the .deb into
-// the pool and then re-scans the entire tree to regenerate
-// Packages + Release. Concurrent scans race the concurrent writes
-// (partial files yield EOF), so we hold the lock around the whole
-// publish + regenerate cycle.
+// builds each finish by copying their .deb into the shared pool; the
+// lock keeps concurrent directory creation and atomic renames from
+// racing. Index regeneration no longer happens here (it is deferred to a
+// single scan when the index is consumed), so the lock only guards the
+// cheap copy.
 var debPublishMu sync.Mutex
 
 // DebRepoOptions configures the project's Debian-format repo emitter.
@@ -93,18 +93,24 @@ func GenerateDebianIndex(opts DebRepoOptions) error {
 	var indices []packagesIndex
 
 	for _, comp := range opts.Components {
-		debsByArch, err := walkPool(filepath.Join(opts.RepoDir, "pool", comp))
+		pooled, err := scanPool(filepath.Join(opts.RepoDir, "pool", comp), opts.RepoDir)
 		if err != nil {
 			return fmt.Errorf("deb_emitter: pool scan: %w", err)
 		}
+		byArch := map[string][]pooledDeb{}
+		for _, pd := range pooled {
+			byArch[pd.arch] = append(byArch[pd.arch], pd)
+		}
 		for _, arch := range opts.Arches {
-			entries := append([]string(nil), debsByArch[arch]...)
-			entries = append(entries, debsByArch["all"]...)
-			sort.Strings(entries)
-			body, err := buildPackagesFile(opts.RepoDir, entries)
-			if err != nil {
-				return fmt.Errorf("deb_emitter: Packages for %s/%s: %w", comp, arch, err)
+			entries := append([]pooledDeb(nil), byArch[arch]...)
+			entries = append(entries, byArch["all"]...)
+			sort.Slice(entries, func(i, j int) bool { return entries[i].path < entries[j].path })
+			var bodyBuf bytes.Buffer
+			for _, e := range entries {
+				bodyBuf.Write(e.stanza)
+				bodyBuf.WriteByte('\n')
 			}
+			body := bodyBuf.Bytes()
 			rel := filepath.Join(comp, "binary-"+arch, "Packages")
 			dst := filepath.Join(distsDir, rel)
 			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
@@ -146,11 +152,24 @@ func GenerateDebianIndex(opts DebRepoOptions) error {
 	return nil
 }
 
-// walkPool returns a map of arch -> []relative-to-RepoDir deb paths.
-// Architecture: "all" entries live under their natural pool path and
-// are surfaced under the "all" key for the caller to fan out.
-func walkPool(componentPool string) (map[string][]string, error) {
-	out := map[string][]string{}
+// pooledDeb is one .deb found in the pool: its declared architecture,
+// its path (for stable ordering), and its fully rendered Packages
+// stanza. Built in a single pass so each .deb is parsed once per index
+// generation rather than once for arch routing and again for the stanza
+// — the prior two-read shape turned index emit into an O(pool) ×
+// (decompress + hash) cost paid twice.
+type pooledDeb struct {
+	arch   string
+	path   string
+	stanza []byte
+}
+
+// scanPool walks componentPool and returns one pooledDeb per .deb,
+// reading and decompressing each file a single time. Architecture: "all"
+// packages are returned under their declared arch ("all") for the caller
+// to fan out into every per-arch Packages file.
+func scanPool(componentPool, repoDir string) ([]pooledDeb, error) {
+	var out []pooledDeb
 	if _, err := os.Stat(componentPool); os.IsNotExist(err) {
 		return out, nil
 	}
@@ -161,13 +180,11 @@ func walkPool(componentPool string) (map[string][]string, error) {
 		if d.IsDir() || !strings.HasSuffix(p, ".deb") {
 			return nil
 		}
-		d2, err := deb.ReadDeb(p)
+		stanza, arch, err := stanzaForDeb(repoDir, p)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", p, err)
 		}
-		arch := d2.Control.Architecture
-		_ = d2.Close()
-		out[arch] = append(out[arch], p)
+		out = append(out, pooledDeb{arch: arch, path: p, stanza: stanza})
 		return nil
 	})
 	if err != nil {
@@ -176,53 +193,40 @@ func walkPool(componentPool string) (map[string][]string, error) {
 	return out, nil
 }
 
-// buildPackagesFile concatenates the control stanzas for every deb in
-// `debs`, appending Filename / Size / SHA256 derived from the on-disk
-// file.
-func buildPackagesFile(repoDir string, debs []string) ([]byte, error) {
-	var buf bytes.Buffer
-	for _, p := range debs {
-		stanza, err := packageStanza(repoDir, p)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", p, err)
-		}
-		buf.Write(stanza)
-		buf.WriteByte('\n')
-	}
-	return buf.Bytes(), nil
-}
-
-func packageStanza(repoDir, debPath string) ([]byte, error) {
+// stanzaForDeb renders the Packages stanza for a single .deb and returns
+// the package's declared architecture alongside it. The file is opened
+// once: its control paragraph supplies the stanza body and the arch, and
+// its raw bytes supply Size / SHA256.
+func stanzaForDeb(repoDir, debPath string) (stanza []byte, arch string, err error) {
 	d, err := deb.ReadDeb(debPath)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer d.Close()
+	arch = d.Control.Architecture
 
 	relFilename, err := filepath.Rel(repoDir, debPath)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-
 	stat, err := os.Stat(debPath)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-
 	raw, err := os.ReadFile(debPath)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	sha := sha256.Sum256(raw)
 
 	var b bytes.Buffer
 	if err := deb.WriteControl(&b, d.Control); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	fmt.Fprintf(&b, "Filename: %s\n", filepath.ToSlash(relFilename))
 	fmt.Fprintf(&b, "Size: %d\n", stat.Size())
 	fmt.Fprintf(&b, "SHA256: %x\n", sha[:])
-	return b.Bytes(), nil
+	return b.Bytes(), arch, nil
 }
 
 // buildRelease produces the Release file body. Fields follow Debian
@@ -277,10 +281,17 @@ func gzipBytes(data []byte) ([]byte, error) {
 }
 
 // PublishDeb copies debPath into the project pool at
-// pool/<component>/<initial>/<src>/<basename>.deb, then re-runs
-// GenerateDebianIndex against opts. Parallel invocations are
-// serialized via debPublishMu so concurrent unit builds don't race
-// each other reading half-written .deb files during index emit.
+// pool/<component>/<initial>/<src>/<basename>.deb. It does NOT regenerate
+// the Packages/Release index: that is an O(pool) full re-scan, and doing
+// it once per published .deb made a fresh image build O(units²). The
+// index is instead refreshed once from the pool when it is actually
+// consumed — immediately before image assembly, and once at the end of a
+// build that published .debs without building an image — so the on-disk
+// index always reflects the pool without the quadratic re-emit.
+//
+// debPublishMu still serializes the copy so concurrent unit builds don't
+// race the directory creation; each .deb lands at a distinct path via an
+// atomic temp+rename, so the pool stays consistent for the later scan.
 func PublishDeb(debPath string, opts DebRepoOptions, component string) error {
 	debPublishMu.Lock()
 	defer debPublishMu.Unlock()
@@ -300,7 +311,7 @@ func PublishDeb(debPath string, opts DebRepoOptions, component string) error {
 	if err := copyFile(debPath, dst); err != nil {
 		return fmt.Errorf("PublishDeb: copy: %w", err)
 	}
-	return GenerateDebianIndex(opts)
+	return nil
 }
 
 // sourceNameOf returns the source package name (Source field on the

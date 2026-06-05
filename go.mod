@@ -43,3 +43,5 @@ require (
 	golang.org/x/net v0.53.0 // indirect
 	pault.ag/go/topsort v0.1.1 // indirect
 )
+
+replace pault.ag/go/debian => github.com/yoebuild/go-debian v0.19.0-yoe1
