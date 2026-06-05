@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	yoe "github.com/yoebuild/yoe/internal"
@@ -278,7 +279,11 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		started  = map[string]bool{}
 		firstErr error
 		stop     bool // set on first failure or ctx cancel; no new work scheduled
+		// progress counts units reached (cached or built) for the
+		// "[building 34/133]" position indicator in the build log.
+		progress atomic.Int64
 	)
+	total := len(order)
 
 	sem := make(chan struct{}, parallel)
 	var wg sync.WaitGroup
@@ -324,11 +329,12 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		forceThis := (opts.Force || opts.Clean) && (len(requested) == 0 || requested[name])
 
 		built := false
+		n := progress.Add(1)
 		if !forceThis && !opts.NoCache && !depRebuilt &&
 			cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hash, effectiveDistro) {
-			fmt.Fprintf(sw, "%-20s ⚡ [cached] %s\n", name, hash[:12])
+			fmt.Fprintf(sw, "%-20s ⚡ [cached %d/%d] %s\n", name, n, total, hash[:12])
 		} else {
-			fmt.Fprintf(sw, "%-20s 🔨 [building]\n", name)
+			fmt.Fprintf(sw, "%-20s 🔨 [building %d/%d]\n", name, n, total)
 			notify(name, "building")
 			if err := buildOne(ctx, proj, dag, unit, hash, opts, sw); err != nil {
 				notify(name, "failed")
