@@ -339,9 +339,9 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		n := progress.Add(1)
 		if !forceThis && !opts.NoCache && !depRebuilt &&
 			cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hash, effectiveDistro) {
-			fmt.Fprintf(sw, "%-20s ⚡ [cached %d/%d] %s\n", name, n, total, hash[:12])
+			fmt.Fprintf(sw, "%-20s ⚡ [cached %d/%d units] %s\n", name, n, total, hash[:12])
 		} else {
-			fmt.Fprintf(sw, "%-20s 🔨 [building %d/%d]\n", name, n, total)
+			fmt.Fprintf(sw, "%-20s 🔨 [building %d/%d units]\n", name, n, total)
 			notify(name, "building")
 			if err := buildOne(ctx, proj, dag, unit, hash, opts, sw); err != nil {
 				notify(name, "failed")
