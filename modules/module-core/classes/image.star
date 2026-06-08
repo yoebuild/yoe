@@ -348,6 +348,18 @@ for kvdir in $DESTDIR/rootfs/lib/modules/*/; do
     chroot $DESTDIR/rootfs update-initramfs -u -k "$kv"
 done
 
+# Make the kernel and initramfs world-readable. Ubuntu ships /boot/vmlinuz-*
+# and /boot/initrd.img-* mode 0600 (root-only) as a hardening measure; Debian
+# and Alpine ship them 0644. On qemu-arm64 (and any firmware-less direct-kernel
+# machine) the boot test runs host QEMU as the invoking user and hands the
+# kernel/initrd straight to -kernel/-initrd off the host rootfs, so a 0600
+# kernel makes QEMU fail with "could not load kernel". The bootloader on real
+# hardware and x86 disk boot read /boot as root and don't care, so relaxing to
+# 0644 (matching Debian/Alpine) only enables the direct-kernel path.
+for f in $DESTDIR/rootfs/boot/vmlinuz-* $DESTDIR/rootfs/boot/initrd.img-*; do
+    [ -e "$f" ] && chmod a+r "$f"
+done
+
 mkdir -p $DESTDIR/rootfs/etc%s
 """ % (pkg_list, extra), privileged = True)
 

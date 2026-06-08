@@ -183,7 +183,10 @@ The launcher in `internal/device/qemu.go`:
 3. If the machine has no `firmware`, appends
    `-kernel <vmlinuz> -append <cmdline>` for the direct-boot path (this is what
    qemu-arm64 uses), taking the kernel from the built image's `/boot` and adding
-   `-initrd <initrd.img>` when the image ships one (e.g. Debian).
+   `-initrd <initrd.img>` when the image ships one (e.g. Debian). The launcher
+   reads these straight off the host rootfs, so the image build makes the kernel
+   and initramfs world-readable (Ubuntu otherwise ships them root-only, which
+   would fail with "could not load kernel").
 4. Tries host QEMU first; falls back to running QEMU inside the `toolchain-musl`
    container with the project bind-mounted at `/project` if the host doesn't
    have it installed.
