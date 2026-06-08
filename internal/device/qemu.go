@@ -268,10 +268,14 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 // unpacked rootfs (<destdir>/rootfs/boot), which sits beside the .img. It is
 // distro-agnostic: Alpine ships /boot/vmlinuz and mounts the rootfs directly
 // (no initrd), while Debian ships a versioned /boot/vmlinuz-<ver> plus an
-// initrd.img-<ver> it boots through. Direct kernel boot (arm64/riscv64 with
-// no firmware) passes these host paths to -kernel/-initrd. Either return
-// value is empty when nothing matches — an empty kernel disables direct boot,
-// an empty initrd just omits -initrd.
+// initrd.img-<ver> it boots through. Ubuntu sits in between: its kernel only
+// *Recommends* an initramfs generator, so an Ubuntu image carries no real
+// initrd — only a dangling /boot/initrd.img symlink left by the kernel's
+// maintainer scripts — and boots through the kernel's built-in virtio/ext4
+// drivers like Alpine. Direct kernel boot (arm64/riscv64 with no firmware)
+// passes these host paths to -kernel/-initrd. Either return value is empty
+// when nothing resolves — an empty kernel disables direct boot, an empty
+// initrd just omits -initrd.
 func findBootKernel(imgPath string) (kernel, initrd string) {
 	bootDir := filepath.Join(filepath.Dir(imgPath), "rootfs", "boot")
 	kernel = firstGlob(bootDir, "vmlinuz", "vmlinuz-*", "Image", "Image-*")
@@ -281,14 +285,22 @@ func findBootKernel(imgPath string) (kernel, initrd string) {
 
 // firstGlob returns a file in dir matching the earliest pattern that matches
 // anything, patterns tried in order. A bare name matches that exact file.
-// Within one pattern the lexically greatest match wins, so when several
-// versioned kernels are installed the newest-sorting name is preferred.
+// Within one pattern the lexically greatest *resolvable* match wins, so when
+// several versioned kernels are installed the newest-sorting name is
+// preferred. Matches that don't resolve are skipped: Ubuntu's kernel
+// maintainer scripts leave a /boot/initrd.img symlink pointing at an
+// initrd.img-<ver> that was never generated, and handing that dangling path
+// to QEMU's -initrd makes it abort with "could not load initrd". os.Stat
+// follows the symlink, so a broken one is filtered out and the image falls
+// back to its built-in-driver direct boot.
 func firstGlob(dir string, patterns ...string) string {
 	for _, pat := range patterns {
 		matches, _ := filepath.Glob(filepath.Join(dir, pat))
-		if len(matches) > 0 {
-			sort.Strings(matches)
-			return matches[len(matches)-1]
+		sort.Strings(matches)
+		for i := len(matches) - 1; i >= 0; i-- {
+			if _, err := os.Stat(matches[i]); err == nil {
+				return matches[i]
+			}
 		}
 	}
 	return ""

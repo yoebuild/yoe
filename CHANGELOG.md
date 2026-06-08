@@ -8,9 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
-- **Ubuntu arm64 images now boot in QEMU.** The kernel and initramfs are now
-  readable by the QEMU launcher, so arm64 Ubuntu images start instead of failing
-  with "could not load kernel."
+## [0.12.1] - 2026-06-08
+
+- **Ubuntu arm64 images now boot in QEMU.** The launcher no longer trips over an
+  unused initramfs reference Ubuntu leaves behind, so arm64 Ubuntu images start
+  cleanly instead of failing with "could not load initrd."
 
 ## [0.12.0] - 2026-06-05
 
