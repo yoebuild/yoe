@@ -188,7 +188,7 @@ The launcher in `internal/device/qemu.go`:
    build makes the kernel world-readable (Ubuntu otherwise ships it root-only,
    which would fail with "could not load kernel"). An image that carries no
    initramfs boots through the kernel's built-in drivers (Alpine, and Ubuntu —
-   whose kernel only *recommends* an initramfs generator); the launcher resolves
+   whose kernel only _recommends_ an initramfs generator); the launcher resolves
    the `/boot/initrd.img` symlink and omits `-initrd` when it dangles, rather
    than handing QEMU a path it would reject with "could not load initrd".
 4. Tries host QEMU first; falls back to running QEMU inside the `toolchain-musl`
