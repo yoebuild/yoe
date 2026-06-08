@@ -176,6 +176,33 @@ func TestFindBootKernel(t *testing.T) {
 		}
 	})
 
+	t.Run("ubuntu: dangling initrd.img symlink is skipped", func(t *testing.T) {
+		// Ubuntu's kernel only Recommends an initramfs generator, so no real
+		// initrd.img-<ver> is ever written — but the maintainer scripts still
+		// leave /boot/initrd.img and /boot/vmlinuz symlinks. The vmlinuz one
+		// resolves; the initrd one dangles. The launcher must follow the
+		// kernel symlink and drop the broken initrd so QEMU boots through the
+		// kernel's built-in drivers instead of aborting on -initrd.
+		img := writeBoot(t,
+			"vmlinuz-7.0.0-14-generic",
+			"config-7.0.0-14-generic",
+		)
+		bootDir := filepath.Join(filepath.Dir(img), "rootfs", "boot")
+		if err := os.Symlink("vmlinuz-7.0.0-14-generic", filepath.Join(bootDir, "vmlinuz")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("initrd.img-7.0.0-14-generic", filepath.Join(bootDir, "initrd.img")); err != nil {
+			t.Fatal(err)
+		}
+		kernel, initrd := findBootKernel(img)
+		if filepath.Base(kernel) != "vmlinuz" {
+			t.Errorf("kernel = %q, want the resolvable .../vmlinuz symlink", kernel)
+		}
+		if initrd != "" {
+			t.Errorf("initrd = %q, want empty (dangling symlink must be skipped)", initrd)
+		}
+	})
+
 	t.Run("multiple kernels: newest-sorting wins", func(t *testing.T) {
 		img := writeBoot(t, "vmlinuz-6.1.0-47-arm64", "vmlinuz-6.12.86+deb13-arm64")
 		kernel, _ := findBootKernel(img)

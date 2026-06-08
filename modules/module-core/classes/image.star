@@ -339,8 +339,12 @@ fi
 # xattr`, which needs libattr in place; run too early it copies nothing
 # and the image ships an initramfs with no virtio/ext4 drivers, so the
 # kernel can't find its root device and hangs in the local-block loop.
-# Everything is configured now — rebuild each kernel's initramfs so the
-# drivers actually land in it.
+# drivers actually land in it. Only rebuild a kernel that already has a
+# real initramfs (Debian's linux-image postinst leaves /boot/initrd.img-$kv
+# behind). Ubuntu only *Recommends* an initramfs generator, so an Ubuntu
+# image carries no update-initramfs and no real initrd — it boots through
+# the kernel's built-in virtio/ext4 drivers instead (the launcher omits
+# -initrd when no real file is present), so there is nothing to regenerate.
 for kvdir in $DESTDIR/rootfs/lib/modules/*/; do
     [ -d "$kvdir" ] || continue
     kv=$(basename "$kvdir")
