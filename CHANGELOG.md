@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Ubuntu arm64 images now boot in QEMU.** The kernel and initramfs are now
+  readable by the QEMU launcher, so arm64 Ubuntu images start instead of failing
+  with "could not load kernel."
+
 ## [0.12.0] - 2026-06-05
 
 _Ubuntu support is ready to use in this version._
