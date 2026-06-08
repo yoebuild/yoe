@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-06-08
+
 - **Ubuntu arm64 images now boot in QEMU.** The launcher no longer trips over an
   unused initramfs reference Ubuntu leaves behind, so arm64 Ubuntu images start
   cleanly instead of failing with "could not load initrd."

@@ -6,7 +6,12 @@
 > and link from here. If a topic doesn't have a design doc yet, leave the entry
 > brief — write the design doc when the work is actually picked up.
 
-## Next
+## Next video/blog posts
+
+- debugging the zstd issue
+- self-hosting on rPI
+
+## Next Features
 
 - Be able to specify distro deps by version if necessary (another optional
   nested level).
