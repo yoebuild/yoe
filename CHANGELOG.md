@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.12.3] - 2026-06-09
+
 - **Ubuntu arm64 images boot under software emulation too.** When QEMU has no
   KVM acceleration (an x86 host, or an arm64 host without `/dev/kvm`), Ubuntu's
   EFI-only arm64 kernel now boots instead of aborting QEMU, so the boot test and
