@@ -832,18 +832,19 @@ acceptable, Avocado is several years ahead of `[yoe]` on maturity.
 ## vs. Rugix
 
 [Rugix](https://rugix.org/) is an open-source suite for building and updating
-embedded Linux devices, maintained by [Silitics](https://oss.silitics.com/rugix/)
-(which also offers the Nexigon fleet-management product and commercial support).
-It began life as **Rugpi** — Raspberry Pi tooling — and was
+embedded Linux devices, maintained by
+[Silitics](https://oss.silitics.com/rugix/) (which also offers the Nexigon
+fleet-management product and commercial support). It began life as **Rugpi** —
+Raspberry Pi tooling — and was
 [renamed to Rugix at v0.8](https://oss.silitics.com/rugix/blog/releases/0.8/) to
 signal that it had outgrown a single board. It is dual-licensed (MIT or
-Apache-2.0) and written almost entirely in Rust (~98% of the repo). Unusually for
-the systems compared here, Rugix is really **two separable tools**, and the split
-is the most interesting thing about it relative to `[yoe]`:
+Apache-2.0) and written almost entirely in Rust (~98% of the repo). Unusually
+for the systems compared here, Rugix is really **two separable tools**, and the
+split is the most interesting thing about it relative to `[yoe]`:
 
 - **Rugix Bakery** — the build system. It assembles a custom distribution from a
-  _binary_ base — ready-made integrations for Debian, Alpine, and Raspberry Pi OS
-  — or drives a from-source Yocto/Poky build (offered as a proof of concept).
+  _binary_ base — ready-made integrations for Debian, Alpine, and Raspberry Pi
+  OS — or drives a from-source Yocto/Poky build (offered as a proof of concept).
   Builds run container-based for reproducibility, and a single _project_ can
   define multiple _systems_ that share configuration.
 - **Rugix Ctrl** — a single self-contained on-device binary for robust OTA
@@ -868,16 +869,16 @@ is the most interesting thing about it relative to `[yoe]`:
   default path layers Debian/Alpine/RPi OS binaries rather than compiling from
   source, the same "prebuilt for the long tail" bet `[yoe]` makes with
   `alpine_pkg`.
-- **No cloud lock-in** — Ctrl updates install from any plain HTTP server (it uses
-  HTTP range queries for its adaptive delta updates); there is no mandatory SaaS,
-  matching `[yoe]`'s self-hosted-feed stance. Fleet management is a separate,
-  optional product.
+- **No cloud lock-in** — Ctrl updates install from any plain HTTP server (it
+  uses HTTP range queries for its adaptive delta updates); there is no mandatory
+  SaaS, matching `[yoe]`'s self-hosted-feed stance. Fleet management is a
+  separate, optional product.
 
 **What `[yoe]` does differently:**
 
 - **Imperative recipe steps vs. a declarative unit graph.** A Bakery _recipe_ is
-  a TOML file (`description`, `priority`, `dependencies`, a `[parameters]` block)
-  whose body is a sequence of numbered _steps_ of three kinds: `packages`
+  a TOML file (`description`, `priority`, `dependencies`, a `[parameters]`
+  block) whose body is a sequence of numbered _steps_ of three kinds: `packages`
   (apt/apk install lists), `run` (scripts in the host build environment), and
   `install` (scripts run inside the target via chroot). Steps are ordinary
   scripts in any language — bash, Python (`.py`), whatever has a shebang — with
@@ -886,8 +887,8 @@ is the most interesting thing about it relative to `[yoe]`:
   image layers. This is closer to debos's flat action sequences and Gaia's
   multi-language recipes than to `[yoe]`'s Starlark units, which form a
   content-addressed dependency graph with no per-step shell scripting. Rugix
-  resolves variation through imperative chroot steps; `[yoe]` resolves it through
-  a declarative DAG and a single configuration language.
+  resolves variation through imperative chroot steps; `[yoe]` resolves it
+  through a declarative DAG and a single configuration language.
 - **Image assembly vs. a package feed + cache.** Bakery's output is the image
   (plus a Ctrl update bundle); it has no notion of a per-unit content-addressed
   `.apk` that is simultaneously the build cache and the on-device package feed.
@@ -905,34 +906,36 @@ is the most interesting thing about it relative to `[yoe]`:
   style, not isolated containers). `[yoe]` goes the other way: each unit builds
   in its own container worker against a staged `sysroot/` holding exactly the
   dependencies that unit declared, kept distinct from the rootfs that ships. The
-  separation is what lets `[yoe]` build from source under isolation and cache per
-  unit; Bakery's in-place chroot model is simpler but conflates build environment
-  and shipping tree. (Sysroots reappear only if you descend into Bakery's Yocto
-  passthrough — but those are Yocto's `recipe-sysroot`s, not a Bakery concept.)
+  separation is what lets `[yoe]` build from source under isolation and cache
+  per unit; Bakery's in-place chroot model is simpler but conflates build
+  environment and shipping tree. (Sysroots reappear only if you descend into
+  Bakery's Yocto passthrough — but those are Yocto's `recipe-sysroot`s, not a
+  Bakery concept.)
 - **From-source-by-default vs. binary-base-by-default.** Bakery's first-class
-  path is layering a binary distribution; its from-source story is Yocto, carried
-  as a proof of concept. `[yoe]` builds its core from source into apks and treats
-  prebuilt-distro consumption as the long-tail supplement — the inverse default.
+  path is layering a binary distribution; its from-source story is Yocto,
+  carried as a proof of concept. `[yoe]` builds its core from source into apks
+  and treats prebuilt-distro consumption as the long-tail supplement — the
+  inverse default.
 - **Rust throughout vs. Go + Starlark.** Like Avocado's CLI, Rugix is a Rust
   codebase; `[yoe]` is Go for the engine and Starlark for units, machines, and
   images.
 
 **Rugix Ctrl is a candidate ingredient, not just an alternative.** Most systems
 in this document are alternatives to `[yoe]` — you pick one. Ctrl is different,
-in the same way [Chisel](#chisel-and-chiselled-ubuntu) is for the Debian side: it
-is a well-scoped, build-system-agnostic component that solves precisely the piece
-`[yoe]` has left as an open design decision. Ctrl asks only for an A/B partition
-layout and one of a handful of supported bootloaders (U-Boot, GRUB,
-`systemd-boot`, or Raspberry Pi's `tryboot`); it drives the slot switch, verifies
-signed bundles before writing, streams block-checked delta updates from a dumb
-HTTP server, and manages the read-only-root-plus-overlay state model — explicitly
-_not_ building images, replacing bootloaders, or doing fleet management. That
-boundary makes it adoptable: _if_ `[yoe]` chose the A/B-plus-immutable-root
-direction for its still-undecided update mechanism, an image that ships that
-layout and a supported bootloader could carry Rugix Ctrl as its update engine
-rather than `[yoe]` growing one from scratch. Worth studying as prior art at
-minimum, and a plausible direct dependency should `[yoe]`'s update design land in
-that part of the space.
+in the same way [Chisel](#chisel-and-chiselled-ubuntu) is for the Debian side:
+it is a well-scoped, build-system-agnostic component that solves precisely the
+piece `[yoe]` has left as an open design decision. Ctrl asks only for an A/B
+partition layout and one of a handful of supported bootloaders (U-Boot, GRUB,
+`systemd-boot`, or Raspberry Pi's `tryboot`); it drives the slot switch,
+verifies signed bundles before writing, streams block-checked delta updates from
+a dumb HTTP server, and manages the read-only-root-plus-overlay state model —
+explicitly _not_ building images, replacing bootloaders, or doing fleet
+management. That boundary makes it adoptable: _if_ `[yoe]` chose the
+A/B-plus-immutable-root direction for its still-undecided update mechanism, an
+image that ships that layout and a supported bootloader could carry Rugix Ctrl
+as its update engine rather than `[yoe]` growing one from scratch. Worth
+studying as prior art at minimum, and a plausible direct dependency should
+`[yoe]`'s update design land in that part of the space.
 
 **Key differences:**
 
@@ -956,9 +959,9 @@ _today_ — A/B atomic updates, automatic rollback, bandwidth-efficient delta
 delivery over plain HTTP, and a read-only-root state model — especially on
 Raspberry Pi or any board with a U-Boot/GRUB/systemd-boot setup, and you are
 happy assembling images from Debian/Alpine/RPi OS binary packages. And even if
-you build images some other way, Rugix Ctrl is worth evaluating on its own as the
-update layer, since it is designed to drop into an existing build rather than
-replace it.
+you build images some other way, Rugix Ctrl is worth evaluating on its own as
+the update layer, since it is designed to drop into an existing build rather
+than replace it.
 
 ## vs. NixOS / Nix
 
