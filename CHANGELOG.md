@@ -8,11 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
-- **Ubuntu arm64 images now reach a login prompt in QEMU.** Ubuntu's arm64 kernel
-  needs UEFI firmware to boot, which the QEMU launcher now supplies automatically
-  (from the host's `qemu-efi-aarch64` / `edk2-aarch64` package) instead of hanging
-  with a blank console; if the firmware isn't installed, the run now fails with a
-  clear message naming the package to install.
+## [0.12.2] - 2026-06-09
+
+- **Ubuntu arm64 images now reach a login prompt in QEMU.** Ubuntu's arm64
+  kernel needs UEFI firmware to boot, which the QEMU launcher now supplies
+  automatically (from the host's `qemu-efi-aarch64` / `edk2-aarch64` package)
+  instead of hanging with a blank console; if the firmware isn't installed, the
+  run now fails with a clear message naming the package to install.
 
 ## [0.12.1] - 2026-06-08
 
