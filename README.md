@@ -104,7 +104,7 @@ The TUI user interface:
 ![screenshot](assets/yoe-screenshot.png)
 
 `dev-image` is another included image with a few more things in it. Press the
-`s` key to navigate tot he setup menu and select the image.
+`s` key to navigate to the setup menu and select the image.
 
 The `/` key modifies the unit query to change what units are displayed.
 
