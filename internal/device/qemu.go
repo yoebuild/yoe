@@ -559,13 +559,23 @@ func kvmAvailable() bool {
 }
 
 // qemuCPU resolves the -cpu model. `host` (and the implicit default) only
-// works under an accelerator; without KVM it becomes `max`, the broadest
-// TCG-emulatable model. Any other explicit model is passed through.
-func qemuCPU(configured string, useKVM bool) string {
+// works under an accelerator; without KVM it falls back to the broadest
+// TCG-emulatable model for the arch. Any other explicit model is passed
+// through.
+//
+// On arm64 the TCG fallback is a concrete model rather than `max`: QEMU 8.2's
+// aarch64 TCG aborts with "regime_is_user: code should not be reached" when
+// EDK2/UEFI firmware runs on `-cpu max` (the path Ubuntu's EFI-only zboot
+// kernels take). neoverse-n1 is a stable ARMv8.2 server model that both EDK2
+// and Ubuntu's arm64 kernels boot on cleanly under emulation.
+func qemuCPU(configured, arch string, useKVM bool) string {
 	if useKVM {
 		return configured // "" lets QEMU pick its default
 	}
 	if configured == "" || configured == "host" {
+		if arch == "arm64" {
+			return "neoverse-n1"
+		}
 		return "max"
 	}
 	return configured
@@ -584,7 +594,7 @@ func baseQEMUArgs(machine *yoestar.Machine, opts QEMUOptions) []string {
 		if qemu.Machine != "" {
 			args = append(args, "-machine", qemu.Machine)
 		}
-		if cpu := qemuCPU(qemu.CPU, useKVM); cpu != "" {
+		if cpu := qemuCPU(qemu.CPU, machine.Arch, useKVM); cpu != "" {
 			args = append(args, "-cpu", cpu)
 		}
 	} else {
@@ -594,7 +604,7 @@ func baseQEMUArgs(machine *yoestar.Machine, opts QEMUOptions) []string {
 		default:
 			args = append(args, "-machine", "q35")
 		}
-		args = append(args, "-cpu", qemuCPU("host", useKVM))
+		args = append(args, "-cpu", qemuCPU("host", machine.Arch, useKVM))
 	}
 
 	if useKVM {
