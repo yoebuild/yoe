@@ -104,8 +104,14 @@ The TUI user interface:
 ![screenshot](assets/yoe-screenshot.png)
 
 `dev-image` is another included image with a few more things in it. Press the
-`s` key to and configure the image. The `/` key modifies the unit query to
-change what is displayed.
+`s` key to navigate tot he setup menu and select the image.
+
+The `/` key modifies the unit query to change what units are displayed.
+
+The `tab` key shifts between the unit, modules, and diagnostics pages.
+
+For more information on the TUI, see the
+[`[yoe]` tool documentation](/docs/yoe-tool.md).
 
 There are also CLI variants of the above commands (`build`, `run`, etc.).
 
