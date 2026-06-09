@@ -251,3 +251,56 @@ func TestBuildQEMUArgsDirectBoot(t *testing.T) {
 		t.Errorf("expected no -kernel with empty kernel path, got %v", none)
 	}
 }
+
+// writeKernelFile creates a fake arm64 kernel: a bare Image carries the "ARMd"
+// magic at offset 56; an EFI-only (zboot) image is a PE stub without it.
+func writeKernelFile(t *testing.T, bareImage bool) string {
+	t.Helper()
+	buf := make([]byte, 64)
+	copy(buf[0:2], "MZ")
+	if bareImage {
+		copy(buf[56:60], "ARMd")
+	}
+	p := filepath.Join(t.TempDir(), "vmlinuz")
+	if err := os.WriteFile(p, buf, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestArm64BareImage(t *testing.T) {
+	if !arm64BareImage(writeKernelFile(t, true)) {
+		t.Error("bare Image (ARMd magic) should be reported direct-bootable")
+	}
+	if arm64BareImage(writeKernelFile(t, false)) {
+		t.Error("EFI-only kernel (no ARMd magic) should not be direct-bootable")
+	}
+	if !arm64BareImage(filepath.Join(t.TempDir(), "missing")) {
+		t.Error("unreadable path should default to true (preserve direct boot)")
+	}
+}
+
+func TestBuildQEMUArgsZbootUEFI(t *testing.T) {
+	machine := &yoestar.Machine{
+		Arch:   "arm64",
+		Kernel: yoestar.KernelConfig{Unit: "linux", Cmdline: "console=ttyAMA0 root=/dev/vda1 rw"},
+		QEMU:   &yoestar.QEMUConfig{Machine: "virt"},
+	}
+
+	// A bare Image direct-boots: never gets -bios, regardless of host firmware.
+	bare := BuildQEMUArgs(machine, QEMUOptions{}, "/img.img", writeKernelFile(t, true), "")
+	if slices.Contains(bare, "-bios") {
+		t.Errorf("bare Image must not add -bios, got %v", bare)
+	}
+
+	// An EFI-only (zboot) kernel boots via UEFI: -bios is added iff edk2/AAVMF
+	// firmware is installed on this host. The -kernel handoff stays either way.
+	zboot := BuildQEMUArgs(machine, QEMUOptions{}, "/img.img", writeKernelFile(t, false), "")
+	if !slices.Contains(zboot, "-kernel") {
+		t.Errorf("expected -kernel for zboot kernel, got %v", zboot)
+	}
+	wantBios := aarch64UEFIFirmware() != ""
+	if got := slices.Contains(zboot, "-bios"); got != wantBios {
+		t.Errorf("zboot -bios = %v, want %v (firmware=%q)", got, wantBios, aarch64UEFIFirmware())
+	}
+}
