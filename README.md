@@ -71,6 +71,21 @@ Prerequisites: Linux or macOS with Git and Docker installed. Windows users:
 install WSL2 and use the Linux binary (Linux x86_64/Docker is the most tested
 configuration). Claude Code is highly recommended, but not required.
 
+To run a built image you also need QEMU. On Debian/Ubuntu:
+
+```sh
+sudo apt-get install qemu-system-x86
+```
+
+For KVM acceleration, your user must be in the `kvm` group. If `yoe run` reports
+`failed to initialize kvm: Permission denied`, add yourself and pick up the new
+group membership:
+
+```sh
+sudo usermod -aG kvm $(whoami)
+newgrp kvm   # or log out and back in
+```
+
 ```sh
 # Download the yoe binary (Linux x86_64)
 curl -L https://github.com/yoebuild/yoe/releases/latest/download/yoe-Linux-x86_64 -o yoe
