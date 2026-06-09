@@ -121,8 +121,11 @@ jobs:
           # QEMU on the host (host networking keeps the guest SSH forward on
           # the runner's loopback, where the boot test can reach it). One
           # package per arch; both are cheap to install on either host.
+          # qemu-efi-aarch64 supplies the AAVMF/edk2 firmware that Ubuntu's
+          # EFI-only (zboot) arm64 kernels need to boot — it's arch-independent
+          # (Architecture: all), so it installs on either host.
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-system-arm
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-system-arm qemu-efi-aarch64
           # When /dev/kvm exists but isn't group-accessible to the runner
           # user, make it usable so the native-arch boot runs accelerated;
           # if it's absent, yoe falls back to TCG on its own.

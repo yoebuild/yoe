@@ -96,11 +96,11 @@ with an actionable message rather than launching a guest that never prints. Bare
 
 > **On real hardware:** this UEFI handoff is a QEMU-side accommodation for the
 > dev/CI machine. Booting an EFI-zboot kernel on a physical low-end SoC (e.g. a
-> TI AM62 whose U-Boot uses the classic `booti`/extlinux flow, which also expects
-> a bare `Image`) needs a separate decision when such a target is added — either
-> the board's U-Boot UEFI path (`bootefi`), or unwrapping the zboot payload back
-> to a bare `Image` at image-assembly time. The bare-`Image` distros sidestep the
-> question entirely.
+> TI AM62 whose U-Boot uses the classic `booti`/extlinux flow, which also
+> expects a bare `Image`) needs a separate decision when such a target is added
+> — either the board's U-Boot UEFI path (`bootefi`), or unwrapping the zboot
+> payload back to a bare `Image` at image-assembly time. The bare-`Image`
+> distros sidestep the question entirely.
 
 The single ext4 partition becomes `/dev/vda1` through QEMU's virtio-blk disk.
 The disk is presented to the guest as a raw image file, attached with

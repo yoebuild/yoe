@@ -373,27 +373,33 @@ Why apk over apt and dnf:
   package repository, enabling incremental OTA updates (install only changed
   packages) alongside full image updates.
 
-The `[yoe]` build tooling invokes units to produce `.apk` packages, which are
-published to a repository. Image assembly then uses `apk` to install packages
-into a root filesystem, just as Alpine does.
+The `[yoe]` build tooling invokes units to produce packages — `.apk` on the
+default Alpine base, `.deb` on the experimental Debian/Ubuntu bases — which are
+published to a repository. Image assembly then installs those packages into a
+root filesystem with the base's native tool (`apk` on Alpine, `mmdebstrap`/`apt`
+on Debian/Ubuntu).
 
 ### 🧱 Base System
 
-The base userspace today is **busybox** on top of a C library (musl today, glibc
-targeted), with busybox's built-in init as PID 1:
+The base userspace depends on the image's **distro**. The default — and most
+mature — base is Alpine-derived: **busybox** on a **musl** C library, with
+busybox's built-in init as PID 1. `[yoe]` also builds experimental **Debian**
+and **Ubuntu** bases, which are **glibc** worlds running **systemd** as PID 1
+(see [Yoe and distributions](docs/distro.md)). The choice is per image:
 
-- **C library** — the project currently uses musl (inherited from Alpine's
-  toolchain), with a planned move to glibc for maximum compatibility with
-  pre-built binaries, language runtimes (Go, Rust, Python, Node.js), and
-  third-party libraries.
-- **busybox** — provides the core userspace utilities (sh, coreutils, etc.) and
-  init in a single small binary. Keeps the base image minimal while still giving
-  a functional shell environment for debugging and scripting.
-- **Init (current: busybox init)** — busybox's built-in init handles PID 1
-  duties today. **systemd will be an option in the future**: it is
-  well-understood, has rich service management, and provides integrated journal
-  logging, network management, device management (udev), and container
-  integration. The trade-off is size and complexity.
+- **C library** — musl on the Alpine base (inherited from Alpine's toolchain);
+  glibc on the Debian/Ubuntu bases, for maximum compatibility with pre-built
+  binaries, vendor blobs, language runtimes (Go, Rust, Python, Node.js), and
+  third-party libraries that assume glibc.
+- **busybox** (Alpine base) — provides the core userspace utilities (sh,
+  coreutils, etc.) and init in a single small binary, keeping the image minimal
+  while still giving a functional shell environment for debugging and scripting.
+  The Debian/Ubuntu bases ship the full GNU coreutils instead.
+- **Init** — busybox's built-in init handles PID 1 on the Alpine base; the
+  Debian/Ubuntu bases run **systemd**, with its rich service management,
+  integrated journal logging, network management, and device management (udev).
+  The trade-off is size and complexity — which is why the lean busybox path
+  stays the default.
 
 This combination gives a small but fully functional base system that can run
 real-world services without surprises.
