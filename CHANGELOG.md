@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Ubuntu arm64 images boot under software emulation too.** When QEMU has no
+  KVM acceleration (an x86 host, or an arm64 host without `/dev/kvm`), Ubuntu's
+  EFI-only arm64 kernel now boots instead of aborting QEMU, so the boot test and
+  `yoe run` work the same with or without hardware acceleration.
+
 ## [0.12.2] - 2026-06-09
 
 - **Ubuntu arm64 images now reach a login prompt in QEMU.** Ubuntu's arm64
