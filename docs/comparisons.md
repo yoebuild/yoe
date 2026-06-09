@@ -51,7 +51,7 @@ existing solutions along these axes:
 `[yoe]` is honest about where it does not yet compete: vendor BSP breadth,
 from-source package coverage (dozens of source-built units vs. thousands of
 Yocto recipes — though the prebuilt-distro module makes thousands of packages
-directly consumable, Alpine today with other distros planned, so raw
+directly consumable — Alpine plus experimental Debian and Ubuntu — so raw
 availability is closer to a full distro's), configuration UX, legal-compliance
 tooling, and a production track record. The
 [Value Proposition](#value-proposition-and-strategic-positioning) section sets
@@ -261,8 +261,8 @@ where it matters, prebuilt Alpine for the long tail — is what makes the
 package-count gap discussed in the
 [Value Proposition](#value-proposition-and-strategic-positioning) much narrower
 than the source-built unit count implies. The `*_pkg` wrapper is deliberately
-distro-agnostic; Alpine is the only prebuilt source today, with other distros
-(see the Debian section) a planned extension of the same shape.
+distro-agnostic; the same feed-based passthrough now covers Alpine plus
+experimental Debian and Ubuntu (see the Debian section).
 
 **What `[yoe]` leaves behind:**
 
@@ -282,8 +282,8 @@ whatever busybox init + plain scripts give you.
 
 |                   | Alpine                            | `[yoe]`                                              |
 | ----------------- | --------------------------------- | ---------------------------------------------------- |
-| C library         | musl                              | musl today; glibc planned                            |
-| Init system       | OpenRC                            | busybox init today; systemd a future option          |
+| C library         | musl                              | musl (Alpine base); glibc (Debian/Ubuntu bases)      |
+| Init system       | OpenRC                            | busybox init (Alpine); systemd (Debian/Ubuntu)       |
 | Target            | Containers, small servers         | Custom embedded hardware                             |
 | BSP support       | Generic x86/ARM images            | Per-board machine definitions                        |
 | Image assembly    | `alpine-make-rootfs`              | `yoe build <image>` with machine + partition support |
@@ -409,18 +409,18 @@ before hitting its limits on custom hardware.
 - **In-place `dist-upgrade`** — `[yoe]` prefers atomic image updates with
   rollback over mutating a running root filesystem.
 
-**Consuming Debian/Ubuntu prebuilt packages (planned).** `[yoe]` already wraps
-Alpine's published binary apks as units via the `alpine_pkg` class (see the
-Alpine section). The wrapper pattern is intentionally distro-agnostic — fetch an
-upstream package, re-sign its metadata with the project key, expose it as an
-ordinary unit — so the same shape is the natural way to make Debian/Ubuntu
-`.deb`s directly consumable: a `deb_pkg`-style class pulling from a pinned
-Debian/Ubuntu suite. This is **not implemented today** — only Alpine is wired up
-— but it is the expected path for teams that need a specific Debian/Ubuntu
-binary (a vendor-provided `.deb`, a package absent from Alpine) without porting
-it. The `.deb` maintainer-script tradition (preinst/postinst/debconf) makes
-verbatim Debian consumption more invasive than Alpine's near-empty install
-scripts, so this tier is most useful for leaf packages, not base-system pieces.
+**Consuming Debian/Ubuntu prebuilt packages.** `[yoe]` consumes prebuilt distro
+binaries through a feed mechanism: `alpine_feed(...)` for Alpine apks and
+`apt_feed(...)` for Debian/Ubuntu `.deb`s, each fetched verbatim from a pinned
+release and exposed as ordinary units. Debian and Ubuntu are wired today (via
+`module-debian` and `module-ubuntu`, both experimental): upstream `.deb`s mirror
+in verbatim, are verified against the suite's signed `Packages` index, and yoe
+builds its own units as native `.deb`s served from a project-signed apt repo.
+This is the path for teams that need a specific Debian/Ubuntu binary (a
+vendor-provided `.deb`, a package absent from Alpine) without porting it. The
+`.deb` maintainer-script tradition (preinst/postinst/debconf) makes verbatim
+Debian consumption more invasive than Alpine's near-empty install scripts, so
+the smoothest fit is still leaf packages rather than base-system pieces.
 
 **Key differences:**
 
@@ -476,9 +476,9 @@ curated by Canonical; chisel runs at build time (notably inside Rockcraft to
 build OCI "rocks") and is not shipped on the device.
 
 Chisel is directly relevant to `[yoe]` because **Alpine is where `[yoe]` starts,
-not where it ends — Debian support is on the roadmap**, alongside the
-`deb_pkg`-style consumption path sketched above. Once `[yoe]` is pulling Debian
-binaries, the fat-`.deb` problem chisel attacks becomes `[yoe]`'s problem too:
+not where it ends — experimental Debian and Ubuntu support has landed**, via the
+`apt_feed` consumption path described above. Now that `[yoe]` pulls Debian
+binaries, the fat-`.deb` problem chisel attacks is `[yoe]`'s problem too:
 Debian's one-big-package layout bundles docs, headers, and locales an embedded
 image does not want. Chisel is the proven prior art for trimming that —
 file-level slicing of binary packages — and is worth studying as either
@@ -828,23 +828,23 @@ backed by a commercial OTA SaaS
 
 **Key differences:**
 
-|                     | Avocado OS                                 | `[yoe]`                                      |
-| ------------------- | ------------------------------------------ | -------------------------------------------- |
-| Build engine        | Yocto / BitBake (Python)                   | `yoe` (Go)                                   |
-| Recipe language     | BitBake (`.bb`/`.bbappend`)                | Starlark                                     |
-| CLI language        | Rust (`avocado-cli`)                       | Go (`yoe`)                                   |
-| Cross-compilation   | Yes (Yocto default)                        | None — native builds only                    |
-| C library           | glibc                                      | musl                                         |
-| Package format      | IPK/RPM internally; sysext DDI on device   | apk                                          |
-| Runtime composition | `systemd-sysext` overlays + `dm-verity`    | apk into shared FHS rootfs                   |
-| Init system         | systemd (required by sysext model)         | busybox init today; systemd a future option  |
-| Filesystem          | btrfs root, immutable                      | ext4 today; immutability planned             |
-| OTA mechanism       | Peridio Core (commercial SaaS)             | Self-hosted; mechanism TBD                   |
-| Build caching       | Yocto sstate                               | Content-addressed apk in S3-compatible cache |
-| Container model     | SDK containers for dev                     | Container as build worker                    |
-| Hardware focus      | Edge AI: Jetson, i.MX, Rockchip, RPi       | Generic embedded; RPi/BBB/QEMU first         |
-| Commercial backing  | Peridio (VC-backed)                        | None — open project                          |
-| Status              | Production (April 2025+), paying customers | Pre-1.0                                      |
+|                     | Avocado OS                                 | `[yoe]`                                        |
+| ------------------- | ------------------------------------------ | ---------------------------------------------- |
+| Build engine        | Yocto / BitBake (Python)                   | `yoe` (Go)                                     |
+| Recipe language     | BitBake (`.bb`/`.bbappend`)                | Starlark                                       |
+| CLI language        | Rust (`avocado-cli`)                       | Go (`yoe`)                                     |
+| Cross-compilation   | Yes (Yocto default)                        | None — native builds only                      |
+| C library           | glibc                                      | musl                                           |
+| Package format      | IPK/RPM internally; sysext DDI on device   | apk                                            |
+| Runtime composition | `systemd-sysext` overlays + `dm-verity`    | apk into shared FHS rootfs                     |
+| Init system         | systemd (required by sysext model)         | busybox init (Alpine); systemd (Debian/Ubuntu) |
+| Filesystem          | btrfs root, immutable                      | ext4 today; immutability planned               |
+| OTA mechanism       | Peridio Core (commercial SaaS)             | Self-hosted; mechanism TBD                     |
+| Build caching       | Yocto sstate                               | Content-addressed apk in S3-compatible cache   |
+| Container model     | SDK containers for dev                     | Container as build worker                      |
+| Hardware focus      | Edge AI: Jetson, i.MX, Rockchip, RPi       | Generic embedded; RPi/BBB/QEMU first           |
+| Commercial backing  | Peridio (VC-backed)                        | None — open project                            |
+| Status              | Production (April 2025+), paying customers | Pre-1.0                                        |
 
 **Structural distance.** Avocado OS and `[yoe]` agree on the _symptoms_ —
 unwrapped Yocto is too sharp, embedded teams need atomic updates with rollback,
@@ -1694,14 +1694,13 @@ pinned to a single Alpine release — so most of "I just need `dbus`/`python3`/
 gap is narrower and more specific: a package only Alpine ships as a binary is
 _consumed_, not _built from source under your control_, and anything Alpine does
 not carry (or carries with the wrong build options) still needs a written unit.
-The prebuilt-wrapper pattern is deliberately distro-agnostic — a `*_pkg` class
-fetches an upstream package, re-signs it, and exposes it as a unit; Alpine is
-the only prebuilt source today, and the same shape is intended to extend to
-other distros (Debian/Ubuntu binary packages, for example) so the
-binary-availability tier is not tied to a single upstream. Yocto's value is that
-everything is from source by default; `[yoe]`'s bet is that prebuilt-distro
-packages plus source-where-it-matters covers most real products with far less
-work.
+The prebuilt-wrapper pattern is deliberately distro-agnostic — a feed fetches
+upstream packages and exposes them as units; Alpine (`alpine_feed`) plus
+experimental Debian and Ubuntu (`apt_feed`) are all wired today, so the
+binary-availability tier already spans multiple upstreams rather than a single
+one. Yocto's value is that everything is from source by default; `[yoe]`'s bet
+is that prebuilt-distro packages plus source-where-it-matters covers most real
+products with far less work.
 
 **Configuration UX.** Buildroot's `make menuconfig` is a killer feature —
 visual, discoverable, searchable. You can explore what's available without
@@ -1749,7 +1748,7 @@ push packages to a bucket, pull them on other machines. CI builds once,
 developers reuse the output.
 
 **AI-assisted unit generation.** With prebuilt distro packages already
-consumable via `alpine_pkg` (Alpine today, other distros planned), the gap is
+consumable via feeds (Alpine, plus experimental Debian and Ubuntu), the gap is
 from-source coverage. If an AI can generate a working Starlark unit from a
 project URL faster than porting a Yocto unit, even that gap stops mattering.
 Starlark is far more tractable for AI than BitBake's metadata format.
@@ -2052,24 +2051,24 @@ documented baseline.
 
 ## Summary Matrix
 
-| Feature                 | Yocto    | Buildroot | Alpine   | Arch     | Debian   | UC        | NixOS     | **`[yoe]`**                               |
-| ----------------------- | -------- | --------- | -------- | -------- | -------- | --------- | --------- | ----------------------------------------- |
-| Embedded focus          | Yes      | Yes       | Partial  | No       | No       | Yes       | No        | **Yes**                                   |
-| Simple config           | No       | Moderate  | Moderate | Yes      | Moderate | No        | No        | **Yes**                                   |
-| Native builds           | No       | No        | Yes      | Yes      | Yes      | Yes       | Yes       | **Yes**                                   |
-| On-device packages      | Optional | No        | Yes      | Yes      | Yes      | Yes       | Yes       | **Yes**                                   |
-| Content-addressed cache | Partial  | No        | No       | No       | No       | No        | Yes       | **Yes**                                   |
-| Remote shared cache     | Complex  | No        | No       | No       | No       | No        | Yes       | **Yes**                                   |
-| Pre-built package cache | No       | No        | Yes      | Yes      | Yes      | Yes       | Yes       | **Yes**                                   |
-| Declarative images      | Yes      | Partial   | No       | No       | Partial  | Yes       | Yes       | **Yes**                                   |
-| Multi-image support     | Yes      | No        | No       | No       | No       | Partial   | Yes       | **Yes**                                   |
-| Image inheritance       | Partial  | No        | No       | No       | No       | No        | Yes       | **Yes**                                   |
-| Custom BSP support      | Yes      | Yes       | No       | No       | Minimal  | Yes       | Minimal   | **Yes**                                   |
-| Incremental updates     | Complex  | No        | Yes      | Yes      | Yes      | Yes       | Yes       | **Yes**                                   |
-| Hermetic builds         | Partial  | No        | No       | No       | No       | Partial   | Yes       | **Yes**                                   |
-| Fast package ops        | N/A      | N/A       | Yes      | Moderate | Moderate | Slow      | Slow      | **Yes**                                   |
-| Min base image size     | ~15 MB   | ~5 MB     | ~5 MB    | ~500 MB  | ~150 MB  | ~2,500 MB | ~1,500 MB | **~5 MB**                                 |
-| Packages available      | ~5,000   | ~2,800    | ~36,000  | ~15,000  | ~35,000  | ~10,000   | ~142,000  | **Dozens from source + ~Alpine prebuilt** |
+| Feature                 | Yocto    | Buildroot | Alpine   | Arch     | Debian   | UC        | NixOS     | **`[yoe]`**                                            |
+| ----------------------- | -------- | --------- | -------- | -------- | -------- | --------- | --------- | ------------------------------------------------------ |
+| Embedded focus          | Yes      | Yes       | Partial  | No       | No       | Yes       | No        | **Yes**                                                |
+| Simple config           | No       | Moderate  | Moderate | Yes      | Moderate | No        | No        | **Yes**                                                |
+| Native builds           | No       | No        | Yes      | Yes      | Yes      | Yes       | Yes       | **Yes**                                                |
+| On-device packages      | Optional | No        | Yes      | Yes      | Yes      | Yes       | Yes       | **Yes**                                                |
+| Content-addressed cache | Partial  | No        | No       | No       | No       | No        | Yes       | **Yes**                                                |
+| Remote shared cache     | Complex  | No        | No       | No       | No       | No        | Yes       | **Yes**                                                |
+| Pre-built package cache | No       | No        | Yes      | Yes      | Yes      | Yes       | Yes       | **Yes**                                                |
+| Declarative images      | Yes      | Partial   | No       | No       | Partial  | Yes       | Yes       | **Yes**                                                |
+| Multi-image support     | Yes      | No        | No       | No       | No       | Partial   | Yes       | **Yes**                                                |
+| Image inheritance       | Partial  | No        | No       | No       | No       | No        | Yes       | **Yes**                                                |
+| Custom BSP support      | Yes      | Yes       | No       | No       | Minimal  | Yes       | Minimal   | **Yes**                                                |
+| Incremental updates     | Complex  | No        | Yes      | Yes      | Yes      | Yes       | Yes       | **Yes**                                                |
+| Hermetic builds         | Partial  | No        | No       | No       | No       | Partial   | Yes       | **Yes**                                                |
+| Fast package ops        | N/A      | N/A       | Yes      | Moderate | Moderate | Slow      | Slow      | **Yes**                                                |
+| Min base image size     | ~15 MB   | ~5 MB     | ~5 MB    | ~500 MB  | ~150 MB  | ~2,500 MB | ~1,500 MB | **~5 MB**                                              |
+| Packages available      | ~5,000   | ~2,800    | ~36,000  | ~15,000  | ~35,000  | ~10,000   | ~142,000  | **Dozens from source + Alpine/Debian/Ubuntu prebuilt** |
 
 _UC = Ubuntu Core. "Min base image size" is the approximate on-disk footprint of
 the smallest practical bootable/usable root filesystem (core-image-minimal for
@@ -2081,9 +2080,8 @@ Yocto counts typical oe-core + meta-openembedded, Arch excludes the ~90,000 AUR
 packages, UC counts snaps in the public store — a different delivery model that
 is not directly comparable. `[yoe]`'s entry is two-tier: dozens of packages
 built from source in `module-core`, plus thousands of distro packages consumed
-as prebuilt binaries via a `*_pkg` module (Alpine today via `alpine_pkg` —
-pinned to one Alpine release, re-signed with the project key; other distros a
-planned extension of the same pattern) — so the practical availability ceiling
-is close to the upstream distro's, while the from-source set is intentionally
-small. Sources: project documentation,
-[repology.org](https://repology.org/repositories/packages)._
+as prebuilt binaries via feed modules (Alpine via `alpine_feed`, plus
+experimental Debian and Ubuntu via `apt_feed`, each pinned to one upstream
+release) — so the practical availability ceiling is close to the upstream
+distro's, while the from-source set is intentionally small. Sources: project
+documentation, [repology.org](https://repology.org/repositories/packages)._
