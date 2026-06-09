@@ -193,6 +193,17 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 		if machine.Arch == detectHostArch() && !kvmAvailable() {
 			fmt.Fprintf(w, "  /dev/kvm not available — using TCG software emulation (slower)\n")
 		}
+		// An EFI-only kernel (Ubuntu's arm64 zboot) boots through UEFI
+		// firmware, not the firmware-less -kernel path. Fail loudly if the
+		// firmware package is missing rather than launch a guest that hangs
+		// with a black serial console.
+		if needsDirectBoot && hostKernel != "" && machine.Arch == "arm64" && !arm64BareImage(hostKernel) {
+			fw := aarch64UEFIFirmware()
+			if fw == "" {
+				return fmt.Errorf("kernel %s is EFI-only (zboot) and needs UEFI firmware to boot, but no edk2/AAVMF firmware was found — install it (Debian/Ubuntu: qemu-efi-aarch64; Fedora: edk2-aarch64; Arch: edk2-aarch64)", filepath.Base(hostKernel))
+			}
+			fmt.Fprintf(w, "  EFI-only kernel (zboot); booting via UEFI firmware: %s\n", fw)
+		}
 		args := buildArgs(imgPath, hostKernel, hostInitrd)
 		if opts.BootTest {
 			sshPort, err := sshHostPort(machine, opts)
@@ -301,6 +312,49 @@ func firstGlob(dir string, patterns ...string) string {
 			if _, err := os.Stat(matches[i]); err == nil {
 				return matches[i]
 			}
+		}
+	}
+	return ""
+}
+
+// arm64BareImage reports whether the kernel at path is a bare arm64 `Image`
+// that QEMU's firmware-less `-kernel` loader can start directly. A bare Image
+// carries the magic "ARMd" at offset 56 (see the arm64 boot protocol). Ubuntu
+// builds its arm64 kernels as EFI zboot — a compressed EFI/PE application with
+// no bare-Image header — so the magic is absent and they can only boot through
+// UEFI firmware. An unreadable path (notably a not-yet-built placeholder the
+// TUI uses for its command preview) reports true, preserving the direct-boot
+// default for everything except a kernel we can positively identify as EFI-only.
+func arm64BareImage(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return true
+	}
+	defer f.Close()
+	var hdr [60]byte
+	if _, err := io.ReadFull(f, hdr[:]); err != nil {
+		return true
+	}
+	return string(hdr[56:60]) == "ARMd"
+}
+
+// aarch64UEFIFirmware returns the path to an edk2/AAVMF firmware image usable
+// with `-bios` to UEFI-boot an arm64 guest, or "" if none is installed. yoe
+// uses it to boot EFI-only kernels (Ubuntu's zboot) that the firmware-less
+// `-kernel` path cannot start; edk2 still picks up the `-kernel`/`-initrd`/
+// `-append` that follow via fw_cfg, so the kernel runs through its real EFI
+// stub. The candidates span the common packaging layouts (Debian/Ubuntu's
+// qemu-efi-aarch64, Fedora/Arch's edk2).
+func aarch64UEFIFirmware() string {
+	for _, p := range []string{
+		"/usr/share/qemu-efi-aarch64/QEMU_EFI.fd",
+		"/usr/share/edk2/aarch64/QEMU_EFI.fd",
+		"/usr/share/edk2-armvirt/aarch64/QEMU_EFI.fd",
+		"/usr/share/AAVMF/AAVMF_CODE.fd",
+		"/usr/share/qemu/edk2-aarch64-code.fd",
+	} {
+		if _, err := os.Stat(p); err == nil {
+			return p
 		}
 	}
 	return ""
@@ -458,6 +512,18 @@ func BuildQEMUArgs(machine *yoestar.Machine, opts QEMUOptions, imgPath, kernelPa
 	// the caller couldn't resolve a kernel path.
 	needsDirectBoot := machine.QEMU == nil || machine.QEMU.Firmware == ""
 	if needsDirectBoot && machine.Kernel.Unit != "" && kernelPath != "" {
+		// An EFI-only kernel (Ubuntu's arm64 zboot) can't be started by the
+		// firmware-less -kernel path, so boot it through UEFI firmware. edk2
+		// still loads the -kernel/-initrd/-append below via fw_cfg, running
+		// the kernel's own EFI stub. Debian and Alpine ship bare arm64 Images
+		// and stay on the plain direct-kernel path (no -bios). If the firmware
+		// isn't installed we omit -bios here and let RunQEMU's preflight report
+		// it loudly rather than failing inside a command-preview path.
+		if machine.Arch == "arm64" && !arm64BareImage(kernelPath) {
+			if fw := aarch64UEFIFirmware(); fw != "" {
+				a = append(a, "-bios", fw)
+			}
+		}
 		a = append(a, "-kernel", kernelPath)
 		if initrdPath != "" {
 			a = append(a, "-initrd", initrdPath)
@@ -584,7 +650,9 @@ func baseQEMUArgs(machine *yoestar.Machine, opts QEMUOptions) []string {
 		case "ovmf":
 			args = append(args, "-bios", "/usr/share/OVMF/OVMF.fd")
 		case "aavmf":
-			args = append(args, "-bios", "/usr/share/AAVMF/AAVMF.fd")
+			if fw := aarch64UEFIFirmware(); fw != "" {
+				args = append(args, "-bios", fw)
+			}
 		}
 	}
 

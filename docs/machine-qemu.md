@@ -81,6 +81,27 @@ ROM, no SPL, no need for U-Boot. (For physical aarch64 boards, see
 [BeaglePlay](machine-beagleplay.md) for the full ROM → SPL → TF-A → U-Boot →
 kernel chain.)
 
+**EFI-only kernels boot through UEFI firmware.** Direct `-kernel` boot only
+works for a bare arm64 `Image` (Alpine and Debian ship one — recognizable by the
+`ARMd` magic at offset 56). Ubuntu builds its arm64 kernels as **EFI zboot**: a
+zstd-compressed EFI/PE application with no bare-`Image` header, which the
+firmware-less `-kernel` path cannot start (the guest would hang with a silent
+console). The launcher detects this — an EFI-only `/boot/vmlinuz` — and boots it
+through edk2/AAVMF UEFI firmware (`-bios`), which still picks up the
+`-kernel`/`-initrd`/`-append` that follow via fw_cfg and runs the kernel's own
+EFI stub to decompress and start it. The firmware comes from the host's
+`qemu-efi-aarch64` / `edk2-aarch64` package; if it is missing, `yoe run` fails
+with an actionable message rather than launching a guest that never prints. Bare
+`Image` kernels are untouched and keep the plain direct-kernel path.
+
+> **On real hardware:** this UEFI handoff is a QEMU-side accommodation for the
+> dev/CI machine. Booting an EFI-zboot kernel on a physical low-end SoC (e.g. a
+> TI AM62 whose U-Boot uses the classic `booti`/extlinux flow, which also expects
+> a bare `Image`) needs a separate decision when such a target is added — either
+> the board's U-Boot UEFI path (`bootefi`), or unwrapping the zboot payload back
+> to a bare `Image` at image-assembly time. The bare-`Image` distros sidestep the
+> question entirely.
+
 The single ext4 partition becomes `/dev/vda1` through QEMU's virtio-blk disk.
 The disk is presented to the guest as a raw image file, attached with
 `-drive file=...,format=raw,if=virtio`.
