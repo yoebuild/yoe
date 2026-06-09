@@ -537,6 +537,39 @@ above), while `[yoe]` builds from source into content-addressed apks; debos
 recipes are flat action sequences, while `[yoe]`'s Starlark units form a
 dependency graph with a shared, content-addressed build cache.
 
+**[edi](https://www.get-edi.io/)** ([source](https://github.com/lueschem/edi))
+is a Python tool for building customized Debian/Ubuntu images _and_ matching
+development environments, maintained by Matthias Lüscher. Where debos is built
+around flat action sequences, edi's distinguishing choice is **configuration
+management as the customization layer**:
+
+- **debootstrap + Ansible.** edi bootstraps a Debian/Ubuntu rootfs and then runs
+  **Ansible playbooks** against it to install packages and apply configuration,
+  so customization is expressed as Ansible roles rather than image-builder
+  actions. Project configuration is YAML with **Jinja2** templating, layered
+  through an overlay/plugin model.
+- **LXD/LXC as the build-and-test substrate.** edi can bring the same
+  configuration up as an LXD container for development or apply it to a disk
+  image for the device, and uses `qemu-user`/binfmt to bootstrap foreign-arch
+  (e.g., arm64) rootfs on an x86 host — the native-under-emulation instinct
+  `[yoe]` shares.
+- **Pairs with an external updater.** edi documents integrating Mender for OTA
+  rather than shipping its own update engine.
+
+Contrast with `[yoe]`: edi consumes Debian/Ubuntu `apt` directly (inheriting the
+~150 MB `.deb` size floor and the maintainer-script model) and has no
+from-source unit build or package feed of its own; its per-board story is
+"whatever Debian/RPi provides" rather than a first-class
+machine/kernel-config/device-tree/partition abstraction. The customization model
+is the sharpest difference — edi layers **Ansible** over a Debian base, while
+`[yoe]` resolves the same variation through a declarative Starlark unit graph
+with a content-addressed cache and no configuration-management step.
+
+**When to prefer edi:** when you want a Debian/Ubuntu device image plus a
+matching LXD development environment, are already comfortable with Ansible for
+configuration management, and are happy consuming apt directly with an external
+updater like Mender.
+
 **[isar](https://github.com/ilbers/isar)** — "Integration System for Automated
 Root filesystem generation," maintained by ilbers GmbH — is the most
 architecturally interesting Debian builder relative to `[yoe]`, because it
@@ -962,6 +995,66 @@ happy assembling images from Debian/Alpine/RPi OS binary packages. And even if
 you build images some other way, Rugix Ctrl is worth evaluating on its own as
 the update layer, since it is designed to drop into an existing build rather
 than replace it.
+
+## vs. mkosi
+
+[mkosi](https://github.com/systemd/mkosi) ("make operating system image") is the
+systemd project's image builder — a Python tool that assembles an OS image from
+a distribution's own packages. It is the closest mainstream tool to `[yoe]`'s
+"assemble from prebuilt distro packages" path, but aimed at a very different
+target: modern, systemd-centric, often immutable host/VM/container images rather
+than embedded devices on custom silicon.
+
+**What `[yoe]` shares with mkosi:**
+
+- **Build an image declaratively from distro packages.** mkosi reads INI-style
+  `mkosi.conf` files and pulls packages through the target distro's native
+  package manager (`dnf`, `apt`, `pacman`, `zypper`) — Fedora, CentOS Stream,
+  Debian, Ubuntu, Arch, openSUSE, and more. `[yoe]`'s prebuilt-distro modules
+  make the same bet that the common case is consuming an upstream feed, not
+  compiling from source.
+- **Build your own software into the image.** `mkosi.build`/`mkosi.postinst`
+  scripts compile and install project code during the image build — the rough
+  analogue of `[yoe]`'s from-source units, expressed as imperative scripts
+  rather than a cached unit graph.
+- **A fast boot-in-QEMU dev loop.** `mkosi qemu`/`mkosi boot` start the freshly
+  built image in QEMU or a container in one step, the same tight edit-build-boot
+  loop `[yoe]`'s `yoe run` provides.
+- **Foreign-arch via emulation.** mkosi can build foreign-architecture images
+  using `qemu-user`/binfmt — the same native-under-emulation instinct (rather
+  than a cross toolchain) that `[yoe]` is built around.
+
+**What `[yoe]` does differently:**
+
+- **General OS images vs. embedded/BSP.** mkosi targets hosts, VMs, and
+  containers; its center of gravity is the modern systemd image stack — Unified
+  Kernel Images, `systemd-boot`, `systemd-repart`, dm-verity, secure-boot
+  signing, and system-extension (`sysext`/`confext`) images. It has no notion of
+  a per-board machine, kernel defconfig, device tree, SoC bootloader, or
+  partition layout for custom silicon. `[yoe]` is BSP-first: machines, kernels,
+  device trees, bootloaders, and image/partition assembly are the core surface,
+  and the base is Alpine-style musl + OpenRC rather than systemd + glibc by
+  construction.
+- **No package feed or content-addressed cache of its own.** mkosi consumes
+  upstream distro repositories and caches packages and base images for
+  incremental rebuilds, but there is no per-package content-addressed artifact
+  that is simultaneously the build cache and the on-device feed. `[yoe]` builds
+  its core from source into content-addressed apks where "the cache _is_ the
+  feed."
+- **systemd-coupled by design.** mkosi's most valuable features assume systemd
+  on the build host and in the image (`ukify`, `systemd-repart`, credentials,
+  measured boot). `[yoe]` deliberately avoids that coupling so the base stays in
+  the single-digit-MB class and the runtime stays init-agnostic.
+- **Config + scripts vs. a unit graph.** mkosi is declarative `.conf` files plus
+  shell build scripts; `[yoe]` is a Starlark unit DAG resolved and validated
+  before anything builds, with no per-step shell scripting in the common path.
+
+**When to use mkosi instead:** when you're building a **systemd-based OS image**
+for a server, VM, or container from a mainstream distribution — especially an
+immutable, UKI / secure-boot / dm-verity image or a `sysext` overlay — and you
+do not need embedded BSP support for custom SoC hardware. mkosi is also the
+natural choice if you already live in the systemd image-based-OS world and want
+the reference tool its maintainers use to build and test systemd itself.
 
 ## vs. NixOS / Nix
 
