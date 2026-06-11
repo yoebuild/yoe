@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`yoe skills install` adds yoe's AI skills to your project.** The skills that
+  power `/new-unit`, `/diagnose`, `/audit-unit`, and friends now ship inside the
+  `yoe` binary; run `yoe skills install` to drop editable copies into your
+  project's `.claude/skills` so Claude Code picks them up. They're yours to edit,
+  and `yoe skills update` refreshes them to the latest versions when you upgrade
+  `yoe`. New projects from `yoe init` get them installed automatically.
+
 ## [0.12.3] - 2026-06-09
 
 - **Ubuntu arm64 images boot under software emulation too.** When QEMU has no

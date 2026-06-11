@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/yoebuild/yoe/internal/skills"
 )
 
 func RunInit(projectDir string, machine string) error {
@@ -153,6 +155,14 @@ func RunInit(projectDir string, machine string) error {
 	}
 
 	fmt.Printf("Created Yoe project at %s\n", projectDir)
+
+	// Drop yoe's Claude Code skills into the new project so Claude Code picks
+	// them up immediately. A failure here doesn't invalidate the project, so
+	// warn rather than abort.
+	if err := skills.Install(projectDir, false, os.Stdout); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not install skills: %v\n", err)
+	}
+
 	return nil
 }
 

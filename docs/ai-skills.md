@@ -252,9 +252,28 @@ References the actual Yocto documentation and provides side-by-side comparisons.
 /diff-from-yocto sstate-cache
 ```
 
+## Installing the skills
+
+The skills are baked into the `yoe` binary. To make them available to Claude
+Code in your project, install them into the project's `.claude/skills`
+directory:
+
+```sh
+yoe skills install   # copy the skills into ./.claude/skills
+yoe skills list      # list the skills embedded in this binary
+yoe skills update    # refresh them after upgrading yoe
+```
+
+This is a deliberate departure from Claude Code's plugin marketplace: rather than
+a managed plugin cache you can't easily edit, `yoe skills install` writes plain
+Markdown files that belong to your project. They're yours to read, tweak, and
+commit. `install` won't clobber a skill you've already edited (it skips and tells
+you); `yoe skills update` refreshes the yoe-managed skills to the running
+binary's versions, so keep heavily customized variants under a different name.
+See [`yoe skills`](yoe-tool.md) for the full behavior.
+
 ## Implementation Notes
 
-Skills are implemented as Claude Code plugins that ship with the `yoe` tool.
 Each skill:
 
 - Has access to the full project state via `yoe desc`, `yoe refs`, `yoe graph`,
