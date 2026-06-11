@@ -272,6 +272,22 @@ you); `yoe skills update` refreshes the yoe-managed skills to the running
 binary's versions, so keep heavily customized variants under a different name.
 See [`yoe skills`](yoe-tool.md) for the full behavior.
 
+### Or install as a Claude Code plugin
+
+`[yoe]` also publishes the same skills as a Claude Code plugin through a
+marketplace, for those who prefer managed, auto-updating installs over editable
+copies. From inside Claude Code:
+
+```text
+/plugin marketplace add yoebuild/yoe
+/plugin install yoe@yoe
+```
+
+The plugin and the embedded skills come from one source — `.claude/skills` in
+the [yoebuild/yoe](https://github.com/yoebuild/yoe) repository — so both paths
+deliver identical skills. Choose `yoe skills install` when you want to edit the
+skills, and the plugin when you want Claude Code to keep them updated for you.
+
 ## Implementation Notes
 
 Each skill:

@@ -1,0 +1,27 @@
+{
+  "name": "yoe",
+  "owner": {
+    "name": "yoebuild",
+    "email": "cbrake@bec-systems.com"
+  },
+  "description": "Claude Code skills for yoe, the AI-first embedded Linux build system",
+  "plugins": [
+    {
+      "name": "yoe",
+      "source": "./.claude",
+      "description": "AI skills for building embedded Linux distributions with yoe: create, update, and audit units, diagnose build failures, and pull packages from Alpine.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Cliff Brake",
+        "email": "cbrake@bec-systems.com"
+      },
+      "homepage": "https://github.com/yoebuild/yoe",
+      "license": "Apache-2.0",
+      "keywords": [
+        "embedded-linux",
+        "build-system",
+        "yoe"
+      ]
+    }
+  ]
+}

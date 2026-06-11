@@ -14,6 +14,10 @@ and this project adheres to
   project's `.claude/skills` so Claude Code picks them up. They're yours to edit,
   and `yoe skills update` refreshes them to the latest versions when you upgrade
   `yoe`. New projects from `yoe init` get them installed automatically.
+- **The skills are also available as a Claude Code plugin.** If you'd rather
+  Claude Code manage updates for you, add the marketplace with
+  `/plugin marketplace add yoebuild/yoe` and install `yoe@yoe` — the same skills,
+  delivered the standard plugin way.
 
 ## [0.12.3] - 2026-06-09
 
