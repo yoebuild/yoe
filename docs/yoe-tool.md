@@ -55,8 +55,8 @@ yoe clean           Remove build artifacts
 yoe container       Manage the build container (build, binfmt, status)
 ```
 
-All commands except `init`, `version`, `skills`, and `container` run inside an Alpine
-build container automatically. The container is built on first use from
+All commands except `init`, `version`, `skills`, and `container` run inside an
+Alpine build container automatically. The container is built on first use from
 `containers/Dockerfile.build`. See
 [Build Environment](build-environment.md#tier-0-bootstrap-module-automatic-container)
 for details.
@@ -1047,15 +1047,15 @@ yoe skills update
 untouched so your local edits survive, and the command reports it as skipped.
 Pass `--force` to overwrite, or use `update`, which always refreshes the
 yoe-managed skills to the binary's versions. Either way, only the skills `[yoe]`
-ships are touched — any skills you authored under `.claude/skills` are never read
-or modified.
+ships are touched — any skills you authored under `.claude/skills` are never
+read or modified.
 
 The installed copies are plain Markdown files that belong to your project. Edit
 them to fit your workflow; the next `yoe skills update` will overwrite your
 changes to the yoe-managed skills, so keep heavily customized variants under a
-different name. When run inside a project (a directory with `PROJECT.star`, found
-by walking up from the current directory), the skills land at the project root;
-otherwise they land in the current directory.
+different name. When run inside a project (a directory with `PROJECT.star`,
+found by walking up from the current directory), the skills land at the project
+root; otherwise they land in the current directory.
 
 ### Custom Commands
 
