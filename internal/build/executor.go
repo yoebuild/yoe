@@ -9,10 +9,12 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	yoe "github.com/yoebuild/yoe/internal"
 	"github.com/yoebuild/yoe/internal/artifact"
+	"github.com/yoebuild/yoe/internal/deb"
 	"github.com/yoebuild/yoe/internal/repo"
 	"github.com/yoebuild/yoe/internal/resolve"
 	"github.com/yoebuild/yoe/internal/source"
@@ -53,6 +55,14 @@ type Options struct {
 	// Parallel caps how many units build concurrently. Values <= 0 fall
 	// back to DefaultParallel; 1 forces fully sequential builds.
 	Parallel int
+	// EffectiveDistro is the consuming image's effective distro. When
+	// set, it folds into every unit's input hash so an untagged source
+	// unit consumed by both an alpine and a debian image hashes
+	// differently per consumer. Empty falls back to the project-level
+	// EffectiveDistro() (DefaultDistroOverride -> DefaultDistro). Per-
+	// image callers should pass the image's value explicitly via
+	// proj.EffectiveDistroForImage(name).
+	EffectiveDistro string
 }
 
 // syncWriter serializes concurrent writes from parallel unit builds so
@@ -133,17 +143,32 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		opts.Signer = signer
 	}
 
-	// Make the project's public key available under <repo>/keys/ before any
-	// unit's tasks run. Units that ship the key (base-files puts it under
-	// /etc/apk/keys/ in the rootfs) need it on disk during their own build,
-	// not after the first apk is published. Idempotent — Publish would
-	// rewrite the same bytes later.
-	repoDir := repo.RepoDir(proj, opts.ProjectDir)
+	// Make the project's public key available under
+	// <repo>/<distro>/keys/ before any unit's tasks run. Units that ship
+	// the key (base-files puts it under /etc/apk/keys/ in the rootfs)
+	// need it on disk during their own build, not after the first apk
+	// is published. Idempotent — Publish would rewrite the same bytes
+	// later. The pubkey lives under the per-distro subtree so each
+	// backend (apk + deb) owns its own key surface — Alpine's RSA key
+	// here, Debian's GPG key under debian/. Effective distro derivation
+	// moved up so it's available for this early bootstrap step.
+	effectiveDistro := opts.EffectiveDistro
+	if effectiveDistro == "" {
+		var derr error
+		effectiveDistro, derr = proj.EffectiveDistro()
+		if derr != nil {
+			return fmt.Errorf("resolving effective distro for build: %w", derr)
+		}
+		opts.EffectiveDistro = effectiveDistro
+	}
+	repoDir := repo.RepoDistroDir(proj, opts.ProjectDir, effectiveDistro)
 	if err := repo.WritePublicKey(repoDir, opts.Signer); err != nil {
 		return fmt.Errorf("publishing project public key: %w", err)
 	}
 
-	dag, err := resolve.BuildDAG(proj)
+	// BuildDAG iterates the per-distro view so cross-distro same-name
+	// collisions resolve to the variant the consuming distro expects.
+	dag, err := resolve.BuildDAG(proj, effectiveDistro)
 	if err != nil {
 		return err
 	}
@@ -166,8 +191,10 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 	// state — without that step, an uncommitted edit didn't change
 	// the hash and the build was served from cache, silently
 	// dropping the user's edits.
-	srcInputs := SrcInputsFn(opts.ProjectDir, opts.Arch, opts.Machine)
-	hashes, err := resolve.ComputeAllHashes(dag, opts.Arch, opts.Machine, srcInputs)
+	// effectiveDistro is already resolved above (the WritePublicKey
+	// path needs it). Re-use the pinned value rather than re-deriving.
+	srcInputs := SrcInputsFn(opts.ProjectDir, opts.Arch, opts.Machine, effectiveDistro)
+	hashes, err := resolve.ComputeAllHashes(dag, opts.Arch, opts.Machine, srcInputs, effectiveDistro)
 	if err != nil {
 		return err
 	}
@@ -198,10 +225,10 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 	// can show the full build queue before any work starts.
 	for _, name := range order {
 		hash := hashes[name]
-		unit := proj.Units[name]
+		unit := proj.LookupUnit(effectiveDistro, name)
 		sd := ScopeDir(unit, opts.Arch, opts.Machine)
 		forceThis := (opts.Force || opts.Clean) && (len(requested) == 0 || requested[name])
-		if !forceThis && !opts.NoCache && cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hash) {
+		if !forceThis && !opts.NoCache && cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hash, effectiveDistro) {
 			notify(name, "cached")
 		} else {
 			notify(name, "waiting")
@@ -248,11 +275,22 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		// rebuilt: units actually rebuilt this run, so dependents invalidate
 		// their cache even when input hashes are unchanged. Read/written by
 		// workers, so guarded by mu.
-		rebuilt  = map[string]bool{}
-		started  = map[string]bool{}
-		firstErr error
-		stop     bool // set on first failure or ctx cancel; no new work scheduled
+		rebuilt = map[string]bool{}
+		started = map[string]bool{}
+		// publishedDeb: an apt-family non-image unit published a .deb into
+		// the pool this run. imageRefreshed: an image unit ran its own
+		// pre-assembly index regen. Together they decide whether a single
+		// end-of-build index refresh is needed (deb published but no image
+		// rebuilt it). Guarded by mu.
+		publishedDeb   bool
+		imageRefreshed bool
+		firstErr       error
+		stop           bool // set on first failure or ctx cancel; no new work scheduled
+		// progress counts units reached (cached or built) for the
+		// "[building 34/133]" position indicator in the build log.
+		progress atomic.Int64
 	)
+	total := len(order)
 
 	sem := make(chan struct{}, parallel)
 	var wg sync.WaitGroup
@@ -279,7 +317,7 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		}
 		mu.Unlock()
 
-		unit := proj.Units[name]
+		unit := proj.LookupUnit(effectiveDistro, name)
 		hash := hashes[name]
 		sd := ScopeDir(unit, opts.Arch, opts.Machine)
 
@@ -298,15 +336,16 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		forceThis := (opts.Force || opts.Clean) && (len(requested) == 0 || requested[name])
 
 		built := false
+		n := progress.Add(1)
 		if !forceThis && !opts.NoCache && !depRebuilt &&
-			cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hash) {
-			fmt.Fprintf(sw, "%-20s [cached] %s\n", name, hash[:12])
+			cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hash, effectiveDistro) {
+			fmt.Fprintf(sw, "%-20s ⚡ [cached %d/%d units] %s\n", name, n, total, hash[:12])
 		} else {
-			fmt.Fprintf(sw, "%-20s [building]\n", name)
+			fmt.Fprintf(sw, "%-20s 🔨 [building %d/%d units]\n", name, n, total)
 			notify(name, "building")
 			if err := buildOne(ctx, proj, dag, unit, hash, opts, sw); err != nil {
 				notify(name, "failed")
-				fmt.Fprintf(sw, "%-20s [failed] %v\n", name, err)
+				fmt.Fprintf(sw, "%-20s ❌ [failed] %v\n", name, err)
 				blocked := blockedUnits(dag, name, order)
 				if len(blocked) > 0 {
 					fmt.Fprintf(sw, "  the following units depend on %s and cannot be built:\n", name)
@@ -322,8 +361,8 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 				mu.Unlock()
 				return
 			}
-			writeCacheMarker(opts.ProjectDir, sd, name, hash)
-			fmt.Fprintf(sw, "%-20s [done] %s\n", name, hash[:12])
+			writeCacheMarker(opts.ProjectDir, sd, name, hash, effectiveDistro)
+			fmt.Fprintf(sw, "%-20s ✅ [done] %s\n", name, hash[:12])
 			notify(name, "done")
 			built = true
 		}
@@ -333,6 +372,18 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		mu.Lock()
 		if built {
 			rebuilt[name] = true
+			if yoestar.IsAptFamily(opts.EffectiveDistro) {
+				switch unit.Class {
+				case "image":
+					// buildOne regenerated the index from the pool before
+					// assembly, so the on-disk index is already current.
+					imageRefreshed = true
+				case "container":
+					// containers don't publish .debs
+				default:
+					publishedDeb = true
+				}
+			}
 		}
 		for _, rd := range dag.Nodes[name].Rdeps {
 			if orderSet[rd] {
@@ -369,26 +420,89 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		// reported to the writer by the worker that hit the error.
 		return firstErr
 	}
+
+	// If .debs were published but no image rebuilt this run, the on-disk
+	// Packages/Release index would otherwise lag the pool (an image
+	// refreshes it before assembly; a direct deb-unit build has no such
+	// step). Regenerate it once from the pool — O(pool), paid a single
+	// time, versus the former per-publish regen that was O(units²).
+	if publishedDeb && !imageRefreshed {
+		suite, err := proj.SuiteForDistro(effectiveDistro)
+		if err != nil {
+			return fmt.Errorf("refresh %s index: %w", effectiveDistro, err)
+		}
+		if err := repo.GenerateDebianIndex(repo.DebRepoOptions{
+			RepoDir:    repo.RepoDistroDir(proj, opts.ProjectDir, effectiveDistro),
+			Suite:      suite,
+			Components: []string{"main"},
+			Arches:     []string{"amd64", "arm64"},
+		}); err != nil {
+			return fmt.Errorf("refresh %s index: %w", effectiveDistro, err)
+		}
+	}
 	return nil
+}
+
+// buildLogTailLines bounds how much of a failed unit's build.log is echoed
+// inline. Enough to capture the compiler/configure error and its context
+// without burying the terminal (or a CI log) in the full transcript; the
+// path is always printed so the complete log stays one open away.
+const buildLogTailLines = 50
+
+// reportBuildFailure surfaces a failed unit's build.log at the point of
+// failure. In verbose mode the log was already streamed to the terminal as
+// it ran, so only the path is noted. Otherwise the log lived only on disk —
+// useless when the build ran somewhere ephemeral like CI, where the runner
+// (and its filesystem) is discarded after the job — so echo the tail inline
+// so the actual error is visible from stdout alone.
+func reportBuildFailure(w io.Writer, unitName, taskName, logPath string, verbose bool) {
+	// Lead with the failing unit and task. Parallel builds interleave task
+	// lines from several units on the shared writer, and the log path names a
+	// scope dir that may not obviously match the unit, so without this header
+	// the reader cannot tell which unit actually failed.
+	fmt.Fprintf(w, "  ❌ FAILED: %s task: %s\n", unitName, taskName)
+	fmt.Fprintf(w, "  build log: %s\n", logPath)
+	if verbose {
+		return
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		return
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return
+	}
+	if len(lines) > buildLogTailLines {
+		lines = lines[len(lines)-buildLogTailLines:]
+		fmt.Fprintf(w, "  ── build.log (last %d lines) ──\n", buildLogTailLines)
+	} else {
+		fmt.Fprintf(w, "  ── build.log ──\n")
+	}
+	for _, ln := range lines {
+		fmt.Fprintf(w, "  │ %s\n", ln)
+	}
+	fmt.Fprintf(w, "  ──\n")
 }
 
 func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit *yoestar.Unit, hash string, opts Options, w io.Writer) (buildErr error) {
 	sd := ScopeDir(unit, opts.Arch, opts.Machine)
-	buildDir := UnitBuildDir(opts.ProjectDir, sd, unit.Name)
+	distro := opts.EffectiveDistro
+	buildDir := UnitBuildDir(opts.ProjectDir, sd, unit.Name, distro)
 	EnsureDir(buildDir)
 
 	// Skip if another process is already building this unit.
-	if IsBuildInProgress(opts.ProjectDir, sd, unit.Name) {
-		fmt.Fprintf(w, "  %s: build already in progress, skipping\n", unit.Name)
+	if IsBuildInProgress(opts.ProjectDir, sd, unit.Name, distro) {
+		fmt.Fprintf(w, "  ⏭️  %s: build already in progress, skipping\n", unit.Name)
 		return nil
 	}
 
 	// Remove the cache marker before starting so a cancelled or failed
 	// build does not leave a stale marker that makes it appear cached.
-	os.Remove(CacheMarkerPath(opts.ProjectDir, sd, unit.Name, hash))
+	os.Remove(CacheMarkerPath(opts.ProjectDir, sd, unit.Name, hash, distro))
 
 	// Write a lock file so other yoe instances can detect an in-progress build.
-	lockPath := BuildingLockPath(opts.ProjectDir, sd, unit.Name)
+	lockPath := BuildingLockPath(opts.ProjectDir, sd, unit.Name, distro)
 	os.WriteFile(lockPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
 	defer os.Remove(lockPath)
 
@@ -476,7 +590,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 
 	// Resolve container image early so destdir cleanup can recover from
 	// root-owned files left by a previous failed image build.
-	containerImage := resolveContainerImage(proj, unit, opts.Arch)
+	containerImage := resolveContainerImage(proj, unit, opts.Arch, opts.EffectiveDistro)
 
 	// No post-image chown-back-to-host defer. The image class deliberately
 	// preserves per-file ownership from each apk's tar headers so that
@@ -512,21 +626,25 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		if meta := ReadMeta(buildDir); meta != nil {
 			cachedSourceState = meta.SourceState
 		}
-		if _, err := source.Prepare(opts.ProjectDir, sd, unit, cachedSourceState, w); err != nil {
+		if _, err := source.Prepare(opts.ProjectDir, sd, opts.EffectiveDistro, unit, cachedSourceState, w); err != nil {
 			return fmt.Errorf("preparing source: %w", err)
 		}
 	} else {
 		EnsureDir(srcDir)
 	}
 
-	if len(unit.Tasks) == 0 {
+	// Skip only when there's genuinely nothing to produce. Companion
+	// units with no tasks but services=[...] need to fall through to
+	// CreateAPK so materializeServiceSymlinks bakes the runlevel
+	// symlinks; the task loop below tolerates an empty Tasks slice.
+	if len(unit.Tasks) == 0 && len(unit.Services) == 0 {
 		fmt.Fprintf(w, "  (no tasks for %s class %q)\n", unit.Name, unit.Class)
 		return nil
 	}
 
 	// Assemble per-unit sysroot from transitive deps
 	sysroot := filepath.Join(buildDir, "sysroot")
-	if err := AssembleSysroot(sysroot, dag, unit.Name, opts.ProjectDir, opts.Arch); err != nil {
+	if err := AssembleSysroot(sysroot, dag, unit.Name, opts.ProjectDir, opts.Arch, distro); err != nil {
 		return fmt.Errorf("assembling sysroot: %w", err)
 	}
 	// Extract console device from machine kernel cmdline (e.g., "console=ttyS0,115200" → "ttyS0")
@@ -545,21 +663,48 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	}
 
 	env := map[string]string{
-		"PREFIX":          "/usr",
-		"DESTDIR":         "/build/destdir",
-		"NPROC":           NProc(),
-		"ARCH":            opts.Arch,
-		"MACHINE":         opts.Machine,
-		"CONSOLE":         console,
-		"HOME":            "/tmp",
-		"PATH":            "/build/sysroot/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		"PKG_CONFIG_PATH": "/build/sysroot/usr/lib/pkgconfig:/usr/lib/pkgconfig",
+		"PREFIX":  "/usr",
+		"DESTDIR": "/build/destdir",
+		"NPROC":   NProc(),
+		"ARCH":    opts.Arch,
+		"MACHINE": opts.Machine,
+		// The consuming image's effective distro, so a build-twice
+		// source unit can branch on it (e.g. base-files giving root a
+		// bash login shell on Debian but the busybox /bin/sh on
+		// Alpine). Already a unit-hash input, so this only surfaces what
+		// the cache key already distinguishes.
+		"DISTRO":  opts.EffectiveDistro,
+		"CONSOLE": console,
+		"HOME":    "/tmp",
+		"PATH":    "/build/sysroot/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		// Debian's multiarch layout puts arch-specific libs, .pc files,
+		// and the core dynamic loader under /usr/lib/<tuple>/ and
+		// /lib/<tuple>/. Include those alongside the legacy /usr/lib
+		// paths so debian-feed deps (liblzma-dev's liblzma.pc,
+		// libssl-dev's libssl.pc, libc6's ld-linux) are visible to
+		// pkg-config / ld / rtld during builds. Alpine ignores the
+		// multiarch paths since they don't exist in its sysroot.
+		"PKG_CONFIG_PATH": fmt.Sprintf("/build/sysroot/usr/lib/pkgconfig:/build/sysroot/usr/lib/%s/pkgconfig:/usr/lib/pkgconfig:/usr/lib/%s/pkgconfig", multiarchTuple(opts.Arch), multiarchTuple(opts.Arch)),
 		"CFLAGS":          "-I/build/sysroot/usr/include",
 		"CPPFLAGS":        "-I/build/sysroot/usr/include",
-		"LDFLAGS":         "-L/build/sysroot/usr/lib",
-		"LD_LIBRARY_PATH": "/build/sysroot/usr/lib",
+		"LDFLAGS":         fmt.Sprintf("-L/build/sysroot/usr/lib -L/build/sysroot/usr/lib/%s -L/build/sysroot/lib/%s", multiarchTuple(opts.Arch), multiarchTuple(opts.Arch)),
+		"LD_LIBRARY_PATH": fmt.Sprintf("/build/sysroot/usr/lib:/build/sysroot/usr/lib/%s:/build/sysroot/lib/%s", multiarchTuple(opts.Arch), multiarchTuple(opts.Arch)),
 		"PYTHONPATH":      "/build/sysroot/usr/lib/python3.12/site-packages",
-		"REPO":            filepath.Join("/project", repoRelPath(proj, opts.ProjectDir)),
+		"REPO":            filepath.Join("/project", repoRelPath(proj, opts.ProjectDir), opts.EffectiveDistro),
+	}
+
+	// Expose the release codename to the build as $SUITE so the image
+	// class's mmdebstrap invocation targets the same suite the repo
+	// emitter stamps, both sourced from the project's apt_feed. Only
+	// meaningful for apt-family distros (Debian, Ubuntu); an alpine build
+	// has no apt_feed and skips it. Errors loudly if an apt build can't
+	// resolve a suite — the rootfs assembly can't proceed without one.
+	if yoestar.IsAptFamily(opts.EffectiveDistro) {
+		suite, serr := proj.SuiteForDistro(opts.EffectiveDistro)
+		if serr != nil {
+			return fmt.Errorf("resolving %s suite: %w", opts.EffectiveDistro, serr)
+		}
+		env["SUITE"] = suite
 	}
 
 	// Expose the project's signing key info so units that need to ship the
@@ -568,7 +713,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	// key file is YOE_KEY_NAME inside it. Both are unset when the build
 	// runs without a Signer (apk add then needs --allow-untrusted).
 	if opts.Signer != nil {
-		env["YOE_KEYS_DIR"] = filepath.Join("/project", repoRelPath(proj, opts.ProjectDir), "keys")
+		env["YOE_KEYS_DIR"] = filepath.Join("/project", repoRelPath(proj, opts.ProjectDir), opts.EffectiveDistro, "keys")
 		env["YOE_KEY_NAME"] = opts.Signer.KeyName
 	}
 
@@ -606,9 +751,38 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	}
 	tctxData := BuildTemplateContext(unit, opts.Arch, opts.Machine, console, projectName, projectVersion)
 
+	// Debian image assembly reads the project repo's Packages index as
+	// mmdebstrap's copy: source. Regenerate it from the current pool
+	// before assembling so the index can never lag the pool: the index
+	// is otherwise only rewritten when a unit publishes a .deb, so an
+	// image-only rebuild (nothing published) reuses whatever the last
+	// publish left. A stale stanza for a .deb that has since been
+	// removed makes apt resolve to a version whose file no longer
+	// exists and abort the whole rootfs ("Failed to stat ... No such
+	// file or directory"). GenerateDebianIndex scans the pool, so a
+	// refresh here always matches what is actually on disk.
+	if unit.Class == "image" && yoestar.IsAptFamily(opts.EffectiveDistro) {
+		suite, serr := proj.SuiteForDistro(opts.EffectiveDistro)
+		if serr != nil {
+			return fmt.Errorf("refresh %s index: %w", opts.EffectiveDistro, serr)
+		}
+		if err := repo.GenerateDebianIndex(repo.DebRepoOptions{
+			RepoDir:    repo.RepoDistroDir(proj, opts.ProjectDir, opts.EffectiveDistro),
+			Suite:      suite,
+			Components: []string{"main"},
+			Arches:     []string{"amd64", "arm64"},
+		}); err != nil {
+			return fmt.Errorf("refresh %s index: %w", opts.EffectiveDistro, err)
+		}
+	}
+
 	// Execute tasks
 	for ti, t := range unit.Tasks {
-		fmt.Fprintf(w, "  [%d/%d] task: %s\n", ti+1, len(unit.Tasks), t.Name)
+		// Lead with the unit name (same column as the [building]/[done]
+		// status lines): parallel builds interleave these task lines from
+		// several units on the shared writer, so the name is what tells you
+		// which unit a given task line belongs to.
+		fmt.Fprintf(w, "%-20s [%d/%d] task: %s\n", unit.Name, ti+1, len(unit.Tasks), t.Name)
 		fmt.Fprintf(logW, "  task: %s (%d steps)\n", t.Name, len(t.Steps))
 
 		// Per-task container override
@@ -616,7 +790,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		if t.Container != "" {
 			taskUnit := *unit
 			taskUnit.Container = t.Container
-			taskContainer = resolveContainerImage(proj, &taskUnit, opts.Arch)
+			taskContainer = resolveContainerImage(proj, &taskUnit, opts.Arch, opts.EffectiveDistro)
 		}
 
 		for i, step := range t.Steps {
@@ -637,9 +811,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 				hostEnv["SRCDIR"] = srcDir
 				hostEnv["SYSROOT"] = sysroot
 				if err := doInstallStep(unit, step.Install, tctxData, hostEnv); err != nil {
-					if !opts.Verbose {
-						fmt.Fprintf(w, "  build log: %s\n", logPath)
-					}
+					reportBuildFailure(w, unit.Name, t.Name, logPath, opts.Verbose)
 					return fmt.Errorf("task %s: %w", t.Name, err)
 				}
 				continue
@@ -664,9 +836,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 					Stderr:     logW,
 				}
 				if err := RunInSandbox(cfg, step.Command); err != nil {
-					if !opts.Verbose {
-						fmt.Fprintf(w, "  build log: %s\n", logPath)
-					}
+					reportBuildFailure(w, unit.Name, t.Name, logPath, opts.Verbose)
 					return err
 				}
 			} else if step.Fn != nil {
@@ -689,60 +859,207 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 				}
 				thread := NewBuildThread(ctx, cfg, RealExecer{})
 				if _, err := starlark.Call(thread, step.Fn, nil, nil); err != nil {
-					if !opts.Verbose {
-						fmt.Fprintf(w, "  build log: %s\n", logPath)
-					}
+					reportBuildFailure(w, unit.Name, t.Name, logPath, opts.Verbose)
 					return fmt.Errorf("task %s: %w", t.Name, err)
 				}
 			}
 		}
 	}
 
-	// Package the output into an .apk and publish to the local repo.
-	// Then stage destdir for downstream units' per-unit sysroots.
+	// Package the output and publish to the local repo. Then stage
+	// destdir for downstream units' per-unit sysroots.
+	//
+	// Branch by the consuming image's effective distro, not the unit's
+	// own Distro tag. A source unit visible to every distro (Distro
+	// unset) builds once per distro that reaches it (the build-twice
+	// model) and packages in that distro's native format: .deb for a
+	// Debian image, .apk otherwise — so module-core's bash becomes a
+	// .deb in a Debian closure and a .apk in an Alpine closure. Feed
+	// passthrough units only ever appear in their own distro's closure,
+	// so EffectiveDistro matches their tag and the branch is unchanged
+	// for them.
 	if unit.Class != "image" && unit.Class != "container" {
-		archDir := RepoArchDir(unit, opts.Arch)
-		var (
-			apkPath string
-			err     error
-		)
-		if unit.PassthroughAPK != "" {
-			// Re-sign the upstream apk verbatim — keeps Alpine's PKGINFO
-			// and install scripts intact. The tasks above still run so
-			// destdir is populated for downstream units' sysroots.
-			srcAPK := filepath.Join(srcDir, unit.PassthroughAPK)
-			apkPath, err = artifact.RepackAPK(unit, srcAPK, filepath.Join(buildDir, "pkg"), opts.Signer)
-			if err != nil {
-				return fmt.Errorf("repacking upstream apk: %w", err)
+		switch {
+		case yoestar.IsAptFamily(opts.EffectiveDistro):
+			if err := packageDeb(unit, destDir, srcDir, buildDir, opts, proj, w); err != nil {
+				return fmt.Errorf("packaging deb: %w", err)
 			}
-			// Honor upstream PKGINFO's arch when publishing. apk-tools
-			// constructs fetch URLs as `<repo>/<pkg.arch>/<file>.apk`
-			// using the package's own arch — so a noarch apk physically
-			// has to live in `<repo>/noarch/` regardless of which arch's
-			// build invoked us. Each per-arch APKINDEX picks up noarch
-			// entries via GenerateIndex's sibling-dir scan.
-			if a, aerr := artifact.ReadAPKArch(srcAPK); aerr == nil && a != "" {
-				archDir = a
+		default:
+			if err := packageAPK(unit, destDir, sysroot, srcDir, buildDir, opts, proj, w); err != nil {
+				return err
 			}
-		} else {
-			apkPath, err = artifact.CreateAPK(unit, destDir, sysroot, filepath.Join(buildDir, "pkg"), archDir, opts.ProjectCommit, opts.Signer)
-			if err != nil {
-				return fmt.Errorf("creating apk: %w", err)
-			}
-		}
-		fmt.Fprintf(w, "  → %s\n", filepath.Base(apkPath))
-
-		repoDir := repo.RepoDir(proj, opts.ProjectDir)
-		if err := repo.Publish(apkPath, repoDir, archDir, opts.Signer); err != nil {
-			return fmt.Errorf("publishing to repo: %w", err)
 		}
 
 		if err := StageSysroot(destDir, buildDir); err != nil {
-			fmt.Fprintf(w, "  (warning: sysroot staging failed: %v)\n", err)
+			fmt.Fprintf(w, "  ⚠️  (warning: sysroot staging failed: %v)\n", err)
 		}
 	}
 
 	return nil
+}
+
+// packageAPK is the alpine-side packaging branch — extracted from the
+// inline body when the deb branch was added. Repacks the upstream apk
+// when PassthroughAPK is set, else builds a fresh apk from destdir.
+func packageAPK(unit *yoestar.Unit, destDir, sysroot, srcDir, buildDir string, opts Options, proj *yoestar.Project, w io.Writer) error {
+	archDir := RepoArchDir(unit, opts.Arch)
+	var (
+		apkPath string
+		err     error
+	)
+	if unit.PassthroughAPK != "" {
+		srcAPK := filepath.Join(srcDir, unit.PassthroughAPK)
+		apkPath, err = artifact.RepackAPK(unit, srcAPK, filepath.Join(buildDir, "pkg"), opts.Signer)
+		if err != nil {
+			return fmt.Errorf("repacking upstream apk: %w", err)
+		}
+		if a, aerr := artifact.ReadAPKArch(srcAPK); aerr == nil && a != "" {
+			archDir = a
+		}
+	} else {
+		apkPath, err = artifact.CreateAPK(unit, destDir, sysroot, filepath.Join(buildDir, "pkg"), archDir, opts.ProjectCommit, opts.Signer)
+		if err != nil {
+			return fmt.Errorf("creating apk: %w", err)
+		}
+	}
+	fmt.Fprintf(w, "  📦 %s\n", filepath.Base(apkPath))
+
+	repoDir := repo.RepoDistroDir(proj, opts.ProjectDir, opts.EffectiveDistro)
+	if err := repo.Publish(apkPath, repoDir, archDir, opts.Signer); err != nil {
+		return fmt.Errorf("publishing to repo: %w", err)
+	}
+	return nil
+}
+
+// packageDeb is the debian-side packaging branch. PassthroughDeb units
+// (mirror-verbatim from a apt_feed) copy the upstream .deb into the
+// project pool. Project source units run dpkg-deb --build over destDir.
+func packageDeb(unit *yoestar.Unit, destDir, srcDir, buildDir string, opts Options, proj *yoestar.Project, w io.Writer) error {
+	pkgDir := filepath.Join(buildDir, "pkg")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir pkg: %w", err)
+	}
+
+	var debPath string
+	if unit.PassthroughDeb != "" {
+		// Mirror-verbatim: copy the upstream .deb out of srcDir to
+		// the project pool. R15 SHA256 verification fires here.
+		src := filepath.Join(srcDir, unit.PassthroughDeb)
+		if unit.SHA256 != "" {
+			if err := repo.VerifyMirrorSHA256(src, unit.SHA256); err != nil {
+				return err
+			}
+		}
+		debPath = filepath.Join(pkgDir, unit.PassthroughDeb)
+		if err := copyDebFile(src, debPath); err != nil {
+			return fmt.Errorf("copy passthrough deb: %w", err)
+		}
+	} else {
+		// Build from destDir. Derive control fields from the unit's
+		// metadata; for v1 we use the unit name, version, runtime
+		// deps, and project maintainer.
+		debArch := debArchForYoe(opts.Arch)
+		fname := fmt.Sprintf("%s_%s_%s.deb", unit.Name, unit.Version, debArch)
+		debPath = filepath.Join(pkgDir, fname)
+
+		c := deb.Control{
+			Package:      unit.Name,
+			Version:      unit.Version,
+			Architecture: debArch,
+			Maintainer:   "Yoe <build@yoe.local>",
+			Description:  unit.Description,
+			Depends:      strings.Join(unit.RuntimeDeps, ", "),
+			Provides:     debProvides(unit.Provides, unit.Version),
+		}
+		if c.Description == "" {
+			c.Description = unit.Name
+		}
+		// Bake systemd service wants symlinks before dpkg-deb sees
+		// destDir (yoe's "services follow packages" pattern).
+		if err := deb.MaterializeSystemdServiceSymlinks(destDir, "", unit.Services); err != nil {
+			return fmt.Errorf("service symlinks: %w", err)
+		}
+		if err := deb.BuildDeb(destDir, c, debPath, ""); err != nil {
+			return fmt.Errorf("BuildDeb: %w", err)
+		}
+	}
+	fmt.Fprintf(w, "  📦 %s\n", filepath.Base(debPath))
+
+	// Publish into the project pool and regenerate the per-arch
+	// Packages + Release + InRelease at repo/<project>/<distro>/.
+	suite, err := proj.SuiteForDistro(opts.EffectiveDistro)
+	if err != nil {
+		return fmt.Errorf("packaging deb: %w", err)
+	}
+	repoDir := repo.RepoDistroDir(proj, opts.ProjectDir, opts.EffectiveDistro)
+	publishOpts := repo.DebRepoOptions{
+		RepoDir:    repoDir,
+		Suite:      suite,
+		Components: []string{"main"},
+		Arches:     []string{"amd64", "arm64"},
+	}
+	if err := repo.PublishDeb(debPath, publishOpts, "main"); err != nil {
+		return fmt.Errorf("PublishDeb: %w", err)
+	}
+	return nil
+}
+
+// debProvides emits a unit's Provides as versioned self-provides:
+// "libssl3" with unit version 3.4.1 becomes "libssl3 (= 3.4.1)". apt
+// enforces that an unversioned Provides cannot satisfy a versioned
+// Depends (e.g. a feed package's "libssl3 (>= 3.0.0)"), so a
+// source-built unit that owns a SONAME-style virtual must declare the
+// version it provides or apt rejects the closure as unmet. An entry
+// that already carries an explicit "(...)" version is passed through
+// untouched. The Alpine path is intentionally not versioned this way —
+// apk resolves library deps through auto-generated SONAME provides, and
+// the manual names there only claim Alpine's package names to avoid
+// file conflicts.
+func debProvides(provides []string, version string) string {
+	if len(provides) == 0 {
+		return ""
+	}
+	out := make([]string, 0, len(provides))
+	for _, p := range provides {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if strings.Contains(p, "(") {
+			out = append(out, p) // already versioned/qualified
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s (= %s)", p, version))
+	}
+	return strings.Join(out, ", ")
+}
+
+func debArchForYoe(yoeArch string) string {
+	switch yoeArch {
+	case "x86_64":
+		return "amd64"
+	case "arm64":
+		return "arm64"
+	default:
+		return yoeArch
+	}
+}
+
+func copyDebFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 func filterBuildOrder(dag *resolve.DAG, fullOrder []string, names []string) ([]string, error) {
@@ -791,11 +1108,11 @@ func blockedUnits(dag *resolve.DAG, failed string, order []string) []string {
 func dryRun(w io.Writer, proj *yoestar.Project, order []string, hashes map[string]string, opts Options, requested map[string]bool) error {
 	fmt.Fprintln(w, "Dry run — would build in this order:")
 	for _, name := range order {
-		unit := proj.Units[name]
+		unit := proj.LookupUnit(opts.EffectiveDistro, name)
 		sd := ScopeDir(unit, opts.Arch, opts.Machine)
 		cached := ""
 		forceThis := (opts.Force || opts.Clean) && (len(requested) == 0 || requested[name])
-		if !forceThis && cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hashes[name]) {
+		if !forceThis && cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hashes[name], opts.EffectiveDistro) {
 			cached = " [cached, skip]"
 		}
 		fmt.Fprintf(w, "  %-20s [%s] %s%s\n", name, unit.Class, hashes[name][:12], cached)
@@ -816,7 +1133,16 @@ func hasTask(unit *yoestar.Unit, name string) bool {
 // resolveContainerImage returns the Docker image tag for a unit's container.
 // For container units (referenced by name), the tag is yoe/<name>:<version>-<arch>.
 // For external images (containing ":" or "/"), the value is used directly.
-func resolveContainerImage(proj *yoestar.Project, unit *yoestar.Unit, arch string) string {
+//
+// Per R9 (toolchain dispatch via provides + distro), a virtual reference
+// like Container="toolchain" is dereferenced through the project's
+// Provides table to a concrete container unit. The dispatch distro is
+// the unit's own Distro tag when set; otherwise effectiveDistro (the
+// consuming image's, or the project default for image-less builds) is
+// used so untagged source units like module-core's `file` route through
+// the correct backend toolchain instead of the global Provides table's
+// alphabetical first.
+func resolveContainerImage(proj *yoestar.Project, unit *yoestar.Unit, arch, effectiveDistro string) string {
 	container := unit.Container
 	if container == "" {
 		return ""
@@ -827,9 +1153,36 @@ func resolveContainerImage(proj *yoestar.Project, unit *yoestar.Unit, arch strin
 		return container
 	}
 
-	// Container unit — look up version and build tag.
-	// Always include arch in tag for explicitness.
-	if cu, ok := proj.Units[container]; ok {
+	// Distro context: unit's own tag wins; otherwise fall back to the
+	// caller-supplied effectiveDistro so untagged source units still
+	// dispatch to the right backend toolchain.
+	distroCtx := unit.Distro
+	if distroCtx == "" {
+		distroCtx = effectiveDistro
+	}
+
+	// Virtual reference — dereference through Provides to the concrete
+	// container unit, distro-aware. Looks like Container="toolchain"
+	// -> "toolchain-debian-13" (debian), "toolchain-ubuntu-26.04" (ubuntu),
+	// or "toolchain-musl" (alpine). Falls
+	// through to literal interpretation when no provider exists,
+	// preserving back-compat for Container="toolchain-musl" literal
+	// references.
+	if resolved := proj.ResolveProvidesForDistro(container, distroCtx); resolved != "" {
+		container = resolved
+	}
+
+	// Container unit — look up version and build tag. Resolve in the
+	// distro context: an alpine source unit picks toolchain-musl, a
+	// debian source unit picks toolchain-debian-13. Falls back to the
+	// cross-module AnyUnit lookup when nothing matches so the literal-
+	// container path (e.g. container="toolchain-musl") still finds its
+	// container regardless of which distro registered it.
+	cu := proj.LookupUnit(distroCtx, container)
+	if cu == nil {
+		cu = proj.AnyUnit(container)
+	}
+	if cu != nil {
 		imageArch := arch
 		if unit.ContainerArch == "host" {
 			imageArch = Arch()
@@ -889,12 +1242,12 @@ func chownDirToHost(ctx context.Context, dir, projectDir, image string) error {
 
 // --- Simple file-based cache ---
 
-func CacheMarkerPath(projectDir, arch, name, hash string) string {
-	return filepath.Join(UnitBuildDir(projectDir, arch, name), ".yoe-hash")
+func CacheMarkerPath(projectDir, arch, name, hash, distro string) string {
+	return filepath.Join(UnitBuildDir(projectDir, arch, name, distro), ".yoe-hash")
 }
 
-func IsBuildCached(projectDir, arch, name, hash string) bool {
-	data, err := os.ReadFile(CacheMarkerPath(projectDir, arch, name, hash))
+func IsBuildCached(projectDir, arch, name, hash, distro string) bool {
+	data, err := os.ReadFile(CacheMarkerPath(projectDir, arch, name, hash, distro))
 	if err != nil {
 		return false
 	}
@@ -910,16 +1263,34 @@ func IsBuildCached(projectDir, arch, name, hash string) bool {
 // and arch (the actual target architecture) because they diverge for
 // machine-scoped units: the build cache lives under build/<machine>/, but
 // the apk lives under repo/.../<arch>/.
-func cacheValid(proj *yoestar.Project, projectDir string, unit *yoestar.Unit, scopeDir, arch, hash string) bool {
-	if !IsBuildCached(projectDir, scopeDir, unit.Name, hash) {
+func cacheValid(proj *yoestar.Project, projectDir string, unit *yoestar.Unit, scopeDir, arch, hash, distro string) bool {
+	if !IsBuildCached(projectDir, scopeDir, unit.Name, hash, distro) {
 		return false
 	}
 	if unit.Class == "image" || unit.Class == "container" {
 		return true
 	}
+	repoBase := repo.RepoDistroDir(proj, projectDir, distro)
+
+	// Apt-family units (Debian, Ubuntu, …) publish a .deb into the pool,
+	// not an .apk into an arch dir. Confirm the pooled .deb exists;
+	// without this branch the .apk stat below always misses and every
+	// passthrough (and every source .deb) looks stale, rebuilding on
+	// every run. Keying this off the literal "debian" string instead of
+	// the apt-family set let every Ubuntu package rebuild each run. The
+	// pool layout is pool/<component>/<initial>/<source>/<file>, so glob
+	// three levels deep for the package filename.
+	if yoestar.IsAptFamily(distro) {
+		debName := filepath.Base(unit.PassthroughDeb)
+		if debName == "." || debName == "" {
+			debName = fmt.Sprintf("%s_%s_%s.deb", unit.Name, unit.Version, debArchForYoe(arch))
+		}
+		matches, _ := filepath.Glob(filepath.Join(repoBase, "pool", "*", "*", "*", debName))
+		return len(matches) > 0
+	}
+
 	archDir := RepoArchDir(unit, arch)
 	apkName := fmt.Sprintf("%s-%s-r%d.apk", unit.Name, unit.Version, unit.Release)
-	repoBase := repo.RepoDir(proj, projectDir)
 	if _, err := os.Stat(filepath.Join(repoBase, archDir, apkName)); err == nil {
 		return true
 	}
@@ -935,20 +1306,20 @@ func cacheValid(proj *yoestar.Project, projectDir string, unit *yoestar.Unit, sc
 	return false
 }
 
-func HasBuildLog(projectDir, arch, name string) bool {
-	_, err := os.Stat(filepath.Join(UnitBuildDir(projectDir, arch, name), "build.log"))
+func HasBuildLog(projectDir, arch, name, distro string) bool {
+	_, err := os.Stat(filepath.Join(UnitBuildDir(projectDir, arch, name, distro), "build.log"))
 	return err == nil
 }
 
 // BuildingLockPath returns the path of the lock file written during a build.
-func BuildingLockPath(projectDir, arch, name string) string {
-	return filepath.Join(UnitBuildDir(projectDir, arch, name), ".lock")
+func BuildingLockPath(projectDir, arch, name, distro string) string {
+	return filepath.Join(UnitBuildDir(projectDir, arch, name, distro), ".lock")
 }
 
 // IsBuildInProgress returns true if another process is currently building this unit.
 // It checks for the lock file and verifies the PID is still alive.
-func IsBuildInProgress(projectDir, arch, name string) bool {
-	data, err := os.ReadFile(BuildingLockPath(projectDir, arch, name))
+func IsBuildInProgress(projectDir, arch, name, distro string) bool {
+	data, err := os.ReadFile(BuildingLockPath(projectDir, arch, name, distro))
 	if err != nil {
 		return false
 	}
@@ -958,8 +1329,8 @@ func IsBuildInProgress(projectDir, arch, name string) bool {
 	return err == nil
 }
 
-func writeCacheMarker(projectDir, arch, name, hash string) {
-	path := CacheMarkerPath(projectDir, arch, name, hash)
+func writeCacheMarker(projectDir, arch, name, hash, distro string) {
+	path := CacheMarkerPath(projectDir, arch, name, hash, distro)
 	EnsureDir(filepath.Dir(path))
 	os.WriteFile(path, []byte(hash), 0644)
 }
@@ -1003,10 +1374,14 @@ func repoRelPath(proj *yoestar.Project, projectDir string) string {
 // would treat dev units as cache-neutral at startup, never matching
 // the executor-written marker, and dev units would always show as
 // uncached on TUI restart.
-func SrcInputsFn(projectDir, arch, machine string) func(u *yoestar.Unit) string {
+//
+// distro is the consuming image's effective distro (drives the
+// build-dir path); SrcInputsFn looks at the unit's BuildMeta to decide
+// pin-vs-dev, which is per-distro state now that the layout splits.
+func SrcInputsFn(projectDir, arch, machine, distro string) func(u *yoestar.Unit) string {
 	return func(u *yoestar.Unit) string {
 		sd := ScopeDir(u, arch, machine)
-		buildDir := UnitBuildDir(projectDir, sd, u.Name)
+		buildDir := UnitBuildDir(projectDir, sd, u.Name, distro)
 		persisted := source.StateEmpty
 		if meta := ReadMeta(buildDir); meta != nil {
 			persisted = source.State(meta.SourceState)

@@ -1,0 +1,136 @@
+name: E2E Build
+
+# Full from-source build of dev-image (base-image plus diagnostic/developer
+# tools): the bootstrap toolchain, musl/glibc, busybox, the kernel, and image
+# assembly. This is the expensive regression tier, so it runs on a nightly
+# schedule and on demand -- not on every push or pull request.
+#
+# The matrix covers all three distros (alpine, debian, ubuntu) on both host
+# architectures (x86_64, arm64). Builds are native -- each job runs on a host
+# whose arch matches its target machine, so there is no QEMU user-mode
+# emulation in the build path. Each cell surfaces as its own CI check, e.g.
+# "E2E Build (alpine / x86_64)".
+#
+# After building, each cell boots the image in QEMU (`yoe run --boot-test`):
+# it waits for the serial console to reach the login prompt, SSHes in and runs
+# a health command, then powers off -- catching boot/runtime regressions a
+# build alone can't. The boot runs KVM-accelerated when the runner exposes
+# /dev/kvm and falls back to slower TCG emulation otherwise.
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-build:
+    name: E2E Build (${{ matrix.distro }} / ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+
+    strategy:
+      # Surface every distro/arch failure independently rather than cancelling
+      # siblings on the first red cell.
+      fail-fast: false
+      matrix:
+        distro: [alpine, debian, ubuntu]
+        arch: [x86_64, arm64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+            machine: qemu-x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            machine: qemu-arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          # A cold from-source build (toolchain, kernel, cache, container
+          # image) needs more headroom than the runner ships with. The Android
+          # SDK and CodeQL caches only exist on the x86_64 runner image, so
+          # tolerate their absence on arm64.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL || true
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Enable unprivileged user namespaces
+        run: |
+          # Ubuntu 24.04 (both x86_64 and arm64 runner images) restricts
+          # unprivileged user namespaces via AppArmor, which makes bwrap inside
+          # the build container fail with "setting up uid map: Permission
+          # denied" even though the container is --privileged.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build yoe
+        run: |
+          VERSION=$(git describe --tags HEAD 2>/dev/null || echo "dev")
+          go build -ldflags "-X main.version=${VERSION}" -o yoe ./cmd/yoe
+
+      - name: Cache yoe build cache
+        uses: actions/cache@v4
+        with:
+          # Content-addressed objects, synced modules, and fetched sources.
+          # The run-id key always saves a fresh cache; restore-keys pulls the
+          # most recent prior cache so successive runs build incrementally. The
+          # key is scoped per distro and arch so the four matrix cells do not
+          # clobber one another's caches.
+          path: testdata/e2e-project/cache
+          key: yoe-cache-${{ matrix.distro }}-${{ matrix.arch }}-${{ github.run_id }}
+          restore-keys: |
+            yoe-cache-${{ matrix.distro }}-${{ matrix.arch }}-
+
+      # The build's implicit module sync only clones missing modules; it does
+      # not advance an already-cached module to the latest commit on its branch
+      # ref. Since the build cache (restored above) persists module checkouts
+      # across runs, a branch-pinned module (e.g. module-debian @ trixie) would
+      # stay frozen at whatever commit it was first cloned at. An explicit sync
+      # fast-forwards every cached module to its pinned ref before building.
+      - name: Sync modules
+        working-directory: testdata/e2e-project
+        run: ../../yoe module sync
+
+      - name: Build dev-image
+        working-directory: testdata/e2e-project
+        run: ../../yoe build -j "$(nproc)" --distro ${{ matrix.distro }} --machine ${{ matrix.machine }} dev-image
+
+      - name: Verify image artifact
+        working-directory: testdata/e2e-project
+        run: |
+          img=build/${{ matrix.distro }}/dev-image.${{ matrix.machine }}/destdir/dev-image.img
+          if [ ! -s "$img" ]; then
+            echo "::error::dev-image build produced no image at $img"
+            exit 1
+          fi
+          ls -lh "$img"
+
+      - name: Install QEMU
+        run: |
+          # The runner image ships no qemu-system, and `yoe run` launches
+          # QEMU on the host (host networking keeps the guest SSH forward on
+          # the runner's loopback, where the boot test can reach it). One
+          # package per arch; both are cheap to install on either host.
+          # qemu-efi-aarch64 supplies the AAVMF/edk2 firmware that Ubuntu's
+          # EFI-only (zboot) arm64 kernels need to boot — it's arch-independent
+          # (Architecture: all), so it installs on either host.
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-system-arm qemu-efi-aarch64
+          # When /dev/kvm exists but isn't group-accessible to the runner
+          # user, make it usable so the native-arch boot runs accelerated;
+          # if it's absent, yoe falls back to TCG on its own.
+          [ -e /dev/kvm ] && sudo chmod 666 /dev/kvm || true
+
+      - name: Boot test dev-image
+        working-directory: testdata/e2e-project
+        run: ../../yoe run --boot-test --timeout 5m --distro ${{ matrix.distro }} --machine ${{ matrix.machine }} dev-image

@@ -31,8 +31,19 @@ units.
 | Extra packages   | none                              | `syslinux`                   |
 | Default forwards | `2222:22`, `8080:80`, `8118:8118` | same                         |
 
-Both default to 1 GB RAM and `display = "none"`; the `-nographic` flag sends
-serial to the controlling terminal.
+Both default to 4 GB RAM and `display = "none"`; the `-nographic` flag sends
+serial to the controlling terminal. 4 GB is the floor for memory-heavy unit
+builds inside the guest — the kernel link step alone needs well over 1 GB, so a
+self-hosted `yoe build` of `linux` is OOM-killed on a smaller VM.
+
+Pass `--display` to `yoe run` (e.g. `yoe run qt-image --display`) to drop
+`-nographic` and let QEMU open its native window for the guest framebuffer. The
+launcher attaches a virtio-vga adapter for the DRM virtio-gpu driver and keeps
+serial multiplexed onto host stdio so kernel logs still appear in the terminal
+that started the run. The kernel's `graphics.cfg` fragment turns on the relevant
+FB/DRM bits (`DRM_VIRTIO_GPU`, `DRM_BOCHS`, `FB_VESA`, `FB_EFI`,
+`DRM_FBDEV_EMULATION`), so `/dev/fb0` is present from the first boot — needed by
+linuxfb-backed UIs like the `qt-image` demo.
 
 ## qemu-arm64
 
@@ -49,7 +60,7 @@ machine(
         partition(label = "rootfs", type = "ext4", size = "512M", root = True),
     ],
     qemu = qemu_config(
-        machine = "virt", cpu = "host", memory = "1G",
+        machine = "virt", cpu = "host", memory = "4G",
         display = "none",
         ports = ["2222:22", "8080:80", "8118:8118"],
     ),
@@ -57,15 +68,39 @@ machine(
 ```
 
 There is no bootloader and no boot partition. `yoe qemu` invokes QEMU with
-`-kernel <linux-unit>/destdir/boot/vmlinuz` and passes the machine's `cmdline`
-via `-append`. QEMU loads the image straight into emulated DRAM on the `virt`
-machine and starts the A53 cores at the kernel entry point.
+`-kernel <vmlinuz>` taken from the built image's own `/boot`, and passes the
+machine's `cmdline` via `-append`. The kernel is whichever one the image ships:
+Alpine installs `/boot/vmlinuz` and mounts the rootfs directly, while Debian
+installs a versioned `/boot/vmlinuz-<ver>` alongside an `initrd.img-<ver>` that
+QEMU also receives via `-initrd`. QEMU loads these straight into emulated DRAM
+on the `virt` machine and starts the A53 cores at the kernel entry point.
 
 This is the one place in yoe where direct-kernel boot is the correct path, not a
 shortcut. The `virt` machine has no analog in physical silicon — there is no
 ROM, no SPL, no need for U-Boot. (For physical aarch64 boards, see
 [BeaglePlay](machine-beagleplay.md) for the full ROM → SPL → TF-A → U-Boot →
 kernel chain.)
+
+**EFI-only kernels boot through UEFI firmware.** Direct `-kernel` boot only
+works for a bare arm64 `Image` (Alpine and Debian ship one — recognizable by the
+`ARMd` magic at offset 56). Ubuntu builds its arm64 kernels as **EFI zboot**: a
+zstd-compressed EFI/PE application with no bare-`Image` header, which the
+firmware-less `-kernel` path cannot start (the guest would hang with a silent
+console). The launcher detects this — an EFI-only `/boot/vmlinuz` — and boots it
+through edk2/AAVMF UEFI firmware (`-bios`), which still picks up the
+`-kernel`/`-initrd`/`-append` that follow via fw_cfg and runs the kernel's own
+EFI stub to decompress and start it. The firmware comes from the host's
+`qemu-efi-aarch64` / `edk2-aarch64` package; if it is missing, `yoe run` fails
+with an actionable message rather than launching a guest that never prints. Bare
+`Image` kernels are untouched and keep the plain direct-kernel path.
+
+> **On real hardware:** this UEFI handoff is a QEMU-side accommodation for the
+> dev/CI machine. Booting an EFI-zboot kernel on a physical low-end SoC (e.g. a
+> TI AM62 whose U-Boot uses the classic `booti`/extlinux flow, which also
+> expects a bare `Image`) needs a separate decision when such a target is added
+> — either the board's U-Boot UEFI path (`bootefi`), or unwrapping the zboot
+> payload back to a bare `Image` at image-assembly time. The bare-`Image`
+> distros sidestep the question entirely.
 
 The single ext4 partition becomes `/dev/vda1` through QEMU's virtio-blk disk.
 The disk is presented to the guest as a raw image file, attached with
@@ -87,7 +122,7 @@ machine(
         partition(label = "rootfs", type = "ext4", size = "600M", root = True),
     ],
     qemu = qemu_config(
-        machine = "q35", cpu = "host", memory = "1G",
+        machine = "q35", cpu = "host", memory = "4G",
         firmware = "seabios",
         display = "none",
         ports = ["2222:22", "8080:80", "8118:8118"],
@@ -125,8 +160,31 @@ userspace layout.
 `yoe qemu` wires a single virtio-net device through QEMU's user-mode networking
 (SLIRP). The default forwards in the machine descriptor land SSH on host port
 2222 and a couple of HTTP ports for app dev. Extra forwards can be passed on the
-CLI (`yoe qemu --port 9000:9000`); they append to the machine-declared list,
-with CLI entries taking precedence on collision.
+CLI (`yoe run --port 9000:9000`, repeatable). A `--port` entry whose **guest**
+port matches a machine forward replaces that forward; an entry with a new guest
+port is appended.
+
+That replace-on-match behavior is what makes `--port` usable for qemu-in-qemu —
+see [Running inside a QEMU guest](#running-inside-a-qemu-guest-qemu-in-qemu)
+below.
+
+## Tuning at run time
+
+Three knobs override the machine descriptor for a given developer without
+editing checked-in `.star` files:
+
+| Knob     | Local override        | CLI flag      | Persisted by       |
+| -------- | --------------------- | ------------- | ------------------ |
+| RAM      | `qemu_memory = "8G"`  | `--memory 8G` | `--memory` and TUI |
+| Display  | `qemu_display = "on"` | `--display`   | TUI                |
+| Forwards | `qemu_ports = [...]`  | `--port h:g`  | TUI                |
+
+All three live in `local.star` and apply the next time you run the same image.
+The TUI editor is on **Setup → QEMU settings** (press `s`, move down to **QEMU
+settings**, press Enter). Local-override forwards layer over the machine's
+defaults with the same replace-on-guest-port rule that `--port` uses; the order
+at run time is machine ← `local.star` ← CLI, so a one-off `--port` still beats a
+saved entry for the same guest port.
 
 ## How `yoe qemu` runs
 
@@ -134,12 +192,26 @@ The launcher in `internal/device/qemu.go`:
 
 1. Picks the binary by arch: `qemu-system-aarch64`, `qemu-system-x86_64`, or
    `qemu-system-riscv64`.
-2. Builds the arg list: `-machine`, `-cpu`, `-m`, `-nographic` (if
-   `display = "none"`), the virtio-blk drive, the virtio-net device with port
-   forwards, and `-bios` if a firmware (OVMF/AAVMF) is set.
+2. Builds the arg list: `-machine`, `-cpu`, `-m`, `-nographic` by default (or
+   `-device virtio-vga -serial mon:stdio` when `yoe run --display` is set, which
+   lets QEMU open its native window and still leaves the serial console muxed
+   onto host stdio), the virtio-blk drive, the virtio-net device with port
+   forwards, and `-bios` if a firmware (OVMF/AAVMF) is set. On a same-arch host
+   it adds `-enable-kvm` when `/dev/kvm` is present; when it is not (notably
+   qemu-in-qemu without nested virtualization) it drops KVM, downgrades a `host`
+   CPU to `max`, and runs under TCG software emulation instead — slower, but it
+   still boots.
 3. If the machine has no `firmware`, appends
    `-kernel <vmlinuz> -append <cmdline>` for the direct-boot path (this is what
-   qemu-arm64 uses).
+   qemu-arm64 uses), taking the kernel from the built image's `/boot` and adding
+   `-initrd <initrd.img>` only when the image ships a real initramfs (e.g.
+   Debian). The launcher reads these straight off the host rootfs, so the image
+   build makes the kernel world-readable (Ubuntu otherwise ships it root-only,
+   which would fail with "could not load kernel"). An image that carries no
+   initramfs boots through the kernel's built-in drivers (Alpine, and Ubuntu —
+   whose kernel only _recommends_ an initramfs generator); the launcher resolves
+   the `/boot/initrd.img` symlink and omits `-initrd` when it dangles, rather
+   than handing QEMU a path it would reject with "could not load initrd".
 4. Tries host QEMU first; falls back to running QEMU inside the `toolchain-musl`
    container with the project bind-mounted at `/project` if the host doesn't
    have it installed.
@@ -159,3 +231,27 @@ image is regenerated, the guest starts clean.
   Apple Silicon Mac, an Ampere server) it uses KVM and is fast.
 - For anything physical-board-shaped — secure boot, vendor blobs, display, real
   I/O — use the actual board's machine descriptor.
+
+## Running inside a QEMU guest (qemu-in-qemu)
+
+`yoe run` works from within a guest that is itself running under QEMU — useful
+for exercising a self-hosted `yoe` build. Two things differ from a run on the
+bare host, and `yoe run` handles both:
+
+1. **Port forwards collide.** The outer guest already holds the machine's
+   default host forwards (`2222`, `8080`, `8118`), so a nested run cannot bind
+   them. Remap the host side with `--port`; an entry whose guest port matches a
+   default forward replaces it:
+
+   ```sh
+   yoe run base-image --port 12222:22 --port 18080:80 --port 18118:8118
+   ```
+
+2. **No KVM.** A guest has no `/dev/kvm` unless its host was started with nested
+   virtualization. `yoe run` detects this and falls back to TCG software
+   emulation automatically — it prints `using TCG software emulation (slower)`
+   and boots. No flag is needed; expect roughly a 10–20× slowdown versus KVM.
+
+To get full-speed nested runs instead of TCG, enable nested virtualization on
+the bare-metal host (`kvm_intel`/`kvm_amd` module option `nested=1`) and start
+the outer guest with a passthrough CPU so `/dev/kvm` appears inside it.

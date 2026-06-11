@@ -8,6 +8,291 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.12.4] - 2026-06-11
+
+- **`yoe skills install` adds yoe's AI skills to your project.** The skills that
+  power `/new-unit`, `/diagnose`, `/audit-unit`, and friends now ship inside the
+  `yoe` binary; run `yoe skills install` to drop editable copies into your
+  project's `.claude/skills` so Claude Code picks them up. They're yours to
+  edit, and `yoe skills update` refreshes them to the latest versions when you
+  upgrade `yoe`. New projects from `yoe init` get them installed automatically.
+- **The skills are also available as a Claude Code plugin.** If you'd rather
+  Claude Code manage updates for you, add the marketplace with
+  `/plugin marketplace add yoebuild/yoe` and install `yoe@yoe` — the same
+  skills, delivered the standard plugin way.
+- **New projects ignore the right files out of the box.** `yoe init` now writes
+  a `.gitignore` that also covers the local apk repository (`repo/`) and your
+  per-developer `local.star`, so a fresh project stays clean in Git without you
+  curating ignores by hand.
+
+## [0.12.3] - 2026-06-09
+
+- **Ubuntu arm64 images boot under software emulation too.** When QEMU has no
+  KVM acceleration (an x86 host, or an arm64 host without `/dev/kvm`), Ubuntu's
+  EFI-only arm64 kernel now boots instead of aborting QEMU, so the boot test and
+  `yoe run` work the same with or without hardware acceleration.
+
+## [0.12.2] - 2026-06-09
+
+- **Ubuntu arm64 images now reach a login prompt in QEMU.** Ubuntu's arm64
+  kernel needs UEFI firmware to boot, which the QEMU launcher now supplies
+  automatically (from the host's `qemu-efi-aarch64` / `edk2-aarch64` package)
+  instead of hanging with a blank console; if the firmware isn't installed, the
+  run now fails with a clear message naming the package to install.
+
+## [0.12.1] - 2026-06-08
+
+- **Ubuntu arm64 images now boot in QEMU.** The launcher no longer trips over an
+  unused initramfs reference Ubuntu leaves behind, so arm64 Ubuntu images start
+  cleanly instead of failing with "could not load initrd."
+
+## [0.12.0] - 2026-06-05
+
+_Ubuntu support is ready to use in this version._
+
+- **Building Ubuntu images no longer runs the machine out of memory.** Large
+  Ubuntu builds could grow to tens of gigabytes and get killed; they now stay
+  flat at a few hundred megabytes and complete reliably.
+- **Fresh Debian and Ubuntu image builds are faster.** The package index is now
+  built once when it is needed instead of being rebuilt after every package, so
+  build time no longer grows sharply with the number of packages.
+- **The attr library builds reliably across architectures.** It no longer
+  intermittently fails to build from a build-system timestamp race that showed
+  up on arm64.
+
+## [0.11.7] - 2026-06-04
+
+- **Ubuntu images now bring up the wired network automatically.** NetworkManager
+  manages and DHCPs the ethernet port out of the box, so the image is reachable
+  over SSH on first boot with no connection profile — matching Debian.
+- **Passwordless root SSH login now works on Ubuntu dev images.** Root could log
+  in on the serial console but SSH rejected the empty password; Ubuntu images
+  now get the same permissive dev-login drop-in Debian already had.
+- **Ubuntu images build correctly in projects that also use Debian.** The two
+  distros' build toolchains no longer share an identity, which previously could
+  crash an Ubuntu image build; each distro now builds with its own toolchain.
+
+## [0.11.6] - 2026-06-04
+
+- **The unit list now shows cached status the moment yoe opens.** Cached units
+  no longer render as blank lines until the first build; their status is correct
+  on startup.
+- **Ubuntu packages now reuse the cache instead of rebuilding every run.**
+  Building an Ubuntu image no longer re-fetches and re-extracts every package on
+  each `yoe build`; unchanged packages are reused from the cache, the same as
+  Debian and Alpine.
+- **ncurses now builds on Ubuntu.** The terminal library no longer fails to
+  compile under Ubuntu's newer toolchain, so Ubuntu images that pull in ncurses
+  build successfully.
+- **bash now builds on Ubuntu.** The shell no longer fails to compile under
+  Ubuntu's newer toolchain, so Ubuntu images that pull in bash build
+  successfully.
+
+## [0.11.5] - 2026-06-04
+
+- **Ubuntu is now a selectable distro alongside Alpine and Debian.** Point a
+  project at `module-ubuntu` and set the distro to `ubuntu` (per image, or via
+  the default-distro override) to build images from Ubuntu's package archive.
+  Ubuntu and Debian images can live side by side in one project without their
+  packages colliding. _(Still debugging, not ready for use)_.
+- **The `debian_feed(...)` builtin is now `apt_feed(...)` and takes a
+  `distro`.** One builtin serves every apt-based distro; pass
+  `distro = "debian"` or `distro = "ubuntu"`. It also accepts an optional
+  `arch_urls` map so a single feed can pull amd64 from one mirror and arm64 from
+  another — needed for Ubuntu, whose ports architectures live on a separate
+  host.
+- **Build failures now name the unit and task that broke.** When a build fails,
+  the output leads with a clear `❌ FAILED: <unit> task: <task>` line before the
+  log, so you can tell at a glance which unit failed even when several are
+  building in parallel.
+- **Build status lines now carry icons for quick scanning.** Each unit reports
+  with an at-a-glance marker — ⚡ cached, 🔨 building, ✅ done, ❌ failed — and
+  freshly packaged artifacts are flagged with 📦.
+- **Fixed source units failing to build in projects that mix two distros.** When
+  a project combined distros that share image names (such as Debian and Ubuntu,
+  which both ship `dev-image`), a source unit's build-time `-dev` dependencies
+  could be silently dropped for one of the distros, leaving it to build against
+  an empty sysroot and fail (for example, "zlib support requested but not
+  found"). Both distros' build dependencies now resolve correctly.
+- **Boot smoke test output now carries status emojis.** A `--boot-test` run
+  flags each stage at a glance — 🚀 launch, 🔑 reaching the login prompt and
+  connecting over SSH, 🩺 health check, and a final ✅ pass or ❌ fail.
+
+## [0.11.4] - 2026-06-04
+
+- **`yoe run` now boots arm64 images correctly.** On arm64 (and other
+  direct-kernel-boot targets) the launcher looked for the kernel at the wrong
+  path, so QEMU started with nothing to boot and sat at a blank console. It now
+  takes the kernel — and, for Debian, the initramfs — straight from the image's
+  own `/boot`, so arm64 images boot the same kernel they ship. This also makes
+  `yoe run --boot-test` pass for arm64 images.
+
+## [0.11.3] - 2026-06-04
+
+- **`yoe run --boot-test` boots an image and verifies it came up.** It boots
+  headless, waits for the login prompt, SSHes in to run a health check, then
+  powers off — a one-command pass/fail smoke test for CI or a quick local sanity
+  check. `--timeout` bounds it; `--distro` picks which distro's image to run
+  when the name exists in several.
+
+## [0.11.2] - 2026-06-04
+
+- **Build failures now show the unit's log right where they happen.** When a
+  unit fails to build, yoe prints the tail of that unit's build log inline
+  instead of only pointing at a file on disk, so you can see the actual error
+  without opening anything — and so failures are diagnosable from CI output
+  where the log file is thrown away with the runner.
+- **Per-task build lines now name their unit.** During parallel builds the task
+  progress lines from different units interleave; each line now leads with the
+  unit name so you can tell which build it belongs to.
+- **Units with patches build on machines that have no git identity configured.**
+  Applying a unit's patches no longer depends on a global git
+  `user.name`/`user.email`, so builds succeed out of the box on fresh machines
+  and CI runners instead of failing with "empty ident name not allowed."
+
+## [0.11.1] - 2026-06-04
+
+- **Source downloads no longer fail intermittently with "gzip: invalid
+  header."** Some download mirrors serve a `.tar.gz` in a way that made yoe save
+  an already-decompressed archive under a compressed name, so a build would
+  break or succeed depending on which mirror you happened to reach. Downloads
+  are now fetched verbatim, so a unit that builds once builds every time.
+
+## [0.11.0] - 2026-06-03
+
+- **Debian Trixie support.** yoe can now build Debian images alongside Alpine.
+  Set `defaults.distro = "debian"` to target a whole project at Debian, or tag
+  an individual `image(...)` with `distro = "debian"`, and yoe builds it through
+  the Debian backend — glibc toolchain, `.deb` packaging, a signed apt repo, and
+  a fully configured, bootable rootfs. `base-image` and `dev-image` are
+  available for Debian out of the box.
+- **`yoe deploy`, `run`, and `flash` work for Debian targets.** Deploy wires the
+  project's dev feed into apt and installs with `apt-get` (Alpine still installs
+  over apk); `run` and `flash` locate Debian images. `apt-get install` and
+  `apt-get upgrade` work offline against your project repo, which apt verifies
+  with the project's own GPG key. The edit-deploy loop is identical on both
+  distros. (not fully tested yet)
+- **`yoe build` takes a `--distro` flag.** When the same image name exists in
+  more than one distro (say a `base-image` from both the Alpine and Debian
+  modules), pick which one to build for a single command —
+  `yoe build --distro debian base-image` — instead of editing `local.star`.
+- **The TUI shows and selects the default distro.** The status header displays
+  the active distro, and TUI Setup (press `s`) has a Default Distro picker that
+  persists to `local.star` and re-walks the build cache immediately so status
+  reflects the chosen backend.
+- **`yoe log` and `yoe diagnose` work on feed-based projects again.** They no
+  longer fail with an `undefined: alpine_feed` error and now find the build log
+  for images and other machine-specific units.
+- **Repository and build layout are now split by distro.** So Alpine and Debian
+  artifacts can coexist, APK repos moved to `repo/<project>/alpine/<arch>/`,
+  Debian repos live under `repo/<project>/debian/`, and build output moved to
+  `build/<distro>/<unit>.<scope>/`. Update any hardcoded repo URLs and
+  `/etc/apk/repositories` entries; old `repo/<project>/<arch>/` and
+  `build/<unit>.<scope>/` directories are stranded and can be removed.
+  `prefer_modules` is now keyed by distro:
+  `prefer_modules = {"alpine": {"xz": "alpine.main"}, "debian": {...}}` — rewrap
+  any existing flat pins under their distro key.
+
+## [0.10.15] - 2026-05-26
+
+- **TUI Setup gained a QEMU settings sub-screen.** Press `s` then Enter on "QEMU
+  settings" to adjust the guest's RAM with ←/→, toggle the graphical display,
+  and add or remove host:guest port forwards for `yoe run`. Choices persist to
+  `local.star` and apply automatically the next time you launch the guest — no
+  need to remember `--memory`, `--display`, or `--port` flags for routine work.
+- **The QEMU settings screen shows the equivalent qemu command.** A live preview
+  at the bottom of the sub-screen renders the exact `qemu-system-*` invocation
+  `yoe run` would emit with the current Memory / Display / Ports values, so you
+  can confirm what each tweak changes before launching — and copy-paste the line
+  to drive QEMU directly.
+- **New `qt-image` boots straight into a Qt 6 Quick demo on the framebuffer.**
+  Build with `yoe build qt-image` and run with `yoe run qt-image --display`;
+  QEMU opens a window showing the demo scene (a "Hello from yoe!" message
+  rendered through the linuxfb platform plugin and the software scene graph).
+  Useful as a quick end-to-end check that a yoe-built image's graphical stack
+  works on hardware that ships virtio-gpu, Bochs, or a plain VESA/EFI
+  framebuffer.
+- **`yoe run --display` now actually opens a QEMU window.** Previously the flag
+  dropped `-nographic` but didn't tell QEMU what to display with; running an
+  image showed only an empty terminal. The launcher now attaches a virtio-vga
+  adapter and keeps the serial console muxed onto host stdio
+  (`-serial mon:stdio`) so kernel logs stay visible alongside the framebuffer
+  window. Headless `yoe run` (no `--display`) is unchanged.
+- **The kernel ships framebuffer and DRM drivers for QEMU and common PC GPUs out
+  of the box.** `linux` now merges a `graphics.cfg` fragment that enables
+  virtio-gpu, Bochs, vesafb, efifb, and DRM fbdev emulation, so every yoe image
+  exposes `/dev/fb0` on first boot without per-image configuration.
+
+## [0.10.14] - 2026-05-26
+
+- **Modules tab no longer scrolls the title off the top.** When a project
+  declared one or more feeds, the FEEDS section pushed the body past the
+  terminal height and you'd lose the title, tab bar, and column header. The
+  viewport now sizes itself to leave room for the FEEDS section.
+- **The edit shortcut is hidden for feed-supplied units.** Units coming from a
+  feed (e.g. `alpine_feed()`) have no `.star` file to open, so the Units tab no
+  longer advertises `e edit` when the cursor is on one, and pressing `e` on such
+  a unit is a silent no-op.
+
+## [0.10.13] - 2026-05-26
+
+- **`alpine_feed()` declares a feed directly in a module's MODULE.star.** A
+  module can now expose thousands of upstream Alpine packages as yoe units with
+  a single declaration — point `alpine_feed()` at a checked-in directory of
+  APKINDEX files and the named packages become available to image artifacts with
+  no per-package `.star` file. Package units materialize lazily as the image's
+  runtime closure needs them, so working memory stays bounded by the closure
+  size rather than the catalog size.
+- **The Modules tab shows declared feeds.** Each `alpine_feed()` call appears in
+  a FEEDS section under the regular module list with its parent module and the
+  total package count.
+- **`yoe update-feeds` refreshes feed APKINDEX files from upstream.** Run inside
+  a module repo, the new subcommand fetches every `alpine_feed()`'s APKINDEX for
+  every active arch, verifies the upstream RSA signature against the keys the
+  module declared, and writes the new indices to disk for the maintainer to
+  review with `git diff` and commit. Signature verification is pure-Go and never
+  consults the host's `/etc/apk/keys/` — the trust list the feed declares is the
+  one that's actually enforced.
+
+## [0.10.12] - 2026-05-22
+
+- **CI builds `base-image` from source on every push to `main`.** A full
+  end-to-end build — bootstrap toolchain, kernel, and image assembly — now runs
+  in CI, so build regressions surface immediately instead of at the next
+  release.
+- **`yoe run` works inside a QEMU guest (qemu-in-qemu).** When no `/dev/kvm` is
+  available, `yoe run` now falls back to TCG software emulation instead of
+  failing with a KVM error, so you can launch a guest from within a guest. It
+  prints a one-line note that emulation is in use.
+- **`yoe run --port` can remap a machine's default forwards.** A `--port` entry
+  whose guest port matches a machine forward now replaces it instead of adding a
+  second, colliding one — so a nested `yoe run` can move its host-side ports off
+  the ones the outer guest already holds.
+- **`yoe run` flags work after the image name.** `yoe run base-image --port …`
+  previously ignored every flag that followed the image name; flags and the
+  image name may now appear in any order.
+- **`yoe run` explains a port conflict instead of failing cryptically.** When a
+  QEMU guest is already running, `yoe run` (and the TUI `r` key) now report
+  which host port is taken and that an earlier run is probably still up, rather
+  than an opaque `exit status 1`. Other QEMU launch failures now include the
+  reason QEMU printed.
+- **`yoe run` remembers the QEMU guest memory.** Pass `--memory 8G` once and the
+  value is saved to `local.star`, so later runs reuse it without the flag. Set
+  it without a run via `yoe config set qemu-memory 8G`, or on the TUI Setup page
+  with ←/→. Clear it with an empty value to fall back to the machine default.
+- **QEMU can now be installed into an image.** Adding QEMU pulled in filesystem
+  libraries that conflicted with the bundled `e2fsprogs`, aborting the image
+  build; that conflict is now resolved.
+- **QEMU machines now default to 4 GB RAM.** The old 1 GB default was too small
+  for memory-heavy unit builds run inside the guest — a self-hosted `yoe build`
+  of the Linux kernel was OOM-killed at the link step. Bump the `memory` field
+  in your machine file if you need more or less.
+- **TUI clean (`c` and `C`) now works on image units.** Previously failed with
+  permission errors on the root-owned files left by image builds; now routes
+  through the same container-side `rm` that `yoe clean` uses.
+- **`selfhost-image`.** Bootable image that bundles `yoe`, Go, Docker, git, and
+  the dev-image tool set (tested on QEMU, soon native ARM systems).
+
 ## [0.10.11] - 2026-05-20
 
 - **`beagleplay` machine.** New target for the TI AM625 BeaglePlay. Build with

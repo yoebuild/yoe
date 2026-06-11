@@ -91,7 +91,7 @@ func TestPrepare(t *testing.T) {
 		Source:  srv.URL + "/test-1.0.tar.gz",
 	}
 
-	srcDir, err := Prepare(projectDir, "x86_64", unit, "", os.Stdout)
+	srcDir, err := Prepare(projectDir, "x86_64", "alpine", unit, "", os.Stdout)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestPrepare_WithPatches(t *testing.T) {
 		Patches: []string{"test-pkg/fix.patch"},
 	}
 
-	srcDir, err := Prepare(projectDir, "x86_64", unit, "", os.Stdout)
+	srcDir, err := Prepare(projectDir, "x86_64", "alpine", unit, "", os.Stdout)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestPrepare_PatchesRelativeToDefinedIn(t *testing.T) {
 		DefinedIn: unitDir,
 	}
 
-	srcDir, err := Prepare(projectDir, "x86_64", unit, "", os.Stdout)
+	srcDir, err := Prepare(projectDir, "x86_64", "alpine", unit, "", os.Stdout)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestPrepare_PatchesRelativeToDefinedIn(t *testing.T) {
 
 func TestPrepare_DevMode(t *testing.T) {
 	projectDir := t.TempDir()
-	srcDir := filepath.Join(projectDir, "build", "test-pkg.x86_64", "src")
+	srcDir := filepath.Join(projectDir, "build", "alpine", "test-pkg.x86_64", "src")
 	os.MkdirAll(srcDir, 0755)
 
 	// Set up a git repo with local commits
@@ -247,7 +247,7 @@ func TestPrepare_DevMode(t *testing.T) {
 		Source: "https://example.com/should-not-fetch.tar.gz",
 	}
 
-	result, err := Prepare(projectDir, "x86_64", unit, "", os.Stdout)
+	result, err := Prepare(projectDir, "x86_64", "alpine", unit, "", os.Stdout)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestPrepare_DevMode(t *testing.T) {
 // re-fetched on top of.
 func TestPrepare_CachedDevSkipsFetch(t *testing.T) {
 	projectDir := t.TempDir()
-	srcDir := filepath.Join(projectDir, "build", "test-pkg.x86_64", "src")
+	srcDir := filepath.Join(projectDir, "build", "alpine", "test-pkg.x86_64", "src")
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +293,7 @@ func TestPrepare_CachedDevSkipsFetch(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	result, err := Prepare(projectDir, "x86_64", unit, "dev", &buf)
+	result, err := Prepare(projectDir, "x86_64", "alpine", unit, "dev", &buf)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestPrepare_StaleCacheFallsThrough(t *testing.T) {
 
 	// Cache says "dev" but no src dir exists — Prepare should still
 	// run a fresh prep instead of returning the missing dir.
-	srcDir, err := Prepare(projectDir, "x86_64", unit, "dev", os.Stdout)
+	srcDir, err := Prepare(projectDir, "x86_64", "alpine", unit, "dev", os.Stdout)
 	if err != nil {
 		t.Fatalf("Prepare with stale dev cache: %v", err)
 	}
@@ -543,13 +543,15 @@ func createTestZip(t *testing.T, path string, entries []zipEntry) {
 }
 
 func TestAPKChecksumVerify(t *testing.T) {
-	// Use a real Alpine apk from the cache populated by module-alpine's
-	// gen-unit.py runs. Skip cleanly when it isn't there (CI without
-	// the cache).
+	// Use a real Alpine apk fixture. Skip cleanly when it isn't there
+	// (CI without the cache). To populate it locally:
+	//   mkdir -p ~/.cache/module-alpine-gen/v3.21/main/x86_64 && \
+	//   curl -sLo ~/.cache/module-alpine-gen/v3.21/main/x86_64/musl-1.2.5-r11.apk \
+	//     https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/musl-1.2.5-r11.apk
 	apkPath := filepath.Join(os.Getenv("HOME"),
 		".cache/module-alpine-gen/v3.21/main/x86_64/musl-1.2.5-r11.apk")
 	if _, err := os.Stat(apkPath); err != nil {
-		t.Skip("test apk not in cache; run gen-unit.py first")
+		t.Skip("test apk not in cache; see comment above to populate it")
 	}
 	apk, err := os.ReadFile(apkPath)
 	if err != nil {

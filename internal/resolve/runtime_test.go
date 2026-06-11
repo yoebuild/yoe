@@ -10,16 +10,16 @@ import (
 
 func TestRuntimeClosure_Sqlite(t *testing.T) {
 	proj := &yoestar.Project{
-		Units: map[string]*yoestar.Unit{
+		UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 			"sqlite":   {Name: "sqlite",   RuntimeDeps: []string{"musl", "readline"}},
 			"musl":     {Name: "musl"},
 			"readline": {Name: "readline", RuntimeDeps: []string{"ncurses"}},
 			"ncurses":  {Name: "ncurses",  RuntimeDeps: []string{"musl"}},
 			"unrelated":{Name: "unrelated"},
-		},
+		}},
 		Provides: map[string]string{},
 	}
-	got := resolve.RuntimeClosure(proj, []string{"sqlite"})
+	got := resolve.RuntimeClosure(proj, []string{"sqlite"}, "alpine")
 	sort.Strings(got)
 	want := []string{"musl", "ncurses", "readline", "sqlite"}
 	if len(got) != len(want) {
@@ -34,14 +34,14 @@ func TestRuntimeClosure_Sqlite(t *testing.T) {
 
 func TestRuntimeClosure_RoutesProvides(t *testing.T) {
 	proj := &yoestar.Project{
-		Units: map[string]*yoestar.Unit{
+		UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 			"app":         {Name: "app",         RuntimeDeps: []string{"linux"}},
 			"linux-rpi4":  {Name: "linux-rpi4",  RuntimeDeps: []string{"musl"}},
 			"musl":        {Name: "musl"},
-		},
+		}},
 		Provides: map[string]string{"linux": "linux-rpi4"},
 	}
-	got := resolve.RuntimeClosure(proj, []string{"app"})
+	got := resolve.RuntimeClosure(proj, []string{"app"}, "alpine")
 	sort.Strings(got)
 	want := []string{"app", "linux-rpi4", "musl"}
 	if len(got) != len(want) {

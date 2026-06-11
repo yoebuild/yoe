@@ -37,10 +37,14 @@ func hashStringMap(h io.Writer, label string, m map[string]string) {
 //   - Source-state inputs (only for units in dev mode — pin units stay
 //     cache-neutral; the line is gated on non-empty so adding the field
 //     doesn't invalidate every unit's hash).
+//   - Effective distro of the consuming image (only when non-empty, so
+//     units built in a pre-distro context stay cache-neutral; once a
+//     closure walk supplies an effective distro the same source unit
+//     hashes differently for alpine vs debian builds).
 //
 // This ensures any change to a unit, its source, or any of its dependencies
 // produces a new hash and triggers a rebuild.
-func UnitHash(unit *yoestar.Unit, arch string, depHashes map[string]string, srcInputs string) string {
+func UnitHash(unit *yoestar.Unit, arch string, depHashes map[string]string, srcInputs, effectiveDistro string) string {
 	h := sha256.New()
 
 	// Unit identity
@@ -58,7 +62,16 @@ func UnitHash(unit *yoestar.Unit, arch string, depHashes map[string]string, srcI
 	// Source
 	fmt.Fprintf(h, "source:%s\n", unit.Source)
 	fmt.Fprintf(h, "sha256:%s\n", unit.SHA256)
-	fmt.Fprintf(h, "apk_checksum:%s\n", unit.APKChecksum)
+	// Gate on non-empty per the CLAUDE.md hash-gating rule. Units
+	// without an upstream APKINDEX checksum (i.e., everything that
+	// isn't an alpine_pkg or feed-materialized synthetic) stays
+	// cache-neutral when the field is absent — adding the write
+	// unconditionally would invalidate every unit's hash. The cutover
+	// to feeds-as-modules (U13) starts from `yoe clean` anyway, so
+	// the one-time invalidation cost of gating this line is moot.
+	if unit.APKChecksum != "" {
+		fmt.Fprintf(h, "apk_checksum:%s\n", unit.APKChecksum)
+	}
 	fmt.Fprintf(h, "passthrough_apk:%s\n", unit.PassthroughAPK)
 	fmt.Fprintf(h, "tag:%s\n", unit.Tag)
 	fmt.Fprintf(h, "branch:%s\n", unit.Branch)
@@ -72,6 +85,16 @@ func UnitHash(unit *yoestar.Unit, arch string, depHashes map[string]string, srcI
 	// in-place edits invalidate the cache.
 	if srcInputs != "" {
 		fmt.Fprintf(h, "src_state:%s\n", srcInputs)
+	}
+	// Effective distro of the consuming image. Gated on non-empty per
+	// the CLAUDE.md hash-gating rule: a unit hashed without effective
+	// distro (pre-walker-threading) stays cache-neutral, and the line
+	// flips on once a closure walk supplies the value. Drives toolchain
+	// selection through U5's virtual-container resolution; the cache
+	// key must reflect it so alpine-built and debian-built versions of
+	// the same source unit don't collide.
+	if effectiveDistro != "" {
+		fmt.Fprintf(h, "effective_distro:%s\n", effectiveDistro)
 	}
 
 	// Tasks — hash command text, callable name, and install-step payload so
@@ -107,6 +130,19 @@ func UnitHash(unit *yoestar.Unit, arch string, depHashes map[string]string, srcI
 	fmt.Fprintf(h, "provides:%s\n", strings.Join(unit.Provides, ","))
 	fmt.Fprintf(h, "replaces:%s\n", strings.Join(unit.Replaces, ","))
 	fmt.Fprintf(h, "runtime_deps:%s\n", strings.Join(unit.RuntimeDeps, ","))
+	// Per-distro deps additions. Gated on the consuming
+	// effectiveDistro entry being non-empty so units without any
+	// distro_deps stay cache-neutral (and a unit that uses
+	// distro_deps for alpine but not debian doesn't invalidate its
+	// debian-side cache by adding an alpine entry later).
+	if effectiveDistro != "" {
+		if extra := unit.DistroDeps[effectiveDistro]; len(extra) > 0 {
+			fmt.Fprintf(h, "distro_deps:%s:%s\n", effectiveDistro, strings.Join(extra, ","))
+		}
+		if extra := unit.DistroRuntimeDeps[effectiveDistro]; len(extra) > 0 {
+			fmt.Fprintf(h, "distro_runtime_deps:%s:%s\n", effectiveDistro, strings.Join(extra, ","))
+		}
+	}
 	fmt.Fprintf(h, "services:%s\n", strings.Join(unit.Services, ","))
 	fmt.Fprintf(h, "conffiles:%s\n", strings.Join(unit.Conffiles, ","))
 	hashStringMap(h, "environment", unit.Environment)
@@ -127,9 +163,11 @@ func UnitHash(unit *yoestar.Unit, arch string, depHashes map[string]string, srcI
 		hashFilesDir(h, filesDir)
 	}
 
-	// Dependencies — include their hashes for transitivity
-	deps := make([]string, len(unit.Deps))
-	copy(deps, unit.Deps)
+	// Dependencies — include their hashes for transitivity.
+	// DepsForDistro folds in any distro_deps[effectiveDistro] so a
+	// debian-only build dep contributes to the debian hash but not
+	// the alpine one.
+	deps := append([]string{}, unit.DepsForDistro(effectiveDistro)...)
 	sort.Strings(deps)
 	for _, dep := range deps {
 		if dh, ok := depHashes[dep]; ok {
@@ -165,7 +203,13 @@ func UnitHash(unit *yoestar.Unit, arch string, depHashes map[string]string, srcI
 // preserving pre-dev-mode hashing behaviour. Production callers
 // (the build executor) supply a function that reads BuildMeta and
 // runs source.SrcHashInputs against the unit's src dir.
-func ComputeAllHashes(dag *DAG, arch, machine string, srcInputs func(*yoestar.Unit) string) (map[string]string, error) {
+//
+// `effectiveDistro` is the distro driving the closure (an image's
+// effective distro). Pass "" when the caller has no image scope —
+// the hash line is gated on non-empty, so passing "" leaves every
+// unit cache-neutral. Production callers walking from an image
+// supply the image's effective distro per R20a/R21.
+func ComputeAllHashes(dag *DAG, arch, machine string, srcInputs func(*yoestar.Unit) string, effectiveDistro string) (map[string]string, error) {
 	order, err := dag.TopologicalSort()
 	if err != nil {
 		return nil, err
@@ -184,7 +228,7 @@ func ComputeAllHashes(dag *DAG, arch, machine string, srcInputs func(*yoestar.Un
 		if srcInputs != nil {
 			src = srcInputs(node.Unit)
 		}
-		hashes[name] = UnitHash(node.Unit, unitArch, hashes, src)
+		hashes[name] = UnitHash(node.Unit, unitArch, hashes, src, effectiveDistro)
 	}
 
 	return hashes, nil

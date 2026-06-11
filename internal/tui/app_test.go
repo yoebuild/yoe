@@ -66,7 +66,7 @@ func TestUpdateSearch_CtrlU_ClearsInput(t *testing.T) {
 		queryCompletions: []string{"in:", "module:"},
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units:    map[string]*yoestar.Unit{},
+			UnitsByModule:    map[string]map[string]*yoestar.Unit{"": {}},
 		},
 	}
 	updated, _ := m.updateSearch(tea.KeyMsg{Type: tea.KeyCtrlU})
@@ -116,11 +116,154 @@ func TestRenderQueryCompletions_EmptyReturnsNothing(t *testing.T) {
 // order: the completion candidates land between the Query line and
 // the column header, not above the Query line nor at the bottom of
 // the screen.
+func TestViewModulesTab_RendersSyntheticModules(t *testing.T) {
+	m := model{
+		proj: &yoestar.Project{
+			Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
+			UnitsByModule:    map[string]map[string]*yoestar.Unit{"": {}},
+			ResolvedModules: []yoestar.ResolvedModule{
+				{Name: "module-core", URL: "https://example.com/core.git"},
+			},
+			SyntheticModules: []*yoestar.SyntheticModule{
+				{
+					Name:   "alpine.main",
+					Parent: "alpine",
+					Names:  func() []string { return []string{"musl", "openssh", "zlib"} },
+					Lookup: func(string) (*yoestar.Unit, error) { return nil, nil },
+				},
+				{
+					Name:   "alpine.community",
+					Parent: "alpine",
+					Names:  func() []string { return []string{"docker", "nginx"} },
+					Lookup: func(string) (*yoestar.Unit, error) { return nil, nil },
+				},
+			},
+		},
+		width: 120, height: 40,
+	}
+	got := m.viewModulesTab()
+	for _, want := range []string{"FEEDS", "alpine.main", "alpine.community", "feed", "alpine", "3", "2"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("modules tab missing %q in:\n%s", want, got)
+		}
+	}
+	// Should keep showing the real module too.
+	if !strings.Contains(got, "module-core") {
+		t.Errorf("modules tab dropped real module-core:\n%s", got)
+	}
+}
+
+// TestViewModulesTab_FeedsDoNotPushTopOffScreen guards the bug where
+// modulesViewportHeight() failed to account for the FEEDS section
+// (rendered after the navigable rows), causing total output to exceed
+// m.height and scroll the title/header off the top.
+func TestViewModulesTab_FeedsDoNotPushTopOffScreen(t *testing.T) {
+	mods := make([]yoestar.ResolvedModule, 0, 10)
+	for i := range 10 {
+		mods = append(mods, yoestar.ResolvedModule{
+			Name: fmt.Sprintf("module-%02d", i),
+			URL:  fmt.Sprintf("https://example.com/m%02d.git", i),
+		})
+	}
+	m := model{
+		proj: &yoestar.Project{
+			Defaults:        yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
+			UnitsByModule:           map[string]map[string]*yoestar.Unit{"": {}},
+			ResolvedModules: mods,
+			SyntheticModules: []*yoestar.SyntheticModule{
+				{Name: "alpine.main", Parent: "alpine",
+					Names:  func() []string { return []string{"musl"} },
+					Lookup: func(string) (*yoestar.Unit, error) { return nil, nil }},
+				{Name: "alpine.community", Parent: "alpine",
+					Names:  func() []string { return []string{"nginx"} },
+					Lookup: func(string) (*yoestar.Unit, error) { return nil, nil }},
+			},
+		},
+		width: 120, height: 30,
+	}
+	got := m.viewModulesTab()
+	// Count newlines as a proxy for visual line count (lipgloss styles
+	// don't add lines). Allow the rendered output to equal m.height but
+	// never exceed it.
+	lines := strings.Count(got, "\n")
+	if lines > m.height {
+		t.Fatalf("viewModulesTab produced %d lines but m.height=%d — content overflows and the top scrolls off:\n%s",
+			lines, m.height, got)
+	}
+}
+
+// TestUnitFromFeed checks the synthetic-module detection: units
+// registered by a SyntheticModule are flagged, units defined by a
+// regular module (or the project root) are not.
+func TestUnitFromFeed(t *testing.T) {
+	m := model{
+		proj: &yoestar.Project{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
+				"musl":     {Name: "musl", Module: "alpine.main"},
+				"hello":    {Name: "hello", Module: "module-core", DefinedIn: "/tmp/module-core"},
+				"rootunit": {Name: "rootunit"},
+			}},
+			SyntheticModules: []*yoestar.SyntheticModule{
+				{Name: "alpine.main", Parent: "alpine"},
+			},
+		},
+	}
+	if !m.unitFromFeed("musl") {
+		t.Errorf("musl came from alpine.main feed but unitFromFeed returned false")
+	}
+	if m.unitFromFeed("hello") {
+		t.Errorf("hello came from regular module-core but unitFromFeed returned true")
+	}
+	if m.unitFromFeed("rootunit") {
+		t.Errorf("rootunit has no Module but unitFromFeed returned true")
+	}
+	if m.unitFromFeed("nonexistent") {
+		t.Errorf("nonexistent name unitFromFeed returned true")
+	}
+}
+
+// TestViewUnitsTab_HelpBarOmitsEditForFeedUnits checks that the
+// "e edit" shortcut is dropped from the units-tab help bar when the
+// cursor is on a feed-materialized unit (no .star file to open).
+func TestViewUnitsTab_HelpBarOmitsEditForFeedUnits(t *testing.T) {
+	m := model{
+		proj: &yoestar.Project{
+			Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
+				"musl":  {Name: "musl", Class: "unit", Module: "alpine.main"},
+				"hello": {Name: "hello", Class: "unit", Module: "module-core", DefinedIn: "/tmp/module-core"},
+			}},
+			SyntheticModules: []*yoestar.SyntheticModule{
+				{Name: "alpine.main", Parent: "alpine"},
+			},
+		},
+		units:   []string{"musl", "hello"},
+		visible: []int{0, 1},
+		width:   120, height: 30,
+	}
+
+	// Cursor on a regular unit — edit must appear.
+	m.cursor = 1
+	got := m.viewUnitsTab()
+	if !strings.Contains(got, "edit") {
+		t.Errorf("regular unit help bar missing 'edit':\n%s", got)
+	}
+
+	// Cursor on a feed unit — edit must NOT appear.
+	m.cursor = 0
+	got = m.viewUnitsTab()
+	// The help bar renders "<key> <label>" pairs; look for the label.
+	// "edit" appears nowhere else in the rendered output for this fixture.
+	if strings.Contains(got, "edit") {
+		t.Errorf("feed unit help bar still advertises 'edit':\n%s", got)
+	}
+}
+
 func TestViewUnitsTab_CompletionsRenderUnderQueryLine(t *testing.T) {
 	m := model{
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
-			Units:    map[string]*yoestar.Unit{},
+			UnitsByModule:    map[string]map[string]*yoestar.Unit{"": {}},
 		},
 		queryEditing:     true,
 		queryInput:       "o",
@@ -142,18 +285,19 @@ func TestViewUnitsTab_CompletionsRenderUnderQueryLine(t *testing.T) {
 
 func TestRefreshUnitSize_PicksUpFreshlyWrittenMeta(t *testing.T) {
 	projDir := t.TempDir()
-	// build/foo.x86_64/build.json
-	buildDir := filepath.Join(projDir, "build", "foo.x86_64")
+	// build/<distro>/foo.x86_64/build.json per R14a.
+	buildDir := filepath.Join(projDir, "build", "alpine", "foo.x86_64")
 	writeMeta(t, buildDir, 4096)
 
 	m := &model{
 		projectDir: projDir,
 		arch:       "x86_64",
+		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit"},
-			},
+			}},
 		},
 	}
 	if m.unitSize["foo"] != 0 {
@@ -170,9 +314,10 @@ func TestRefreshUnitSize_UnknownUnit_NoOp(t *testing.T) {
 	m := &model{
 		projectDir: t.TempDir(),
 		arch:       "x86_64",
+		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units:    map[string]*yoestar.Unit{},
+			UnitsByModule:    map[string]map[string]*yoestar.Unit{"": {}},
 		},
 	}
 	// Should not panic, should not allocate spurious entries.
@@ -222,17 +367,18 @@ func TestSrcStateToken_AllStates(t *testing.T) {
 
 func TestUnitSourceState_ReadsBuildMeta(t *testing.T) {
 	projDir := t.TempDir()
-	buildDir := filepath.Join(projDir, "build", "foo.x86_64")
+	buildDir := filepath.Join(projDir, "build", "alpine", "foo.x86_64")
 	writeMetaWithSourceState(t, buildDir, "dev-mod", "v1.0-3-gabc1234")
 
 	m := model{
 		projectDir: projDir,
 		arch:       "x86_64",
+		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -249,11 +395,12 @@ func TestUnitSourceState_NoBuildMeta_ReturnsEmpty(t *testing.T) {
 	m := model{
 		projectDir: t.TempDir(),
 		arch:       "x86_64",
+		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -264,16 +411,17 @@ func TestUnitSourceState_NoBuildMeta_ReturnsEmpty(t *testing.T) {
 
 func TestRenderSrcCell_DevMod_RendersYellow(t *testing.T) {
 	projDir := t.TempDir()
-	buildDir := filepath.Join(projDir, "build", "foo.x86_64")
+	buildDir := filepath.Join(projDir, "build", "alpine", "foo.x86_64")
 	writeMetaWithSourceState(t, buildDir, "dev-mod", "")
 	m := model{
 		projectDir: projDir,
 		arch:       "x86_64",
+		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -294,11 +442,12 @@ func TestRenderSrcCell_Image_RendersBlank(t *testing.T) {
 	m := model{
 		projectDir: t.TempDir(),
 		arch:       "x86_64",
+		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"my-img": {Name: "my-img", Class: "image"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -338,12 +487,13 @@ func TestDetailSourceLine_ImageReturnsEmpty(t *testing.T) {
 	m := model{
 		projectDir: t.TempDir(),
 		arch:       "x86_64",
+		distro:     "alpine",
 		detailUnit: "my-img",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"my-img": {Name: "my-img", Class: "image"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -354,17 +504,18 @@ func TestDetailSourceLine_ImageReturnsEmpty(t *testing.T) {
 
 func TestDetailSourceLine_DevModSurfacesDescribe(t *testing.T) {
 	projDir := t.TempDir()
-	buildDir := filepath.Join(projDir, "build", "foo.x86_64")
+	buildDir := filepath.Join(projDir, "build", "alpine", "foo.x86_64")
 	writeMetaWithSourceState(t, buildDir, "dev-mod", "v3.4.1-3-gabc1234")
 	m := model{
 		projectDir: projDir,
 		arch:       "x86_64",
+		distro:     "alpine",
 		detailUnit: "foo",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit", Source: "https://example.com/foo.git"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -385,7 +536,7 @@ func TestDetailSourceLine_DevModSurfacesDescribe(t *testing.T) {
 
 func TestDetailSourceLine_BranchTrackingHint(t *testing.T) {
 	projDir := t.TempDir()
-	buildDir := filepath.Join(projDir, "build", "foo.x86_64")
+	buildDir := filepath.Join(projDir, "build", "alpine", "foo.x86_64")
 	srcDir := filepath.Join(buildDir, "src")
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -417,12 +568,13 @@ func TestDetailSourceLine_BranchTrackingHint(t *testing.T) {
 	m := model{
 		projectDir: projDir,
 		arch:       "x86_64",
+		distro:     "alpine",
 		detailUnit: "foo",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit", Source: "https://example.com/foo.git", Tag: "v1.36.1", Branch: "main"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -437,17 +589,18 @@ func TestDetailSourceLine_BranchTrackingHint(t *testing.T) {
 
 func TestDetailSourceLine_PinShowsTag(t *testing.T) {
 	projDir := t.TempDir()
-	buildDir := filepath.Join(projDir, "build", "foo.x86_64")
+	buildDir := filepath.Join(projDir, "build", "alpine", "foo.x86_64")
 	writeMetaWithSourceState(t, buildDir, "pin", "")
 	m := model{
 		projectDir: projDir,
 		arch:       "x86_64",
+		distro:     "alpine",
 		detailUnit: "foo",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit", Source: "https://example.com/foo.git", Tag: "v1.36.1"},
-			},
+			}},
 		},
 		unitSrcStates: map[string]source.State{},
 	}
@@ -483,11 +636,12 @@ func newModelWithUnit(t *testing.T, projDir, unitName string, state source.State
 	m := model{
 		projectDir: projDir,
 		arch:       "x86_64",
+		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				unitName: {Name: unitName, Class: "unit", Source: "https://example.com/" + unitName + ".git"},
-			},
+			}},
 		},
 		unitSrcStates:   map[string]source.State{unitName: state},
 		moduleSrcStates: map[string]source.State{},
@@ -531,11 +685,12 @@ func TestOpenSourcePromptForUnit_Image_NoOpsWithMessage(t *testing.T) {
 	m := model{
 		projectDir: t.TempDir(),
 		arch:       "x86_64",
+		distro:     "alpine",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"my-img": {Name: "my-img", Class: "image"},
-			},
+			}},
 		},
 		unitSrcStates:   map[string]source.State{},
 		moduleSrcStates: map[string]source.State{},
@@ -864,8 +1019,8 @@ func TestViewSourcePrompt_RendersHeaderAndOptions(t *testing.T) {
 // size, and symlinks are flagged so the renderer can dim them.
 func TestRefreshDetailFiles_WalksDestdir(t *testing.T) {
 	projDir := t.TempDir()
-	// build/foo.x86_64/destdir/...
-	destDir := filepath.Join(projDir, "build", "foo.x86_64", "destdir")
+	// build/<distro>/foo.x86_64/destdir/... per R14a.
+	destDir := filepath.Join(projDir, "build", "alpine", "foo.x86_64", "destdir")
 	if err := os.MkdirAll(filepath.Join(destDir, "usr", "bin"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -885,12 +1040,13 @@ func TestRefreshDetailFiles_WalksDestdir(t *testing.T) {
 	m := &model{
 		projectDir: projDir,
 		arch:       "x86_64",
+		distro:     "alpine",
 		detailUnit: "foo",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"foo": {Name: "foo", Class: "unit"},
-			},
+			}},
 		},
 	}
 	m.refreshDetailFiles()
@@ -936,7 +1092,7 @@ func TestRefreshDetailFiles_WalksDestdir(t *testing.T) {
 // the partition size and would dominate the listing.
 func TestRefreshDetailFiles_ImageWalksRootfs(t *testing.T) {
 	projDir := t.TempDir()
-	destDir := filepath.Join(projDir, "build", "img.x86_64", "destdir")
+	destDir := filepath.Join(projDir, "build", "alpine", "img.x86_64", "destdir")
 	rootfs := filepath.Join(destDir, "rootfs")
 	if err := os.MkdirAll(filepath.Join(rootfs, "etc"), 0o755); err != nil {
 		t.Fatalf("mkdir rootfs: %v", err)
@@ -954,12 +1110,13 @@ func TestRefreshDetailFiles_ImageWalksRootfs(t *testing.T) {
 	m := &model{
 		projectDir: projDir,
 		arch:       "x86_64",
+		distro:     "alpine",
 		detailUnit: "img",
 		proj: &yoestar.Project{
 			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			Units: map[string]*yoestar.Unit{
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 				"img": {Name: "img", Class: "image"},
-			},
+			}},
 		},
 	}
 	m.refreshDetailFiles()
@@ -1071,5 +1228,88 @@ func TestRenderHomeHeader_ProgressReplacesFeed(t *testing.T) {
 	m.resetBuildProgress()
 	if !strings.Contains(m.renderHomeHeader(), "feed: serving") {
 		t.Fatalf("feed banner should return after session reset")
+	}
+}
+
+func TestStderrSummary(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{
+			name: "error line wins",
+			in:   "cloning module...\nError: host port 2222 is already in use — stop that guest\n",
+			want: "host port 2222 is already in use — stop that guest",
+		},
+		{
+			name: "error line plus wrapped detail",
+			in:   "qemu: warning\nError: QEMU exited with an error: exit status 1\nqemu-system-x86_64: Failed to get write lock\n",
+			want: "QEMU exited with an error: exit status 1 — qemu-system-x86_64: Failed to get write lock",
+		},
+		{
+			name: "no error line falls back to last non-empty",
+			in:   "starting up\nsomething odd happened\n\n",
+			want: "something odd happened",
+		},
+		{name: "empty", in: "", want: ""},
+		{name: "blank only", in: "\n  \n", want: ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := stderrSummary(c.in); got != c.want {
+				t.Fatalf("stderrSummary(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+func TestWrapShellCommandText(t *testing.T) {
+	// Wide enough — single line, no continuation.
+	got := wrapShellCommandText("qemu-system-x86_64",
+		[]string{"-m", "1G", "-nographic"},
+		200, "  ")
+	want := "  qemu-system-x86_64 -m 1G -nographic\n"
+	if got != want {
+		t.Fatalf("wide single line:\n got %q\nwant %q", got, want)
+	}
+
+	// Narrow width forces wrapping at argument boundaries with the standard
+	// backslash continuation; every line should end either in " \\" or be
+	// the terminating line.
+	got = wrapShellCommandText("qemu-system-x86_64",
+		[]string{"-m", "1G", "-nographic", "-enable-kvm"},
+		25, "  ")
+	lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
+	for i, ln := range lines {
+		if i < len(lines)-1 && !strings.HasSuffix(ln, " \\") {
+			t.Fatalf("non-final line %d not continued: %q (full output: %q)", i, ln, got)
+		}
+	}
+	if !strings.HasPrefix(lines[0], "  qemu-system-x86_64") {
+		t.Fatalf("first line should start with the indented bin name: %q", lines[0])
+	}
+	// Every continuation line must start with the indent + 2 extra spaces.
+	for i := 1; i < len(lines); i++ {
+		if !strings.HasPrefix(lines[i], "    ") {
+			t.Fatalf("continuation %d not indented: %q", i, lines[i])
+		}
+	}
+
+	// Arg containing a space must be single-quoted.
+	got = wrapShellCommandText("qemu-system-x86_64",
+		[]string{"-append", "console=ttyS0 root=/dev/vda2 rw"},
+		200, "  ")
+	if !strings.Contains(got, "'console=ttyS0 root=/dev/vda2 rw'") {
+		t.Fatalf("append arg not single-quoted: %q", got)
+	}
+
+	// Plain alphanumeric + comma args don't need quoting.
+	got = wrapShellCommandText("qemu-system-x86_64",
+		[]string{"-netdev", "user,id=net0,hostfwd=tcp::2222-:22"},
+		200, "  ")
+	if !strings.Contains(got, "user,id=net0,hostfwd=tcp::2222-:22") {
+		t.Fatalf("netdev arg missing from output: %q", got)
+	}
+	if strings.Contains(got, "'user") {
+		t.Fatalf("netdev arg unexpectedly quoted: %q", got)
 	}
 }

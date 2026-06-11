@@ -25,9 +25,26 @@ type LocalOverrides struct {
 	DeployHost  string // last-used target for `yoe deploy` from the TUI
 	FlashDevice string // last-used flash target (e.g. /dev/sdb) for the TUI flash view
 	Query       string // last-saved TUI search query (in:base-image, etc.)
+	// QEMUMemory overrides the RAM `yoe run` gives the QEMU guest (e.g.
+	// "8G"). Empty means "not set" — the machine's own qemu memory is used.
+	QEMUMemory string
+	// QEMUDisplay overrides the `yoe run` graphical-display default. Tri-state:
+	// "on" forces -display ... + virtio-vga, "off" forces -nographic, "" leaves
+	// the run-time CLI flag (--display) in charge (default: off).
+	QEMUDisplay string
+	// QEMUPorts is an extra set of host:guest forward mappings appended to
+	// the machine's declared forwards. A matching guest port replaces the
+	// machine entry; otherwise the entry is appended. Empty means "no extras".
+	QEMUPorts []string
 	// ParallelBuilds caps how many units `yoe build` builds concurrently.
 	// Zero means "not set" — the build picks its own default.
 	ParallelBuilds int
+	// DefaultDistroOverride is the per-developer effective-distro
+	// override. Wins over PROJECT.star's default_distro but loses to
+	// an explicit image-level distro. Empty means "no override; honor
+	// PROJECT.star". Populated by the TUI Setup → Default Distro
+	// picker.
+	DefaultDistroOverride string
 }
 
 // LoadLocalOverrides reads <projectDir>/local.star if it exists and
@@ -60,6 +77,23 @@ func LoadLocalOverrides(projectDir string) (LocalOverrides, error) {
 				captured.ParallelBuilds = int(i)
 				continue
 			}
+			if string(key) == "qemu_ports" {
+				list, ok := kv[1].(*starlark.List)
+				if !ok {
+					return nil, fmt.Errorf("local: qemu_ports must be a list of strings")
+				}
+				iter := list.Iterate()
+				defer iter.Done()
+				var elem starlark.Value
+				for iter.Next(&elem) {
+					s, ok := elem.(starlark.String)
+					if !ok {
+						return nil, fmt.Errorf("local: qemu_ports entries must be strings")
+					}
+					captured.QEMUPorts = append(captured.QEMUPorts, string(s))
+				}
+				continue
+			}
 			v, ok := kv[1].(starlark.String)
 			if !ok {
 				return nil, fmt.Errorf("local: %s must be a string", string(key))
@@ -75,6 +109,17 @@ func LoadLocalOverrides(projectDir string) (LocalOverrides, error) {
 				captured.FlashDevice = string(v)
 			case "query":
 				captured.Query = string(v)
+			case "default_distro_override":
+				captured.DefaultDistroOverride = string(v)
+			case "qemu_memory":
+				captured.QEMUMemory = string(v)
+			case "qemu_display":
+				switch string(v) {
+				case "on", "off", "":
+					captured.QEMUDisplay = string(v)
+				default:
+					return nil, fmt.Errorf("local: qemu_display must be \"on\", \"off\", or \"\"")
+				}
 			default:
 				return nil, fmt.Errorf("local: unknown keyword %q", string(key))
 			}
@@ -113,6 +158,25 @@ func WriteLocalOverrides(projectDir string, ov LocalOverrides) error {
 	}
 	if ov.Query != "" {
 		fmt.Fprintf(&b, "    query = %q,\n", ov.Query)
+	}
+	if ov.DefaultDistroOverride != "" {
+		fmt.Fprintf(&b, "    default_distro_override = %q,\n", ov.DefaultDistroOverride)
+	}
+	if ov.QEMUMemory != "" {
+		fmt.Fprintf(&b, "    qemu_memory = %q,\n", ov.QEMUMemory)
+	}
+	if ov.QEMUDisplay != "" {
+		fmt.Fprintf(&b, "    qemu_display = %q,\n", ov.QEMUDisplay)
+	}
+	if len(ov.QEMUPorts) > 0 {
+		b.WriteString("    qemu_ports = [")
+		for i, p := range ov.QEMUPorts {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", p)
+		}
+		b.WriteString("],\n")
 	}
 	if ov.ParallelBuilds > 0 {
 		fmt.Fprintf(&b, "    parallel_builds = %d,\n", ov.ParallelBuilds)

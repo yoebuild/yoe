@@ -6,6 +6,18 @@ import (
 	"testing"
 )
 
+// countAllUnits returns the count of distinct unit names in the
+// project's catalog — deduplicated across modules so a name
+// registered for multiple distros yields one count, matching the
+// flat-catalog cardinality tests historically asserted against.
+func countAllUnits(p *Project) int {
+	seen := map[string]struct{}{}
+	for name := range p.AllUnits() {
+		seen[name] = struct{}{}
+	}
+	return len(seen)
+}
+
 func TestLoadProject(t *testing.T) {
 	dir := filepath.Join("..", "..", "testdata", "valid-project")
 	proj, err := LoadProject(dir)
@@ -36,23 +48,23 @@ func TestLoadProject(t *testing.T) {
 	}
 
 	// Units
-	if len(proj.Units) != 7 {
-		t.Errorf("got %d units, want 7", len(proj.Units))
+	if countAllUnits(proj) != 7 {
+		t.Errorf("got %d units, want 7", countAllUnits(proj))
 	}
-	if _, ok := proj.Units["testlib"]; !ok {
+	if proj.AnyUnit("testlib") == nil {
 		t.Error("expected unit 'testlib' from units/libs/ subdirectory")
 	}
-	if r, ok := proj.Units["openssh"]; !ok {
+	if r := proj.AnyUnit("openssh"); r == nil {
 		t.Error("expected unit 'openssh'")
 	} else if r.Class != "unit" {
 		t.Errorf("openssh class = %q, want %q", r.Class, "unit")
 	}
-	if r, ok := proj.Units["myapp"]; !ok {
+	if r := proj.AnyUnit("myapp"); r == nil {
 		t.Error("expected unit 'myapp'")
 	} else if r.Class != "unit" {
 		t.Errorf("myapp class = %q, want %q", r.Class, "unit")
 	}
-	if r, ok := proj.Units["base-image"]; !ok {
+	if r := proj.AnyUnit("base-image"); r == nil {
 		t.Error("expected unit 'base-image'")
 	} else {
 		if r.Class != "image" {
@@ -100,15 +112,15 @@ func TestLoadProject_ProvidesOverride(t *testing.T) {
 		t.Fatalf("LoadProject: %v", err)
 	}
 	// Both units should exist
-	if _, ok := proj.Units["base-files"]; !ok {
+	if proj.AnyUnit("base-files") == nil {
 		t.Error("expected unit 'base-files'")
 	}
-	if _, ok := proj.Units["base-files-custom"]; !ok {
+	if proj.AnyUnit("base-files-custom") == nil {
 		t.Error("expected unit 'base-files-custom'")
 	}
 	// base-files-custom should have higher module index than base-files
-	bf := proj.Units["base-files"]
-	bfc := proj.Units["base-files-custom"]
+	bf := proj.AnyUnit("base-files")
+	bfc := proj.AnyUnit("base-files-custom")
 	if bfc.ModuleIndex <= bf.ModuleIndex {
 		t.Errorf("base-files-custom ModuleIndex=%d should be > base-files ModuleIndex=%d",
 			bfc.ModuleIndex, bf.ModuleIndex)
@@ -123,8 +135,8 @@ func TestLoadProject_NameShadowing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadProject: %v", err)
 	}
-	u, ok := proj.Units["musl"]
-	if !ok {
+	u := proj.AnyUnit("musl")
+	if u == nil {
 		t.Fatal("expected unit 'musl'")
 	}
 	if u.Version != "2.0.0-override" {
@@ -144,8 +156,8 @@ func TestLoadProject_ProjectShadowsModules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadProject: %v", err)
 	}
-	u, ok := proj.Units["musl"]
-	if !ok {
+	u := proj.AnyUnit("musl")
+	if u == nil {
 		t.Fatal("expected unit 'musl'")
 	}
 	if u.Version != "3.0.0-project" {

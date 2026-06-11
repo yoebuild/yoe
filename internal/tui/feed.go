@@ -30,7 +30,14 @@ func startProjectFeed(proj *yoestar.Project, projectDir string) (stop func(), st
 
 	projRepoDir := repo.RepoDir(proj, projectDir)
 	httpRoot := filepath.Dir(projRepoDir)
-	archs, _ := repo.ArchDirs(projRepoDir)
+	// Arches now live under repo/<project>/<distro>/<arch>/. Use the
+	// project's effective distro; multi-distro support reads arches
+	// from each distro subtree separately.
+	distro, derr := proj.EffectiveDistro()
+	if derr != nil {
+		return stop, fmt.Sprintf("skipped: resolve distro: %v", derr)
+	}
+	archs, _ := repo.ArchDirs(repo.RepoDistroDir(proj, projectDir, distro))
 
 	srv, err := feed.Start(feed.Config{
 		RepoDir:  httpRoot,

@@ -17,25 +17,46 @@ import (
 // never recurses into a name it has already visited, and missing names
 // are skipped (the build planner is responsible for flagging them).
 func BuildInClosure(proj *yoestar.Project, root string) map[string]bool {
-	if proj == nil || proj.Units == nil {
+	if proj == nil {
 		return nil
 	}
-	if _, ok := proj.Units[root]; !ok {
+	// The TUI query has no image scope, so resolve through the
+	// project's effective distro. If neither default_distro nor an
+	// override is set, fall back to scanning any module for the root
+	// — search-as-you-type UX is best-effort.
+	distro, _ := proj.EffectiveDistro()
+	rootUnit := proj.LookupUnit(distro, root)
+	if rootUnit == nil {
+		rootUnit = proj.AnyUnit(root)
+	}
+	if rootUnit == nil {
 		return nil
 	}
 
 	seen := map[string]bool{}
 	var walk func(name string)
 	walk = func(name string) {
-		if real, ok := proj.Provides[name]; ok {
+		// Distro-aware provides resolution so a virtual like
+		// "toolchain" routes to toolchain-musl in an alpine closure
+		// and toolchain-glibc in a debian closure. The global
+		// proj.Provides table has one winner per virtual and would
+		// silently drag the wrong-distro variant into the closure.
+		if distro != "" {
+			if real := proj.ResolveProvidesForDistro(name, distro); real != "" {
+				name = real
+			}
+		} else if real, ok := proj.Provides[name]; ok {
 			name = real
 		}
-		u, ok := proj.Units[name]
-		if !ok || seen[name] {
+		u := proj.LookupUnit(distro, name)
+		if u == nil {
+			u = proj.AnyUnit(name)
+		}
+		if u == nil || seen[name] {
 			return
 		}
 		seen[name] = true
-		for _, dep := range u.Deps {
+		for _, dep := range u.DepsForDistro(distro) {
 			walk(dep)
 		}
 		// image units carry their package list in Artifacts; treat those
@@ -50,9 +71,12 @@ func BuildInClosure(proj *yoestar.Project, root string) map[string]bool {
 	walk(root)
 
 	// Union runtime-dep closure rooted at the same unit. RuntimeClosure
-	// already routes through proj.Provides.
-	for _, name := range resolve.RuntimeClosure(proj, []string{root}) {
-		seen[name] = true
+	// already routes through proj.Provides. Empty distro short-circuits
+	// (the walker would panic on it).
+	if distro != "" {
+		for _, name := range resolve.RuntimeClosure(proj, []string{root}, distro) {
+			seen[name] = true
+		}
 	}
 	return seen
 }

@@ -43,16 +43,18 @@ Three north stars guide the experiment — everything else is in service of thes
 
 ## Is `[yoe]` Right for You?
 
-`[yoe]` is not for everyone. If you are building a mission-critical system that
-requires bit-for-bit reproducible builds, long-term release freezes, or
-extensive compliance certification, use [Yocto](https://www.yoctoproject.org/) —
-it is battle-tested for those requirements.
+`[yoe]` build is not for everyone. If you are building a mission-critical system
+that requires bit-for-bit reproducible builds, long-term release freezes, or
+extensive compliance certification, use the current generation [Yoe
+Distribution](https://yoedistro.org/ based on
+[Yocto](https://www.yoctoproject.org/) - it is battle-tested for those
+requirements.
 
-`[yoe]` is designed for edge systems that behave more like cloud systems — AI
-workloads and modern-language applications — and for teams that track upstream
-closely and prioritize fast iteration over strict reproducibility. If your
-product ships frequent updates, runs containerized services, or depends heavily
-on Go/Rust/Python ecosystems, `[yoe]` may be a better fit.
+`[yoe]` build is designed for edge systems that behave more like cloud systems —
+AI workloads and modern-language applications — and for teams that track
+upstream closely and prioritize fast iteration over strict reproducibility. If
+your product ships frequent updates, runs containerized services, or depends
+heavily on Go/Rust/Python ecosystems, `[yoe]` may be a better fit.
 
 More fundamentally, `[yoe]` assumes a small-team problem set, not a scaled-down
 enterprise one. A startup or ten-person product team doesn't have smaller
@@ -68,6 +70,21 @@ have.
 Prerequisites: Linux or macOS with Git and Docker installed. Windows users:
 install WSL2 and use the Linux binary (Linux x86_64/Docker is the most tested
 configuration). Claude Code is highly recommended, but not required.
+
+To run a built image you also need QEMU. On Debian/Ubuntu:
+
+```sh
+sudo apt-get install qemu-system-x86
+```
+
+For KVM acceleration, your user must be in the `kvm` group. If `yoe run` reports
+`failed to initialize kvm: Permission denied`, add yourself and pick up the new
+group membership:
+
+```sh
+sudo usermod -aG kvm $(whoami)
+newgrp kvm   # or log out and back in
+```
 
 ```sh
 # Download the yoe binary (Linux x86_64)
@@ -102,8 +119,14 @@ The TUI user interface:
 ![screenshot](assets/yoe-screenshot.png)
 
 `dev-image` is another included image with a few more things in it. Press the
-`s` key to and configure the image. The `/` key modifies the unit query to
-change what is displayed.
+`s` key to navigate to the setup menu and select the image.
+
+The `/` key modifies the unit query to change what units are displayed.
+
+The `tab` key shifts between the unit, modules, and diagnostics pages.
+
+For more information on the TUI, see the
+[`[yoe]` tool documentation](/docs/yoe-tool.md).
 
 There are also CLI variants of the above commands (`build`, `run`, etc.).
 
@@ -189,7 +212,10 @@ this can:
 - **Generate machine definitions from board names** —
   `/new-machine "Raspberry Pi 5"`
 
-See [AI Skills](docs/ai-skills.md) for the full catalog of AI-driven workflows.
+Add these skills to your project with `yoe skills install` (or as a Claude Code
+plugin via `/plugin marketplace add yoebuild/yoe`). See
+[AI Skills](docs/ai-skills.md) for installation details and the full catalog of
+AI-driven workflows.
 
 ## 💡 Inspirations
 
@@ -258,6 +284,11 @@ equally well on an embedded dev kit, an ARM cloud instance, or a CI runner, the
 development loop is centered on the machine where developers already have their
 editor, shell, browser, debugger, and Git workflow set up. You should not need
 to SSH into a Raspberry Pi to get real work done.
+
+That said, the option is there. The `selfhost-image` for the Raspberry Pi 5
+bundles `yoe`, Go, Docker, git, and the dev-image tool set (helix, yazi, zellij)
+— flash, boot, and a freshly-imaged RPi5 is a complete native ARM64 build host.
+See [Self-Host on RPi5](docs/selfhost-rpi5.md).
 
 When a build runs much faster on a different native architecture — for example,
 building ARM64 packages from an x86_64 workstation — those build steps can be
@@ -366,27 +397,33 @@ Why apk over apt and dnf:
   package repository, enabling incremental OTA updates (install only changed
   packages) alongside full image updates.
 
-The `[yoe]` build tooling invokes units to produce `.apk` packages, which are
-published to a repository. Image assembly then uses `apk` to install packages
-into a root filesystem, just as Alpine does.
+The `[yoe]` build tooling invokes units to produce packages — `.apk` on the
+default Alpine base, `.deb` on the experimental Debian/Ubuntu bases — which are
+published to a repository. Image assembly then installs those packages into a
+root filesystem with the base's native tool (`apk` on Alpine, `mmdebstrap`/`apt`
+on Debian/Ubuntu).
 
 ### 🧱 Base System
 
-The base userspace today is **busybox** on top of a C library (musl today, glibc
-targeted), with busybox's built-in init as PID 1:
+The base userspace depends on the image's **distro**. The default — and most
+mature — base is Alpine-derived: **busybox** on a **musl** C library, with
+busybox's built-in init as PID 1. `[yoe]` also builds experimental **Debian**
+and **Ubuntu** bases, which are **glibc** worlds running **systemd** as PID 1
+(see [Yoe and distributions](docs/distro.md)). The choice is per image:
 
-- **C library** — the project currently uses musl (inherited from Alpine's
-  toolchain), with a planned move to glibc for maximum compatibility with
-  pre-built binaries, language runtimes (Go, Rust, Python, Node.js), and
-  third-party libraries.
-- **busybox** — provides the core userspace utilities (sh, coreutils, etc.) and
-  init in a single small binary. Keeps the base image minimal while still giving
-  a functional shell environment for debugging and scripting.
-- **Init (current: busybox init)** — busybox's built-in init handles PID 1
-  duties today. **systemd will be an option in the future**: it is
-  well-understood, has rich service management, and provides integrated journal
-  logging, network management, device management (udev), and container
-  integration. The trade-off is size and complexity.
+- **C library** — musl on the Alpine base (inherited from Alpine's toolchain);
+  glibc on the Debian/Ubuntu bases, for maximum compatibility with pre-built
+  binaries, vendor blobs, language runtimes (Go, Rust, Python, Node.js), and
+  third-party libraries that assume glibc.
+- **busybox** (Alpine base) — provides the core userspace utilities (sh,
+  coreutils, etc.) and init in a single small binary, keeping the image minimal
+  while still giving a functional shell environment for debugging and scripting.
+  The Debian/Ubuntu bases ship the full GNU coreutils instead.
+- **Init** — busybox's built-in init handles PID 1 on the Alpine base; the
+  Debian/Ubuntu bases run **systemd**, with its rich service management,
+  integrated journal logging, network management, and device management (udev).
+  The trade-off is size and complexity — which is why the lean busybox path
+  stays the default.
 
 This combination gives a small but fully functional base system that can run
 real-world services without surprises.
@@ -421,52 +458,16 @@ regardless of whether a fresh build would produce identical bytes.
 
 ## 📚 Documentation
 
-- [FAQ](https://yoebuild.org/faq/) — answers to common questions about `[yoe]`
-- [AI Skills](docs/ai-skills.md) — AI-driven workflows for unit creation, build
-  debugging, security auditing, and more
-- [The `yoe` Tool](docs/yoe-tool.md) — CLI reference for building, imaging, and
-  flashing
-- [Unit & Configuration Format](docs/metadata-format.md) — Starlark unit and
-  configuration spec
-- [Naming and Resolution](docs/naming-and-resolution.md) — how modules, units,
-  and dependencies are named, referenced, and resolved
-- [File Templates](docs/file-templates.md) — moving inline file content out of
-  Starlark units into external templates
-- [Starlark Packaging and Image Assembly](docs/starlark-packaging-images.md) —
-  composable Starlark tasks for packaging and image assembly
-- [Build Dependencies and Caching](docs/build-dependencies-and-caching.md) —
-  containers for host tools, apk sysroot for libraries, language-native package
-  managers for everything else
-- [Build Environment](docs/build-environment.md) — bootstrap, host tools, and
-  build isolation
-- [Build Languages](docs/build-languages.md) — analysis of Starlark, CUE, Nix,
-  and other embeddable languages for unit definitions
-- [Development Environments](docs/dev-env.md) — the no-SDK model, `yoe shell`
-  for interactive dev, and `yoe bundle` for air-gapped distribution
-- [Testing](docs/testing.md) — testing strategy across Go logic, package QA,
-  image smoke tests, and on-device test runs
-- [apk Signing](docs/signing.md) — keypair generation, signature verification,
-  and on-device trust
-- [On-Device Package Management](docs/on-device-apk.md) — using `apk` on booted
-  yoe systems to install and upgrade packages
-- [Feed Server and `yoe deploy`](docs/feed-server.md) — dev-loop for serving the
-  project apk repo and installing units on running devices
-- [Containers on yoe Images](docs/containers.md) — design for running Docker /
-  Podman / containerd workloads on yoe-built devices
-- [libc, init, and the Rootfs Base](docs/libc-and-init.md) — the default base of
-  musl, busybox, and OpenRC, and the path to glibc/systemd for edge-AI hardware
-- [module-alpine](docs/module-alpine.md) — wrapping prebuilt Alpine packages as
-  yoe units
-- [Comparisons](docs/comparisons.md) — how `[yoe]` relates to Yocto, Buildroot,
-  Alpine, Arch, and NixOS
-- [Roadmap](docs/roadmap.md) — existing units and what's needed for a complete
-  base system
+See the [main documentation site](https://docs.yoebuild.org/) for more
+information.
 
 ## 🤝 Contributing
 
 Contributions are welcome — especially BSPs for new boards and units for new
 packages. AI-assisted contributions are fine; just make sure the result actually
-works, and keep PRs small and reviewable.
+works, and keep PRs small and reviewable. Please
+[discuss](https://github.com/yoebuild/yoe/discussions) architectural or
+significant UI changes before implementing.
 
 ## 💚 Sponsors
 

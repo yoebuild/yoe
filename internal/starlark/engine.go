@@ -13,11 +13,22 @@ var fileOpts = &syntax.FileOptions{}
 
 // Engine evaluates .star files and collects results.
 type Engine struct {
-	mu        sync.Mutex
-	project   *Project
-	machines  map[string]*Machine
-	units     map[string]*Unit
-	commands  map[string]*Command
+	mu         sync.Mutex
+	project    *Project
+	machines   map[string]*Machine
+	// units is the legacy flat catalog: one slot per name, populated
+	// in module-priority order (or first-wins for cross-priority
+	// ties). The closure walker still consults it for the fast path;
+	// cross-distro collisions fall back to unitsByModule.
+	units      map[string]*Unit
+	// unitsByModule is the primary per-module storage that lets two
+	// modules' same-named units coexist. Same-named units from
+	// alpine.main and debian.main both register here; the closure
+	// walker picks the right one per consuming distro. Materialized
+	// synthetic units also register here under their synthetic module
+	// name (e.g., e.unitsByModule["alpine.main"]["openssl"]).
+	unitsByModule map[string]map[string]*Unit
+	commands   map[string]*Command
 	moduleInfo *ModuleInfo
 
 	// Current module context — set by the loader before evaluating each
@@ -54,16 +65,77 @@ type Engine struct {
 	// shadows accumulates cross-module unit name collisions in registration
 	// order. Surfaced via Project.Diagnostics for the TUI's Diagnostics tab.
 	shadows []ShadowEvent
+
+	// syntheticModules holds entries registered by `alpine_feed(...)` and
+	// friends during MODULE.star evaluation. The loader pulls them after
+	// the real-module walk to assign Priority and attach to the project.
+	syntheticModules []*SyntheticModule
+
+	// extraBuiltins holds (name, *Builtin) pairs registered via
+	// WithBuiltin LoadOption. Materialized once when builtins() is first
+	// called so the factories execute against the live Engine.
+	extraBuiltins map[string]*starlark.Builtin
+
+	// activeArch carries the resolver's currently active architecture
+	// after machine evaluation. Read by lazy feed lookups (synthetic
+	// module Lookup callbacks) so an alpine_feed Lookup serves entries
+	// matching the project's arch without needing the arch passed in
+	// through every call site.
+	activeArch string
+
 }
+
+// SetExtraBuiltins materializes the WithBuiltin factories. Called by the
+// loader after the Engine is constructed but before any .star file is
+// evaluated.
+func (e *Engine) SetExtraBuiltins(specs map[string]BuiltinFactory) {
+	if e.extraBuiltins == nil {
+		e.extraBuiltins = make(map[string]*starlark.Builtin, len(specs))
+	}
+	for name, factory := range specs {
+		e.extraBuiltins[name] = factory(e)
+	}
+}
+
+// SetActiveArch records the arch the loader has settled on for this
+// evaluation pass. Lazy feed lookups (alpine_feed, apt_feed) consult
+// this when materializing units so per-arch APKINDEX entries can be
+// filtered without threading arch through every call.
+func (e *Engine) SetActiveArch(arch string) { e.activeArch = arch }
+
+// ActiveArch returns the active architecture set by the loader. Empty
+// before SetActiveArch is called.
+func (e *Engine) ActiveArch() string { return e.activeArch }
 
 func NewEngine() *Engine {
 	return &Engine{
-		machines: make(map[string]*Machine),
-		units:    make(map[string]*Unit),
-		commands: make(map[string]*Command),
-		vars:     make(map[string]starlark.Value),
+		machines:      make(map[string]*Machine),
+		units:         make(map[string]*Unit),
+		unitsByModule: make(map[string]map[string]*Unit),
+		commands:      make(map[string]*Command),
+		vars:          make(map[string]starlark.Value),
 	}
 }
+
+// storeByModule writes a registered or materialized unit into the
+// per-module storage. Same-module same-name re-registration is
+// expected (e.g., the loader writes after registerUnit then a
+// materialization callback resolves the same name); the latest write
+// wins inside one module. Cross-module same-name collisions register
+// independently — that's the whole point of the nested map.
+//
+// Must be called with e.mu held.
+func (e *Engine) storeByModule(u *Unit) {
+	if u == nil {
+		return
+	}
+	mod := u.Module
+	if e.unitsByModule[mod] == nil {
+		e.unitsByModule[mod] = make(map[string]*Unit)
+	}
+	e.unitsByModule[mod][u.Name] = u
+}
+
 
 // SetVar sets a predeclared variable available in all subsequently evaluated
 // .star files. Used to inject ARCH after machines are loaded.
@@ -74,6 +146,13 @@ func (e *Engine) SetVar(name string, value starlark.Value) {
 func (e *Engine) Project() *Project              { return e.project }
 func (e *Engine) Machines() map[string]*Machine   { return e.machines }
 func (e *Engine) Units() map[string]*Unit     { return e.units }
+
+// UnitsByModule returns the per-module unit catalog populated during
+// registration and synthetic materialization. Same-named units from
+// different modules coexist as separate entries. Used by the loader
+// to seed Project.UnitsByModule and DistroViews.
+func (e *Engine) UnitsByModule() map[string]map[string]*Unit { return e.unitsByModule }
+
 func (e *Engine) Commands() map[string]*Command   { return e.commands }
 func (e *Engine) ModuleInfo() *ModuleInfo         { return e.moduleInfo }
 func (e *Engine) Globals() starlark.StringDict    { return e.globals }
@@ -83,6 +162,12 @@ func (e *Engine) SetCurrentModule(name string, index int) {
 	e.currentModule = name
 	e.currentModuleIndex = index
 }
+
+// CurrentModule returns the name of the module currently being
+// evaluated, or "" when running at the project root. Used by feed
+// builtins (alpine_feed, apt_feed) to compose synthetic module
+// names like "alpine.main".
+func (e *Engine) CurrentModule() string { return e.currentModule }
 
 // SetShowShadows toggles emission of stderr notices about cross-module unit
 // shadowing and intra-module `provides` overrides. Default is off.

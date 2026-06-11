@@ -14,11 +14,12 @@ import (
 
 func TestDryRun(t *testing.T) {
 	proj := &yoestar.Project{
-		Name: "test",
-		Units: map[string]*yoestar.Unit{
+		Name:          "test",
+		DefaultDistro: "alpine",
+		UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 			"zlib":    {Name: "zlib", Version: "1.3", Class: "unit", Tasks: []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "make"}}}}},
 			"openssh": {Name: "openssh", Version: "9.6", Class: "unit", Deps: []string{"zlib"}, Tasks: []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "make"}}}}},
-		},
+		}},
 	}
 
 	var buf bytes.Buffer
@@ -47,37 +48,44 @@ func TestCacheMarker(t *testing.T) {
 	hash := "abc123def456"
 
 	arch := "x86_64"
+	distro := "alpine"
 
 	// Not cached initially
-	if IsBuildCached(dir, arch, name, hash) {
+	if IsBuildCached(dir, arch, name, hash, distro) {
 		t.Error("should not be cached initially")
 	}
 
 	// Write marker
-	writeCacheMarker(dir, arch, name, hash)
+	writeCacheMarker(dir, arch, name, hash, distro)
 
 	// Now cached
-	if !IsBuildCached(dir, arch, name, hash) {
+	if !IsBuildCached(dir, arch, name, hash, distro) {
 		t.Error("should be cached after writing marker")
 	}
 
 	// Different hash not cached
-	if IsBuildCached(dir, arch, name, "different") {
+	if IsBuildCached(dir, arch, name, "different", distro) {
 		t.Error("different hash should not be cached")
+	}
+
+	// Different distro is a separate cache slot — R14a disambiguation
+	// at the disk layer is what U6 enables.
+	if IsBuildCached(dir, arch, name, hash, "debian") {
+		t.Error("different distro should not share the cache marker")
 	}
 }
 
 func TestFilterBuildOrder(t *testing.T) {
 	proj := &yoestar.Project{
-		Units: map[string]*yoestar.Unit{
+		UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 			"a": {Name: "a"},
 			"b": {Name: "b", Deps: []string{"a"}},
 			"c": {Name: "c", Deps: []string{"b"}},
 			"d": {Name: "d"},
-		},
+		}},
 	}
 
-	dag, _ := resolve.BuildDAG(proj)
+	dag, _ := resolve.BuildDAG(proj, "")
 	order, _ := dag.TopologicalSort()
 
 	filtered, err := filterBuildOrder(dag, order, []string{"c"})
@@ -124,8 +132,9 @@ func TestBuildUnits_WithDeps(t *testing.T) {
 	projectDir := t.TempDir()
 
 	proj := &yoestar.Project{
-		Name: "test",
-		Units: map[string]*yoestar.Unit{
+		Name:          "test",
+		DefaultDistro: "alpine",
+		UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 			"hello": {
 				Name:          "hello",
 				Version:       "1.0",
@@ -134,7 +143,7 @@ func TestBuildUnits_WithDeps(t *testing.T) {
 				ContainerArch: "target",
 				Tasks:         []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "echo built > built.txt"}}}},
 			},
-		},
+		}},
 	}
 
 	// Create source directory with a file (simulating prepared source)
@@ -173,9 +182,9 @@ func TestBuildUnits_WithDeps(t *testing.T) {
 	}
 
 	// Verify cache marker was written
-	if !IsBuildCached(projectDir, "x86_64", "hello", "") {
+	if !IsBuildCached(projectDir, "x86_64", "hello", "", "alpine") {
 		// The hash won't be "" — just verify the marker file exists
-		markerDir := filepath.Join(projectDir, "build", "hello.x86_64")
+		markerDir := filepath.Join(projectDir, "build", "alpine", "hello.x86_64")
 		entries, _ := os.ReadDir(markerDir)
 		found := false
 		for _, e := range entries {
@@ -239,7 +248,8 @@ func TestBuildUnits_ParallelRespectsDAG(t *testing.T) {
 		run(t, srcDir, "git", "commit", "-m", "upstream")
 		run(t, srcDir, "git", "tag", "yoe/pin")
 	}
-	proj := &yoestar.Project{Name: "test", Units: units}
+	proj := &yoestar.Project{Name: "test", DefaultDistro: "alpine"}
+	proj.SetFlatUnits(units)
 
 	var buf bytes.Buffer
 	opts := Options{ProjectDir: projectDir, Arch: "x86_64", Parallel: 3}

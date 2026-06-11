@@ -11,7 +11,7 @@ def go_binary(name, version, source, tag="", sha256="",
               go_package="", binary="", deps=[], runtime_deps=[],
               services=[], conffiles=[], environment={},
               license="", description="", tasks=[], scope="",
-              container="golang:1.24", container_arch="host",
+              container="golang:1.26", container_arch="host",
               go_version="", **kwargs):
     if not go_package:
         go_package = "./cmd/" + name

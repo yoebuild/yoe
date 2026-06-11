@@ -44,6 +44,9 @@ Typical modules:
   (Raspberry Pi 4/5, BeaglePlay, NVIDIA Jetson) and the matching kernel /
   bootloader / firmware units.
 - `module-alpine` — passthrough access to upstream Alpine `.apk` packages.
+- `module-debian` — passthrough access to upstream Debian `.deb` packages
+  (experimental; see [module-debian.md](module-debian.md) for current status and
+  limitations).
 
 Modules are referenced by URL and Git ref in `PROJECT.star`. The `[yoe]` CLI
 clones them into the project's cache. See
@@ -68,17 +71,20 @@ unit, class, and machine API.
 
 ### Packages
 
-A **package** is the build output — an `.apk` file that the unit produces.
-Packages are content-addressed, cached, signed, and published to a repository.
-They are consumed by `apk` at image-assembly time and by the on-device package
-manager for over-the-air updates.
+A **package** is the build output — an `.apk` for alpine-targeted units or a
+`.deb` for debian-targeted units. Packages are content-addressed, cached,
+signed, and published to a repository. They are consumed by `apk` (alpine
+images) or `dpkg` / `apt` (debian images) at image-assembly time and by the
+on-device package manager for over-the-air updates.
 
-One unit produces one `.apk` today. A small set of subpackage splits (`-dev`,
-`-dbg`) is planned for cases where the runtime image should not carry headers or
-debug info. See
+One unit produces one package today — `.apk` or `.deb` is chosen per the
+consuming image's distro, not per unit. A small set of subpackage splits
+(`-dev`, `-dbg`) is planned for cases where the runtime image should not carry
+headers or debug info. See
 [metadata-format.md#units-vs-packages](metadata-format.md#units-vs-packages) for
-the contract between units and packages, and [apk Signing](signing.md) /
-[Feed Server](feed-server.md) for how packages get published and deployed.
+the contract between units and packages, [apk Signing](signing.md) for the
+alpine pipeline, [module-debian.md](module-debian.md) for the debian pipeline,
+and [Feed Server](feed-server.md) for how packages get published and deployed.
 
 ### How they fit together
 
@@ -144,14 +150,36 @@ every module, with module declaration order in `project()` deciding ties:
 This is what makes images machine- and project-portable: an image asks for
 `linux`, and a Raspberry Pi machine config points `linux` at `linux-rpi4` while
 a Jetson machine points it at a Tegra kernel — same image, different hardware.
-Concrete names that match directly skip the registry. See
-[Naming and Resolution](naming-and-resolution.md) for collision rules, name
-shadowing, and the `replaces` mechanism.
+Concrete names that match directly skip the registry.
+
+For multi-distro projects, resolution is also distro-aware: a unit tagged for
+one distro is invisible to images of another, and virtuals like `toolchain`
+route to the matching toolchain unit (`toolchain-musl` for alpine,
+`toolchain-debian-13` for debian, `toolchain-ubuntu-26.04` for ubuntu) via the
+same `provides` mechanism. See [Naming and Resolution](naming-and-resolution.md)
+for collision rules, name shadowing, and the `replaces` mechanism, and
+[Catalog and Materialization](catalog.md) for the in-memory data structures that
+hold units while a project is being evaluated, how synthetic feed units
+materialize lazily, the distro visibility filter, and the working-set sizes the
+resolver operates at.
 
 ## Packaging
 
 Every artifact published by yoe — whether built from source or repacked from a
-distro — flows through the same apk-format pipeline, signed by the project key.
+distro — flows through one of two parallel format pipelines, both signed by the
+project key. The pipelines mirror each other: same content-addressed cache, same
+source paths, same `yoe build` invocation; only the on-disk format and signing
+mechanism differ to match the consuming image's distro.
+
+- **`.apk` pipeline** — used by alpine images. Per-`.apk` RSA-SHA1 signature
+  plus a signed `APKINDEX.tar.gz` per arch. Verified on-device by apk-tools.
+- **`.deb` pipeline** — used by debian images. Per-`.deb` SHA256 in the
+  `Packages` file plus a clearsign-GPG `InRelease` per suite. Verified on-device
+  by apt with `Signed-By:` scoped to the project keyring. Experimental — see
+  [module-debian.md](module-debian.md) for current status.
+
+A single project can have both — one image targeting alpine and another
+targeting debian — and each lands in its own per-distro repository subtree.
 
 ### Distro passthrough
 
@@ -168,18 +196,37 @@ See [Alpine apk Passthrough](apk-passthrough.md) for the two-metadata-systems
 story (`.star` fields drive the yoe resolver; PKGINFO drives apk-tools at
 install time) and the noarch routing details.
 
+`module-debian` follows a parallel but distinct pattern. Upstream `.deb` files
+are mirrored verbatim (no repack), and only the project's `InRelease` is
+re-signed with the project's GPG key. Each downloaded `.deb`'s SHA256 is
+verified at mirror time against the upstream-signed `Packages` entry, and the
+device's apt trust is scoped to the project key via deb822 `Signed-By:` — so the
+per-`.deb` upstream signature isn't on the trust path at all, only the
+project-signed `InRelease` and the per-`.deb` SHA256 inside it. See
+[module-debian.md](module-debian.md) for the verbatim-mirror rationale and the
+`Valid-Until` posture.
+
 ### Signing and trust
 
-Every `.apk` and the per-arch `APKINDEX.tar.gz` are signed at build time with a
-per-project RSA key. The public half rides into the device via `base-files`, so
-on-device installs verify without `--allow-untrusted`:
+Each pipeline has its own signing primitive, but both anchor on the same
+per-project key bootstrapped under `~/.config/yoe/keys/<project>/`:
 
-![apk signing trust chain](assets/apk-signing-trust-chain.png)
+- **apk pipeline** — RSA-SHA1 per-`.apk` signature + signed `APKINDEX.tar.gz`,
+  public half shipped in the rootfs via `base-files`.
 
-The private key never leaves the workstation; the public key travels through two
-independent channels (the project repo for inspection, the rootfs for
-verification). See [apk Signing](signing.md) for key generation, rotation, and
-the exact bytes that get signed.
+  ![apk signing trust chain](assets/apk-signing-trust-chain.png)
+
+- **deb pipeline** — clearsign-GPG `InRelease` per suite, public key staged at
+  `/etc/apt/keyrings/<project>.gpg` and referenced from the deb822 `.sources`
+  file's `Signed-By:` field (scoping trust to the project source only, not the
+  system-wide trust store). HTTPS-only URLs enforced at evaluation. Experimental
+  status applies.
+
+For both: the private key never leaves the workstation, and the public key
+travels through two independent channels (the project repo for inspection, the
+rootfs for verification). See [apk Signing](signing.md) for the alpine key
+generation / rotation surface and the exact apk bytes that get signed. See
+[module-debian.md](module-debian.md) for the deb trust details.
 
 ## Deployment
 
@@ -190,9 +237,23 @@ there's only one delivery mechanism to understand.
 ### Reaching a running device
 
 Built packages flow from the workstation to a running yoe device through a small
-set of orthogonal channels: mDNS for discovery, HTTP for the apk pull, and SSH
-for orchestration. The same apk repo, signing key, and `APKINDEX` serve
-image-time installs, the dev loop, and on-device OTA:
+set of orthogonal channels: mDNS for discovery, HTTP for the package pull, and
+SSH for orchestration. The delivery mechanism is one — the per-distro package
+format is two:
+
+- **Alpine images** consume an apk repo at `repo/<project>/alpine/<arch>/` with
+  the project's RSA-signed `APKINDEX`. `yoe device repo add` writes the matching
+  `/etc/apk/repositories` entry; `apk add` / `apk upgrade` then work on-device
+  against the project's own feed.
+- **Debian images** consume a Debian-format repo at
+  `repo/<project>/debian/dists/<suite>/`. The project's GPG key signs the
+  `InRelease`; image assembly stages `/etc/apt/sources.list.d/<project>.sources`
+  (deb822 format) referencing the keyring via `Signed-By:`. `apt update` and
+  `apt install` on the device verify against the project key only, so other apt
+  sources can't smuggle packages into the project's namespace.
+
+Same project key, same HTTP transport, same mDNS + SSH channels — the apk vs apt
+split is on-device tooling, not on-workstation infrastructure.
 
 ![Feed server topology](assets/feed-server-topology.png)
 
@@ -200,7 +261,8 @@ image-time installs, the dev loop, and on-device OTA:
 one-time `/etc/apk/repositories` setup, and `yoe deploy` orchestrates the whole
 "build → ship → install" round trip. See
 [Feed Server and yoe deploy](feed-server.md) for the workflows, command
-reference, and trust model.
+reference, and trust model, and [module-debian](module-debian.md) for the apt
+side end-to-end.
 
 ## Development
 
@@ -209,10 +271,14 @@ experimental tweak — yoe leans on plain git rather than a separate "dev mode."
 
 ### Source modifications round-trip
 
-Every unit's build directory is a regular git repo. Upstream source is checked
-out at the version pinned by the unit and tagged `upstream`; any patches the
-unit declares are applied as commits on top; your local edits become further
-commits. There's no separate workspace, no mode to enter:
+Every unit's build directory is a regular git repo, living under
+`build/<distro>/<unit>.<scope>/`. The per-distro segment lets a source unit
+consumed by both an Alpine and a Debian image keep two destdirs (one built
+against musl, one against glibc) so each image gets the right libc without
+clobbering its peer between builds. Upstream source is checked out at the
+version pinned by the unit and tagged `upstream`; any patches the unit declares
+are applied as commits on top; your local edits become further commits. There's
+no separate workspace, no mode to enter:
 
 ![Source modification flow](assets/source-mod-flow.png)
 

@@ -1,15 +1,16 @@
 # libc, init, and the rootfs base
 
-Yoe today is a musl + OpenRC + Alpine-derived distribution builder. This is a
-deliberate choice, not an accident, but it is also not a permanent one. This
-document explains the choice, what it implies for the products yoe can serve,
-where the boundary lies, and the planned direction for serving products that sit
-on the other side of that boundary — most notably edge-AI hardware where glibc
-and systemd are non-negotiable.
+Yoe's default and most mature base is musl + OpenRC + Alpine-derived. It now
+also builds experimental **glibc + systemd** images on Debian and Ubuntu bases
+(see [Yoe and distributions](distro.md), [module-debian.md](module-debian.md),
+[module-ubuntu.md](module-ubuntu.md)). This document explains the musl/Alpine
+choice, what it implies for the products yoe serves, where the libc/init
+boundary lies, and how the glibc/systemd path closes it — most notably for
+edge-AI hardware where glibc and systemd are non-negotiable.
 
 ## What yoe ships today
 
-The default and currently only fully-supported configuration is:
+The default and most mature configuration is:
 
 - **musl libc.** All units build against musl. The build container
   (`toolchain-musl`) is Alpine-based. The `module-alpine` module pulls prebuilt
@@ -29,6 +30,17 @@ The default and currently only fully-supported configuration is:
 This stack runs cleanly on x86_64, arm64, and (with limitations) riscv64. It
 boots on QEMU, Raspberry Pi, BeagleBone, and any board where an upstream
 mainline kernel + a sane bootloader handle the hardware.
+
+**Beyond the default (experimental).** yoe also builds glibc + systemd images on
+Debian and Ubuntu bases. These are selected per image via the **distro** axis
+(`distro = "debian" | "ubuntu"`), pull their userland as native `.deb`s through
+`apt_feed(...)`, and run systemd as PID 1. They build, boot in QEMU, and accept
+SSH in the nightly CI matrix on both x86_64 and arm64, but are not yet
+production-hardened. This is how the glibc/systemd boundary discussed below is
+crossed today; the rest of this document explains why that boundary exists and
+what the glibc path unlocks. See [Yoe and distributions](distro.md) for the full
+distro model, and [module-debian.md](module-debian.md) /
+[module-ubuntu.md](module-ubuntu.md) for the per-base specifics.
 
 ## Where this stack works well
 
@@ -146,14 +158,15 @@ base-source abstraction sits **above** it, not in place of it.
 
 **(C) is the recommended direction.**
 
-## Rootfs-base abstraction (planned)
+## Rootfs-base abstraction (partially realized)
 
-> **Status:** Not implemented. Yoe today only supports the Alpine/musl/OpenRC
-> configuration described in [What yoe ships today](#what-yoe-ships-today). The
-> abstraction sketched here is a forward design for serving glibc/systemd
-> products (notably Jetson) without forking the project. No code, Starlark
-> builtin, project field, or class described below exists in the current
-> implementation.
+> **Status:** Partially realized. yoe now builds glibc + systemd images on
+> Debian and Ubuntu bases (experimental) — but via the **distro axis**
+> (`distro = "debian" | "ubuntu"`) and per-distro modules, not the `base = …`
+> project field sketched below. Treat the `base = ubuntu_l4t(...)` /
+> `alpine_rootfs(...)` syntax here as illustrative of the goal, not the shipped
+> API. The Jetson/L4T base specifically — CUDA, a `toolchain-glibc-arm64`, an
+> L4T rootfs — is still forward design and does not exist yet.
 
 The shape of the abstraction:
 
@@ -212,8 +225,7 @@ The base provides:
 - **The upstream feed format.** apt/deb for Ubuntu/L4T bases, apk for Alpine
   bases. yoe is pragmatic about what it serves on the target: it matches the
   base's native format rather than forcing a single one everywhere (see
-  [Package format follows the base](#package-format-follows-the-base-planned)
-  below).
+  [Package format follows the base](#package-format-follows-the-base) below).
 
 What yoe **continues to own across every base**:
 
@@ -234,17 +246,17 @@ The bits that vary with the base:
 - The init system integration (OpenRC scripts vs systemd unit files).
 - The `network-config`-style yoe-defining units (would have a systemd-flavored
   variant for systemd bases).
-- The on-target package format and the class that consumes upstream packages
-  (`alpine_pkg` on Alpine; on Debian, either deb→apk conversion or native deb —
-  see [debian-ubuntu.md](debian-ubuntu.md)).
+- The on-target package format and the mechanism that consumes upstream packages
+  (`alpine_feed` on Alpine; native `.deb` via `apt_feed` on Debian/Ubuntu — see
+  [module-debian.md](module-debian.md)).
 
-## Package format follows the base (planned)
+## Package format follows the base
 
-> **Status:** Forward design. Today only `alpine_pkg` exists, on the Alpine/musl
-> base, and it consumes packages that are already apks. No Debian base, `.deb`
-> writer, or apt-feed generation exists yet. This section states the principle;
-> [debian-ubuntu.md](debian-ubuntu.md) works through the Debian-base design in
-> detail.
+> **Status:** Implemented for the Debian/Ubuntu bases. yoe builds its own units
+> as native `.deb`s and serves a project-signed apt repo; upstream `.deb`s
+> mirror in verbatim via `apt_feed(...)`. The Alpine base uses apk as before.
+> See [module-debian.md](module-debian.md) and
+> [module-ubuntu.md](module-ubuntu.md) for the shipped design.
 
 yoe is pragmatic about the on-target package format: **apk-everywhere is a
 default, not a hard requirement.** An earlier version of this doc stated "apk
@@ -256,15 +268,16 @@ format buys a uniformity little actually consumes while costing a conversion
 layer and dpkg-userland emulation. But that argument makes conversion _less
 attractive_, not forbidden; the choice stays open and can be per-project.
 
-The two options, weighed in full in [debian-ubuntu.md](debian-ubuntu.md):
+How each base resolves it:
 
 - **Alpine / musl base** → apk + apk-tools, as today. Upstream apks are consumed
-  via `alpine_pkg`, re-signed with the project key.
-- **Debian / glibc base** → either convert upstream `.deb`s to project-signed
-  apk (Alpine-identical tooling, at the cost of the dpkg-userland concerns), or
-  native deb end to end (yoe builds `.deb`s and serves a signed apt repo,
-  upstream `.deb`s mirrored verbatim, no conversion). Native deb is the likely
-  better fit for this base; neither is mandated here.
+  via `alpine_feed`, re-signed with the project key.
+- **Debian / glibc base** → native deb end to end: yoe builds its units as
+  `.deb`s and serves a signed apt repo, with upstream `.deb`s mirrored verbatim
+  and no conversion layer. (An early design also weighed converting `.deb`s to
+  project-signed apk; native deb won, since a project picks exactly one base and
+  the musl/glibc worlds never share an image, so a cross-base single format buys
+  little.)
 
 What stays constant across bases is the part that matters: one project-signed
 feed, one trust root on the target, the same DAG/cache, the same dev loop, and
@@ -281,9 +294,9 @@ The kernel-module problem (NVIDIA's out-of-tree drivers built against L4T's
 specific kernel ABI) is orthogonal to package format — it's a Jetson-target
 problem, tracked separately.
 
-See [debian-ubuntu.md](debian-ubuntu.md) for the Debian-base design: how the
-base rootfs is obtained, the signed apt-feed work, the verbatim upstream-mirror
-model, and the systemd image-assembly integration.
+See [module-debian.md](module-debian.md) for the shipped Debian-base design: how
+the base rootfs is obtained, the signed apt-feed work, the verbatim
+upstream-mirror model, and the systemd image-assembly integration.
 
 ## Base bootstrap
 
@@ -388,32 +401,31 @@ itself detects the active base.
 
 Either pattern works. The decision is local to each unit.
 
-## Practical roadmap (planned)
+## Practical roadmap
 
-> **Status:** Forward design, not a commitment. The current focus remains
-> finishing the Alpine/musl path described in
-> [What yoe ships today](#what-yoe-ships-today) and
-> [module-alpine.md](module-alpine.md). The phases below describe the
-> approximate order in which the rootfs-base abstraction would be built,
-> conditional on demand.
+> **Status:** Phases 1–3 have largely landed — the Alpine path is solid, the
+> Alpine-coupled seams were made pluggable, and the Debian package path shipped
+> as native deb (experimental Debian and Ubuntu bases). Debian and Ubuntu
+> already coexist with Alpine via the distro axis — a second and third base — so
+> the multi-base generalization (phases 5–6) is in practice already exercised;
+> the remaining gap is the Jetson/L4T base and its toolchain (phase 4). Phases
+> 4–6 stay forward design, conditional on demand.
 
-1. **Solidify the Alpine path.** Ship enough that yoe is a viable choice for
-   non-AI embedded products today. The same architecture carries forward; this
-   is the foundation that proves the dev-loop and image-assembly value before a
-   second base is introduced.
+1. **Solidify the Alpine path — done.** Ship enough that yoe is a viable choice
+   for non-AI embedded products today. The same architecture carries forward;
+   this is the foundation that proves the dev-loop and image-assembly value
+   before a second base is introduced.
 
-2. **Identify the Alpine-coupled seams.** Survey `module-core` and the internal
-   Go code for assumptions that won't survive a non-Alpine base: hardcoded
-   apk-tool invocations, OpenRC-flavored init paths, busybox-shadow logic in
-   `replaces`, the toolchain container's musl-only Dockerfile. Make these
-   pluggable but defer the rewrite.
+2. **Identify the Alpine-coupled seams — done.** Survey `module-core` and the
+   internal Go code for assumptions that won't survive a non-Alpine base:
+   hardcoded apk-tool invocations, OpenRC-flavored init paths, busybox-shadow
+   logic in `replaces`, the toolchain container's musl-only Dockerfile. Make
+   these pluggable. (The distro axis is what these seams became.)
 
-3. **Debian package path.** Either a deb→apk conversion class (Alpine-identical
-   tooling) or a native `.deb` writer + signed apt-repo generator — the two
-   options weighed, with effort breakdowns and the dpkg-userland concerns, in
-   [debian-ubuntu.md](debian-ubuntu.md). Native deb is the likely choice for
-   this base; the decision is deliberately left open and is not a hard
-   requirement either way.
+3. **Debian package path — done.** Landed as a native `.deb` writer + signed
+   apt-repo generator, consumed through `apt_feed(...)`; Debian and Ubuntu bases
+   build and boot experimentally today. See [module-debian.md](module-debian.md)
+   and [module-ubuntu.md](module-ubuntu.md).
 
 4. **First Jetson prototype.** Pick a single Jetson SKU (Orin Nano dev kit is
    cheapest), get a yoe-assembled image booting with CUDA working end-to-end.
@@ -435,12 +447,13 @@ Either pattern works. The decision is local to each unit.
 
 ## Decision rubric
 
-Until the rootfs-base abstraction lands, yoe should refuse to chase
-glibc/systemd compatibility through hacks (gcompat shims, dual-libc images,
-OpenRC-emulating-systemd compatibility layers). These produce brittle systems
-that look like they work and then fail at the worst moment. The right answer for
-a glibc/systemd target today is "yoe is not the right tool yet" — say it
-explicitly and revisit when the abstraction is real.
+yoe should still refuse to chase glibc/systemd compatibility through hacks
+(gcompat shims, dual-libc images, OpenRC-emulating-systemd layers) on the Alpine
+base. These produce brittle systems that look like they work and then fail at
+the worst moment. When a target genuinely needs glibc + systemd, the answer is
+to pick a Debian or Ubuntu base (experimental today) rather than bend the Alpine
+one — and for Jetson/L4T specifically, "yoe is not the right tool yet" remains
+honest until the L4T base lands.
 
 For the Alpine path, the rubric stays as established in
 [module-alpine.md](module-alpine.md):
@@ -455,11 +468,13 @@ For the Alpine path, the rubric stays as established in
 
 ## Summary
 
-Today: musl + OpenRC + Alpine, serving non-AI embedded well.
+Today: musl + OpenRC + Alpine by default, serving non-AI embedded well, plus
+experimental glibc + systemd images on Debian and Ubuntu bases selected via the
+distro axis.
 
-Tomorrow (planned): rootfs-base-agnostic, where each project picks the
-foundation appropriate to its hardware and product. Same yoe experience over
-Alpine for gateways and over Ubuntu/L4T for Jetson.
+Tomorrow (planned): extend the same model to Jetson/L4T — a glibc base with
+CUDA, an arm64 glibc toolchain, and out-of-tree NVIDIA drivers — so one yoe
+experience spans Alpine gateways and edge-AI boxes.
 
 Not on the menu: trying to make musl/OpenRC pretend to be glibc/systemd, or
 trying to make yoe pretend to be a single-base distribution like Alpine itself.

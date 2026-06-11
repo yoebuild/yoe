@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/user"
@@ -355,6 +356,42 @@ type buildEventMsg struct {
 
 type execDoneMsg struct {
 	err error
+	// stderr is the captured standard error of the subprocess, set only
+	// by callers that wire a capture buffer (currently `yoe run`). When
+	// the process fails, its tail gives a real reason instead of a bare
+	// exit code.
+	stderr string
+}
+
+// stderrSummary distills captured subprocess stderr into one status-line
+// message: the `yoe` "Error:" verdict plus any wrapped detail lines when
+// present, otherwise the last non-empty line. Returns "" when there is
+// nothing useful to show.
+func stderrSummary(s string) string {
+	lines := strings.Split(s, "\n")
+	start := -1
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "Error:") {
+			start = i // last "Error:" wins
+		}
+	}
+	var pick []string
+	if start >= 0 {
+		for _, line := range lines[start:] {
+			t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "Error:"))
+			if t != "" {
+				pick = append(pick, t)
+			}
+		}
+	} else {
+		for i := len(lines) - 1; i >= 0; i-- {
+			if t := strings.TrimSpace(lines[i]); t != "" {
+				pick = append(pick, t)
+				break
+			}
+		}
+	}
+	return strings.Join(pick, " — ")
 }
 
 type notifyMsg string
@@ -387,6 +424,10 @@ type model struct {
 	proj              *yoestar.Project
 	projectDir        string
 	arch              string
+	// distro is the project's effective distro at TUI startup. Drives
+	// every UnitBuildDir / IsBuildCached lookup so the TUI inspects
+	// the right per-distro subtree under build/<distro>/.
+	distro            string
 	warning           string // persistent warning banner (e.g., binfmt missing)
 	notification      string // transient global notification (e.g., container rebuild)
 	dag               *resolve.DAG
@@ -441,10 +482,19 @@ type model struct {
 	// Setup view
 	machines       []string // sorted machine names
 	setupCursor    int      // cursor within setup options
-	setupField     string   // "" = top-level, "machine" / "image" = picker active
+	setupField     string   // "" = top-level, "machine" / "image" / "qemu" = sub-screen active
 	machineCursor  int      // cursor within machine list
 	imageCursor    int      // cursor within image list
+	distroCursor   int      // cursor within Default Distro picker
 	parallelBuilds int      // effective `yoe build` concurrency (adjusted on the Setup page)
+	qemuMemory     string   // local.star qemu_memory ("" = machine default; adjusted on the Setup page)
+
+	// QEMU settings sub-screen
+	qemuDisplay    string   // local.star qemu_display ("on" / "off" / "" = run-time default)
+	qemuPorts      []string // local.star qemu_ports (extras layered on top of the machine's declared forwards)
+	qemuCursor     int      // cursor within the qemu-settings rows
+	qemuEditing    bool     // true while typing a new port mapping in the add field
+	qemuEditBuffer string   // in-progress "host:guest" text
 
 	// Flash view
 	flashUnit       string
@@ -542,16 +592,27 @@ type Config struct {
 
 // Run launches the TUI.
 func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
-	dag, err := resolve.BuildDAG(proj)
-	if err != nil {
-		return fmt.Errorf("building DAG: %w", err)
-	}
-
 	arch := build.Arch()
 	if m, ok := proj.Machines[proj.Defaults.Machine]; ok {
 		arch = m.Arch
 	}
-	hashes, err := resolve.ComputeAllHashes(dag, arch, proj.Defaults.Machine, build.SrcInputsFn(projectDir, arch, proj.Defaults.Machine))
+	distro, err := proj.EffectiveDistro()
+	if err != nil {
+		return fmt.Errorf("resolving effective distro: %w", err)
+	}
+
+	// Build the DAG against the effective distro's view, matching the
+	// build executor and the in-app recompute path. A distro-less DAG
+	// resolves each unit's deps by its own tag (first-match-wins across
+	// modules), which yields different hashes than the per-distro view
+	// the build path uses — so IsBuildCached would miss on every cached
+	// unit and the status lines would render blank until the first build
+	// recomputed them.
+	dag, err := resolve.BuildDAG(proj, distro)
+	if err != nil {
+		return fmt.Errorf("building DAG: %w", err)
+	}
+	hashes, err := resolve.ComputeAllHashes(dag, arch, proj.Defaults.Machine, build.SrcInputsFn(projectDir, arch, proj.Defaults.Machine, distro), distro)
 	if err != nil {
 		return fmt.Errorf("computing hashes: %w", err)
 	}
@@ -561,14 +622,14 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	for _, name := range units {
 		hash := hashes[name]
 		sd := arch
-		if u, ok := proj.Units[name]; ok {
+		if u := proj.LookupUnit(distro, name); u != nil {
 			sd = build.ScopeDir(u, arch, proj.Defaults.Machine)
 		}
-		if build.IsBuildCached(projectDir, sd, name, hash) {
+		if build.IsBuildCached(projectDir, sd, name, hash, distro) {
 			statuses[name] = statusCached
-		} else if build.IsBuildInProgress(projectDir, sd, name) {
+		} else if build.IsBuildInProgress(projectDir, sd, name, distro) {
 			statuses[name] = statusBuilding
-		} else if meta := build.ReadMeta(build.UnitBuildDir(projectDir, sd, name)); meta != nil && meta.Hash == hash && meta.Status == "failed" {
+		} else if meta := build.ReadMeta(build.UnitBuildDir(projectDir, sd, name, distro)); meta != nil && meta.Hash == hash && meta.Status == "failed" {
 			statuses[name] = statusFailed
 		}
 	}
@@ -587,6 +648,7 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 		proj:            proj,
 		projectDir:      projectDir,
 		arch:            arch,
+		distro:          distro,
 		dag:             dag,
 		units:           units,
 		hashes:          hashes,
@@ -602,6 +664,9 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 		buildPending:    make(map[string]bool),
 		deployHost:      ov.DeployHost,
 		parallelBuilds:  parallelBuilds,
+		qemuMemory:      ov.QEMUMemory,
+		qemuDisplay:     ov.QEMUDisplay,
+		qemuPorts:       append([]string(nil), ov.QEMUPorts...),
 		loadOpts:        cfg.LoadOpts,
 		globalFlagArgs:  cfg.GlobalFlagArgs,
 	}
@@ -818,7 +883,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case execDoneMsg:
 		if msg.err != nil {
-			m.message = fmt.Sprintf("Command error: %v", msg.err)
+			if summary := stderrSummary(msg.stderr); summary != "" {
+				m.message = summary
+			} else {
+				m.message = fmt.Sprintf("Command error: %v", msg.err)
+			}
 		}
 		return m, nil
 
@@ -1132,11 +1201,18 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "e":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
+			// Feed-materialized units (alpine_feed / apt_feed) have
+			// no .star file — the help bar already hides "e" for them,
+			// so swallow the keypress silently rather than printing a
+			// "could not find" message.
+			if m.unitFromFeed(name) {
+				return m, nil
+			}
 			// Use the resolved unit's DefinedIn (= the winning module's
 			// .star directory after prefer_modules + last-module-wins
 			// shadowing) so editing opens the file yoe actually uses,
 			// not just the first `<name>.star` the filesystem walk hits.
-			if path := unitStarPath(m.proj.Units[name]); path != "" {
+			if path := unitStarPath(m.proj.LookupUnit(m.distro, name)); path != "" {
 				return m, m.execEditor(path)
 			}
 			// Fallback for derived units (e.g., base-files-dev defined
@@ -1164,7 +1240,7 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "l":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
-			logPath := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name), "build.log")
+			logPath := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name, m.distro), "build.log")
 			if _, err := os.Stat(logPath); err == nil {
 				return m, m.execEditor(logPath)
 			}
@@ -1175,7 +1251,7 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
-			logPath := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name), "build.log")
+			logPath := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name, m.distro), "build.log")
 			c := exec.Command("claude", fmt.Sprintf("diagnose %s", logPath))
 			c.Dir = m.projectDir
 			return m, tea.ExecProcess(c, func(err error) tea.Msg {
@@ -1194,13 +1270,28 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
-			if u, ok := m.proj.Units[name]; ok && u.Class == "image" {
+			if u := m.proj.LookupUnit(m.distro, name); u != nil && u.Class == "image" {
+				// Catch "a guest is already running" before launching, so
+				// the reason shows in the TUI rather than scrolling past
+				// as an opaque subprocess exit code.
+				if mc, ok := m.proj.Machines[m.proj.Defaults.Machine]; ok {
+					if err := device.CheckQEMUPortsAvailable(mc, nil); err != nil {
+						m.message = err.Error()
+						return m, nil
+					}
+				}
 				args := append([]string{}, m.globalFlagArgs...)
 				args = append(args, "run", name, "--machine", m.proj.Defaults.Machine)
 				c := exec.Command(os.Args[0], args...)
 				c.Dir = m.projectDir
+				// Capture stderr (still shown live via the tee) so a
+				// QEMU launch failure surfaces its reason in the TUI
+				// instead of a bare exit code. stdin/stdout stay nil so
+				// tea.ExecProcess wires them to the guest console.
+				var errBuf strings.Builder
+				c.Stderr = io.MultiWriter(os.Stderr, &errBuf)
 				return m, tea.ExecProcess(c, func(err error) tea.Msg {
-					return execDoneMsg{err: err}
+					return execDoneMsg{err: err, stderr: errBuf.String()}
 				})
 			}
 			m.message = fmt.Sprintf("%s is not an image unit", name)
@@ -1210,7 +1301,7 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "f":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
-			u, ok := m.proj.Units[name]
+			u := m.proj.LookupUnit(m.distro, name); ok := u != nil
 			if !ok || u.Class != "image" {
 				m.message = fmt.Sprintf("%s is not an image unit", name)
 				return m, nil
@@ -1250,7 +1341,7 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "D":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
-			u, ok := m.proj.Units[name]
+			u := m.proj.LookupUnit(m.distro, name); ok := u != nil
 			if !ok || u.Class == "image" {
 				m.message = fmt.Sprintf("%s is an image unit; use `f` to flash, not deploy", name)
 				return m, nil
@@ -1425,11 +1516,24 @@ func (m model) modulesViewportHeight() int {
 	chrome++ // detail strip "url: ..."
 	chrome++ // blank before bottom row
 	chrome++ // help / message
+	chrome += m.syntheticModulesSectionLines()
 	h := m.height - chrome
 	if h < 3 {
 		h = 3
 	}
 	return h
+}
+
+// syntheticModulesSectionLines returns the vertical footprint of the
+// FEEDS section rendered by viewModulesTab beneath the navigable rows
+// (blank+title, column header, one row per synthetic module). Returns 0
+// when no feeds are declared so projects without alpine_feed / apt_feed
+// keep using the full screen height.
+func (m model) syntheticModulesSectionLines() int {
+	if m.proj == nil || len(m.proj.SyntheticModules) == 0 {
+		return 0
+	}
+	return 3 + len(m.proj.SyntheticModules)
 }
 
 // diagnosticsViewportHeight returns the number of content lines that
@@ -1668,7 +1772,7 @@ func (m *model) applyQuery() {
 		m.visible = make([]int, 0, len(m.units))
 	}
 	for i, name := range m.units {
-		u := m.proj.Units[name]
+		u := m.proj.LookupUnit(m.distro, name)
 		if m.query.Matches(name, u, statusKey(m.statuses[name]), m.inSet) {
 			m.visible = append(m.visible, i)
 		}
@@ -1695,7 +1799,10 @@ func (m *model) applyQuery() {
 // plus the synthetic "project" name used for project-root units.
 func (m model) moduleNames() []string {
 	set := map[string]bool{"project": true}
-	for _, u := range m.proj.Units {
+	// AllUnits iterates UnitsByModule so cross-distro siblings each
+	// contribute their module to the set — alpine.main and
+	// debian.main both appear when both feeds are loaded.
+	for _, u := range m.proj.AllUnits() {
 		if u.Module != "" {
 			set[u.Module] = true
 		}
@@ -1789,8 +1896,8 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		} else if strings.HasPrefix(action, "clean:") {
 			name := strings.TrimPrefix(action, "clean:")
-			buildDir := build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name)
-			if err := os.RemoveAll(buildDir); err != nil {
+			buildDir := build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name, m.distro)
+			if err := yoe.RemoveDirAnyOwner(buildDir, m.projectDir); err != nil {
 				m.message = fmt.Sprintf("Clean failed: %v", err)
 			} else {
 				m.statuses[name] = statusNone
@@ -1808,7 +1915,7 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		} else if action == "clean-all" {
 			buildDir := filepath.Join(m.projectDir, "build")
-			if err := os.RemoveAll(buildDir); err != nil {
+			if err := yoe.RemoveDirAnyOwner(buildDir, m.projectDir); err != nil {
 				m.message = fmt.Sprintf("Clean failed: %v", err)
 			} else {
 				for _, name := range m.units {
@@ -1825,7 +1932,92 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // Setup option names — add new options here.
-var setupOptions = []string{"Machine", "Image", "Parallel builds"}
+var setupOptions = []string{"Machine", "Image", "Default Distro", "Parallel builds", "QEMU settings"}
+
+// QEMU settings sub-screen rows. Memory and Display occupy fixed positions
+// at the top; below them is the Ports section (each local port row + one
+// trailing "add port" prompt) whose length grows with the override list.
+const (
+	qemuRowMemory = iota
+	qemuRowDisplay
+	numFixedQEMURows
+)
+
+// qemuRowCount returns the total row count of the QEMU settings sub-screen
+// — two fixed rows plus one per local port plus the "[+] add port" prompt.
+func (m model) qemuRowCount() int {
+	return numFixedQEMURows + len(m.qemuPorts) + 1
+}
+
+// qemuPortRowIndex translates a row index in the qemu-settings sub-screen
+// into a port-list index. Returns -1 for non-port rows (Memory / Display /
+// the trailing add-port prompt).
+func (m model) qemuPortRowIndex(row int) int {
+	if row < numFixedQEMURows {
+		return -1
+	}
+	idx := row - numFixedQEMURows
+	if idx >= len(m.qemuPorts) {
+		return -1
+	}
+	return idx
+}
+
+// qemuIsAddRow reports whether the given row is the "[+] add port" prompt
+// at the bottom of the sub-screen.
+func (m model) qemuIsAddRow(row int) bool {
+	return row == numFixedQEMURows+len(m.qemuPorts)
+}
+
+// qemuDisplayLadder steps "" (run-time default) → "off" → "on" → "off" → ...
+// when adjusted with ←/→.
+var qemuDisplayLadder = []string{"", "off", "on"}
+
+func qemuDisplayLadderIndex(v string) int {
+	for i, s := range qemuDisplayLadder {
+		if s == v {
+			return i
+		}
+	}
+	return 0
+}
+
+// qemuDisplayLabel turns the tri-state into a human-readable token.
+func qemuDisplayLabel(v string) string {
+	switch v {
+	case "on":
+		return "on"
+	case "off":
+		return "off"
+	}
+	return "default (off)"
+}
+
+// qemuMemoryLadder is the ←/→ preset ladder for the Setup page's QEMU
+// memory row. The empty-string value (machine default) sits one step
+// below the first entry.
+var qemuMemoryLadder = []string{"128M", "256M", "512M", "1G", "2G", "4G", "8G", "16G"}
+
+// qemuMemoryLadderIndex returns the position of v in qemuMemoryLadder, or
+// -1 for the machine-default (empty) value and for any off-ladder value —
+// either way the next ←/→ press steps onto the ladder.
+func qemuMemoryLadderIndex(v string) int {
+	for i, s := range qemuMemoryLadder {
+		if s == v {
+			return i
+		}
+	}
+	return -1
+}
+
+// machineDefaultMemory returns the qemu memory the project's default
+// machine declares, or "" if it declares none.
+func (m model) machineDefaultMemory() string {
+	if mc, ok := m.proj.Machines[m.proj.Defaults.Machine]; ok && mc.QEMU != nil {
+		return mc.QEMU.Memory
+	}
+	return ""
+}
 
 func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.setupField {
@@ -1833,6 +2025,10 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateSetupMachine(msg)
 	case "image":
 		return m.updateSetupImage(msg)
+	case "distro":
+		return m.updateSetupDistro(msg)
+	case "qemu":
+		return m.updateSetupQEMU(msg)
 	}
 
 	switch msg.String() {
@@ -1853,22 +2049,22 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "left", "h", "right", "l":
-		if setupOptions[m.setupCursor] != "Parallel builds" {
-			return m, nil
-		}
-		if msg.String() == "left" || msg.String() == "h" {
-			if m.parallelBuilds > 1 {
-				m.parallelBuilds--
+		left := msg.String() == "left" || msg.String() == "h"
+		if setupOptions[m.setupCursor] == "Parallel builds" {
+			if left {
+				if m.parallelBuilds > 1 {
+					m.parallelBuilds--
+				}
+			} else {
+				m.parallelBuilds++
 			}
-		} else {
-			m.parallelBuilds++
-		}
-		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
-		ov.ParallelBuilds = m.parallelBuilds
-		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
-			m.message = fmt.Sprintf("Parallel builds set to %d (warning: failed to save local.star: %v)", m.parallelBuilds, err)
-		} else {
-			m.message = fmt.Sprintf("Parallel builds set to %d (saved to local.star)", m.parallelBuilds)
+			ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+			ov.ParallelBuilds = m.parallelBuilds
+			if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
+				m.message = fmt.Sprintf("Parallel builds set to %d (warning: failed to save local.star: %v)", m.parallelBuilds, err)
+			} else {
+				m.message = fmt.Sprintf("Parallel builds set to %d (saved to local.star)", m.parallelBuilds)
+			}
 		}
 		return m, nil
 
@@ -1893,19 +2089,209 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					break
 				}
 			}
+		case "Default Distro":
+			m.setupField = "distro"
+			m.distroCursor = 0
+			choices := m.distroChoices()
+			active := m.proj.DefaultDistroOverride
+			for i, name := range choices {
+				if (name == "(none)" && active == "") || name == active {
+					m.distroCursor = i
+					break
+				}
+			}
+		case "QEMU settings":
+			m.setupField = "qemu"
+			m.qemuCursor = qemuRowMemory
+			m.qemuEditing = false
+			m.qemuEditBuffer = ""
 		}
 		return m, nil
 	}
 	return m, nil
 }
 
-// imageUnits returns the sorted names of all image-class units in the project.
-func (m model) imageUnits() []string {
-	var out []string
-	for name, u := range m.proj.Units {
-		if u.Class == "image" {
-			out = append(out, name)
+// updateSetupQEMU handles the QEMU settings sub-screen: Memory ladder,
+// Display tri-state, and the editable Ports list.
+func (m model) updateSetupQEMU(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// While the add-port text field is active, every key feeds it.
+	if m.qemuEditing {
+		return m.updateSetupQEMUPortInput(msg)
+	}
+
+	rows := m.qemuRowCount()
+
+	switch msg.String() {
+	case "esc", "q":
+		m.setupField = ""
+		m.message = ""
+		return m, nil
+
+	case "up", "k":
+		if m.qemuCursor > 0 {
+			m.qemuCursor--
 		}
+		return m, nil
+
+	case "down", "j":
+		if m.qemuCursor < rows-1 {
+			m.qemuCursor++
+		}
+		return m, nil
+
+	case "left", "h", "right", "l":
+		left := msg.String() == "left" || msg.String() == "h"
+		switch m.qemuCursor {
+		case qemuRowMemory:
+			idx := qemuMemoryLadderIndex(m.qemuMemory)
+			if left {
+				if idx >= 0 {
+					idx-- // -1 lands on the machine default
+				}
+			} else if idx < len(qemuMemoryLadder)-1 {
+				idx++
+			}
+			if idx < 0 {
+				m.qemuMemory = ""
+			} else {
+				m.qemuMemory = qemuMemoryLadder[idx]
+			}
+			m.saveQEMUSettings("QEMU memory")
+		case qemuRowDisplay:
+			idx := qemuDisplayLadderIndex(m.qemuDisplay)
+			if left {
+				if idx > 0 {
+					idx--
+				}
+			} else if idx < len(qemuDisplayLadder)-1 {
+				idx++
+			}
+			m.qemuDisplay = qemuDisplayLadder[idx]
+			m.saveQEMUSettings("QEMU display")
+		}
+		return m, nil
+
+	case "enter":
+		// Enter on the trailing "[+] add port" row opens the input field.
+		if m.qemuIsAddRow(m.qemuCursor) {
+			m.qemuEditing = true
+			m.qemuEditBuffer = ""
+			m.message = ""
+		}
+		return m, nil
+
+	case "a", "+":
+		// Shortcut: jump straight to the add field from any row.
+		m.qemuCursor = numFixedQEMURows + len(m.qemuPorts) // the add row
+		m.qemuEditing = true
+		m.qemuEditBuffer = ""
+		m.message = ""
+		return m, nil
+
+	case "d", "-", "delete", "backspace":
+		if idx := m.qemuPortRowIndex(m.qemuCursor); idx >= 0 {
+			removed := m.qemuPorts[idx]
+			m.qemuPorts = append(m.qemuPorts[:idx], m.qemuPorts[idx+1:]...)
+			if m.qemuCursor >= m.qemuRowCount() {
+				m.qemuCursor = m.qemuRowCount() - 1
+			}
+			m.saveQEMUSettings(fmt.Sprintf("removed port %s", removed))
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+// updateSetupQEMUPortInput drives the inline text field used to add a new
+// host:guest forward. Enter commits, Esc cancels.
+func (m model) updateSetupQEMUPortInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.qemuEditing = false
+		m.qemuEditBuffer = ""
+		m.message = ""
+		return m, nil
+	case "enter":
+		entry := strings.TrimSpace(m.qemuEditBuffer)
+		if entry == "" {
+			m.qemuEditing = false
+			return m, nil
+		}
+		if err := validatePortMapping(entry); err != nil {
+			m.message = fmt.Sprintf("invalid port mapping: %v", err)
+			return m, nil
+		}
+		m.qemuPorts = append(m.qemuPorts, entry)
+		m.qemuEditing = false
+		m.qemuEditBuffer = ""
+		m.qemuCursor = numFixedQEMURows + len(m.qemuPorts) // back to the add row
+		m.saveQEMUSettings(fmt.Sprintf("added port %s", entry))
+		return m, nil
+	case "backspace", "ctrl+h":
+		if n := len(m.qemuEditBuffer); n > 0 {
+			m.qemuEditBuffer = m.qemuEditBuffer[:n-1]
+		}
+		return m, nil
+	}
+	// Accept literal characters typed into the field. tea.KeyMsg.Runes is
+	// non-empty for printable input; control keys fall through silently.
+	if len(msg.Runes) > 0 {
+		m.qemuEditBuffer += string(msg.Runes)
+	}
+	return m, nil
+}
+
+// validatePortMapping checks that s parses as a host:guest forward — two
+// non-empty numeric parts separated by a single colon, each within the TCP
+// range. Mirrors what `--port` accepts on the command line.
+func validatePortMapping(s string) error {
+	host, guest, ok := strings.Cut(s, ":")
+	if !ok {
+		return fmt.Errorf("expected host:guest, got %q", s)
+	}
+	for _, p := range []struct{ name, val string }{{"host", host}, {"guest", guest}} {
+		n, err := strconv.Atoi(p.val)
+		if err != nil {
+			return fmt.Errorf("%s port %q is not numeric", p.name, p.val)
+		}
+		if n < 1 || n > 65535 {
+			return fmt.Errorf("%s port %d out of range 1..65535", p.name, n)
+		}
+	}
+	return nil
+}
+
+// saveQEMUSettings persists the current qemuMemory / qemuDisplay / qemuPorts
+// state to local.star and updates the status line with the user-facing
+// label of what just changed.
+func (m *model) saveQEMUSettings(label string) {
+	ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+	ov.QEMUMemory = m.qemuMemory
+	ov.QEMUDisplay = m.qemuDisplay
+	if len(m.qemuPorts) == 0 {
+		ov.QEMUPorts = nil
+	} else {
+		ov.QEMUPorts = append([]string(nil), m.qemuPorts...)
+	}
+	if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
+		m.message = fmt.Sprintf("%s (warning: failed to save local.star: %v)", label, err)
+		return
+	}
+	m.message = fmt.Sprintf("%s (saved to local.star)", label)
+}
+
+// imageUnits returns the sorted names of all image-class units in
+// the project. AllUnits surfaces every module's images; dedup by
+// name so an image registered under multiple modules only lists once.
+func (m model) imageUnits() []string {
+	seen := map[string]bool{}
+	var out []string
+	for name, u := range m.proj.AllUnits() {
+		if u.Class != "image" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
 	}
 	sort.Strings(out)
 	return out
@@ -1998,6 +2384,108 @@ func (m model) updateSetupMachine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.setupField = ""
 		m.view = viewUnits
+		return m, nil
+	}
+	return m, nil
+}
+
+// distroSummary renders the right-hand value in the top-level Setup
+// row. Shows the override when set, otherwise the project default,
+// otherwise "<none>".
+func (m model) distroSummary() string {
+	if m.proj.DefaultDistroOverride != "" {
+		if m.proj.DefaultDistro != "" && m.proj.DefaultDistroOverride != m.proj.DefaultDistro {
+			return fmt.Sprintf("%s (overrides PROJECT.star: %s)",
+				m.proj.DefaultDistroOverride, m.proj.DefaultDistro)
+		}
+		return m.proj.DefaultDistroOverride
+	}
+	if m.proj.DefaultDistro != "" {
+		return m.proj.DefaultDistro
+	}
+	return "<none>"
+}
+
+func defaultIfEmpty(s, alt string) string {
+	if s == "" {
+		return alt
+	}
+	return s
+}
+
+// distroChoices returns the picker entries for the Default Distro
+// sub-screen. The first entry is "(none)" — selecting it clears the
+// override. The remaining entries are the distinct distros declared
+// by loaded synthetic-feed modules (alpine_feed → "alpine",
+// apt_feed → "debian"), in sorted order. Sourced from the
+// project's synthetic modules so yoe core never hardcodes a distro
+// enum; a project that includes only module-alpine sees just
+// "(none)" and "alpine".
+func (m model) distroChoices() []string {
+	seen := map[string]struct{}{}
+	for _, sm := range m.proj.SyntheticModules {
+		if sm.Parent == "" {
+			continue
+		}
+		seen[sm.Parent] = struct{}{}
+	}
+	out := make([]string, 0, len(seen)+1)
+	out = append(out, "(none)")
+	names := make([]string, 0, len(seen))
+	for n := range seen {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	out = append(out, names...)
+	return out
+}
+
+// updateSetupDistro handles key events on the Default Distro picker
+// sub-screen. Persists the selected override to local.star.
+func (m model) updateSetupDistro(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	choices := m.distroChoices()
+	switch msg.String() {
+	case "esc":
+		m.setupField = ""
+		return m, nil
+	case "up", "k":
+		if m.distroCursor > 0 {
+			m.distroCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.distroCursor < len(choices)-1 {
+			m.distroCursor++
+		}
+		return m, nil
+	case "enter":
+		if len(choices) == 0 {
+			return m, nil
+		}
+		picked := choices[m.distroCursor]
+		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+		if picked == "(none)" {
+			ov.DefaultDistroOverride = ""
+			m.proj.DefaultDistroOverride = ""
+		} else {
+			ov.DefaultDistroOverride = picked
+			m.proj.DefaultDistroOverride = picked
+		}
+		// Effective distro changes ripple into the build/<distro>/
+		// and repo/<project>/<distro>/ subtrees the TUI inspects,
+		// so refresh the cached distro and re-walk statuses.
+		if d, derr := m.proj.EffectiveDistro(); derr == nil {
+			m.distro = d
+		}
+		var msgText string
+		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
+			msgText = fmt.Sprintf("Default Distro set to %s (warning: failed to save local.star: %v)", picked, err)
+		} else {
+			msgText = fmt.Sprintf("Default Distro set to %s (saved to local.star)", picked)
+		}
+		m.message = msgText
+		m.recomputeStatuses()
+		m.setupField = ""
 		return m, nil
 	}
 	return m, nil
@@ -2115,7 +2603,7 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.execShell(srcDir)
 
 	case "d":
-		logPath := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit), "build.log")
+		logPath := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit, m.distro), "build.log")
 		c := exec.Command("claude", fmt.Sprintf("diagnose %s", logPath))
 		c.Dir = m.projectDir
 		return m, tea.ExecProcess(c, func(err error) tea.Msg {
@@ -2123,7 +2611,7 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		})
 
 	case "D":
-		u, ok := m.proj.Units[m.detailUnit]
+		u := m.proj.LookupUnit(m.distro, m.detailUnit); ok := u != nil
 		if !ok || u.Class == "image" {
 			m.message = fmt.Sprintf("%s is an image unit; use `f` to flash, not deploy", m.detailUnit)
 			return m, nil
@@ -2136,7 +2624,7 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "r":
-		if u, ok := m.proj.Units[m.detailUnit]; ok && u.Class == "image" {
+		if u := m.proj.LookupUnit(m.distro, m.detailUnit); u != nil && u.Class == "image" {
 			args := append([]string{}, m.globalFlagArgs...)
 			args = append(args, "run", m.detailUnit, "--machine", m.proj.Defaults.Machine)
 			c := exec.Command(os.Args[0], args...)
@@ -2149,7 +2637,7 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "l":
-		logPath := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit), "build.log")
+		logPath := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit, m.distro), "build.log")
 		if _, err := os.Stat(logPath); err == nil {
 			return m, m.execEditor(logPath)
 		}
@@ -2286,6 +2774,7 @@ func (m model) View() string {
 // is identical across them.
 func (m model) renderHomeHeader() string {
 	var b strings.Builder
+	distro := m.distro
 	machine := m.proj.Defaults.Machine
 	image := m.proj.Defaults.Image
 
@@ -2307,7 +2796,8 @@ func (m model) renderHomeHeader() string {
 		renderTabBar(labels, int(m.activeTab)),
 		helpKeyStyle.Render("tab"),
 		helpStyle.Render(": switch"))
-	fmt.Fprintf(&b, "  %s%s  %s%s\n",
+	fmt.Fprintf(&b, "  %s%s  %s%s  %s%s\n",
+		fieldLabelStyle.Render("Distro: "), fieldValueStyle.Render(distro),
 		fieldLabelStyle.Render("Machine: "), fieldValueStyle.Render(machine),
 		fieldLabelStyle.Render("Image: "), fieldValueStyle.Render(image))
 
@@ -2477,7 +2967,7 @@ func (m model) viewUnitsTab() string {
 		class := ""
 		module := ""
 		version := ""
-		if u, ok := m.proj.Units[name]; ok {
+		if u := m.proj.LookupUnit(m.distro, name); u != nil {
 			class = u.Class
 			module = u.Module
 			version = u.Version
@@ -2570,12 +3060,20 @@ func (m model) viewUnitsTab() string {
 			items = defaultHelpItems
 			if m.cursor < len(m.units) {
 				name := m.units[m.cursor]
-				if u, ok := m.proj.Units[name]; ok && u.Class == "image" {
+				if u := m.proj.LookupUnit(m.distro, name); u != nil && u.Class == "image" {
 					if m.statuses[name] == statusCached {
 						items = imageCachedHelpItems
 					} else {
 						items = imageHelpItems
 					}
+				}
+				// Feed-materialized units (alpine_feed /
+				// apt_feed) have no .star file, so the edit
+				// key is dead for them — drop it from the help
+				// bar so the user isn't told to press a key that
+				// won't do anything.
+				if m.unitFromFeed(name) {
+					items = withoutHelpKey(items, "e")
 				}
 			}
 		}
@@ -2590,6 +3088,21 @@ func (m model) viewUnitsTab() string {
 type helpItem struct {
 	key   string
 	label string
+}
+
+// withoutHelpKey returns a copy of items with the entry whose key
+// matches dropped. Used to mask shortcuts that don't apply to the
+// cursor's current selection (e.g. "edit" on a feed-materialized
+// unit). Returns the original slice unchanged if no entry matches.
+func withoutHelpKey(items []helpItem, key string) []helpItem {
+	out := make([]helpItem, 0, len(items))
+	for _, it := range items {
+		if it.key == key {
+			continue
+		}
+		out = append(out, it)
+	}
+	return out
 }
 
 var (
@@ -2728,18 +3241,25 @@ func (m model) helpSections() (string, []helpSection) {
 		}
 
 	case viewSetup:
-		return "Setup — machine, default image, parallel builds", []helpSection{
+		return "Setup — machine, default image, parallel builds, QEMU settings", []helpSection{
 			{title: "Navigate", entries: []helpEntry{
-				{"↑  ·  k", "move up (Machine / Image / Parallel builds)"},
+				{"↑  ·  k", "move up (Machine / Image / Parallel builds / QEMU settings)"},
 				{"↓  ·  j", "move down"},
-				{"Enter", "open the picker for the selected option"},
+				{"Enter", "open the picker / sub-screen for the selected option"},
 				{"←/→  ·  h/l", "adjust Parallel builds"},
 				{"Esc  ·  q", "back to the unit list"},
 			}},
-			{title: "In a picker", entries: []helpEntry{
+			{title: "In Machine / Image picker", entries: []helpEntry{
 				{"↑  ·  ↓", "choose a machine / image"},
 				{"Enter", "select and save to local.star"},
 				{"Esc", "close the picker without changing"},
+			}},
+			{title: "In QEMU settings", entries: []helpEntry{
+				{"↑  ·  ↓", "move between Memory / Display / ports"},
+				{"←/→", "adjust Memory or Display"},
+				{"Enter  ·  a  ·  +", "add a host:guest port forward"},
+				{"d  ·  -", "remove the highlighted local port"},
+				{"Esc", "back to the Setup menu"},
 			}},
 			helpGeneral(false),
 		}
@@ -3040,17 +3560,49 @@ func (m model) viewModulesTab() string {
 		b.WriteString(dimStyle.Render("  (no modules declared in PROJECT.star)\n"))
 	}
 
+	// Synthetic modules (alpine_feed, apt_feed) listed separately
+	// after the navigable real-module rows. They're informational —
+	// the user can't sync / dev-mode them, only consult what they
+	// expose. Showing them here makes feeds discoverable from the
+	// Modules tab; package-name discovery still goes through search.
+	if len(m.proj.SyntheticModules) > 0 {
+		b.WriteString("\n  ")
+		b.WriteString(headerStyle.Render("FEEDS"))
+		b.WriteString("\n")
+		b.WriteString("  ")
+		b.WriteString(headerStyle.Render(fmt.Sprintf("%-22s %-10s %-9s %-32s %s",
+			"NAME", "TYPE", "", "PARENT", "PACKAGES")))
+		b.WriteString("\n")
+		for _, sm := range m.proj.SyntheticModules {
+			count := "?"
+			if names := sm.Names(); names != nil {
+				count = fmt.Sprintf("%d", len(names))
+			}
+			b.WriteString(fmt.Sprintf("  %s %s %s %s %s\n",
+				classUnitStyle.Render(clipFixed(sm.Name, 22)),
+				dimStyle.Render(clipFixed("feed", 10)),
+				dimStyle.Render(clipFixed("", 9)),
+				dimStyle.Render(clipFixed(sm.Parent, 32)),
+				dimStyle.Render(count)))
+		}
+	}
+
 	// Detail strip for the cursor row — useful when fields are clipped.
+	// Always emit both rows (blank when the field is unset) so the body
+	// height stays constant as the cursor moves across modules with and
+	// without a remote URL.
 	if m.modulesCursor >= 0 && m.modulesCursor < len(mods) {
 		rm := mods[m.modulesCursor]
 		dir := rm.Dir
 		if dir == "" {
 			dir = "(not synced)"
 		}
-		fmt.Fprintf(&b, "  %s %s\n", dimStyle.Render("dir:"), dim(dir))
-		if rm.URL != "" {
-			fmt.Fprintf(&b, "  %s %s\n", dimStyle.Render("url:"), dim(rm.URL))
+		url := rm.URL
+		if url == "" {
+			url = "(local)"
 		}
+		fmt.Fprintf(&b, "  %s %s\n", dimStyle.Render("dir:"), dim(dir))
+		fmt.Fprintf(&b, "  %s %s\n", dimStyle.Render("url:"), dim(url))
 	} else {
 		b.WriteString("\n\n")
 	}
@@ -3271,6 +3823,37 @@ func (m model) viewSetup() string {
 		b.WriteString(helpStyle.Render("  enter select  esc back  ? help"))
 		b.WriteString("\n")
 
+	case "qemu":
+		b.WriteString(m.viewSetupQEMU())
+
+	case "distro":
+		b.WriteString(headerStyle.Render("  Select Default Distro"))
+		b.WriteString("\n\n")
+		b.WriteString(helpStyle.Render(fmt.Sprintf("  PROJECT.star default: %s",
+			defaultIfEmpty(m.proj.DefaultDistro, "<none>"))))
+		b.WriteString("\n\n")
+		choices := m.distroChoices()
+		if len(choices) <= 1 {
+			b.WriteString(dimStyle.Render("  no synthetic-feed modules loaded (no distros to pick from)\n"))
+		}
+		active := m.proj.DefaultDistroOverride
+		for i, name := range choices {
+			cursor := "  "
+			style := dimStyle
+			if i == m.distroCursor {
+				cursor = "→ "
+				style = selectedStyle
+			}
+			current := ""
+			if (name == "(none)" && active == "") || name == active {
+				current = cachedStyle.Render(" (current)")
+			}
+			b.WriteString(fmt.Sprintf("%s%s%s\n", cursor, style.Render(name), current))
+		}
+		b.WriteString("\n")
+		b.WriteString(helpStyle.Render("  enter select  esc back  ? help"))
+		b.WriteString("\n")
+
 	default:
 		// Top-level setup menu
 		for i, opt := range setupOptions {
@@ -3286,8 +3869,12 @@ func (m model) viewSetup() string {
 				value = headerStyle.Render(m.proj.Defaults.Machine)
 			case "Image":
 				value = headerStyle.Render(m.proj.Defaults.Image)
+			case "Default Distro":
+				value = headerStyle.Render(m.distroSummary())
 			case "Parallel builds":
 				value = headerStyle.Render(fmt.Sprintf("%d", m.parallelBuilds))
+			case "QEMU settings":
+				value = dimStyle.Render(m.qemuSettingsSummary())
 			}
 			b.WriteString(fmt.Sprintf("%s%s  %s\n", cursor, style.Render(opt), value))
 		}
@@ -3303,6 +3890,226 @@ func (m model) viewSetup() string {
 		b.WriteString("\n")
 	}
 
+	return b.String()
+}
+
+// qemuSettingsSummary renders a compact one-line summary of the current
+// QEMU settings shown next to the "QEMU settings" row on the Setup screen.
+func (m model) qemuSettingsSummary() string {
+	mem := m.qemuMemory
+	if mem == "" {
+		mem = "machine default"
+		if md := m.machineDefaultMemory(); md != "" {
+			mem = "machine (" + md + ")"
+		}
+	}
+	disp := qemuDisplayLabel(m.qemuDisplay)
+	machinePorts := 0
+	if mc, ok := m.proj.Machines[m.proj.Defaults.Machine]; ok {
+		machinePorts = len(mc.QEMUPorts())
+	}
+	portTotal := machinePorts + len(m.qemuPorts)
+	return fmt.Sprintf("memory %s · display %s · %d port(s)", mem, disp, portTotal)
+}
+
+// viewSetupQEMU renders the QEMU settings sub-screen: Memory / Display rows
+// at the top, then a Ports section showing the machine's declared forwards
+// (info-only) followed by the editable local override list and the inline
+// add-port prompt.
+func (m model) viewSetupQEMU() string {
+	var b strings.Builder
+	b.WriteString(headerStyle.Render("  QEMU Settings"))
+	b.WriteString("\n\n")
+
+	// Helper that draws an arrow + selected styling for a given row.
+	rowPrefix := func(idx int) (string, lipgloss.Style) {
+		if idx == m.qemuCursor && !m.qemuEditing {
+			return "→ ", selectedStyle
+		}
+		return "  ", dimStyle
+	}
+
+	// Memory row
+	{
+		cursor, style := rowPrefix(qemuRowMemory)
+		memDisp := m.qemuMemory
+		if memDisp == "" {
+			memDisp = "machine default"
+			if md := m.machineDefaultMemory(); md != "" {
+				memDisp = "machine default (" + md + ")"
+			}
+		}
+		b.WriteString(fmt.Sprintf("%s%s  %s\n", cursor, style.Render("Memory "), headerStyle.Render(memDisp)))
+	}
+
+	// Display row
+	{
+		cursor, style := rowPrefix(qemuRowDisplay)
+		b.WriteString(fmt.Sprintf("%s%s  %s\n", cursor, style.Render("Display"), headerStyle.Render(qemuDisplayLabel(m.qemuDisplay))))
+	}
+
+	b.WriteString("\n")
+	b.WriteString(headerStyle.Render("  Ports"))
+	b.WriteString("\n")
+
+	// Machine-declared ports — informational, not editable.
+	machinePorts := []string{}
+	if mc, ok := m.proj.Machines[m.proj.Defaults.Machine]; ok {
+		machinePorts = mc.QEMUPorts()
+	}
+	if len(machinePorts) == 0 {
+		b.WriteString("    " + dimStyle.Render("(machine declares no forwards)") + "\n")
+	} else {
+		for _, p := range machinePorts {
+			b.WriteString("    " + dimStyle.Render(fmt.Sprintf("%-16s machine", p)) + "\n")
+		}
+	}
+
+	// Local override ports — editable rows, cursor lands here.
+	for i, p := range m.qemuPorts {
+		row := numFixedQEMURows + i
+		cursor, style := rowPrefix(row)
+		label := fmt.Sprintf("%-16s local", p)
+		b.WriteString(fmt.Sprintf("%s%s\n", cursor, style.Render(label)))
+	}
+
+	// Trailing "[+] add port" prompt — Enter (or `a`) opens the input field.
+	{
+		row := numFixedQEMURows + len(m.qemuPorts)
+		cursor, style := rowPrefix(row)
+		if m.qemuEditing {
+			cursor = "→ "
+			style = selectedStyle
+			caret := "_"
+			if m.tick {
+				caret = " "
+			}
+			b.WriteString(fmt.Sprintf("%s%s %s%s\n",
+				cursor,
+				style.Render("host:guest"),
+				headerStyle.Render(m.qemuEditBuffer),
+				caret))
+		} else {
+			b.WriteString(fmt.Sprintf("%s%s\n", cursor, style.Render("[+] add port")))
+		}
+	}
+
+	// Equivalent qemu-system-* command line — a live preview of what `yoe
+	// run` would invoke with the current settings, so the user can see the
+	// effect of each Memory / Display / Ports edit immediately.
+	b.WriteString("\n")
+	b.WriteString(headerStyle.Render("  Equivalent qemu command"))
+	b.WriteString("\n")
+	b.WriteString(m.renderQEMUCommandPreview())
+	b.WriteString("\n")
+
+	if m.qemuEditing {
+		b.WriteString(helpStyle.Render("  type host:guest  enter save  esc cancel"))
+	} else {
+		b.WriteString(helpStyle.Render("  ←/→ adjust  enter / a add port  d remove port  esc back  ? help"))
+	}
+	b.WriteString("\n")
+
+	return b.String()
+}
+
+// renderQEMUCommandPreview builds the qemu-system-* invocation that `yoe run`
+// would emit with the current Memory / Display / Ports values and renders it
+// indented and line-wrapped at argument boundaries so the full command stays
+// readable on narrow terminals.
+func (m model) renderQEMUCommandPreview() string {
+	machine, ok := m.proj.Machines[m.proj.Defaults.Machine]
+	if !ok {
+		return dimStyle.Render("    (no default machine — set one on the Setup page)") + "\n"
+	}
+
+	// Mirror RunQEMU's flag precedence: --memory > local.star > machine.
+	opts := device.QEMUOptions{
+		Memory:  m.qemuMemory,
+		Display: m.qemuDisplay == "on",
+		Ports:   append([]string(nil), m.qemuPorts...),
+	}
+
+	// Placeholders stand in for paths the launcher would resolve at run
+	// time — the user hasn't necessarily built the image yet, and dragging
+	// the build state into a settings preview would mis-represent what the
+	// command actually says.
+	imgPlaceholder := "<image.img>"
+	kernelPlaceholder := ""
+	initrdPlaceholder := ""
+	needsDirectBoot := machine.QEMU == nil || machine.QEMU.Firmware == ""
+	if needsDirectBoot && machine.Kernel.Unit != "" {
+		kernelPlaceholder = "<vmlinuz>"
+		// The actual launcher adds -initrd only for distros that boot
+		// through an initramfs (Debian). The preview can't know the image's
+		// distro, so it leaves the initrd out rather than implying one.
+	}
+
+	args := device.BuildQEMUArgs(machine, opts, imgPlaceholder, kernelPlaceholder, initrdPlaceholder)
+
+	// Width budget for the wrapper: subtract the 4-char indent so wrapped
+	// continuations align under the first arg. Fall back to 80 if we don't
+	// yet know the terminal size (the very first render before the
+	// WindowSizeMsg arrives).
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+	return wrapShellCommand(device.QEMUBinary(machine.Arch), args, width-4, "    ")
+}
+
+// wrapShellCommand renders a binary + argv as an indented, backslash-continued
+// shell command, then runs the whole block through dimStyle.
+func wrapShellCommand(bin string, args []string, width int, indent string) string {
+	return dimStyle.Render(wrapShellCommandText(bin, args, width, indent))
+}
+
+// wrapShellCommandText is the pure-text wrapper underneath wrapShellCommand.
+// Splitting them out lets tests assert on the raw layout without fighting
+// lipgloss's multi-line padding.
+func wrapShellCommandText(bin string, args []string, width int, indent string) string {
+	if width < 20 {
+		width = 20
+	}
+	quote := func(s string) string {
+		if s == "" {
+			return "''"
+		}
+		needsQuote := false
+		for _, r := range s {
+			if r == ' ' || r == '\t' || r == '"' || r == '\'' || r == '$' || r == '*' ||
+				r == '?' || r == '[' || r == ']' || r == '(' || r == ')' || r == '&' ||
+				r == ';' || r == '|' || r == '<' || r == '>' || r == '`' || r == '\\' {
+				needsQuote = true
+				break
+			}
+		}
+		if !needsQuote {
+			return s
+		}
+		// Single-quote and escape any embedded single quotes the bash way.
+		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	}
+
+	var b strings.Builder
+	b.WriteString(indent)
+	line := bin
+	for _, a := range args {
+		tok := quote(a)
+		// +1 for the leading space between tokens, +2 reserved for the
+		// trailing " \\" continuation.
+		if len(indent)+len(line)+1+len(tok) > width-2 {
+			b.WriteString(line)
+			b.WriteString(" \\\n")
+			b.WriteString(indent)
+			b.WriteString("  ")
+			line = tok
+			continue
+		}
+		line += " " + tok
+	}
+	b.WriteString(line)
+	b.WriteString("\n")
 	return b.String()
 }
 
@@ -3358,7 +4165,7 @@ func (m model) upstreamLines() []string {
 	if imgName == "" {
 		return []string{dimStyle.Render("    (no default image set)")}
 	}
-	img, ok := m.proj.Units[imgName]
+	img := m.proj.LookupUnit(m.distro, imgName); ok := img != nil
 	if !ok || img.Class != "image" {
 		return []string{dimStyle.Render("    (default image " + imgName + " not found)")}
 	}
@@ -3425,7 +4232,7 @@ func (m model) findRuntimePath(from, to string) []string {
 	for len(queue) > 0 {
 		cur := queue[0]
 		queue = queue[1:]
-		u, ok := m.proj.Units[cur.name]
+		u := m.proj.LookupUnit(m.distro, cur.name); ok := u != nil
 		if !ok {
 			continue
 		}
@@ -3455,7 +4262,7 @@ func (m model) findRuntimePath(from, to string) []string {
 // matches what the user actually wrote in image() rather than the
 // fully flattened runtime closure.
 func (m model) downstreamChildren(name string) []string {
-	u, ok := m.proj.Units[name]
+	u := m.proj.LookupUnit(m.distro, name); ok := u != nil
 	if !ok {
 		return nil
 	}
@@ -3474,7 +4281,7 @@ func (m model) downstreamChildren(name string) []string {
 		if real, ok := m.proj.Provides[dep]; ok {
 			dep = real
 		}
-		if _, ok := m.proj.Units[dep]; ok {
+		if m.proj.LookupUnit(m.distro, dep) != nil {
 			out = append(out, dep)
 		}
 	}
@@ -3499,7 +4306,7 @@ func (m model) renderUnitTree(root string, getChildren func(string) []string, ma
 			connector = "└── "
 		}
 		label := name
-		if u, ok := m.proj.Units[name]; ok {
+		if u := m.proj.LookupUnit(m.distro, name); u != nil {
 			switch u.Class {
 			case "image":
 				label += dimStyle.Render(" (image)")
@@ -3560,7 +4367,7 @@ func (m model) viewDetail() string {
 
 	status := m.renderStatus(m.detailUnit)
 	titleVersion := ""
-	if u, ok := m.proj.Units[m.detailUnit]; ok && u.Version != "" {
+	if u := m.proj.LookupUnit(m.distro, m.detailUnit); u != nil && u.Version != "" {
 		titleVersion = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(u.Version)
 	}
 	b.WriteString(fmt.Sprintf("  ← %s%s %s\n",
@@ -3569,9 +4376,9 @@ func (m model) viewDetail() string {
 		status))
 
 	// Show build metadata if available
-	if u, ok := m.proj.Units[m.detailUnit]; ok {
+	if u := m.proj.LookupUnit(m.distro, m.detailUnit); u != nil {
 		sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
-		buildDir := build.UnitBuildDir(m.projectDir, sd, m.detailUnit)
+		buildDir := build.UnitBuildDir(m.projectDir, sd, m.detailUnit, m.distro)
 		currentHash := m.hashes[m.detailUnit]
 		if meta := build.ReadMeta(buildDir); meta != nil && meta.Hash == currentHash {
 			dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
@@ -3717,7 +4524,7 @@ func (m model) viewDetail() string {
 		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
 	} else {
 		items := detailHelpItems
-		if u, ok := m.proj.Units[m.detailUnit]; ok && u.Class == "image" {
+		if u := m.proj.LookupUnit(m.distro, m.detailUnit); u != nil && u.Class == "image" {
 			items = detailImageHelpItems
 		}
 		b.WriteString(renderHelp(items))
@@ -3954,37 +4761,58 @@ func (m *model) startBuild(name string) tea.Cmd {
 	unitName := name
 	loadOpts := append([]yoestar.LoadOption{}, m.loadOpts...)
 
-	// Write executor output to a log file so detail view can tail it
-	sd := arch
-	if u, ok := m.proj.Units[name]; ok {
-		sd = build.ScopeDir(u, arch, machine)
-	}
-	outputPath := filepath.Join(build.UnitBuildDir(projectDir, sd, unitName), "executor.log")
-	build.EnsureDir(filepath.Dir(outputPath))
-
 	return func() tea.Msg {
 		defer cancel()
-		f, err := os.Create(outputPath)
-		if err != nil {
-			return buildDoneMsg{unit: unitName, err: err}
-		}
-		defer f.Close()
 
 		// Reload project from .star files so we pick up any changes
 		// made since the TUI started (e.g., edited build steps).
 		freshProj, err := yoestar.LoadProject(projectDir,
 			append(loadOpts, yoestar.WithMachine(machine))...)
 		if err != nil {
-			fmt.Fprintf(f, "warning: could not reload project: %v, using cached config\n", err)
 			freshProj = proj
 		}
 
+		// Image units carry their own distro tag — debian-tagged
+		// dev-image must build into build/debian/, not whatever the
+		// project default happens to be. Mirrors cmdBuild's per-target
+		// derivation so TUI and CLI agree on which dev-image is
+		// "the" dev-image when both alpine.dev-image and
+		// debian.dev-image are registered.
+		var distro string
+		var derr error
+		if u := freshProj.AnyUnit(unitName); u != nil && u.Class == "image" {
+			distro, derr = freshProj.EffectiveDistroForImage(unitName)
+		} else {
+			distro, derr = freshProj.EffectiveDistro()
+		}
+		if derr != nil {
+			return buildDoneMsg{unit: unitName, err: fmt.Errorf("resolve effective distro: %w", derr)}
+		}
+
+		// Write executor output under the same per-distro build dir the
+		// executor will use, so the detail view's log tail and the
+		// build's own destdir/cache land next to each other.
+		sd := arch
+		if u := freshProj.LookupUnit(distro, unitName); u != nil {
+			sd = build.ScopeDir(u, arch, machine)
+		}
+		outputPath := filepath.Join(build.UnitBuildDir(projectDir, sd, unitName, distro), "executor.log")
+		if err := build.EnsureDir(filepath.Dir(outputPath)); err != nil {
+			return buildDoneMsg{unit: unitName, err: err}
+		}
+		f, err := os.Create(outputPath)
+		if err != nil {
+			return buildDoneMsg{unit: unitName, err: err}
+		}
+		defer f.Close()
+
 		err = build.BuildUnits(freshProj, []string{unitName}, build.Options{
-			Ctx:        ctx,
-			Force:      true,
-			ProjectDir: projectDir,
-			Arch:       arch,
-			Machine:    machine,
+			Ctx:             ctx,
+			Force:           true,
+			ProjectDir:      projectDir,
+			Arch:            arch,
+			Machine:         machine,
+			EffectiveDistro: distro,
 			OnEvent: func(ev build.BuildEvent) {
 				if tuiProgram != nil {
 					tuiProgram.Send(buildEventMsg{
@@ -4030,10 +4858,10 @@ func (m model) execShell(dir string) tea.Cmd {
 // build/, or "" if the unit hasn't been fetched yet (so the caller can
 // surface a helpful message instead of dropping into a phantom path).
 func (m model) unitSrcDir(name string) string {
-	if _, ok := m.proj.Units[name]; !ok {
+	if m.proj.LookupUnit(m.distro, name) == nil {
 		return ""
 	}
-	srcDir := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name), "src")
+	srcDir := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name, m.distro), "src")
 	if _, err := os.Stat(srcDir); err != nil {
 		return ""
 	}
@@ -4041,7 +4869,7 @@ func (m model) unitSrcDir(name string) string {
 }
 
 func (m *model) refreshDetail() {
-	unitDir := build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit)
+	unitDir := build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit, m.distro)
 	outputPath := filepath.Join(unitDir, "executor.log")
 	m.outputLines = readFileAll(outputPath)
 	logPath := filepath.Join(unitDir, "build.log")
@@ -4068,8 +4896,8 @@ func (m *model) refreshDetail() {
 func (m *model) refreshDetailFiles() {
 	m.detailFiles = nil
 	m.detailFilesScroll = 0
-	walkRoot := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit), "destdir")
-	if u, ok := m.proj.Units[m.detailUnit]; ok && u.Class == "image" {
+	walkRoot := filepath.Join(build.UnitBuildDir(m.projectDir, m.unitScopeDir(m.detailUnit), m.detailUnit, m.distro), "destdir")
+	if u := m.proj.LookupUnit(m.distro, m.detailUnit); u != nil && u.Class == "image" {
 		walkRoot = filepath.Join(walkRoot, "rootfs")
 	}
 	filepath.Walk(walkRoot, func(path string, info os.FileInfo, err error) error {
@@ -4339,13 +5167,13 @@ func (m *model) sortVisible() {
 
 	keyName := func(i int) string { return m.units[i] }
 	keyClass := func(i int) string {
-		if u, ok := m.proj.Units[m.units[i]]; ok {
+		if u := m.proj.LookupUnit(m.distro, m.units[i]); u != nil {
 			return u.Class
 		}
 		return ""
 	}
 	keyModule := func(i int) string {
-		if u, ok := m.proj.Units[m.units[i]]; ok {
+		if u := m.proj.LookupUnit(m.distro, m.units[i]); u != nil {
 			if u.Module == "" {
 				return "(local)"
 			}
@@ -4354,7 +5182,7 @@ func (m *model) sortVisible() {
 		return ""
 	}
 	keyVersion := func(i int) string {
-		if u, ok := m.proj.Units[m.units[i]]; ok {
+		if u := m.proj.LookupUnit(m.distro, m.units[i]); u != nil {
 			return u.Version
 		}
 		return ""
@@ -4451,12 +5279,12 @@ func (m *model) recomputeMetrics() {
 	size := make(map[string]int64, len(m.units))
 	deps := make(map[string]int, len(m.units))
 	for _, name := range m.units {
-		u := m.proj.Units[name]
+		u := m.proj.LookupUnit(m.distro, name)
 		if u == nil {
 			continue
 		}
 		sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
-		buildDir := build.UnitBuildDir(m.projectDir, sd, name)
+		buildDir := build.UnitBuildDir(m.projectDir, sd, name, m.distro)
 		size[name] = installedSize(buildDir)
 
 		// Runtime closure of what the unit pulls in. For image units the
@@ -4469,7 +5297,26 @@ func (m *model) recomputeMetrics() {
 		} else {
 			roots = []string{name}
 		}
-		closure := resolve.RuntimeClosure(m.proj, roots)
+		// For image units use the image's own effective distro; for
+		// non-image units (single deploy contexts) fall back to the
+		// project default.
+		var distro string
+		if u.Class == "image" {
+			d, err := m.proj.EffectiveDistroForImage(name)
+			if err != nil {
+				deps[name] = 0
+				continue
+			}
+			distro = d
+		} else {
+			d, err := m.proj.EffectiveDistro()
+			if err != nil {
+				deps[name] = 0
+				continue
+			}
+			distro = d
+		}
+		closure := resolve.RuntimeClosure(m.proj, roots, distro)
 		count := len(closure)
 		if u.Class != "image" && count > 0 {
 			count-- // don't count the unit itself for non-image units
@@ -4496,12 +5343,12 @@ func (m *model) recomputeMetrics() {
 // final recomputeMetrics. Skips the runtime-closure walk because deps
 // don't change just because the unit got built.
 func (m *model) refreshUnitSize(name string) {
-	u, ok := m.proj.Units[name]
+	u := m.proj.LookupUnit(m.distro, name); ok := u != nil
 	if !ok {
 		return
 	}
 	sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
-	buildDir := build.UnitBuildDir(m.projectDir, sd, name)
+	buildDir := build.UnitBuildDir(m.projectDir, sd, name, m.distro)
 	if m.unitSize == nil {
 		m.unitSize = make(map[string]int64)
 	}
@@ -4537,7 +5384,7 @@ func clipFixed(s string, w int) string {
 // "v3.4.1-3-gabc1234-dirty"). Returns "" when the unit has no source
 // dir (image/container) so the caller can skip the line entirely.
 func (m model) detailSourceLine() string {
-	u, ok := m.proj.Units[m.detailUnit]
+	u := m.proj.LookupUnit(m.distro, m.detailUnit); ok := u != nil
 	if !ok || u.Class == "image" || u.Class == "container" {
 		return ""
 	}
@@ -4555,7 +5402,7 @@ func (m model) detailSourceLine() string {
 	// rewritten origin (HTTPS↔SSH), surface the live remote instead.
 	url := u.Source
 	sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
-	buildDir := build.UnitBuildDir(m.projectDir, sd, m.detailUnit)
+	buildDir := build.UnitBuildDir(m.projectDir, sd, m.detailUnit, m.distro)
 	srcDir := filepath.Join(buildDir, "src")
 	if source.IsDev(state) {
 		if live := remoteOriginURL(srcDir); live != "" {
@@ -4673,7 +5520,7 @@ func srcStateStyle(s source.State) lipgloss.Style {
 // is assumed pin (it has never been toggled to dev).
 func (m model) renderSrcCell(name string) string {
 	const w = 9
-	u, ok := m.proj.Units[name]
+	u := m.proj.LookupUnit(m.distro, name); ok := u != nil
 	if !ok || u.Class == "image" || u.Class == "container" {
 		return clipFixed("", w)
 	}
@@ -4696,9 +5543,9 @@ func (m model) unitSourceState(name string) source.State {
 		return s
 	}
 	state := source.StateEmpty
-	if u, ok := m.proj.Units[name]; ok {
+	if u := m.proj.LookupUnit(m.distro, name); u != nil {
 		sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
-		buildDir := build.UnitBuildDir(m.projectDir, sd, name)
+		buildDir := build.UnitBuildDir(m.projectDir, sd, name, m.distro)
 		if meta := build.ReadMeta(buildDir); meta != nil {
 			state = source.State(meta.SourceState)
 		}
@@ -4763,7 +5610,7 @@ func formatSize(b int64) string {
 
 // unitScopeDir returns the scope directory for a unit (arch, machine name, or noarch).
 func (m model) unitScopeDir(name string) string {
-	if u, ok := m.proj.Units[name]; ok {
+	if u := m.proj.LookupUnit(m.distro, name); u != nil {
 		return build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
 	}
 	return m.arch
@@ -4780,7 +5627,7 @@ func (m *model) recomputeStatuses() {
 	if err == nil {
 		m.proj = freshProj
 		// Rebuild DAG and unit list from fresh project
-		if dag, err := resolve.BuildDAG(freshProj); err == nil {
+		if dag, err := resolve.BuildDAG(freshProj, m.distro); err == nil {
 			m.dag = dag
 			m.units = allUnits(freshProj)
 			m.cursor = 0
@@ -4793,7 +5640,7 @@ func (m *model) recomputeStatuses() {
 	// m.visible would carry stale indices into the old slice.
 	m.applyQuery()
 
-	hashes, err := resolve.ComputeAllHashes(m.dag, m.arch, m.proj.Defaults.Machine, build.SrcInputsFn(m.projectDir, m.arch, m.proj.Defaults.Machine))
+	hashes, err := resolve.ComputeAllHashes(m.dag, m.arch, m.proj.Defaults.Machine, build.SrcInputsFn(m.projectDir, m.arch, m.proj.Defaults.Machine, m.distro), m.distro)
 	if err != nil {
 		return
 	}
@@ -4804,14 +5651,14 @@ func (m *model) recomputeStatuses() {
 		}
 		hash := hashes[name]
 		sd := m.arch
-		if u, ok := m.proj.Units[name]; ok {
+		if u := m.proj.LookupUnit(m.distro, name); u != nil {
 			sd = build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
 		}
-		if build.IsBuildCached(m.projectDir, sd, name, hash) {
+		if build.IsBuildCached(m.projectDir, sd, name, hash, m.distro) {
 			m.statuses[name] = statusCached
-		} else if build.IsBuildInProgress(m.projectDir, sd, name) {
+		} else if build.IsBuildInProgress(m.projectDir, sd, name, m.distro) {
 			m.statuses[name] = statusBuilding
-		} else if meta := build.ReadMeta(build.UnitBuildDir(m.projectDir, sd, name)); meta != nil && meta.Hash == hash && meta.Status == "failed" {
+		} else if meta := build.ReadMeta(build.UnitBuildDir(m.projectDir, sd, name, m.distro)); meta != nil && meta.Hash == hash && meta.Status == "failed" {
 			m.statuses[name] = statusFailed
 		} else {
 			m.statuses[name] = statusNone
@@ -4918,6 +5765,27 @@ func (m model) renderBuildProgress() string {
 	}
 	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	return bar.View() + labelStyle.Render(label)
+}
+
+// unitFromFeed reports whether the named unit was materialized by a
+// synthetic module (alpine_feed / apt_feed) rather than declared in
+// a .star file. Feed-origin units have no source file to open, so the
+// editor / shell paths short-circuit on them and the help bar omits
+// their keybindings.
+func (m model) unitFromFeed(name string) bool {
+	if m.proj == nil {
+		return false
+	}
+	u := m.proj.LookupUnit(m.distro, name); ok := u != nil
+	if !ok || u == nil || u.Module == "" {
+		return false
+	}
+	for _, sm := range m.proj.SyntheticModules {
+		if sm.Name == u.Module {
+			return true
+		}
+	}
+	return false
 }
 
 // unitStarPath returns the .star file that defines the given resolved
@@ -5053,9 +5921,20 @@ func readFileAll(path string) []string {
 	return lines
 }
 
-// allUnits returns sorted unit names from the project.
+// allUnits returns sorted unit names from the project. Dedupes
+// across modules so cross-distro siblings (alpine.main + debian.main
+// both registering libssl3) yield a single entry rather than two.
 func allUnits(proj *yoestar.Project) []string {
-	return sortedKeys(proj.Units)
+	seen := map[string]struct{}{}
+	for name := range proj.AllUnits() {
+		seen[name] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func sortedKeys[V any](m map[string]V) []string {
@@ -5245,7 +6124,11 @@ func findImageForFlash(proj *yoestar.Project, unitName, projectDir string) (stri
 	if !ok {
 		return "", 0, fmt.Errorf("default machine %q not found", proj.Defaults.Machine)
 	}
-	imgPath := filepath.Join(projectDir, "build", unitName+"."+machine.Name, "destdir", unitName+".img")
+	distro, err := proj.EffectiveDistroForImage(unitName)
+	if err != nil {
+		return "", 0, fmt.Errorf("resolving distro for %q: %w", unitName, err)
+	}
+	imgPath := filepath.Join(projectDir, "build", distro, unitName+"."+machine.Name, "destdir", unitName+".img")
 	info, err := os.Stat(imgPath)
 	if err != nil {
 		return "", 0, fmt.Errorf("no built image found — run yoe build %s first", unitName)

@@ -6,17 +6,39 @@
 > and link from here. If a topic doesn't have a design doc yet, leave the entry
 > brief — write the design doc when the work is actually picked up.
 
-## Next
+## Next video/blog posts
 
-- Building from console is not confusing with parallel build as to what is
+- debugging the zstd issue
+- self-hosting on rPI
+
+## Next Features
+
+- Be able to specify distro deps by version if necessary (another optional
+  nested level).
+- Update landing page to include reflect latest developments.
+- Test deploy with Debian
+- Rust support, put cargo packages in cache dir.
+- Update Alpine to v3.23
+- Should image settings only show images for configured distro?
+- Can we start yoe without a distro setting and select distro based on image
+  distro field?
+- Switch Alpine module to versioned branches.
+- Script on both Alpine and Debian to add upstream feeds for runtime
+  development.
+- Custom Linux kernel in Debian. The stock Debian kernel is dragging in 1/2G of
+  kernel modules.
+- Build container packages and deploy to target.
+- vcpkg (seems popular, Rustdesk uses it)
+- Building from console is now confusing with parallel build as to what is
   happening [1/1] task: build (should also include unit)
 - Option to ignore certain flash devices, save in local.star, and then they are
   not presented in the flash list again. This helps prevent accidental writes to
   media.
+- yoe kiosk browser support
 - Lock all writes to build.json files, local.star, etc
 - create patches for src trees
-- Beagle Play
 - Odroid C4
+- Built-in serial terminal.
 - Use a generic container for alpine repackaing, so a container bump does not
   cause all alpine packages to rebuild.
 - Yoe unit that builds in place
@@ -27,9 +49,7 @@
   Useful for incremental development.
 - Allow running yoe build/deploy in a unit build src dir. We walk up the
   directory to learn what unit it is, and load the project.
-- why do modules not show pin on startup?
 - module dev status should update
-- video on src modifications
 - Block diagram on src modifications (needs some work)
 - mDNS on rPI does not work
 - Units output multiple packages. Seems like this will be required for
@@ -305,17 +325,16 @@ to be capable enough for real engineering work, not just demo targets, and
 surfaces gaps in container hosting, editor experience, and the build cache all
 at once.
 
-Compilers stay in the build containers (gcc, binutils, headers, language
-toolchains live in `toolchain-musl` and friends, not the rootfs). What the
-device itself needs:
+The first cut shipped as `selfhost-image` for the Raspberry Pi 5 — see
+[selfhost-rpi5.md](selfhost-rpi5.md). It bundles yoe, Go, Docker, git,
+bubblewrap, and the dev-image tool set. What's still open:
 
-- **`yoe` binary in the project's apk repo** so a yoe-built device can
-  `apk add yoe` like any other unit.
-- **Go on-device** for editing yoe source comfortably (`gopls`, `delve`), not
-  for the build itself.
-- **`git`** unit.
-- **An editor that runs on musl.** Fix the helix glibc issue (cargo-from-source
-  build) or commit to neovim as the default.
 - **CI gate** that builds yoe from source on a yoe-built image and runs the test
   suite, so toolchain or libc-compatibility regressions break the build instead
   of being discovered later.
+- **Backport `selfhost-image` to other boards** — RPi4 first (mostly mechanical;
+  swap `linux-rpi5` → `linux-rpi4` in the manifest), then BeaglePlay, then
+  Jetson once the Tegra kernel carries the container CONFIG fragment.
+- **Cross-arch builds from the RPi5** — install `qemu-user-static` and register
+  binfmt handlers in the image so the device can also build x86_64 / RISC-V
+  packages.

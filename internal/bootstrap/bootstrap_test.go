@@ -15,12 +15,13 @@ func TestStatus(t *testing.T) {
 	os.MkdirAll(filepath.Join(projectDir, "build", "repo"), 0755)
 
 	proj := &yoestar.Project{
-		Name: "test",
-		Units: map[string]*yoestar.Unit{
+		Name:          "test",
+		DefaultDistro: "alpine",
+		UnitsByModule: map[string]map[string]*yoestar.Unit{"": {
 			"glibc":   {Name: "glibc", Version: "2.39"},
 			"gcc":     {Name: "gcc", Version: "14.1"},
 			"busybox": {Name: "busybox", Version: "1.36"},
-		},
+		}},
 	}
 
 	var buf bytes.Buffer
@@ -51,8 +52,9 @@ func TestStatus(t *testing.T) {
 
 func TestStage0_MissingUnits(t *testing.T) {
 	proj := &yoestar.Project{
-		Name:    "test",
-		Units: map[string]*yoestar.Unit{},
+		Name:          "test",
+		DefaultDistro: "alpine",
+		UnitsByModule:         map[string]map[string]*yoestar.Unit{"": {}},
 	}
 
 	var buf bytes.Buffer

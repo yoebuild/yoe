@@ -3,14 +3,95 @@ package device
 import (
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	yoe "github.com/yoebuild/yoe/internal"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
+
+// checkQEMUPortsFree returns a descriptive error if any host-side forward
+// port is already bound. A bound forward port almost always means another
+// QEMU guest from an earlier `yoe run` is still running — a live guest
+// holds its forwards for its whole lifetime — so this turns an opaque
+// QEMU "exit status 1" into a message that names the actual problem.
+func checkQEMUPortsFree(ports []string) error {
+	for _, p := range ports {
+		host, _, ok := strings.Cut(p, ":")
+		if !ok || host == "" {
+			continue
+		}
+		ln, err := net.Listen("tcp", ":"+host)
+		if err != nil {
+			return fmt.Errorf("host port %s is already in use — a QEMU guest from an earlier `yoe run` is probably still running. Stop that guest first, or pass --port to forward different host ports", host)
+		}
+		_ = ln.Close()
+	}
+	return nil
+}
+
+// mergeQEMUPorts combines a machine's declared forwards with CLI `--port`
+// entries. A CLI entry whose guest port matches a machine entry replaces
+// that machine entry; a CLI entry with a new guest port is appended.
+//
+// Replacing (rather than appending) is what makes `--port` usable for
+// qemu-in-qemu: when `yoe run` executes inside a QEMU guest, the outer
+// guest already holds the machine's default host forwards (2222, 8080,
+// 8118). `--port 18118:8118` then moves the host side of the 8118 forward
+// off the taken port instead of declaring a second, still-colliding
+// forward for the same guest port.
+func mergeQEMUPorts(machinePorts, cliPorts []string) []string {
+	guestPort := func(p string) (string, bool) {
+		_, guest, ok := strings.Cut(p, ":")
+		return guest, ok && guest != ""
+	}
+	merged := append([]string(nil), machinePorts...)
+	for _, cp := range cliPorts {
+		guest, ok := guestPort(cp)
+		if !ok {
+			merged = append(merged, cp)
+			continue
+		}
+		replaced := false
+		for i, mp := range merged {
+			if g, ok := guestPort(mp); ok && g == guest {
+				merged[i] = cp
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			merged = append(merged, cp)
+		}
+	}
+	return merged
+}
+
+// CheckQEMUPortsAvailable verifies the host forward ports a `yoe run` of
+// this machine would bind are free. The CLI and the TUI both call it
+// before launching so a guest that is already running is reported
+// clearly instead of as an opaque QEMU exit code.
+func CheckQEMUPortsAvailable(machine *yoestar.Machine, extraPorts []string) error {
+	return checkQEMUPortsFree(mergeQEMUPorts(machine.QEMUPorts(), extraPorts))
+}
+
+// qemuStderrTail returns the last non-empty line of captured QEMU stderr,
+// prefixed with a newline, or "" when there is nothing useful to add.
+func qemuStderrTail(s string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			return "\n" + line
+		}
+	}
+	return ""
+}
 
 // QEMUOptions configures a QEMU run.
 type QEMUOptions struct {
@@ -18,13 +99,34 @@ type QEMUOptions struct {
 	Ports   []string // host:guest port mappings
 	Display bool
 	Daemon  bool
+	// DiskSize, if non-empty, is the size to grow the QEMU-side image
+	// copy to before launch. Format is the usual K/M/G suffix (e.g. "8G").
+	// The built disk.img is left untouched so `yoe flash` keeps writing
+	// only the partition-sized image; the grown copy lives alongside as
+	// disk.run.img and is reused across runs. Enables on-target
+	// grow-rootfs to actually have free space to extend into.
+	// Empty string disables the copy (yoe run uses disk.img directly).
+	DiskSize string
+	// BootTest turns `yoe run` into a non-interactive smoke test: boot the
+	// image headless, wait for the serial console to reach the login
+	// prompt, SSH in and run a health command, then power off. The process
+	// exits 0 on success and non-zero on any failure (timeout, early QEMU
+	// exit, no SSH). Used by CI to catch boot/runtime regressions a build
+	// can't. Requires qemu-system on the host (the container fallback can't
+	// forward the guest SSH port back to the host).
+	BootTest bool
+	// BootTestTimeout bounds the whole boot test (boot + SSH). Zero selects
+	// defaultBootTestTimeout. Generous by default because a host without
+	// /dev/kvm falls back to TCG emulation, which boots several times slower.
+	BootTestTimeout time.Duration
 }
 
 // RunQEMU launches an image in QEMU.
 func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, opts QEMUOptions, w io.Writer) error {
-	// Find the image unit
-	unit, ok := proj.Units[unitName]
-	if !ok {
+	// Find the image unit. AnyUnit suffices to read class + name;
+	// the actual built artifact lives at a per-machine path.
+	unit := proj.AnyUnit(unitName)
+	if unit == nil {
 		return fmt.Errorf("unit %q not found", unitName)
 	}
 	if unit.Class != "image" {
@@ -41,79 +143,131 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 	}
 
 	// Find the built image
-	imgPath := findImage(projectDir, machine.Name, unitName)
+	distro, err := proj.EffectiveDistroForImage(unitName)
+	if err != nil {
+		return fmt.Errorf("resolving distro for %q: %w", unitName, err)
+	}
+	imgPath := findImage(projectDir, machine.Name, unitName, distro)
 	if imgPath == "" {
 		return fmt.Errorf("no built image for %q — run yoe build %s first", unitName, unitName)
 	}
 
+	// Fail fast (before the disk grow) if a guest is already holding the
+	// host forward ports — the common "an image is already running" case.
+	if err := checkQEMUPortsFree(mergeQEMUPorts(machine.QEMUPorts(), opts.Ports)); err != nil {
+		return err
+	}
+
+	// Optionally grow a side-by-side copy of the image so grow-rootfs on
+	// the guest has free space to extend the partition into. Leaves the
+	// original disk.img untouched.
+	if opts.DiskSize != "" {
+		grown, err := ensureGrownQEMUImage(imgPath, opts.DiskSize)
+		if err != nil {
+			return fmt.Errorf("growing QEMU image: %w", err)
+		}
+		imgPath = grown
+	}
+
 	qemuBin := qemuBinary(machine.Arch)
 
-	// Build common QEMU args (without image path — that differs host vs container)
-	buildArgs := func(imgFile string) []string {
-		a := baseQEMUArgs(machine, opts)
-		a = append(a, "-drive", fmt.Sprintf("file=%s,format=raw,if=virtio", imgFile))
+	// Direct kernel boot (arm64/riscv64 with no firmware) needs the kernel
+	// and, for distros that boot through an initramfs (Debian), the initrd.
+	// Both live in the built image's own /boot, so pull them straight from
+	// the unpacked rootfs beside the .img rather than guessing a separate
+	// kernel-unit destdir — that keeps it distro-agnostic and always matches
+	// the kernel the image actually ships.
+	hostKernel, hostInitrd := "", ""
+	needsDirectBoot := machine.QEMU == nil || machine.QEMU.Firmware == ""
+	if needsDirectBoot && machine.Kernel.Unit != "" {
+		hostKernel, hostInitrd = findBootKernel(imgPath)
+	}
 
-		// Merge machine-defined ports with CLI ports (CLI takes precedence)
-		ports := machine.QEMUPorts()
-		ports = append(ports, opts.Ports...)
-
-		netdev := "user,id=net0"
-		for _, port := range ports {
-			// port format is "host:guest", QEMU wants "hostfwd=tcp::host-:guest"
-			netdev += fmt.Sprintf(",hostfwd=tcp::%s", strings.Replace(port, ":", "-:", 1))
-		}
-		a = append(a, "-netdev", netdev)
-		a = append(a, "-device", "virtio-net-pci,netdev=net0")
-
-		// Direct kernel boot: when no firmware is configured, pass
-		// -kernel and -append for architectures that need it (arm64, riscv64).
-		needsDirectBoot := machine.QEMU == nil || machine.QEMU.Firmware == ""
-		if needsDirectBoot && machine.Kernel.Unit != "" {
-			kernelPath := findKernelImage(projectDir, machine.Arch, machine.Kernel.Unit)
-			if kernelPath != "" {
-				a = append(a, "-kernel", kernelPath)
-				if machine.Kernel.Cmdline != "" {
-					a = append(a, "-append", machine.Kernel.Cmdline)
-				}
-			}
-		}
-
-		return a
+	// Build common QEMU args (without paths — those differ host vs container)
+	buildArgs := func(imgFile, kernelFile, initrdFile string) []string {
+		return BuildQEMUArgs(machine, opts, imgFile, kernelFile, initrdFile)
 	}
 
 	// Try host QEMU first
 	if _, err := exec.LookPath(qemuBin); err == nil {
+		if machine.Arch == detectHostArch() && !kvmAvailable() {
+			fmt.Fprintf(w, "  /dev/kvm not available — using TCG software emulation (slower)\n")
+		}
+		// An EFI-only kernel (Ubuntu's arm64 zboot) boots through UEFI
+		// firmware, not the firmware-less -kernel path. Fail loudly if the
+		// firmware package is missing rather than launch a guest that hangs
+		// with a black serial console.
+		if needsDirectBoot && hostKernel != "" && machine.Arch == "arm64" && !arm64BareImage(hostKernel) {
+			fw := aarch64UEFIFirmware()
+			if fw == "" {
+				return fmt.Errorf("kernel %s is EFI-only (zboot) and needs UEFI firmware to boot, but no edk2/AAVMF firmware was found — install it (Debian/Ubuntu: qemu-efi-aarch64; Fedora: edk2-aarch64; Arch: edk2-aarch64)", filepath.Base(hostKernel))
+			}
+			fmt.Fprintf(w, "  EFI-only kernel (zboot); booting via UEFI firmware: %s\n", fw)
+		}
+		args := buildArgs(imgPath, hostKernel, hostInitrd)
+		if opts.BootTest {
+			sshPort, err := sshHostPort(machine, opts)
+			if err != nil {
+				return err
+			}
+			return runBootTest(qemuBin, args, sshPort, opts.BootTestTimeout, w)
+		}
 		fmt.Fprintf(w, "Starting QEMU (host): %s %s\n", qemuBin, machine.Arch)
-		args := buildArgs(imgPath)
 		cmd := exec.Command(qemuBin, args...)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
 		if opts.Daemon {
 			cmd.Stdin = nil
 			cmd.Stdout = nil
-			cmd.Stderr = nil
 			if err := cmd.Start(); err != nil {
 				return fmt.Errorf("starting QEMU: %w", err)
 			}
 			fmt.Fprintf(w, "QEMU running in background (PID %d)\n", cmd.Process.Pid)
 			return nil
 		}
-		return cmd.Run()
+		// Tee stderr so a QEMU launch failure can be reported with the
+		// reason QEMU printed, not just a bare exit code.
+		var errBuf strings.Builder
+		cmd.Stderr = io.MultiWriter(os.Stderr, &errBuf)
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("QEMU exited with an error: %w%s", err, qemuStderrTail(errBuf.String()))
+		}
+		return nil
 	}
 
 	// Fall back to container
+	if opts.BootTest {
+		// The boot test SSHes into the guest over a host-side port forward.
+		// Inside the build container QEMU's user-net forwards land on the
+		// container's loopback, not the host's, so the SSH probe can't reach
+		// the guest — and that's exactly the port-mapping tangle host QEMU
+		// avoids. Require qemu-system on the host rather than emulate it.
+		return fmt.Errorf("boot-test requires %s on the host PATH (the container fallback can't forward the guest SSH port back to the host); install qemu-system for %s", qemuBin, machine.Arch)
+	}
 	fmt.Fprintf(w, "Starting QEMU (container): %s %s\n", qemuBin, machine.Arch)
 	rel, err := filepath.Rel(projectDir, imgPath)
 	if err != nil {
 		return fmt.Errorf("image path not under project: %w", err)
 	}
 	containerImgPath := filepath.Join("/project", rel)
-	args := buildArgs(containerImgPath)
+	// The kernel and initrd live under the same project tree as the image,
+	// so remap them onto /project the same way — a host path would not
+	// resolve inside the container.
+	toContainer := func(p string) string {
+		if p == "" {
+			return ""
+		}
+		r, err := filepath.Rel(projectDir, p)
+		if err != nil {
+			return p
+		}
+		return filepath.Join("/project", r)
+	}
+	args := buildArgs(containerImgPath, toContainer(hostKernel), toContainer(hostInitrd))
 	fullCmd := qemuBin + " " + strings.Join(args, " ")
 
 	return yoe.RunInContainer(yoe.ContainerRunConfig{
-		Image:       yoe.DefaultContainerImage(proj.Units),
+		Image:       yoe.DefaultContainerImage(proj),
 		Command:     fullCmd,
 		ProjectDir:  projectDir,
 		Interactive: !opts.Daemon,
@@ -121,17 +275,196 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 	})
 }
 
-// findKernelImage locates the kernel image (vmlinuz) from a kernel unit's
-// build output.
-func findKernelImage(projectDir, scopeDir, kernelUnit string) string {
-	// Check the unit's destdir for /boot/vmlinuz
-	// Uses the new flat layout: build/<name>.<scope>/destdir/
-	destDir := filepath.Join(projectDir, "build", kernelUnit+"."+scopeDir, "destdir")
-	vmlinuz := filepath.Join(destDir, "boot", "vmlinuz")
-	if _, err := os.Stat(vmlinuz); err == nil {
-		return vmlinuz
+// findBootKernel locates the kernel and any initrd inside a built image's
+// unpacked rootfs (<destdir>/rootfs/boot), which sits beside the .img. It is
+// distro-agnostic: Alpine ships /boot/vmlinuz and mounts the rootfs directly
+// (no initrd), while Debian ships a versioned /boot/vmlinuz-<ver> plus an
+// initrd.img-<ver> it boots through. Ubuntu sits in between: its kernel only
+// *Recommends* an initramfs generator, so an Ubuntu image carries no real
+// initrd — only a dangling /boot/initrd.img symlink left by the kernel's
+// maintainer scripts — and boots through the kernel's built-in virtio/ext4
+// drivers like Alpine. Direct kernel boot (arm64/riscv64 with no firmware)
+// passes these host paths to -kernel/-initrd. Either return value is empty
+// when nothing resolves — an empty kernel disables direct boot, an empty
+// initrd just omits -initrd.
+func findBootKernel(imgPath string) (kernel, initrd string) {
+	bootDir := filepath.Join(filepath.Dir(imgPath), "rootfs", "boot")
+	kernel = firstGlob(bootDir, "vmlinuz", "vmlinuz-*", "Image", "Image-*")
+	initrd = firstGlob(bootDir, "initrd.img", "initrd.img-*", "initramfs", "initramfs-*")
+	return kernel, initrd
+}
+
+// firstGlob returns a file in dir matching the earliest pattern that matches
+// anything, patterns tried in order. A bare name matches that exact file.
+// Within one pattern the lexically greatest *resolvable* match wins, so when
+// several versioned kernels are installed the newest-sorting name is
+// preferred. Matches that don't resolve are skipped: Ubuntu's kernel
+// maintainer scripts leave a /boot/initrd.img symlink pointing at an
+// initrd.img-<ver> that was never generated, and handing that dangling path
+// to QEMU's -initrd makes it abort with "could not load initrd". os.Stat
+// follows the symlink, so a broken one is filtered out and the image falls
+// back to its built-in-driver direct boot.
+func firstGlob(dir string, patterns ...string) string {
+	for _, pat := range patterns {
+		matches, _ := filepath.Glob(filepath.Join(dir, pat))
+		sort.Strings(matches)
+		for i := len(matches) - 1; i >= 0; i-- {
+			if _, err := os.Stat(matches[i]); err == nil {
+				return matches[i]
+			}
+		}
 	}
 	return ""
+}
+
+// arm64BareImage reports whether the kernel at path is a bare arm64 `Image`
+// that QEMU's firmware-less `-kernel` loader can start directly. A bare Image
+// carries the magic "ARMd" at offset 56 (see the arm64 boot protocol). Ubuntu
+// builds its arm64 kernels as EFI zboot — a compressed EFI/PE application with
+// no bare-Image header — so the magic is absent and they can only boot through
+// UEFI firmware. An unreadable path (notably a not-yet-built placeholder the
+// TUI uses for its command preview) reports true, preserving the direct-boot
+// default for everything except a kernel we can positively identify as EFI-only.
+func arm64BareImage(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return true
+	}
+	defer f.Close()
+	var hdr [60]byte
+	if _, err := io.ReadFull(f, hdr[:]); err != nil {
+		return true
+	}
+	return string(hdr[56:60]) == "ARMd"
+}
+
+// aarch64UEFIFirmware returns the path to an edk2/AAVMF firmware image usable
+// with `-bios` to UEFI-boot an arm64 guest, or "" if none is installed. yoe
+// uses it to boot EFI-only kernels (Ubuntu's zboot) that the firmware-less
+// `-kernel` path cannot start; edk2 still picks up the `-kernel`/`-initrd`/
+// `-append` that follow via fw_cfg, so the kernel runs through its real EFI
+// stub. The candidates span the common packaging layouts (Debian/Ubuntu's
+// qemu-efi-aarch64, Fedora/Arch's edk2).
+func aarch64UEFIFirmware() string {
+	for _, p := range []string{
+		"/usr/share/qemu-efi-aarch64/QEMU_EFI.fd",
+		"/usr/share/edk2/aarch64/QEMU_EFI.fd",
+		"/usr/share/edk2-armvirt/aarch64/QEMU_EFI.fd",
+		"/usr/share/AAVMF/AAVMF_CODE.fd",
+		"/usr/share/qemu/edk2-aarch64-code.fd",
+	} {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+// ensureGrownQEMUImage copies src to a side file (src with `.run` inserted
+// before the extension) and grows it sparsely to targetSize. If the side
+// file already exists and is at least targetSize bytes AND newer than src,
+// it's reused. Returns the path to the side file.
+func ensureGrownQEMUImage(src, targetSize string) (string, error) {
+	targetBytes, err := parseSizeBytes(targetSize)
+	if err != nil {
+		return "", fmt.Errorf("parsing disk size %q: %w", targetSize, err)
+	}
+
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return "", fmt.Errorf("stat src image: %w", err)
+	}
+	// Source already meets or exceeds target — no copy needed.
+	if srcInfo.Size() >= targetBytes {
+		return src, nil
+	}
+
+	ext := filepath.Ext(src)
+	dst := strings.TrimSuffix(src, ext) + ".run" + ext
+
+	// Reuse an existing side file when it's at least target size AND not
+	// stale relative to the source. A rebuild updates src's mtime, which
+	// invalidates the cached copy.
+	if dstInfo, err := os.Stat(dst); err == nil {
+		if dstInfo.Size() >= targetBytes && dstInfo.ModTime().After(srcInfo.ModTime()) {
+			return dst, nil
+		}
+		_ = os.Remove(dst)
+	}
+
+	// Sparse copy: read src, write only non-zero blocks. Then truncate
+	// up to targetBytes. os.O_CREATE | os.O_TRUNC + io.Copy is plenty;
+	// we don't need to detect holes in the source because the source is
+	// already a sparse file and io.Copy preserves zero runs into a fresh
+	// destination via the same byte writes — but for an explicit sparse
+	// result we use cp --sparse=always when available, falling back to
+	// plain Go copy + truncate.
+	if err := copySparse(src, dst); err != nil {
+		_ = os.Remove(dst)
+		return "", fmt.Errorf("copy %s -> %s: %w", src, dst, err)
+	}
+	if err := os.Truncate(dst, targetBytes); err != nil {
+		_ = os.Remove(dst)
+		return "", fmt.Errorf("truncate %s to %s: %w", dst, targetSize, err)
+	}
+	return dst, nil
+}
+
+// copySparse copies src to dst. Tries `cp --sparse=always` first so zero
+// runs in the source stay holes in the destination; falls back to a plain
+// byte copy if cp isn't available or rejects the flag (BusyBox cp).
+func copySparse(src, dst string) error {
+	if cp, err := exec.LookPath("cp"); err == nil {
+		// --sparse=always is a GNU coreutils extension; ignore failure
+		// and fall back rather than producing a non-sparse copy with no
+		// warning.
+		c := exec.Command(cp, "--sparse=always", src, dst)
+		if err := c.Run(); err == nil {
+			return nil
+		}
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Sync()
+}
+
+// parseSizeBytes turns "8G" / "512M" / "1024K" into bytes. Plain digits
+// are bytes.
+func parseSizeBytes(s string) (int64, error) {
+	if s == "" {
+		return 0, fmt.Errorf("empty size")
+	}
+	mult := int64(1)
+	switch s[len(s)-1] {
+	case 'K', 'k':
+		mult = 1024
+		s = s[:len(s)-1]
+	case 'M', 'm':
+		mult = 1024 * 1024
+		s = s[:len(s)-1]
+	case 'G', 'g':
+		mult = 1024 * 1024 * 1024
+		s = s[:len(s)-1]
+	case 'T', 't':
+		mult = 1024 * 1024 * 1024 * 1024
+		s = s[:len(s)-1]
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return n * mult, nil
 }
 
 func qemuBinary(arch string) string {
@@ -143,6 +476,63 @@ func qemuBinary(arch string) string {
 	default:
 		return "qemu-system-x86_64"
 	}
+}
+
+// QEMUBinary returns the qemu-system-* executable that yoe would launch for
+// the given target arch. Exported so callers outside this package (the TUI
+// command preview, in particular) can render the full invocation.
+func QEMUBinary(arch string) string { return qemuBinary(arch) }
+
+// BuildQEMUArgs assembles the qemu-system-* argv (excluding the binary
+// itself) that yoe would pass for the given machine + options + concrete
+// on-disk paths. Both `RunQEMU` and the TUI's "equivalent command line"
+// preview go through here so the two stay in lock-step.
+//
+// imgPath is required; kernelPath may be empty (no `-kernel` argument is
+// emitted) or a placeholder string when the image hasn't been built yet
+// — the caller picks the placeholder. initrdPath adds `-initrd` for distros
+// that boot through an initramfs (Debian); empty omits it (Alpine).
+func BuildQEMUArgs(machine *yoestar.Machine, opts QEMUOptions, imgPath, kernelPath, initrdPath string) []string {
+	a := baseQEMUArgs(machine, opts)
+	a = append(a, "-drive", fmt.Sprintf("file=%s,format=raw,if=virtio", imgPath))
+
+	// Merge machine-defined ports with extra ports. An extra entry whose
+	// guest port matches a machine forward replaces it (qemu-in-qemu).
+	ports := mergeQEMUPorts(machine.QEMUPorts(), opts.Ports)
+	netdev := "user,id=net0"
+	for _, port := range ports {
+		// port format is "host:guest", QEMU wants "hostfwd=tcp::host-:guest"
+		netdev += fmt.Sprintf(",hostfwd=tcp::%s", strings.Replace(port, ":", "-:", 1))
+	}
+	a = append(a, "-netdev", netdev)
+	a = append(a, "-device", "virtio-net-pci,netdev=net0")
+
+	// Direct kernel boot: when no firmware is configured, pass -kernel and
+	// -append for architectures that need it (arm64, riscv64). Skipped if
+	// the caller couldn't resolve a kernel path.
+	needsDirectBoot := machine.QEMU == nil || machine.QEMU.Firmware == ""
+	if needsDirectBoot && machine.Kernel.Unit != "" && kernelPath != "" {
+		// An EFI-only kernel (Ubuntu's arm64 zboot) can't be started by the
+		// firmware-less -kernel path, so boot it through UEFI firmware. edk2
+		// still loads the -kernel/-initrd/-append below via fw_cfg, running
+		// the kernel's own EFI stub. Debian and Alpine ship bare arm64 Images
+		// and stay on the plain direct-kernel path (no -bios). If the firmware
+		// isn't installed we omit -bios here and let RunQEMU's preflight report
+		// it loudly rather than failing inside a command-preview path.
+		if machine.Arch == "arm64" && !arm64BareImage(kernelPath) {
+			if fw := aarch64UEFIFirmware(); fw != "" {
+				a = append(a, "-bios", fw)
+			}
+		}
+		a = append(a, "-kernel", kernelPath)
+		if initrdPath != "" {
+			a = append(a, "-initrd", initrdPath)
+		}
+		if machine.Kernel.Cmdline != "" {
+			a = append(a, "-append", machine.Kernel.Cmdline)
+		}
+	}
+	return a
 }
 
 func detectHostArch() string {
@@ -159,40 +549,65 @@ func detectHostArch() string {
 	}
 }
 
+// kvmAvailable reports whether /dev/kvm exists — the prerequisite for KVM
+// acceleration. Inside a QEMU guest it is absent unless the outer guest
+// was started with nested virtualization, so qemu-in-qemu runs fall back
+// to TCG emulation.
+func kvmAvailable() bool {
+	_, err := os.Stat("/dev/kvm")
+	return err == nil
+}
+
+// qemuCPU resolves the -cpu model. `host` (and the implicit default) only
+// works under an accelerator; without KVM it falls back to the broadest
+// TCG-emulatable model for the arch. Any other explicit model is passed
+// through.
+//
+// On arm64 the TCG fallback is a concrete model rather than `max`: QEMU 8.2's
+// aarch64 TCG aborts with "regime_is_user: code should not be reached" when
+// EDK2/UEFI firmware runs on `-cpu max` (the path Ubuntu's EFI-only zboot
+// kernels take). neoverse-n1 is a stable ARMv8.2 server model that both EDK2
+// and Ubuntu's arm64 kernels boot on cleanly under emulation.
+func qemuCPU(configured, arch string, useKVM bool) string {
+	if useKVM {
+		return configured // "" lets QEMU pick its default
+	}
+	if configured == "" || configured == "host" {
+		if arch == "arm64" {
+			return "neoverse-n1"
+		}
+		return "max"
+	}
+	return configured
+}
+
 func baseQEMUArgs(machine *yoestar.Machine, opts QEMUOptions) []string {
 	var args []string
 
-	hostArch := detectHostArch()
-	crossArch := machine.Arch != hostArch
+	// KVM needs a same-arch host with an accessible /dev/kvm. The latter
+	// is absent in qemu-in-qemu unless the outer guest was given nested
+	// virtualization, so fall back to TCG emulation rather than failing.
+	useKVM := machine.Arch == detectHostArch() && kvmAvailable()
 
 	qemu := machine.QEMU
 	if qemu != nil {
 		if qemu.Machine != "" {
 			args = append(args, "-machine", qemu.Machine)
 		}
-		if crossArch {
-			args = append(args, "-cpu", "max")
-		} else if qemu.CPU != "" {
-			args = append(args, "-cpu", qemu.CPU)
+		if cpu := qemuCPU(qemu.CPU, machine.Arch, useKVM); cpu != "" {
+			args = append(args, "-cpu", cpu)
 		}
 	} else {
 		switch machine.Arch {
-		case "arm64":
-			args = append(args, "-machine", "virt")
-		case "riscv64":
+		case "arm64", "riscv64":
 			args = append(args, "-machine", "virt")
 		default:
 			args = append(args, "-machine", "q35")
 		}
-		if crossArch {
-			args = append(args, "-cpu", "max")
-		} else {
-			args = append(args, "-cpu", "host")
-		}
+		args = append(args, "-cpu", qemuCPU("host", machine.Arch, useKVM))
 	}
 
-	// Enable KVM only for same-arch
-	if !crossArch {
+	if useKVM {
 		args = append(args, "-enable-kvm")
 	}
 
@@ -208,7 +623,34 @@ func baseQEMUArgs(machine *yoestar.Machine, opts QEMUOptions) []string {
 	args = append(args, "-m", mem)
 
 	// Display
-	if !opts.Display {
+	//
+	// Default (`-nographic`): no QEMU window; the guest's serial console
+	// is multiplexed onto host stdio so `yoe run` is a plain terminal
+	// session. This matches the embedded-board workflow where the image's
+	// console is `ttyS0`.
+	//
+	// With `--display`: open a QEMU window so the guest's framebuffer is
+	// visible — what the qt-image and other graphical demos need. Add a
+	// virtio-vga adapter (DRM-driven virtio-gpu plus VGA for early boot)
+	// so the kernel's framebuffer console renders into that window.
+	// Leaving the `-display` backend unspecified lets QEMU pick GTK on
+	// Linux, Cocoa on macOS, SDL otherwise — robust across hosts and
+	// honoring DISPLAY/Wayland the same way every other QEMU invocation
+	// would. `-serial mon:stdio` keeps the serial console attached to
+	// host stdio (the default without `-nographic` is the in-window
+	// virtual console, which would hide kernel logs from the terminal).
+	if opts.Display {
+		// xres/yres set virtio-vga's *preferred* mode in the EDID it
+		// advertises to the guest. Without them the kernel's virtio_gpu
+		// driver picks the first connector mode (640×480 on QEMU 9.x),
+		// scans out only that region of an otherwise-1280×800
+		// framebuffer, and any UI that centres in the framebuffer
+		// (e.g. the qt-image demo) lands at the bottom-right corner of
+		// the visible area. 1280×800 fits a 16:10 demo nicely and stays
+		// well inside virtio-vga's default 16 MiB of vgamem.
+		args = append(args, "-device", "virtio-vga,xres=1280,yres=800")
+		args = append(args, "-serial", "mon:stdio")
+	} else {
 		args = append(args, "-nographic")
 	}
 
@@ -218,7 +660,9 @@ func baseQEMUArgs(machine *yoestar.Machine, opts QEMUOptions) []string {
 		case "ovmf":
 			args = append(args, "-bios", "/usr/share/OVMF/OVMF.fd")
 		case "aavmf":
-			args = append(args, "-bios", "/usr/share/AAVMF/AAVMF.fd")
+			if fw := aarch64UEFIFirmware(); fw != "" {
+				args = append(args, "-bios", fw)
+			}
 		}
 	}
 

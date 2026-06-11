@@ -13,13 +13,30 @@
 - [Feed Server and yoe deploy](feed-server.md)
 - [On-Device Package Management](on-device-apk.md)
 
+# Boards
+
+- [QEMU (arm64, x86_64)](machine-qemu.md)
+- [Raspberry Pi (RPi4, RPi5)](machine-rpi.md)
+- [BeaglePlay (AM625)](machine-beagleplay.md)
+
+# Distro
+
+- [Yoe and distributions](distro.md)
+- [module-alpine](module-alpine.md)
+- [Alpine apk Passthrough](apk-passthrough.md)
+- [apk Signing](signing.md)
+- [module-debian](module-debian.md)
+- [module-ubuntu](module-ubuntu.md)
+
 # Reference
 
 - [Architecture](architecture.md)
 - [Unit & Configuration Format](metadata-format.md)
 - [Naming and Resolution](naming-and-resolution.md)
+- [Catalog and Materialization](catalog.md)
 - [File Templates](file-templates.md)
 - [Build & Configuration Languages](build-languages.md)
+- [Security and Threat Model](security.md)
 
 # Build System
 
@@ -27,24 +44,12 @@
 - [Build Environment](build-environment.md)
 - [Development Environments](dev-env.md)
 - [Testing](testing.md)
-
-# Packages and Devices
-
-- [apk Signing](signing.md)
-- [module-alpine](module-alpine.md)
-- [Alpine apk Passthrough](apk-passthrough.md)
-- [Security and Threat Model](security.md)
+- [Self-Hosting](selfhost.md)
 
 # Base System
 
 - [libc, init, and the Rootfs Base](libc-and-init.md)
 - [Containers on yoe Images](containers.md)
-
-# Boards
-
-- [BeaglePlay (AM625)](machine-beagleplay.md)
-- [Raspberry Pi (RPi4, RPi5)](machine-rpi.md)
-- [QEMU (arm64, x86_64)](machine-qemu.md)
 
 # Project
 

@@ -50,7 +50,10 @@ architecture description live under `docs/` (start with `docs/intro.md` and
   last resort: it multiplies the cache surface, breaks binary reuse across
   projects, and pushes complexity from a few clean conditionals into N parallel
   build configurations. Reach for it only when runtime resolution is genuinely
-  impossible (e.g., kernel defconfig, bootloader target).
+  impossible — kernel defconfig, bootloader target, and libc family (musl-built
+  and glibc-built binaries cannot share at the ABI level, so a unit consumed by
+  both Alpine and Debian images builds twice along the distro axis; see
+  `docs/specs/2026-05-25-module-debian.md` R14a).
 - **Explicit over implicit.** Values in Starlark units and configuration should
   not have hidden defaults. Require fields to be set explicitly — this makes it
   easier for AI to reason about the system and for humans to understand what a
@@ -70,6 +73,19 @@ architecture description live under `docs/` (start with `docs/intro.md` and
   across projects, and pushes policy to the wrong place. If a project genuinely
   needs a package installed but a service disabled, that's an explicit per-image
   opt-out (not an opt-in), and the bar for adding one is high.
+- **Distro modules ship a feed + a companion enable layer.** A module that wraps
+  an upstream distro (Alpine, Debian, …) declares its packages via one
+  `alpine_feed(...)` / `apt_feed(...)` call per repo section, not via thousands
+  of per-package `.star` files. Each feed registers a synthetic module
+  (`alpine.main`, `alpine.community`) whose units materialize lazily — working
+  memory tracks closure size, not catalog size. Service-enable units
+  (`<svc>-enable.star`) are hand-curated companions that depend on the upstream
+  `-openrc` package and set `services = [...]` to bake the runlevel symlink. Do
+  not write a from-source unit for a package the feed already exposes; pulling
+  from `module-alpine` via the feed is the default for the cases listed in
+  [docs/module-alpine.md](docs/module-alpine.md). Do not scan the rootfs for
+  init scripts as an enable mechanism — explicit companion units are how a
+  package's services become enabled.
 - **No backward compatibility concerns.** The project is pre-1.0. Do not add
   compatibility shims, legacy conversion paths, or deprecated-but-still- working
   code. When a design changes, update everything to the new design and delete
@@ -118,6 +134,19 @@ than scanning the directories.
 - **Understand before changing.** Read the relevant code paths end-to-end before
   proposing changes. Build failures often have non-obvious root causes — trace
   the actual problem rather than patching symptoms.
+- **Debug build failures from the on-disk artifacts, not by rebuilding.** A
+  failed `yoe build` already wrote everything you need under
+  `build/<distro>/<unit>.<arch>/`: the full `build.log`, the per-unit
+  `executor.log` (which task/unit failed), `build.json` (status/hash/error), the
+  extracted `src/`, the `destdir/` staging dir, and the per-unit `sysroot/`
+  holding exactly the deps that were staged. Read those first; do not re-run the
+  build to "see the error" — a build can take minutes per unit and re-syncs
+  modules. For a missing-header/missing-library failure, `ls` the unit's
+  `sysroot/` (and check whether `build/<distro>/<dep>.<arch>/` exists at all):
+  an empty or incomplete sysroot is itself the diagnosis — a build edge was
+  dropped or a dep never materialized — and proves it without a rebuild.
+  Rebuilding is the last step, to verify a fix you already identified. The
+  `diagnose` skill encodes this workflow.
 - **Silent failures are bugs.** If something can fail, it should fail loudly
   with a clear error. Never swallow errors or degrade silently in ways that make
   debugging harder later.
@@ -147,6 +176,33 @@ than scanning the directories.
   suffix and the Status blockquote in the same change that ships the code. The
   goal: a reader of `docs/` can never confuse aspirational design with what
   `yoe` actually does today.
+- **When a plan commits to implementation, write docs in final form.** Once a
+  plan under `docs/plans/` exists and we are committed to building it, the
+  matching reference docs under `docs/` are rewritten to describe the
+  post-implementation state — no `(planned)` flags, no `> Status:` blockquotes,
+  no "today's flat shape" or "wiring incomplete" caveats. A reviewer should read
+  the docs as if the work were already done; a single coherent target-state doc
+  is faster to comprehend than a verbose plan with disconnected steps. The
+  plan's **first step** lands the target-state docs (reviewable artifact); the
+  plan's **last step** verifies docs and code agree and closes any gaps that
+  surfaced during implementation. This rule is disjoint from `(planned)` above:
+  `(planned)` covers design-ahead sections with no implementation plan
+  (brainstorming, future-looking writing without commitment to ship);
+  final-form-during-plan covers everything once a plan exists. Switch framings
+  the moment a plan commits.
+- **Docs stand on their own; no plan vocabulary in `docs/`.** Reference docs
+  under `docs/` (excluding `docs/plans/`) must read self-contained. Do not
+  reference R-numbers (R5, R14a, R20a/R21, R21a, …), U-numbers (U6b, U4a-fix,
+  U24, …), commit hashes, or phrases like "plan unit X" / "tracked in the plan."
+  These are plan-internal identifiers — load-bearing inside `docs/plans/` for
+  tracing requirements to implementation units, but noise in a user-facing doc
+  where nothing on the page tells the reader what they mean. Replace every such
+  reference with a self-contained description of the property, behavior, or
+  workaround being documented. Name the _concept_, not the plan label. For a
+  known limitation, describe the limitation and its workaround on its own terms
+  — don't send the reader on a cross-reference hunt to find out what's going on.
+  Plans and docs have different audiences and different shelf lives; keep them
+  separable.
 - **Changelog entries stay simple and user-focused.** Write for the user of
   `yoe`, not the engineer changing it. One or two short sentences, leading with
   the user-visible benefit (what they see, what they can now do, what was broken
@@ -163,6 +219,13 @@ than scanning the directories.
   others live. If a feature is intentionally undocumented (internal,
   experimental), say so in the changelog entry rather than skipping the doc pass
   silently.
+- **`docs/intro.md` is a generated mirror of `README.md`.** The repo's top-level
+  `README.md` is the source; `docs/intro.md` is a gitignored copy produced from
+  it (the generator strips the leading `docs/` from links so they resolve from
+  inside `docs/`). Make any intro/landing-page edit in `README.md`, not in
+  `docs/intro.md` — the latter is overwritten on regeneration and is not tracked
+  in git. Links in `README.md` written as `docs/foo.md` become `foo.md` in the
+  mirror, so reference other docs with their `docs/`-prefixed path there.
 - **`yoe init` mirrors the e2e-project template.** The PROJECT.star generated by
   `RunInit` (`internal/init.go`) is the canonical "what does a fresh project
   look like" answer — it must stay in sync with

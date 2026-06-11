@@ -50,12 +50,13 @@ yoe refs            Show reverse dependencies
 yoe graph           Visualize the dependency DAG
 yoe log             Show build log (most recent or specific unit)
 yoe diagnose        Launch Claude Code to diagnose a build failure
+yoe skills          Install/update yoe's Claude Code skills in this project
 yoe clean           Remove build artifacts
 yoe container       Manage the build container (build, binfmt, status)
 ```
 
-All commands except `init`, `version`, and `container` run inside an Alpine
-build container automatically. The container is built on first use from
+All commands except `init`, `version`, `skills`, and `container` run inside an
+Alpine build container automatically. The container is built on first use from
 `containers/Dockerfile.build`. See
 [Build Environment](build-environment.md#tier-0-bootstrap-module-automatic-container)
 for details.
@@ -75,6 +76,8 @@ Creates:
 ```
 my-project/
 ├── PROJECT.star
+├── .gitignore          # ignores build/, cache/, repo/, local.star
+├── .claude/skills/     # yoe's Claude Code skills (committed)
 ├── machines/
 ├── units/
 ├── classes/
@@ -86,6 +89,11 @@ Optionally specify a machine to start with:
 ```sh
 yoe init my-project --machine beaglebone-black
 ```
+
+`yoe init` also installs `[yoe]`'s Claude Code skills into the new project's
+`.claude/skills` directory (the same set `yoe skills install` provides), so
+Claude Code is ready to help the moment you open the project. See
+[`yoe skills`](#yoe-skills).
 
 ### `yoe build`
 
@@ -223,6 +231,16 @@ value. `yoe config show` prints the value currently in effect. `-j 1` forces a
 fully sequential build, which is handy when reading interleaved verbose output.
 Precedence is `-j` flag → `local.star` → the built-in default of 5.
 
+**When a build fails:** the failing unit's build log is the record of what its
+build steps actually did. yoe prints the tail of that log inline at the point of
+failure, so the underlying error (a configure rejection, a compiler message, a
+missing header) is visible directly in the output — including when the build ran
+somewhere ephemeral like CI, where the log file does not survive the run. The
+full log path is printed alongside the tail; `yoe log <unit>` reprints it, and
+`yoe log <unit> -e` opens it in `$EDITOR`. In verbose mode (`-v`) the log is
+streamed to the terminal as the build runs, so only the path is noted on
+failure.
+
 ### `yoe flash`
 
 Writes a built image to a block device or SD card.
@@ -265,15 +283,31 @@ yoe run base-image --machine qemu-arm64
 # 8080→80, and 8118→8118 — `--port` adds to that list)
 yoe run --port 9000:9000
 
-# Allocate more memory
-yoe run --memory 2G
+# Allocate more memory — also saved to local.star and reused next time
+yoe run --memory 8G
 
-# Run with graphical output (default is serial console)
-yoe run --display
+# Run with graphical output (default is serial console). Opens QEMU's
+# native window with a virtio-vga adapter; serial stays multiplexed onto
+# this terminal via `-serial mon:stdio`, so kernel logs are still
+# visible alongside the framebuffer.
+yoe run qt-image --display
 
 # Run headless in the background
 yoe run --daemon
+
+# Run the Debian build of an image that exists in several distros
+yoe run dev-image --distro debian
+
+# Boot smoke test: boot headless, wait for the login prompt, SSH in and run
+# a health check, then power off — exits non-zero on any failure
+yoe run --boot-test dev-image
+yoe run --boot-test --timeout 90s --machine qemu-arm64 dev-image
 ```
+
+When an image name exists in more than one distro (e.g. `dev-image` ships in
+both the Alpine and Debian modules), `--distro` selects which built image to
+run, mirroring `yoe build --distro`. Without it the project's effective distro
+(the `local.star` override, then `defaults.distro`) decides.
 
 **What happens:**
 
@@ -310,7 +344,7 @@ machine(
     qemu = qemu_config(
         machine = "q35",
         cpu = "host",
-        memory = "1G",
+        memory = "4G",
         firmware = "ovmf",
         display = "none",
     ),
@@ -321,6 +355,49 @@ When `yoe run` is given a machine with a `qemu` configuration, it uses those
 settings directly. When given a hardware machine without `qemu` configuration,
 it falls back to a reasonable default QEMU configuration for the machine's
 architecture.
+
+**Guest memory** follows this precedence: the `--memory` flag, then
+`qemu_memory` in `local.star`, then the machine's own `qemu` memory. Passing
+`--memory` also writes the value to `local.star`, so later runs (and the TUI)
+reuse it without re-passing the flag — the same persistence `-j` uses for
+`parallel-builds`. Set it without a run via `yoe config set qemu-memory 8G`, or
+clear it with `yoe config set qemu-memory ""` to fall back to the machine
+default. The TUI Setup page (`s`) exposes it under **QEMU settings** (see
+below).
+
+**Graphical display** follows the precedence: the `--display` flag, then
+`qemu_display` in `local.star` (`"on"` / `"off"`), then off. The TUI sub-screen
+is the editor for the persisted value.
+
+**Port forwards** layer over the machine's declared `qemu.ports` like this:
+local-overrides (`qemu_ports` in `local.star`) come first, then `--port` flags
+on the command line. In both lists, an entry whose guest port matches one in the
+machine's defaults _replaces_ that default instead of adding a duplicate — the
+same rule `--port` already follows for qemu-in-qemu.
+
+**Boot smoke test (`--boot-test`).** This turns `yoe run` into a non-interactive
+pass/fail check, for CI or a quick local sanity test. yoe boots the image
+headless, watches the serial console until it reaches the login prompt, then
+SSHes into the guest over the `2222→22` forward (as `root`, which dev images
+leave passwordless), runs a health command, and powers the guest off. It exits
+`0` only if every stage succeeds; a boot that never reaches the prompt, a guest
+that exits early, or an unreachable SSH all fail the run. `--timeout` bounds the
+whole sequence (default 5 minutes — generous so an unaccelerated TCG boot still
+finishes); the boot uses KVM when `/dev/kvm` is available and falls back to TCG
+otherwise. The test requires `qemu-system-*` on the host PATH: it runs QEMU on
+the host so the guest's SSH forward lands on the host loopback where the probe
+can reach it, rather than inside the build container.
+
+**QEMU settings sub-screen.** Open Setup with `s`, move to **QEMU settings**,
+press Enter. The sub-screen lays out three sections:
+
+- **Memory** — ←/→ steps a preset ladder (machine default, then 128M doubling up
+  to 16G).
+- **Display** — ←/→ cycles `default (off)` / `off` / `on`.
+- **Ports** — read-only rows show the machine's declared forwards; below them,
+  each row is a local override. Press Enter (or `a` / `+`) on the trailing
+  `[+] add port` row to type a new `host:guest` mapping; press `d` (or `-`) on a
+  local row to remove it. Every change writes through to `local.star`.
 
 ### `yoe serve`
 
@@ -576,19 +653,26 @@ View project configuration and set the per-developer settings stored in
 `local.star`.
 
 ```sh
-# Show current configuration (includes the effective parallel-builds value)
+# Show current configuration (includes parallel-builds and qemu-memory)
 yoe config show
 
 # Set how many units build in parallel (written to local.star)
 yoe config set parallel-builds 12
+
+# Set the RAM `yoe run` gives the QEMU guest (written to local.star)
+yoe config set qemu-memory 8G
+
+# Clear it so the machine's own qemu memory applies again
+yoe config set qemu-memory ""
 ```
 
 `yoe config show` reads `PROJECT.star` and reports the project name, default
-machine and image, cache path, and the parallel-build concurrency in effect
-(annotated `default` or `local.star`).
+machine and image, cache path, the parallel-build concurrency in effect, and the
+QEMU guest memory in effect (each annotated `default`, `machine default`, or
+`local.star`).
 
 `yoe config set` only writes settings that live in the yoe-generated
-`local.star`; today that is `parallel-builds`. Project configuration
+`local.star`: `parallel-builds` and `qemu-memory`. Project configuration
 (`defaults.machine`, `defaults.image`, etc.) lives in hand-authored
 `PROJECT.star` and is edited there directly — `config set` does not patch
 Starlark.
@@ -763,31 +847,31 @@ visible. Press `P` to capture the new HEAD as the new pin.
 
 #### Key bindings (unit list)
 
-| Key         | Action                                                      |
-| ----------- | ----------------------------------------------------------- |
-| `b`         | Build selected unit in background                           |
-| `B`         | Build all visible units in background                       |
-| `x`         | Cancel an in-progress build for the selected unit           |
-| `r`         | Run an image unit (boot in QEMU)                            |
-| `f`         | Flash a built image to a removable device                   |
-| `D`         | Deploy a non-image unit to a host over SSH                  |
-| `e`         | Open unit's `.star` file in `$EDITOR`                       |
-| `$`         | Open `$SHELL` in the unit's checked-out source dir          |
-| `u`         | Toggle the unit's source between pin and dev mode           |
-| `l`         | Open unit's build log in `$EDITOR`                          |
-| `d`         | Launch `claude diagnose` for the unit                       |
-| `a`         | Launch `claude /new-unit`                                   |
-| `s`         | Open Setup (machine / default image / parallel builds)      |
-| `/`         | Edit the active query (substring + `type:` `module:` `in:`) |
-| `\`         | Snap query back to the saved default in `local.star`        |
-| `S`         | Save the current query as the new default                   |
-| `o` / `O`   | Cycle sort column / toggle direction                        |
-| `tab`       | Switch to the next home-screen tab (Units → Modules → …)    |
-| `Enter`     | Open detail view for the selected unit                      |
-| `j/k` `↑/↓` | Navigate up/down                                            |
-| `g/G`       | Jump to top / bottom                                        |
-| `?`         | Show the keyboard cheat sheet for this page                 |
-| `q`         | Quit                                                        |
+| Key         | Action                                                         |
+| ----------- | -------------------------------------------------------------- |
+| `b`         | Build selected unit in background                              |
+| `B`         | Build all visible units in background                          |
+| `x`         | Cancel an in-progress build for the selected unit              |
+| `r`         | Run an image unit (boot in QEMU)                               |
+| `f`         | Flash a built image to a removable device                      |
+| `D`         | Deploy a non-image unit to a host over SSH                     |
+| `e`         | Open unit's `.star` file in `$EDITOR` (hidden for feed units)  |
+| `$`         | Open `$SHELL` in the unit's checked-out source dir             |
+| `u`         | Toggle the unit's source between pin and dev mode              |
+| `l`         | Open unit's build log in `$EDITOR`                             |
+| `d`         | Launch `claude diagnose` for the unit                          |
+| `a`         | Launch `claude /new-unit`                                      |
+| `s`         | Open Setup (machine / image / parallel builds / QEMU settings) |
+| `/`         | Edit the active query (substring + `type:` `module:` `in:`)    |
+| `\`         | Snap query back to the saved default in `local.star`           |
+| `S`         | Save the current query as the new default                      |
+| `o` / `O`   | Cycle sort column / toggle direction                           |
+| `tab`       | Switch to the next home-screen tab (Units → Modules → …)       |
+| `Enter`     | Open detail view for the selected unit                         |
+| `j/k` `↑/↓` | Navigate up/down                                               |
+| `g/G`       | Jump to top / bottom                                           |
+| `?`         | Show the keyboard cheat sheet for this page                    |
+| `q`         | Quit                                                           |
 
 The cursor auto-follows whatever unit is actively building, but only when you've
 been idle for a couple of seconds — pressing `j/k` or typing into the query bar
@@ -872,6 +956,42 @@ executor sends events to the TUI as each unit starts and finishes building.
 
 The TUI is built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
+#### Restarting after edits
+
+The TUI loads the project once at startup and holds the resolved unit catalog in
+memory for the lifetime of the process. There is no in-process reload — if you
+change something that affects what the catalog contains, exit (`q`) and
+re-launch.
+
+**Restart is fast.** Module-cache clones, build outputs, source tarballs, and
+`APKINDEX` / `Packages` files all stay on disk between runs — only the in-memory
+structures rebuild. A typical project's TUI launches in well under a second; a
+large multi-feed project might take a second or two on the first launch (cold OS
+file-cache), warming up to a fraction of a second afterward. The exit/relaunch
+loop is a routine workflow step, not something to dread.
+
+| What changed                                                    | Restart needed?                                      |
+| --------------------------------------------------------------- | ---------------------------------------------------- |
+| A `.star` file: unit, image, class, MODULE.star, PROJECT.star   | Yes                                                  |
+| `local.star` (default-distro override, QEMU settings)           | Yes                                                  |
+| `prefer_modules` pin in PROJECT.star                            | Yes                                                  |
+| Synced module repo (`git pull` in a `cache/modules/<mod>/`)     | Yes                                                  |
+| Refreshed feed index (`yoe update-feeds` ran in another shell)  | Yes                                                  |
+| A unit's upstream source (the tarball or git repo it points at) | No — next build re-fetches if the unit's ref changes |
+| A unit's build output (you ran `yoe build` in another shell)    | No — TUI sees new build state on next refresh        |
+
+The "no in-process reload" stance is deliberate: making the in-memory catalog
+authoritative for the process lifetime avoids races between "what the resolver
+thinks" and "what's on disk." If a long build were partway through a closure
+when the catalog mutated under it, names could resolve differently mid-walk than
+at the start — a class of bug worth avoiding structurally rather than handling
+explicitly. For the architectural shape of what gets loaded and when, see
+[Catalog and Materialization](catalog.md#lifecycle-and-persistence).
+
+One-shot commands (`yoe build`, `yoe deploy`, `yoe dry-run`, …) sidestep this
+entirely: every invocation is a fresh process, so any edit to any `.star` or
+feed index is picked up on the next command automatically.
+
 ### `yoe log`
 
 Shows a build log. With no arguments, shows the most recently modified build
@@ -884,6 +1004,12 @@ yoe log openssl -e       # open openssl build log in $EDITOR
 ```
 
 The `-e` / `--edit` flag opens the log in your editor (defaults to `vi`).
+
+The log is located under the project's effective distro (the same cascade
+`yoe build` uses — an image's own distro, then your `local.star` selection, then
+the project default), so it finds the right log in a multi-distro project. It
+also works for images and other machine-specific units, not just architecture-
+wide libraries and tools.
 
 ### `yoe diagnose`
 
@@ -898,6 +1024,40 @@ yoe diagnose util-linux  # diagnose util-linux build failure
 Requires `claude` to be in your PATH. Claude Code reads the build log and
 iteratively identifies root causes, applies fixes, and rebuilds until the unit
 succeeds.
+
+### `yoe skills`
+
+Installs `[yoe]`'s Claude Code skills — the workflows behind `/new-unit`,
+`/diagnose`, `/audit-unit`, `/update-unit`, and `/pull-alpine` — into your
+project's `.claude/skills` directory, where Claude Code discovers them.
+
+The skills are baked into the `yoe` binary, so installing them needs no network
+access and the versions always match the tool you're running.
+
+```sh
+# Copy the skills into ./.claude/skills (run from anywhere in the project)
+yoe skills install
+
+# List the skills embedded in this binary
+yoe skills list
+
+# Refresh the yoe-managed skills to this binary's versions after `yoe update`
+yoe skills update
+```
+
+`install` is conservative: a skill whose directory already exists is left
+untouched so your local edits survive, and the command reports it as skipped.
+Pass `--force` to overwrite, or use `update`, which always refreshes the
+yoe-managed skills to the binary's versions. Either way, only the skills `[yoe]`
+ships are touched — any skills you authored under `.claude/skills` are never
+read or modified.
+
+The installed copies are plain Markdown files that belong to your project. Edit
+them to fit your workflow; the next `yoe skills update` will overwrite your
+changes to the yoe-managed skills, so keep heavily customized variants under a
+different name. When run inside a project (a directory with `PROJECT.star`,
+found by walking up from the current directory), the skills land at the project
+root; otherwise they land in the current directory.
 
 ### Custom Commands
 

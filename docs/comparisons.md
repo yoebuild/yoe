@@ -51,7 +51,7 @@ existing solutions along these axes:
 `[yoe]` is honest about where it does not yet compete: vendor BSP breadth,
 from-source package coverage (dozens of source-built units vs. thousands of
 Yocto recipes — though the prebuilt-distro module makes thousands of packages
-directly consumable, Alpine today with other distros planned, so raw
+directly consumable — Alpine plus experimental Debian and Ubuntu — so raw
 availability is closer to a full distro's), configuration UX, legal-compliance
 tooling, and a production track record. The
 [Value Proposition](#value-proposition-and-strategic-positioning) section sets
@@ -112,6 +112,31 @@ Starlark has `if` with fields on the predeclared `ctx` struct (`ctx.machine`,
 `ctx.arch`), and the function composition pattern handles the "extend from
 downstream" case. When machine-specific behavior is needed, it's right there in
 the `.star` file — no hidden layering of string operations.
+
+**Two operational pain points** stand out in day-to-day use and are a large part
+of why `[yoe]` replaces BitBake rather than wrapping it:
+
+- **Network access only during `do_fetch`.** BitBake confines the network to the
+  fetch task: `do_fetch` may reach the internet, but `do_compile` and the other
+  tasks run network-isolated. Everything a build consumes must therefore be
+  declared ahead of time as a `SRC_URI` entry and mirrored into the downloads
+  directory first. For a self-contained C/C++ tarball that is routine, but it
+  collides badly with modern language ecosystems whose toolchains expect to
+  resolve dependencies themselves at build time: every cargo crate, Go module,
+  npm package, or pip wheel has to be enumerated, pinned, and fetched up front
+  instead. A single Rust application can pull in several hundred crates plus a
+  dozen git dependencies (and their submodules), each of which has to be listed
+  in the recipe and re-pinned on every upgrade — a large, brittle surface that
+  exists only to satisfy the fetch/build network split. `[yoe]` allows network
+  access during the build itself, so it hands off to the native toolchains
+  (`cargo`, `go`, etc.) and lets them resolve and fetch dependencies the way
+  they normally do — no enumerating or pre-pinning each transitive dependency in
+  unit metadata.
+- **BitBake is relatively slow.** It is written in Python, and the cost lands
+  before any compilation begins: parsing the metadata across a full set of
+  layers and computing the task/signature graph takes from many seconds to
+  minutes on every invocation. `[yoe]`'s engine is Go and resolves at the
+  coarser unit grain, so the resolve-and-plan phase is comparatively cheap.
 
 **Key differences:**
 
@@ -236,8 +261,8 @@ where it matters, prebuilt Alpine for the long tail — is what makes the
 package-count gap discussed in the
 [Value Proposition](#value-proposition-and-strategic-positioning) much narrower
 than the source-built unit count implies. The `*_pkg` wrapper is deliberately
-distro-agnostic; Alpine is the only prebuilt source today, with other distros
-(see the Debian section) a planned extension of the same shape.
+distro-agnostic; the same feed-based passthrough now covers Alpine plus
+experimental Debian and Ubuntu (see the Debian section).
 
 **What `[yoe]` leaves behind:**
 
@@ -257,8 +282,8 @@ whatever busybox init + plain scripts give you.
 
 |                   | Alpine                            | `[yoe]`                                              |
 | ----------------- | --------------------------------- | ---------------------------------------------------- |
-| C library         | musl                              | musl today; glibc planned                            |
-| Init system       | OpenRC                            | busybox init today; systemd a future option          |
+| C library         | musl                              | musl (Alpine base); glibc (Debian/Ubuntu bases)      |
+| Init system       | OpenRC                            | busybox init (Alpine); systemd (Debian/Ubuntu)       |
 | Target            | Containers, small servers         | Custom embedded hardware                             |
 | BSP support       | Generic x86/ARM images            | Per-board machine definitions                        |
 | Image assembly    | `alpine-make-rootfs`              | `yoe build <image>` with machine + partition support |
@@ -312,6 +337,44 @@ transparency directly influences `[yoe]`'s design.
 for personal use and value having full manual control. Arch's philosophy works
 well for power users on general-purpose hardware.
 
+### SteamOS and the Steam Deck
+
+Arch's reputation — rolling, hands-on, assemble-it-yourself — makes it an
+unlikely base for a sealed consumer appliance. Valve's SteamOS 3 ("holo"), the
+OS on the Steam Deck, is exactly that, and a useful existence proof for choices
+`[yoe]` is making.
+
+SteamOS 1 and 2 were Debian-based; SteamOS 3, shipped with the Steam Deck in
+2022, switched to an Arch foundation. The device a user actually runs, though,
+looks nothing like a hands-on Arch install:
+
+- **Immutable, read-only root.** The system partition is mounted read-only.
+  `pacman` is not the update path; the rootfs is sealed, and
+  `steamos-readonly disable` (plus reinitializing the pacman keyring) is the
+  documented — and discouraged — escape hatch for developers.
+- **A/B atomic image updates with rollback.** SteamOS updates by downloading a
+  complete new rootfs image into the inactive half of an A/B partition pair and
+  switching over atomically; a failed or unwanted update rolls back to the other
+  slot. This is image-based updating, not `pacman -Syu`.
+- **Arch is the build-time ingredient, not the runtime model.** Valve uses
+  Arch's packages and rolling base to _build_ the OS image, then ships that
+  image as an atomic unit. Users install applications as Flatpaks into a
+  writable overlay, leaving the base untouched.
+
+The relevance to `[yoe]`: SteamOS demonstrates that "rolling Arch-style base"
+and "sealed, atomically-updated appliance" are not in tension — you take Arch's
+package freshness and simplicity at build time and impose immutability and A/B
+rollback at the image layer. That is the split `[yoe]` draws too: a rolling,
+content-addressed package set at build time, with image-level assembly and
+(planned) atomic update plus rollback on the device.
+
+It is also a caution. SteamOS's immutability and update system are Valve-built
+layers on top of Arch, specific to one device — not something a general Arch
+user inherits. Reproducing that stack for a different board is exactly the
+BSP-and-image work the note above says Arch does not provide. SteamOS is what it
+looks like when a well-resourced team does that work themselves; `[yoe]` aims to
+make it a property of the build system instead.
+
 ## vs. Debian
 
 Debian is the oldest and most conservative general-purpose Linux distribution.
@@ -346,18 +409,18 @@ before hitting its limits on custom hardware.
 - **In-place `dist-upgrade`** — `[yoe]` prefers atomic image updates with
   rollback over mutating a running root filesystem.
 
-**Consuming Debian/Ubuntu prebuilt packages (planned).** `[yoe]` already wraps
-Alpine's published binary apks as units via the `alpine_pkg` class (see the
-Alpine section). The wrapper pattern is intentionally distro-agnostic — fetch an
-upstream package, re-sign its metadata with the project key, expose it as an
-ordinary unit — so the same shape is the natural way to make Debian/Ubuntu
-`.deb`s directly consumable: a `deb_pkg`-style class pulling from a pinned
-Debian/Ubuntu suite. This is **not implemented today** — only Alpine is wired up
-— but it is the expected path for teams that need a specific Debian/Ubuntu
-binary (a vendor-provided `.deb`, a package absent from Alpine) without porting
-it. The `.deb` maintainer-script tradition (preinst/postinst/debconf) makes
-verbatim Debian consumption more invasive than Alpine's near-empty install
-scripts, so this tier is most useful for leaf packages, not base-system pieces.
+**Consuming Debian/Ubuntu prebuilt packages.** `[yoe]` consumes prebuilt distro
+binaries through a feed mechanism: `alpine_feed(...)` for Alpine apks and
+`apt_feed(...)` for Debian/Ubuntu `.deb`s, each fetched verbatim from a pinned
+release and exposed as ordinary units. Debian and Ubuntu are wired today (via
+`module-debian` and `module-ubuntu`, both experimental): upstream `.deb`s mirror
+in verbatim, are verified against the suite's signed `Packages` index, and yoe
+builds its own units as native `.deb`s served from a project-signed apt repo.
+This is the path for teams that need a specific Debian/Ubuntu binary (a
+vendor-provided `.deb`, a package absent from Alpine) without porting it. The
+`.deb` maintainer-script tradition (preinst/postinst/debconf) makes verbatim
+Debian consumption more invasive than Alpine's near-empty install scripts, so
+the smoothest fit is still leaf packages rather than base-system pieces.
 
 **Key differences:**
 
@@ -398,6 +461,38 @@ floor is set by the GNU userland itself: glibc + coreutils + perl-base + bash +
 dpkg + apt are ~60–80 MB combined before anything application-specific is
 installed. Dropping perl-base or coreutils breaks dpkg maintainer scripts (see
 Emdebian, below), so this floor is structural, not a tuning problem.
+
+### Chisel and "chiselled" Ubuntu
+
+[Chisel](https://github.com/canonical/chisel) is Canonical's own response to
+this size floor. It is a Go tool that carves prebuilt Ubuntu `.deb`s into named
+**slices** — YAML-declared subsets of a package's files — and extracts only
+those paths into a target root, talking directly to the Ubuntu archive (no
+`dpkg`/`apt` on the host). The result is a "distroless"-style image several
+times smaller than a standard Ubuntu base: no shell, no package manager, only
+the runtime files a service needs. Slice definitions live in per-release
+branches of [`chisel-releases`](https://github.com/canonical/chisel-releases),
+curated by Canonical; chisel runs at build time (notably inside Rockcraft to
+build OCI "rocks") and is not shipped on the device.
+
+Chisel is directly relevant to `[yoe]` because **Alpine is where `[yoe]` starts,
+not where it ends — experimental Debian and Ubuntu support has landed**, via the
+`apt_feed` consumption path described above. Now that `[yoe]` pulls Debian
+binaries, the fat-`.deb` problem chisel attacks is `[yoe]`'s problem too:
+Debian's one-big-package layout bundles docs, headers, and locales an embedded
+image does not want. Chisel is the proven prior art for trimming that —
+file-level slicing of binary packages — and is worth studying as either
+inspiration or a direct ingredient for a Debian-flavored `[yoe]` target.
+
+The contrast is still instructive. Chisel reaches "small" by **carving prebuilt
+binaries after the fact**: it never builds from source, depends on the Ubuntu
+archive and Canonical-maintained slice definitions, and is `.deb`/Ubuntu-only
+(no apk or RPM, none planned). `[yoe]`'s source-built apks — and Alpine's
+already granular `-dev`/`-doc` splits — reach small the other way, by only
+building and packaging what is declared. The natural synthesis for a
+Debian-based `[yoe]` target is to borrow chisel's slicing idea while keeping
+`[yoe]`'s content-addressed, fetch-at-build-time engine rather than adopting the
+Ubuntu-archive coupling wholesale.
 
 ### Embedded Debian efforts
 
@@ -441,6 +536,71 @@ existing Debian `.deb`s (inheriting the size and package-model properties
 above), while `[yoe]` builds from source into content-addressed apks; debos
 recipes are flat action sequences, while `[yoe]`'s Starlark units form a
 dependency graph with a shared, content-addressed build cache.
+
+**[edi](https://www.get-edi.io/)** ([source](https://github.com/lueschem/edi))
+is a Python tool for building customized Debian/Ubuntu images _and_ matching
+development environments, maintained by Matthias Lüscher. Where debos is built
+around flat action sequences, edi's distinguishing choice is **configuration
+management as the customization layer**:
+
+- **debootstrap + Ansible.** edi bootstraps a Debian/Ubuntu rootfs and then runs
+  **Ansible playbooks** against it to install packages and apply configuration,
+  so customization is expressed as Ansible roles rather than image-builder
+  actions. Project configuration is YAML with **Jinja2** templating, layered
+  through an overlay/plugin model.
+- **LXD/LXC as the build-and-test substrate.** edi can bring the same
+  configuration up as an LXD container for development or apply it to a disk
+  image for the device, and uses `qemu-user`/binfmt to bootstrap foreign-arch
+  (e.g., arm64) rootfs on an x86 host — the native-under-emulation instinct
+  `[yoe]` shares.
+- **Pairs with an external updater.** edi documents integrating Mender for OTA
+  rather than shipping its own update engine.
+
+Contrast with `[yoe]`: edi consumes Debian/Ubuntu `apt` directly (inheriting the
+~150 MB `.deb` size floor and the maintainer-script model) and has no
+from-source unit build or package feed of its own; its per-board story is
+"whatever Debian/RPi provides" rather than a first-class
+machine/kernel-config/device-tree/partition abstraction. The customization model
+is the sharpest difference — edi layers **Ansible** over a Debian base, while
+`[yoe]` resolves the same variation through a declarative Starlark unit graph
+with a content-addressed cache and no configuration-management step.
+
+**When to prefer edi:** when you want a Debian/Ubuntu device image plus a
+matching LXD development environment, are already comfortable with Ansible for
+configuration management, and are happy consuming apt directly with an external
+updater like Mender.
+
+**[isar](https://github.com/ilbers/isar)** — "Integration System for Automated
+Root filesystem generation," maintained by ilbers GmbH — is the most
+architecturally interesting Debian builder relative to `[yoe]`, because it
+shares `[yoe]`'s core bets while keeping a Debian userland:
+
+- **BitBake as the engine, Debian as the content.** isar reuses Yocto's BitBake
+  and its layer/recipe model, but recipes assemble Debian root filesystems from
+  `.deb`s rather than cross-compiling everything from source. It is, in effect,
+  BitBake without OpenEmbedded.
+- **Native builds under QEMU, not cross-compilation.** isar builds custom
+  packages with `dpkg-buildpackage` inside an emulated foreign-arch chroot
+  (binfmt_misc + `qemu-user`) rather than maintaining a cross toolchain — the
+  same choice `[yoe]` makes. Yocto cross-compiles; isar and `[yoe]` both run
+  native toolchains under emulation.
+- **Prebuilt distro packages for the base, source only where needed.** isar
+  bootstraps with `debootstrap`/`apt` and reserves from-source builds for the
+  packages a project actually customizes — the same two-tier "prebuilt for the
+  long tail, source where it matters" split `[yoe]` gets from `alpine_pkg` plus
+  source units.
+
+Contrast with `[yoe]`: isar still inherits Debian's size floor (~150 MB+, `.deb`
+maintainer scripts) and still requires learning BitBake's metadata model and
+layer system — the very things the Yocto section explains `[yoe]` set out to
+replace. isar's bet is "keep BitBake, swap OpenEmbedded's from-source recipes
+for Debian packaging"; `[yoe]`'s is "keep a binary package model, replace
+BitBake with a single Starlark + Go engine."
+
+**When to prefer isar:** when you want a Debian userland on custom hardware, are
+comfortable with BitBake and the Yocto layer model, and want native-under-QEMU
+builds without cross-compilation — particularly if your team already knows Yocto
+tooling and would rather reuse it against Debian than learn a new system.
 
 **[aptly](https://www.aptly.info/)** is the canonical tool for running a
 private, pinned Debian/Ubuntu repository. For teams that do ship Debian-based
@@ -668,23 +828,23 @@ backed by a commercial OTA SaaS
 
 **Key differences:**
 
-|                     | Avocado OS                                 | `[yoe]`                                      |
-| ------------------- | ------------------------------------------ | -------------------------------------------- |
-| Build engine        | Yocto / BitBake (Python)                   | `yoe` (Go)                                   |
-| Recipe language     | BitBake (`.bb`/`.bbappend`)                | Starlark                                     |
-| CLI language        | Rust (`avocado-cli`)                       | Go (`yoe`)                                   |
-| Cross-compilation   | Yes (Yocto default)                        | None — native builds only                    |
-| C library           | glibc                                      | musl                                         |
-| Package format      | IPK/RPM internally; sysext DDI on device   | apk                                          |
-| Runtime composition | `systemd-sysext` overlays + `dm-verity`    | apk into shared FHS rootfs                   |
-| Init system         | systemd (required by sysext model)         | busybox init today; systemd a future option  |
-| Filesystem          | btrfs root, immutable                      | ext4 today; immutability planned             |
-| OTA mechanism       | Peridio Core (commercial SaaS)             | Self-hosted; mechanism TBD                   |
-| Build caching       | Yocto sstate                               | Content-addressed apk in S3-compatible cache |
-| Container model     | SDK containers for dev                     | Container as build worker                    |
-| Hardware focus      | Edge AI: Jetson, i.MX, Rockchip, RPi       | Generic embedded; RPi/BBB/QEMU first         |
-| Commercial backing  | Peridio (VC-backed)                        | None — open project                          |
-| Status              | Production (April 2025+), paying customers | Pre-1.0                                      |
+|                     | Avocado OS                                 | `[yoe]`                                        |
+| ------------------- | ------------------------------------------ | ---------------------------------------------- |
+| Build engine        | Yocto / BitBake (Python)                   | `yoe` (Go)                                     |
+| Recipe language     | BitBake (`.bb`/`.bbappend`)                | Starlark                                       |
+| CLI language        | Rust (`avocado-cli`)                       | Go (`yoe`)                                     |
+| Cross-compilation   | Yes (Yocto default)                        | None — native builds only                      |
+| C library           | glibc                                      | musl                                           |
+| Package format      | IPK/RPM internally; sysext DDI on device   | apk                                            |
+| Runtime composition | `systemd-sysext` overlays + `dm-verity`    | apk into shared FHS rootfs                     |
+| Init system         | systemd (required by sysext model)         | busybox init (Alpine); systemd (Debian/Ubuntu) |
+| Filesystem          | btrfs root, immutable                      | ext4 today; immutability planned               |
+| OTA mechanism       | Peridio Core (commercial SaaS)             | Self-hosted; mechanism TBD                     |
+| Build caching       | Yocto sstate                               | Content-addressed apk in S3-compatible cache   |
+| Container model     | SDK containers for dev                     | Container as build worker                      |
+| Hardware focus      | Edge AI: Jetson, i.MX, Rockchip, RPi       | Generic embedded; RPi/BBB/QEMU first           |
+| Commercial backing  | Peridio (VC-backed)                        | None — open project                            |
+| Status              | Production (April 2025+), paying customers | Pre-1.0                                        |
 
 **Structural distance.** Avocado OS and `[yoe]` agree on the _symptoms_ —
 unwrapped Yocto is too sharp, embedded teams need atomic updates with rollback,
@@ -701,6 +861,200 @@ comfortable with the systemd + btrfs + dm-verity baseline, and prefer to ride
 Yocto's BSP ecosystem rather than write machine definitions for new silicon. If
 you need production deployment now and a paid support relationship is
 acceptable, Avocado is several years ahead of `[yoe]` on maturity.
+
+## vs. Rugix
+
+[Rugix](https://rugix.org/) is an open-source suite for building and updating
+embedded Linux devices, maintained by
+[Silitics](https://oss.silitics.com/rugix/) (which also offers the Nexigon
+fleet-management product and commercial support). It began life as **Rugpi** —
+Raspberry Pi tooling — and was
+[renamed to Rugix at v0.8](https://oss.silitics.com/rugix/blog/releases/0.8/) to
+signal that it had outgrown a single board. It is dual-licensed (MIT or
+Apache-2.0) and written almost entirely in Rust (~98% of the repo). Unusually
+for the systems compared here, Rugix is really **two separable tools**, and the
+split is the most interesting thing about it relative to `[yoe]`:
+
+- **Rugix Bakery** — the build system. It assembles a custom distribution from a
+  _binary_ base — ready-made integrations for Debian, Alpine, and Raspberry Pi
+  OS — or drives a from-source Yocto/Poky build (offered as a proof of concept).
+  Builds run container-based for reproducibility, and a single _project_ can
+  define multiple _systems_ that share configuration.
+- **Rugix Ctrl** — a single self-contained on-device binary for robust OTA
+  updates and state management. It is deliberately build-system-agnostic:
+  Silitics documents integrating it into existing Yocto or Buildroot workflows,
+  and it ships meta-rugix Yocto layers to do so.
+
+**What `[yoe]` shares with Rugix:**
+
+- **A first-class update-and-rollback story as a goal** — both projects treat a
+  well-integrated, signed, roll-back-on-failure update path as table stakes for
+  shipping a product. The overlap is the _goal_, not the mechanism: Ctrl commits
+  to a specific design (read-only system partition, an A/B slot pair,
+  switch-and-roll-back on failure), whereas `[yoe]` has deliberately **not** yet
+  decided its update mechanism. Rugix is a concrete data point for the
+  A/B-plus-immutable-root end of that design space, not a direction `[yoe]` has
+  adopted.
+- **Container as the build environment** — Bakery runs its whole build inside a
+  privileged Docker container for reproducibility, the same instinct behind
+  `[yoe]`'s build container (with a granularity difference noted below).
+- **Assemble from prebuilt distro packages for the common case** — Bakery's
+  default path layers Debian/Alpine/RPi OS binaries rather than compiling from
+  source, the same "prebuilt for the long tail" bet `[yoe]` makes with
+  `alpine_pkg`.
+- **No cloud lock-in** — Ctrl updates install from any plain HTTP server (it
+  uses HTTP range queries for its adaptive delta updates); there is no mandatory
+  SaaS, matching `[yoe]`'s self-hosted-feed stance. Fleet management is a
+  separate, optional product.
+
+**What `[yoe]` does differently:**
+
+- **Imperative recipe steps vs. a declarative unit graph.** A Bakery _recipe_ is
+  a TOML file (`description`, `priority`, `dependencies`, a `[parameters]`
+  block) whose body is a sequence of numbered _steps_ of three kinds: `packages`
+  (apt/apk install lists), `run` (scripts in the host build environment), and
+  `install` (scripts run inside the target via chroot). Steps are ordinary
+  scripts in any language — bash, Python (`.py`), whatever has a shebang — with
+  parameters passed in as `RECIPE_PARAM_*` environment variables. _Layers_ are
+  "collections of build outputs from a stage," composed and reused like Docker
+  image layers. This is closer to debos's flat action sequences and Gaia's
+  multi-language recipes than to `[yoe]`'s Starlark units, which form a
+  content-addressed dependency graph with no per-step shell scripting. Rugix
+  resolves variation through imperative chroot steps; `[yoe]` resolves it
+  through a declarative DAG and a single configuration language.
+- **Image assembly vs. a package feed + cache.** Bakery's output is the image
+  (plus a Ctrl update bundle); it has no notion of a per-unit content-addressed
+  `.apk` that is simultaneously the build cache and the on-device package feed.
+  `[yoe]`'s "the cache _is_ the feed" property — the same bytes CI builds, the
+  cache serves, and a device installs — has no direct Bakery analogue, because
+  Bakery consumes upstream apt/apk feeds rather than producing its own.
+- **One container + chroot vs. a container-per-unit with sysroots.** Bakery runs
+  the whole build inside a single privileged Docker container and applies recipe
+  steps to the in-progress root filesystem in place — `install` steps `chroot`
+  into that rootfs, so the environment a step sees _is_ the system being built.
+  There is no per-recipe or per-step container, and no separate "sysroot" of
+  just-the-build-dependencies: because Bakery's native path assembles prebuilt
+  binaries rather than compiling from source, the only tree in play is the
+  shipping rootfs (its _layers_ are cached snapshots of that tree, Docker-layer
+  style, not isolated containers). `[yoe]` goes the other way: each unit builds
+  in its own container worker against a staged `sysroot/` holding exactly the
+  dependencies that unit declared, kept distinct from the rootfs that ships. The
+  separation is what lets `[yoe]` build from source under isolation and cache
+  per unit; Bakery's in-place chroot model is simpler but conflates build
+  environment and shipping tree. (Sysroots reappear only if you descend into
+  Bakery's Yocto passthrough — but those are Yocto's `recipe-sysroot`s, not a
+  Bakery concept.)
+- **From-source-by-default vs. binary-base-by-default.** Bakery's first-class
+  path is layering a binary distribution; its from-source story is Yocto,
+  carried as a proof of concept. `[yoe]` builds its core from source into apks
+  and treats prebuilt-distro consumption as the long-tail supplement — the
+  inverse default.
+- **Rust throughout vs. Go + Starlark.** Like Avocado's CLI, Rugix is a Rust
+  codebase; `[yoe]` is Go for the engine and Starlark for units, machines, and
+  images.
+
+**Rugix Ctrl is a candidate ingredient, not just an alternative.** Most systems
+in this document are alternatives to `[yoe]` — you pick one. Ctrl is different,
+in the same way [Chisel](#chisel-and-chiselled-ubuntu) is for the Debian side:
+it is a well-scoped, build-system-agnostic component that solves precisely the
+piece `[yoe]` has left as an open design decision. Ctrl asks only for an A/B
+partition layout and one of a handful of supported bootloaders (U-Boot, GRUB,
+`systemd-boot`, or Raspberry Pi's `tryboot`); it drives the slot switch,
+verifies signed bundles before writing, streams block-checked delta updates from
+a dumb HTTP server, and manages the read-only-root-plus-overlay state model —
+explicitly _not_ building images, replacing bootloaders, or doing fleet
+management. That boundary makes it adoptable: _if_ `[yoe]` chose the
+A/B-plus-immutable-root direction for its still-undecided update mechanism, an
+image that ships that layout and a supported bootloader could carry Rugix Ctrl
+as its update engine rather than `[yoe]` growing one from scratch. Worth
+studying as prior art at minimum, and a plausible direct dependency should
+`[yoe]`'s update design land in that part of the space.
+
+**Key differences:**
+
+|                     | Rugix                                       | `[yoe]`                                      |
+| ------------------- | ------------------------------------------- | -------------------------------------------- |
+| Core language       | Rust (~98%)                                 | Go engine + Starlark units                   |
+| Shape               | Two tools: Bakery (build) + Ctrl (update)   | One tool: `yoe` (build + planned update)     |
+| Build inputs        | Debian/Alpine/RPi OS binaries; Yocto (PoC)  | Source-built apks + `alpine_pkg` prebuilt    |
+| Recipe model        | TOML + numbered shell/Python steps (chroot) | Starlark units in a content-addressed DAG    |
+| Config language(s)  | TOML + arbitrary script languages           | Starlark end to end                          |
+| Build isolation     | One privileged container; chroot per step   | A build container per unit + staged sysroot  |
+| Build caching       | Cached rootfs layers (Docker-layer-style)   | Per-unit content-addressed `.apk` in S3      |
+| Package feed        | Upstream apt/apk (consumed)                 | Own content-addressed apk feed (cache==feed) |
+| Update mechanism    | Ctrl: A/B atomic + adaptive delta, signed   | Planned; mechanism undecided                 |
+| Update engine reuse | Standalone; works with Yocto/Buildroot      | Built-in; could adopt an engine like Ctrl    |
+| Bootloaders         | U-Boot, GRUB, systemd-boot, RPi tryboot     | Per-machine bootloader handling              |
+| Backing             | Silitics (commercial support + Nexigon)     | None — open project                          |
+
+**When to use Rugix instead:** when you want a proven, turnkey OTA update engine
+_today_ — A/B atomic updates, automatic rollback, bandwidth-efficient delta
+delivery over plain HTTP, and a read-only-root state model — especially on
+Raspberry Pi or any board with a U-Boot/GRUB/systemd-boot setup, and you are
+happy assembling images from Debian/Alpine/RPi OS binary packages. And even if
+you build images some other way, Rugix Ctrl is worth evaluating on its own as
+the update layer, since it is designed to drop into an existing build rather
+than replace it.
+
+## vs. mkosi
+
+[mkosi](https://github.com/systemd/mkosi) ("make operating system image") is the
+systemd project's image builder — a Python tool that assembles an OS image from
+a distribution's own packages. It is the closest mainstream tool to `[yoe]`'s
+"assemble from prebuilt distro packages" path, but aimed at a very different
+target: modern, systemd-centric, often immutable host/VM/container images rather
+than embedded devices on custom silicon.
+
+**What `[yoe]` shares with mkosi:**
+
+- **Build an image declaratively from distro packages.** mkosi reads INI-style
+  `mkosi.conf` files and pulls packages through the target distro's native
+  package manager (`dnf`, `apt`, `pacman`, `zypper`) — Fedora, CentOS Stream,
+  Debian, Ubuntu, Arch, openSUSE, and more. `[yoe]`'s prebuilt-distro modules
+  make the same bet that the common case is consuming an upstream feed, not
+  compiling from source.
+- **Build your own software into the image.** `mkosi.build`/`mkosi.postinst`
+  scripts compile and install project code during the image build — the rough
+  analogue of `[yoe]`'s from-source units, expressed as imperative scripts
+  rather than a cached unit graph.
+- **A fast boot-in-QEMU dev loop.** `mkosi qemu`/`mkosi boot` start the freshly
+  built image in QEMU or a container in one step, the same tight edit-build-boot
+  loop `[yoe]`'s `yoe run` provides.
+- **Foreign-arch via emulation.** mkosi can build foreign-architecture images
+  using `qemu-user`/binfmt — the same native-under-emulation instinct (rather
+  than a cross toolchain) that `[yoe]` is built around.
+
+**What `[yoe]` does differently:**
+
+- **General OS images vs. embedded/BSP.** mkosi targets hosts, VMs, and
+  containers; its center of gravity is the modern systemd image stack — Unified
+  Kernel Images, `systemd-boot`, `systemd-repart`, dm-verity, secure-boot
+  signing, and system-extension (`sysext`/`confext`) images. It has no notion of
+  a per-board machine, kernel defconfig, device tree, SoC bootloader, or
+  partition layout for custom silicon. `[yoe]` is BSP-first: machines, kernels,
+  device trees, bootloaders, and image/partition assembly are the core surface,
+  and the base is Alpine-style musl + OpenRC rather than systemd + glibc by
+  construction.
+- **No package feed or content-addressed cache of its own.** mkosi consumes
+  upstream distro repositories and caches packages and base images for
+  incremental rebuilds, but there is no per-package content-addressed artifact
+  that is simultaneously the build cache and the on-device feed. `[yoe]` builds
+  its core from source into content-addressed apks where "the cache _is_ the
+  feed."
+- **systemd-coupled by design.** mkosi's most valuable features assume systemd
+  on the build host and in the image (`ukify`, `systemd-repart`, credentials,
+  measured boot). `[yoe]` deliberately avoids that coupling so the base stays in
+  the single-digit-MB class and the runtime stays init-agnostic.
+- **Config + scripts vs. a unit graph.** mkosi is declarative `.conf` files plus
+  shell build scripts; `[yoe]` is a Starlark unit DAG resolved and validated
+  before anything builds, with no per-step shell scripting in the common path.
+
+**When to use mkosi instead:** when you're building a **systemd-based OS image**
+for a server, VM, or container from a mainstream distribution — especially an
+immutable, UKI / secure-boot / dm-verity image or a `sysext` overlay — and you
+do not need embedded BSP support for custom SoC hardware. mkosi is also the
+natural choice if you already live in the systemd image-based-OS world and want
+the reference tool its maintainers use to build and test systemd itself.
 
 ## vs. NixOS / Nix
 
@@ -1126,6 +1480,129 @@ apply. On a mixed design (Linux SoC plus companion MCU), use both: `[yoe]` for
 the Linux side, Pigweed for the firmware side. They meet at the board, not in
 the build.
 
+## vs. Container Image Builders (planned)
+
+> **Status:** `[yoe]` does not emit OCI container images today. Build outputs
+> are `.apk` packages plus bootable disk images (see
+> [`modules/module-core/classes/image.star`](../modules/module-core/classes/image.star)).
+> This section describes the design question: if a `format = "oci"` mode were
+> added to the image class — assembling the same content-addressed `.apk` set
+> into an OCI manifest plus layers — how would it compare to dedicated container
+> image builders? The intent is to clarify when the feature would earn its keep,
+> so it is added for the right audience rather than as default scope creep.
+
+Modern container image building is dominated by four patterns: multi-stage
+`Dockerfile`, Chainguard's `apko` + `melange`, Bazel with `rules_oci`, and Nix
+with `dockerTools`. The question for `[yoe]` is whether a fifth path — assemble
+existing `[yoe]` units into an OCI image — adds value, and for whom.
+
+**Strict scope:** this section is about producing OCI images _from sources
+`[yoe]` already builds_, not about replacing those tools for teams that have no
+other use for `[yoe]`. The conclusion is calibrated accordingly.
+
+### The four alternatives, in brief
+
+- **Multi-stage `Dockerfile`** — one build stage per app, a final stage that
+  `COPY --from=...`s binaries onto a small base (`alpine`, `debian:slim`,
+  `distroless`). Universal, zero new tooling, build logic lives in `RUN` shell.
+- **[`apko`](https://github.com/chainguard-dev/apko) +
+  [`melange`](https://github.com/chainguard-dev/melange)** — the architectural
+  closest match. `melange` builds source-built `.apk`s from a YAML recipe in a
+  QEMU-sandboxed environment; `apko` declaratively assembles a set of apks into
+  a minimal, layered OCI image with no `Dockerfile` and no shell. Used by
+  Chainguard to produce the [Wolfi](https://wolfi.dev/) container images.
+- **[Bazel](https://bazel.build/) +
+  [`rules_oci`](https://github.com/bazel-contrib/rules_oci)** — proper
+  compiler-grain dependency graph through `rules_go` / `rules_rust` /
+  `rules_jvm_external`, then `oci_image` assembles the layers. Strong remote
+  caching via REAPI. See the [Bazel section above](#vs-bazel) for the broader
+  comparison.
+- **Nix +
+  [`dockerTools.streamLayeredImage`](https://nixos.org/manual/nixpkgs/stable/#sec-pkgs-dockerTools)**
+  — each app is a Nix derivation; `dockerTools` snaps them into a deterministic
+  layered image with automatic cross-image layer dedup.
+
+### What changes once `[yoe]` units exist for the apps
+
+The four alternatives above exist to bridge "source code" to "container image."
+If `[yoe]` is already that bridge for the embedded side, _the same unit produces
+the binary that ships to a device and the binary that ships in a container_ —
+one source of truth, one cached `.apk`, two delivery shapes. The structural win
+is not technical superiority on any axis; it is **eliminating a parallel build
+definition** that teams running both embedded and container deployments
+otherwise maintain (and watch drift).
+
+| Property                                    | Multi-stage Docker          | apko + melange      | Bazel + rules_oci         | Nix + dockerTools  | `[yoe]` (with OCI output)   |
+| ------------------------------------------- | --------------------------- | ------------------- | ------------------------- | ------------------ | --------------------------- |
+| Config language                             | Dockerfile + shell          | YAML                | Starlark (`BUILD`)        | Nix expression     | Starlark (unit)             |
+| Build cache shared across team              | Buildx remote cache (extra) | per-apk CAS (Wolfi) | REAPI cluster             | Cachix / nix-serve | Same S3 bucket as device    |
+| Cache shared _between device and container_ | No                          | No                  | No                        | No                 | **Yes**                     |
+| Multi-arch                                  | `buildx` per-platform       | QEMU usermode       | rules_oci platforms       | Nix cross          | Already done, QEMU usermode |
+| Reproducibility                             | Weak                        | Good                | Strong                    | Bit-perfect        | Strong (content-addressed)  |
+| Onboarding for a team already writing units | Learn Dockerfile idioms     | Learn melange YAML  | Learn Bazel + N rule sets | Learn Nix          | **Zero — same unit syntax** |
+
+The "cache shared between device and container" and "zero onboarding" rows are
+the only two where `[yoe]` has a structural edge. They only matter to teams that
+are already in the unit-writing flow for other reasons.
+
+### Where each alternative still wins
+
+- **`apko` + `melange`** — OCI-native niceties are first-class today: SBOMs,
+  Sigstore signatures, in-toto attestations, distroless-style hardening, cosign
+  integration. `[yoe]` would have to build all of this. For a team publishing to
+  a security-conscious registry that enforces attestations on every push, `apko`
+  is years ahead and the gap is not closing soon.
+- **Bazel + rules_oci** — compiler-invocation-grain incrementality. `[yoe]` is
+  unit-grain; touch one `.c` file and the whole unit rebuilds. For most app
+  codebases the unit _is_ the right grain (one Go service = one unit, and
+  `go build` reuses its own object cache inside the unit container), but a
+  monorepo with thousands of fine-grained build targets genuinely benefits from
+  Bazel's action graph.
+- **Nix + `dockerTools`** — bit-perfect reproducibility and aggressive layer
+  dedup across many images. If you produce dozens of container images that share
+  most of their userspace, Nix's layer dedup is hard to beat.
+- **Multi-stage `Dockerfile`** — disappears as soon as the team is fluent in
+  Starlark units. Its only advantage was "every dev already knows it," which the
+  assumption invalidates.
+
+### Where the assumption breaks and the recommendation flips back
+
+1. **The polyglot gap is the real risk.** Source-built `[yoe]` units for the
+   long tail of Java / JavaScript / Python-with-binary-wheels packages is a lot
+   of work. `apko` leans on Wolfi's full archive; `[yoe]` leans on Alpine's via
+   `alpine_pkg` passthrough. As long as passthrough covers most of your stack,
+   the gap is small. The day you need a container with a Python app whose
+   dependencies pull half of PyPI's C extensions, that pressure shows up.
+2. **OCI layer design discipline.** `[yoe]`'s current image assembler is shaped
+   for bootable rootfs (one small base + payload). A good container image has
+   its layers ordered for registry cache friendliness: rarely-changing apks low,
+   frequently-changing app on top. That is a deliberate design step in `apko`
+   and it would need to be a deliberate design step in `[yoe]`'s OCI exporter
+   too — not a side effect of reusing the rootfs assembler.
+3. **A team that isn't doing embedded.** The prerequisite "units exist for the
+   apps you ship" is itself the whole investment. If you are not getting
+   embedded value out of `[yoe]`, paying that cost just to build containers is
+   the wrong trade — `apko` is right there, focused on exactly that.
+
+### Net call
+
+For a team that ships **both** embedded and containers, `[yoe]`-with-OCI-output
+becomes the clearly best option once the unit ecosystem covers their apps. The
+wins — one source of truth, no parallel build definitions, shared cache across
+artifact types — are unique to `[yoe]` and structural, not incremental
+improvements over what `apko` or Bazel already do.
+
+For a team that ships **only** containers, `apko` + `melange` remains the right
+answer — and `[yoe]`'s value proposition for them is the embedded story, not the
+container output. The honest framing of the long-term view is not "`[yoe]`
+replaces `apko`" — it is "`[yoe]` makes `apko` unnecessary for teams that have
+`[yoe]` for other reasons."
+
+This is the same shape as the audience argument in the
+[Value Proposition](#value-proposition-and-strategic-positioning) section: a
+feature added to serve a population that is already in the project, not a land
+grab for a population that has better-aimed tools.
+
 ## Value Proposition and Strategic Positioning
 
 ### The Core Thesis
@@ -1217,14 +1694,13 @@ pinned to a single Alpine release — so most of "I just need `dbus`/`python3`/
 gap is narrower and more specific: a package only Alpine ships as a binary is
 _consumed_, not _built from source under your control_, and anything Alpine does
 not carry (or carries with the wrong build options) still needs a written unit.
-The prebuilt-wrapper pattern is deliberately distro-agnostic — a `*_pkg` class
-fetches an upstream package, re-signs it, and exposes it as a unit; Alpine is
-the only prebuilt source today, and the same shape is intended to extend to
-other distros (Debian/Ubuntu binary packages, for example) so the
-binary-availability tier is not tied to a single upstream. Yocto's value is that
-everything is from source by default; `[yoe]`'s bet is that prebuilt-distro
-packages plus source-where-it-matters covers most real products with far less
-work.
+The prebuilt-wrapper pattern is deliberately distro-agnostic — a feed fetches
+upstream packages and exposes them as units; Alpine (`alpine_feed`) plus
+experimental Debian and Ubuntu (`apt_feed`) are all wired today, so the
+binary-availability tier already spans multiple upstreams rather than a single
+one. Yocto's value is that everything is from source by default; `[yoe]`'s bet
+is that prebuilt-distro packages plus source-where-it-matters covers most real
+products with far less work.
 
 **Configuration UX.** Buildroot's `make menuconfig` is a killer feature —
 visual, discoverable, searchable. You can explore what's available without
@@ -1272,7 +1748,7 @@ push packages to a bucket, pull them on other machines. CI builds once,
 developers reuse the output.
 
 **AI-assisted unit generation.** With prebuilt distro packages already
-consumable via `alpine_pkg` (Alpine today, other distros planned), the gap is
+consumable via feeds (Alpine, plus experimental Debian and Ubuntu), the gap is
 from-source coverage. If an AI can generate a working Starlark unit from a
 project URL faster than porting a Yocto unit, even that gap stops mattering.
 Starlark is far more tractable for AI than BitBake's metadata format.
@@ -1575,24 +2051,24 @@ documented baseline.
 
 ## Summary Matrix
 
-| Feature                 | Yocto    | Buildroot | Alpine   | Arch     | Debian   | UC        | NixOS     | **`[yoe]`**                               |
-| ----------------------- | -------- | --------- | -------- | -------- | -------- | --------- | --------- | ----------------------------------------- |
-| Embedded focus          | Yes      | Yes       | Partial  | No       | No       | Yes       | No        | **Yes**                                   |
-| Simple config           | No       | Moderate  | Moderate | Yes      | Moderate | No        | No        | **Yes**                                   |
-| Native builds           | No       | No        | Yes      | Yes      | Yes      | Yes       | Yes       | **Yes**                                   |
-| On-device packages      | Optional | No        | Yes      | Yes      | Yes      | Yes       | Yes       | **Yes**                                   |
-| Content-addressed cache | Partial  | No        | No       | No       | No       | No        | Yes       | **Yes**                                   |
-| Remote shared cache     | Complex  | No        | No       | No       | No       | No        | Yes       | **Yes**                                   |
-| Pre-built package cache | No       | No        | Yes      | Yes      | Yes      | Yes       | Yes       | **Yes**                                   |
-| Declarative images      | Yes      | Partial   | No       | No       | Partial  | Yes       | Yes       | **Yes**                                   |
-| Multi-image support     | Yes      | No        | No       | No       | No       | Partial   | Yes       | **Yes**                                   |
-| Image inheritance       | Partial  | No        | No       | No       | No       | No        | Yes       | **Yes**                                   |
-| Custom BSP support      | Yes      | Yes       | No       | No       | Minimal  | Yes       | Minimal   | **Yes**                                   |
-| Incremental updates     | Complex  | No        | Yes      | Yes      | Yes      | Yes       | Yes       | **Yes**                                   |
-| Hermetic builds         | Partial  | No        | No       | No       | No       | Partial   | Yes       | **Yes**                                   |
-| Fast package ops        | N/A      | N/A       | Yes      | Moderate | Moderate | Slow      | Slow      | **Yes**                                   |
-| Min base image size     | ~15 MB   | ~5 MB     | ~5 MB    | ~500 MB  | ~150 MB  | ~2,500 MB | ~1,500 MB | **~5 MB**                                 |
-| Packages available      | ~5,000   | ~2,800    | ~36,000  | ~15,000  | ~35,000  | ~10,000   | ~142,000  | **Dozens from source + ~Alpine prebuilt** |
+| Feature                 | Yocto    | Buildroot | Alpine   | Arch     | Debian   | UC        | NixOS     | **`[yoe]`**                                            |
+| ----------------------- | -------- | --------- | -------- | -------- | -------- | --------- | --------- | ------------------------------------------------------ |
+| Embedded focus          | Yes      | Yes       | Partial  | No       | No       | Yes       | No        | **Yes**                                                |
+| Simple config           | No       | Moderate  | Moderate | Yes      | Moderate | No        | No        | **Yes**                                                |
+| Native builds           | No       | No        | Yes      | Yes      | Yes      | Yes       | Yes       | **Yes**                                                |
+| On-device packages      | Optional | No        | Yes      | Yes      | Yes      | Yes       | Yes       | **Yes**                                                |
+| Content-addressed cache | Partial  | No        | No       | No       | No       | No        | Yes       | **Yes**                                                |
+| Remote shared cache     | Complex  | No        | No       | No       | No       | No        | Yes       | **Yes**                                                |
+| Pre-built package cache | No       | No        | Yes      | Yes      | Yes      | Yes       | Yes       | **Yes**                                                |
+| Declarative images      | Yes      | Partial   | No       | No       | Partial  | Yes       | Yes       | **Yes**                                                |
+| Multi-image support     | Yes      | No        | No       | No       | No       | Partial   | Yes       | **Yes**                                                |
+| Image inheritance       | Partial  | No        | No       | No       | No       | No        | Yes       | **Yes**                                                |
+| Custom BSP support      | Yes      | Yes       | No       | No       | Minimal  | Yes       | Minimal   | **Yes**                                                |
+| Incremental updates     | Complex  | No        | Yes      | Yes      | Yes      | Yes       | Yes       | **Yes**                                                |
+| Hermetic builds         | Partial  | No        | No       | No       | No       | Partial   | Yes       | **Yes**                                                |
+| Fast package ops        | N/A      | N/A       | Yes      | Moderate | Moderate | Slow      | Slow      | **Yes**                                                |
+| Min base image size     | ~15 MB   | ~5 MB     | ~5 MB    | ~500 MB  | ~150 MB  | ~2,500 MB | ~1,500 MB | **~5 MB**                                              |
+| Packages available      | ~5,000   | ~2,800    | ~36,000  | ~15,000  | ~35,000  | ~10,000   | ~142,000  | **Dozens from source + Alpine/Debian/Ubuntu prebuilt** |
 
 _UC = Ubuntu Core. "Min base image size" is the approximate on-disk footprint of
 the smallest practical bootable/usable root filesystem (core-image-minimal for
@@ -1604,9 +2080,8 @@ Yocto counts typical oe-core + meta-openembedded, Arch excludes the ~90,000 AUR
 packages, UC counts snaps in the public store — a different delivery model that
 is not directly comparable. `[yoe]`'s entry is two-tier: dozens of packages
 built from source in `module-core`, plus thousands of distro packages consumed
-as prebuilt binaries via a `*_pkg` module (Alpine today via `alpine_pkg` —
-pinned to one Alpine release, re-signed with the project key; other distros a
-planned extension of the same pattern) — so the practical availability ceiling
-is close to the upstream distro's, while the from-source set is intentionally
-small. Sources: project documentation,
-[repology.org](https://repology.org/repositories/packages)._
+as prebuilt binaries via feed modules (Alpine via `alpine_feed`, plus
+experimental Debian and Ubuntu via `apt_feed`, each pinned to one upstream
+release) — so the practical availability ceiling is close to the upstream
+distro's, while the from-source set is intentionally small. Sources: project
+documentation, [repology.org](https://repology.org/repositories/packages)._

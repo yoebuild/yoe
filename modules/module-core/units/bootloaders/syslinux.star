@@ -4,8 +4,8 @@ unit(
     source = "https://mirrors.edge.kernel.org/pub/linux/utils/boot/syslinux/syslinux-6.03.tar.xz",
     license = "GPL-2.0",
     description = "BIOS bootloader (MBR + extlinux, x86 only)",
-    deps = ["toolchain-musl"],
-    container = "toolchain-musl",
+    deps = ["toolchain"],
+    container = "toolchain",
     container_arch = "target",
     tasks = [
         task("build", steps=[

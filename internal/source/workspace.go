@@ -16,10 +16,17 @@ import (
 )
 
 // Prepare sets up the build source directory for a unit:
-// 1. Fetches source (from cache or network)
-// 2. Extracts into build/<unit>/src/ as a git repo with yoe/pin tag
-//    marking the pinned commit
-// 3. Applies patches from the unit as git commits
+//  1. Fetches source (from cache or network)
+//  2. Extracts into build/<distro>/<unit>.<scope>/src/ as a git repo with the
+//     yoe/pin tag marking the pinned commit
+//  3. Applies patches from the unit as git commits
+//
+// distro is the consuming image's effective distro; it segregates source
+// trees the same way the build/destdir/sysroot directories are segregated,
+// so an alpine and a debian consumer of the same source unit each have an
+// independent checkout (matters for dev mode and for distro-specific
+// patches). Must be non-empty — the executor always knows the distro by
+// the time it calls Prepare.
 //
 // cachedSourceState is the unit's BuildMeta.SourceState from the previous
 // build (empty for first-time builds). When it's in the dev* family, the
@@ -27,8 +34,11 @@ import (
 // untouched and logs a warning so .star edits surface explicitly. The
 // "commits beyond upstream" fallback covers manually-committed src dirs
 // from before the dev-mode toggle existed.
-func Prepare(projectDir, scopeDir string, unit *yoestar.Unit, cachedSourceState string, w io.Writer) (string, error) {
-	srcDir := filepath.Join(projectDir, "build", unit.Name+"."+scopeDir, "src")
+func Prepare(projectDir, scopeDir, distro string, unit *yoestar.Unit, cachedSourceState string, w io.Writer) (string, error) {
+	if distro == "" {
+		return "", fmt.Errorf("source.Prepare: distro must not be empty (unit %q)", unit.Name)
+	}
+	srcDir := filepath.Join(projectDir, "build", distro, unit.Name+"."+scopeDir, "src")
 
 	// If the cached state says dev* and the src dir still exists, the
 	// user is actively editing it — never overwrite.
@@ -236,6 +246,12 @@ func prepareNonGitSource(cachedPath, destDir, sourceURL string) error {
 		// (GNU tar handles the multi-stream concatenation correctly);
 		// passing it through extractTarball here would only see the
 		// signature segment.
+		return copyBareSource(cachedPath, destDir, urlBasename(sourceURL))
+	case strings.HasSuffix(cachedPath, ".deb"):
+		// .deb files are ar archives carrying control.tar + data.tar (gz /
+		// xz / zst). Bare-copy so the install task can shell to
+		// `dpkg-deb --fsys-tarfile <file>.deb | tar -xpf - -C $DESTDIR`,
+		// which knows how to unwrap the ar framing.
 		return copyBareSource(cachedPath, destDir, urlBasename(sourceURL))
 	}
 
@@ -473,6 +489,22 @@ func tagUpstream(srcDir string) error {
 	return nil
 }
 
+// gitCommitEnv augments the process environment with a yoe author and
+// committer identity. yoe creates commits on a source tree when it applies a
+// unit's patches; the committing git invocations (`git am`, `git commit`)
+// fail wherever no global `user.name`/`user.email` is configured — notably on
+// CI runners, which ship git with no identity. Supplying the identity through
+// the environment keeps it out of the cloned repo's `.git/config`, so yoe
+// never rewrites the user's working-tree git settings.
+func gitCommitEnv() []string {
+	return append(os.Environ(),
+		"GIT_AUTHOR_NAME=yoe",
+		"GIT_AUTHOR_EMAIL=yoe@yoe.local",
+		"GIT_COMMITTER_NAME=yoe",
+		"GIT_COMMITTER_EMAIL=yoe@yoe.local",
+	)
+}
+
 func initGitRepo(srcDir string) error {
 	cmds := [][]string{
 		{"git", "init"},
@@ -522,9 +554,12 @@ func applyPatches(projectDir, srcDir string, unit *yoestar.Unit) error {
 			patchPath = abs
 		}
 
-		// Apply with git am (preserves commit message from patch)
+		// Apply with git am (preserves commit message from patch). git am
+		// writes a commit, so it needs a committer identity even though the
+		// author comes from the patch header.
 		cmd := exec.Command("git", "am", "--3way", patchPath)
 		cmd.Dir = srcDir
+		cmd.Env = gitCommitEnv()
 		if out, err := cmd.CombinedOutput(); err != nil {
 			// Fallback to git apply
 			cmd = exec.Command("git", "apply", patchPath)
@@ -542,6 +577,7 @@ func applyPatches(projectDir, srcDir string, unit *yoestar.Unit) error {
 			for _, args := range cmds {
 				c := exec.Command(args[0], args[1:]...)
 				c.Dir = srcDir
+				c.Env = gitCommitEnv()
 				if out, err := c.CombinedOutput(); err != nil {
 					return fmt.Errorf("%s: %s\n%s", strings.Join(args, " "), err, out)
 				}

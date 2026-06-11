@@ -33,12 +33,20 @@ func (e *Engine) builtins() starlark.StringDict {
 		"dir_size_mb":    starlark.NewBuiltin("dir_size_mb", fnDirSizeMBPlaceholder),
 		"install_file":     starlark.NewBuiltin("install_file", fnInstallFile),
 		"install_template": starlark.NewBuiltin("install_template", fnInstallTemplate),
+		"resolve_closure":  starlark.NewBuiltin("resolve_closure", e.fnResolveClosure),
 		"True":        starlark.True,
 		"False":       starlark.False,
 	}
 
 	// Merge engine variables (e.g., ARCH set after machine loading).
 	for k, v := range e.vars {
+		d[k] = v
+	}
+
+	// Merge extra builtins registered via WithBuiltin LoadOption.
+	// Materialized once (SetExtraBuiltins) so each factory runs against
+	// the live Engine without re-allocating per ExecFile call.
+	for k, v := range e.extraBuiltins {
 		d[k] = v
 	}
 
@@ -187,6 +195,45 @@ func kwStringList(kwargs []starlark.Tuple, key string) []string {
 	return nil
 }
 
+// kwStringListMap parses a kwarg shaped like
+// `{"alpine": ["a", "b"], "debian": ["c"]}` into map[string][]string.
+// Used for distro_deps / distro_runtime_deps where each distro key
+// names additional deps that apply only to that distro's closure.
+func kwStringListMap(kwargs []starlark.Tuple, key string) map[string][]string {
+	for _, kv := range kwargs {
+		if string(kv[0].(starlark.String)) != key {
+			continue
+		}
+		d, ok := kv[1].(*starlark.Dict)
+		if !ok {
+			return nil
+		}
+		m := make(map[string][]string, d.Len())
+		for _, item := range d.Items() {
+			k, ok := item[0].(starlark.String)
+			if !ok {
+				continue
+			}
+			list, ok := item[1].(*starlark.List)
+			if !ok {
+				continue
+			}
+			var values []string
+			iter := list.Iterate()
+			var v starlark.Value
+			for iter.Next(&v) {
+				if s, ok := v.(starlark.String); ok {
+					values = append(values, string(s))
+				}
+			}
+			iter.Done()
+			m[string(k)] = values
+		}
+		return m
+	}
+	return nil
+}
+
 func kwStringMap(kwargs []starlark.Tuple, key string) map[string]string {
 	for _, kv := range kwargs {
 		if string(kv[0].(starlark.String)) == key {
@@ -214,11 +261,15 @@ func kwStringMap(kwargs []starlark.Tuple, key string) map[string]string {
 // too so it isn't double-captured into Extra.
 var reservedUnitKwargs = map[string]bool{
 	"name": true, "version": true, "release": true, "scope": true,
-	"description": true, "license": true, "source": true, "sha256": true,
+	"description": true, "license": true, "distro": true,
+	"source": true, "sha256": true,
 	"apk_checksum": true,
 	"passthrough_apk": true,
 	"tag": true, "branch": true, "patches": true, "deps": true,
-	"runtime_deps": true, "container": true, "container_arch": true,
+	"runtime_deps": true,
+	"distro_deps":        true,
+	"distro_runtime_deps": true,
+	"container": true, "container_arch": true,
 	"sandbox": true, "shell": true, "tasks": true, "provides": true,
 	"replaces": true,
 	"services": true, "conffiles": true, "environment": true,
@@ -445,7 +496,8 @@ func (e *Engine) fnProject(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.T
 		Cache: CacheConfig{
 			Path: structString(cacheS, "path"),
 		},
-		SigningKey: kwString(kwargs, "signing_key"),
+		SigningKey:    kwString(kwargs, "signing_key"),
+		DefaultDistro: structString(defs, "distro"),
 	}
 
 	// Parse modules list
@@ -469,11 +521,14 @@ func (e *Engine) fnProject(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.T
 		}
 	}
 
-	// Parse prefer_modules: {"<unit>": "<module>"}. Unit names listed here
-	// register only from the named module; same-named units defined in
-	// other modules are dropped. Useful when the source-built version of a
-	// package in module-core is broken or under-configured (e.g. missing
-	// shared libs) and the Alpine prebuilt is the right answer.
+	// Parse prefer_modules: nested per-distro dict
+	//   {"<distro>": {"<unit>": "<module>", ...}, ...}
+	// Outer key is the consuming image's effective distro; inner key
+	// is the unit name; value is the pinned module. A pin only fires
+	// for closures matching its outer key. This shape keeps Alpine
+	// and Debian pins from interfering with each other in mixed-distro
+	// projects — pinning xz to alpine.main has no effect on a debian
+	// closure walk where alpine.main is filtered out by R21a.
 	for _, kv := range kwargs {
 		if string(kv[0].(starlark.String)) != "prefer_modules" {
 			continue
@@ -482,14 +537,24 @@ func (e *Engine) fnProject(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.T
 		if !ok {
 			return nil, fmt.Errorf("project: prefer_modules must be a dict")
 		}
-		p.PreferModules = make(map[string]string, d.Len())
+		p.PreferModules = make(map[string]map[string]string, d.Len())
 		for _, pair := range d.Items() {
-			k, kok := pair.Index(0).(starlark.String)
-			v, vok := pair.Index(1).(starlark.String)
-			if !kok || !vok {
-				return nil, fmt.Errorf("project: prefer_modules keys and values must be strings")
+			distroKey, dok := pair.Index(0).(starlark.String)
+			inner, iok := pair.Index(1).(*starlark.Dict)
+			if !dok || !iok {
+				return nil, fmt.Errorf("project: prefer_modules outer keys must be distro strings and values must be dicts of {unit: module}")
 			}
-			p.PreferModules[string(k)] = string(v)
+			distroName := string(distroKey)
+			pins := make(map[string]string, inner.Len())
+			for _, ipair := range inner.Items() {
+				k, kok := ipair.Index(0).(starlark.String)
+				v, vok := ipair.Index(1).(starlark.String)
+				if !kok || !vok {
+					return nil, fmt.Errorf("project: prefer_modules[%q] keys and values must be strings", distroName)
+				}
+				pins[string(k)] = string(v)
+			}
+			p.PreferModules[distroName] = pins
 		}
 	}
 
@@ -613,6 +678,7 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 		Scope:       kwString(kwargs, "scope"),
 		Description: kwString(kwargs, "description"),
 		License:     kwString(kwargs, "license"),
+		Distro:      kwString(kwargs, "distro"),
 		Source:      kwString(kwargs, "source"),
 		SHA256:      kwString(kwargs, "sha256"),
 		APKChecksum: kwString(kwargs, "apk_checksum"),
@@ -622,6 +688,8 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 		Patches:     kwStringList(kwargs, "patches"),
 		Deps:        kwStringList(kwargs, "deps"),
 		RuntimeDeps: kwStringList(kwargs, "runtime_deps"),
+		DistroDeps:        kwStringListMap(kwargs, "distro_deps"),
+		DistroRuntimeDeps: kwStringListMap(kwargs, "distro_runtime_deps"),
 		Container:     kwString(kwargs, "container"),
 		ContainerArch: kwString(kwargs, "container_arch"),
 		Sandbox:       kwBool(kwargs, "sandbox"),
@@ -698,64 +766,15 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 		r.DefinedIn = filepath.Dir(e.currentFile)
 	}
 
-	// PROJECT.star's prefer_modules pins a unit to a specific module,
-	// overriding default shadow resolution. If the project has pinned
-	// this name and r is from a different module, drop r outright; the
-	// pinned module's unit (when it registers, or already has) wins.
-	preferred := ""
-	if e.project != nil {
-		preferred = e.project.PreferModules[name]
-	}
-
+	// prefer_modules pins are consulted at closure-walk time, not
+	// here. Registration logic only needs to decide which module's
+	// unit wins by module priority when two registrations collide on
+	// the same name. The per-distro pins in proj.PreferModules then
+	// shadow the priority choice at lookup time for the matching
+	// distro only — alpine pins don't interfere with debian closures
+	// and vice versa.
 	e.mu.Lock()
-	if preferred != "" && r.Module != preferred {
-		// r is from the wrong module for this name. Record it as
-		// shadowed for the diagnostics tab and return whatever (if
-		// anything) is currently registered.
-		existing := e.units[name]
-		winnerModule, winnerDir := preferred, ""
-		if existing != nil {
-			winnerModule, winnerDir = existing.Module, existing.DefinedIn
-		}
-		e.shadows = append(e.shadows, ShadowEvent{
-			Unit:         name,
-			WinnerModule: winnerModule,
-			WinnerDir:    winnerDir,
-			LoserModule:  r.Module,
-			LoserDir:     r.DefinedIn,
-		})
-		e.mu.Unlock()
-		if e.showShadows {
-			fmt.Fprintf(os.Stderr,
-				"notice: unit %q from %s dropped (prefer_modules pins it to %s)\n",
-				name, moduleSource(r.Module), preferred)
-		}
-		if existing != nil {
-			return existing, nil
-		}
-		return r, nil // not registered; caller's r is returned for ergonomics but won't be referenced
-	}
 	if existing, ok := e.units[name]; ok {
-		// If prefer_modules pinned this name and existing is from the
-		// wrong module, replace it with r (which is, by the check above,
-		// from the preferred module).
-		if preferred != "" && existing.Module != preferred {
-			e.shadows = append(e.shadows, ShadowEvent{
-				Unit:         name,
-				WinnerModule: r.Module,
-				WinnerDir:    r.DefinedIn,
-				LoserModule:  existing.Module,
-				LoserDir:     existing.DefinedIn,
-			})
-			if e.showShadows {
-				fmt.Fprintf(os.Stderr,
-					"notice: unit %q from %s shadows %s (prefer_modules pin)\n",
-					name, moduleSource(r.Module), moduleSource(existing.Module))
-			}
-			e.units[name] = r
-			e.mu.Unlock()
-			return r, nil
-		}
 		// Same priority (same module, or both project root) → hard error.
 		// Cross-priority collisions are shadows: highest priority wins, with
 		// a stderr notice. Project priority is set strictly above any module
@@ -796,6 +815,11 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 		}
 	}
 	e.units[name] = r
+	// Also store in the per-module catalog. Same-named units from
+	// different modules coexist here (alpine.main's libssl3 doesn't
+	// shadow debian.main's); the closure walker picks per consuming
+	// distro at lookup time.
+	e.storeByModule(r)
 	e.mu.Unlock()
 
 	return r, nil

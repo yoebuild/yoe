@@ -35,8 +35,12 @@ func cmdDeploy(args []string) {
 	hostArg := fs.Arg(1)
 
 	proj := loadProjectWithMachine(*machineName)
-	unit, ok := proj.Units[unitName]
-	if !ok {
+	// AnyUnit suffices to read the unit's class — we only need to
+	// know whether it's an image (flash, not deploy) before driving
+	// the build/ship/install pipeline. The build path itself uses
+	// per-distro views via opts.EffectiveDistro.
+	unit := proj.AnyUnit(unitName)
+	if unit == nil {
 		fmt.Fprintf(os.Stderr, "Error: unit %q not found\n", unitName)
 		os.Exit(1)
 	}
@@ -64,9 +68,27 @@ func cmdDeploy(args []string) {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+	deployDistro, err := proj.EffectiveDistro()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: resolve effective distro: %v\n", err)
+		os.Exit(1)
+	}
+	// The suite is only meaningful for apt-family targets (it stamps the
+	// apt sources.list line); alpine deploys ignore it. Read it from the
+	// project's apt_feed only when deploying an apt distro, so an
+	// alpine-only project — which has no apt_feed — doesn't error.
+	suite := ""
+	if yoestar.IsAptFamily(deployDistro) {
+		if suite, err = proj.SuiteForDistro(deployDistro); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	}
 	err = device.Deploy(context.Background(), device.DeployInput{
 		Target:  target,
 		Unit:    unitName,
+		Distro:  deployDistro,
+		Suite:   suite,
 		FeedURL: feedURL,
 		Out:     os.Stdout,
 	})
@@ -94,13 +116,18 @@ func buildUnitForDeploy(proj *yoestar.Project, unit, machineName string) error {
 	if resolvedMachine == "" {
 		resolvedMachine = proj.Defaults.Machine
 	}
-	opts := build.Options{
-		Ctx:        ctx,
-		ProjectDir: projectDir(),
-		Arch:       targetArch,
-		Machine:    resolvedMachine,
+	distro, err := proj.EffectiveDistro()
+	if err != nil {
+		return fmt.Errorf("deploy: %w", err)
 	}
-	closure := resolve.RuntimeClosure(proj, []string{unit})
+	opts := build.Options{
+		Ctx:             ctx,
+		ProjectDir:      projectDir(),
+		Arch:            targetArch,
+		Machine:         resolvedMachine,
+		EffectiveDistro: distro,
+	}
+	closure := resolve.RuntimeClosure(proj, []string{unit}, distro)
 	return build.BuildUnits(proj, closure, opts, os.Stdout)
 }
 
@@ -119,7 +146,13 @@ func resolveOrStartFeed(proj *yoestar.Project, projDir string, port int, hostIP 
 
 	projRepoDir := repo.RepoDir(proj, projDir)
 	httpRoot := filepath.Dir(projRepoDir)
-	archs, _ := repo.ArchDirs(projRepoDir)
+	// Arches live under repo/<project>/<distro>/<arch>/ now; advertise
+	// arches found under the project's effective-distro subtree.
+	deployDistro, derr := proj.EffectiveDistro()
+	if derr != nil {
+		return "", nil, fmt.Errorf("resolve effective distro: %w", derr)
+	}
+	archs, _ := repo.ArchDirs(repo.RepoDistroDir(proj, projDir, deployDistro))
 
 	bind := "0.0.0.0"
 	hostName := ""

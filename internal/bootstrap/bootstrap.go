@@ -35,10 +35,19 @@ func Stage0(proj *yoestar.Project, projectDir string, w io.Writer) error {
 
 	arch := build.Arch()
 
-	// Verify bootstrap units exist
+	// Bootstrap stages target the Alpine pipeline (glibc-from-source +
+	// apk-tools). The distro segment in build/<distro>/... and
+	// repo/<project>/<distro>/ reflects that explicit choice rather
+	// than the project's default.
+	distro, err := proj.EffectiveDistro()
+	if err != nil {
+		return fmt.Errorf("bootstrap: %w", err)
+	}
+
+	// Verify bootstrap units exist in the bootstrap distro's view.
 	var missing []string
 	for _, name := range bootstrapUnits {
-		if _, ok := proj.Units[name]; !ok {
+		if proj.LookupUnit(distro, name) == nil {
 			missing = append(missing, name)
 		}
 	}
@@ -48,13 +57,13 @@ func Stage0(proj *yoestar.Project, projectDir string, w io.Writer) error {
 	}
 
 	// Build each bootstrap unit without sandbox isolation (using host tools)
-	repoDir := repo.RepoDir(proj, projectDir)
+	repoDir := repo.RepoDistroDir(proj, projectDir, distro)
 
 	for _, name := range bootstrapUnits {
-		unit := proj.Units[name]
+		unit := proj.LookupUnit(distro, name)
 		fmt.Fprintf(w, "\n--- Building %s %s ---\n", unit.Name, unit.Version)
 
-		buildDir := build.UnitBuildDir(projectDir, arch, unit.Name)
+		buildDir := build.UnitBuildDir(projectDir, arch, unit.Name, distro)
 		destDir := filepath.Join(buildDir, "destdir")
 
 		// Clean and prepare
@@ -116,7 +125,11 @@ func Stage1(proj *yoestar.Project, projectDir string, w io.Writer) error {
 	fmt.Fprintln(w)
 
 	arch := build.Arch()
-	repoDir := repo.RepoDir(proj, projectDir)
+	distro, err := proj.EffectiveDistro()
+	if err != nil {
+		return fmt.Errorf("bootstrap stage1: %w", err)
+	}
+	repoDir := repo.RepoDistroDir(proj, projectDir, distro)
 
 	// Verify Stage 0 packages exist in the repo
 	if err := verifyStage0(repoDir, arch); err != nil {
@@ -131,10 +144,13 @@ func Stage1(proj *yoestar.Project, projectDir string, w io.Writer) error {
 
 	// Rebuild each bootstrap unit inside the build root
 	for _, name := range bootstrapUnits {
-		unit := proj.Units[name]
+		unit := proj.LookupUnit(distro, name)
+		if unit == nil {
+			return fmt.Errorf("bootstrap unit %q disappeared between stages", name)
+		}
 		fmt.Fprintf(w, "\n--- Rebuilding %s %s (self-hosted) ---\n", unit.Name, unit.Version)
 
-		buildDir := build.UnitBuildDir(projectDir, arch, unit.Name)
+		buildDir := build.UnitBuildDir(projectDir, arch, unit.Name, distro)
 		destDir := filepath.Join(buildDir, "destdir")
 
 		os.RemoveAll(destDir)
@@ -187,7 +203,11 @@ func Stage1(proj *yoestar.Project, projectDir string, w io.Writer) error {
 
 // Status shows the current bootstrap state.
 func Status(proj *yoestar.Project, projectDir string, w io.Writer) error {
-	repoDir := repo.RepoDir(proj, projectDir)
+	distro, err := proj.EffectiveDistro()
+	if err != nil {
+		return fmt.Errorf("bootstrap status: %w", err)
+	}
+	repoDir := repo.RepoDistroDir(proj, projectDir, distro)
 	arch := build.Arch()
 	archDir := filepath.Join(repoDir, arch)
 
@@ -197,7 +217,7 @@ func Status(proj *yoestar.Project, projectDir string, w io.Writer) error {
 
 	for _, name := range bootstrapUnits {
 		status := "missing"
-		if _, ok := proj.Units[name]; ok {
+		if proj.LookupUnit(distro, name) != nil {
 			status = "unit found"
 		}
 

@@ -62,8 +62,9 @@ Modify the `.star` file:
 ### Step 5: Check Patches
 
 If the unit has `patches`, verify they still apply to the new version. Check
-`build/<unit>/src/` after source preparation for `.rej` files. If patches
-conflict:
+`build/<distro>/<unit>/src/` after source preparation for `.rej` files (the
+build tree is segmented by distro — `build/alpine/...`, `build/debian/...` — and
+`<unit>` carries its arch suffix). If patches conflict:
 
 - Determine if the patch is still needed (the fix may be upstream now)
 - If still needed, regenerate the patch against the new version
@@ -77,8 +78,11 @@ Build the updated unit:
 yoe build --clean <unit-name>
 ```
 
-Use `--clean` to ensure a fresh build from the new source. If the build fails,
-use the diagnose workflow to fix it iteratively.
+Use `--clean` to ensure a fresh build from the new source. If the unit builds
+under more than one distro, add `--distro <distro>` to target each. If the build
+fails, read the log with `yoe log <unit-name>` (or
+`build/<distro>/<unit>/build.log`) and use the diagnose workflow to fix it
+iteratively.
 
 ### Step 7: Test Reverse Dependencies
 

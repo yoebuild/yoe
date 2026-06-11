@@ -18,6 +18,19 @@ import (
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
+// httpClient downloads source archives as opaque bytes. DisableCompression
+// stops Go's default transport from advertising `Accept-Encoding: gzip` and
+// then transparently inflating the response — savannah and other mirrors
+// (e.g. nongnu.askapache.com) serve a `.tar.gz` with `Content-Encoding: gzip`,
+// which the default client would decode, leaving a bare tar on disk under a
+// `.tar.gz` name. extractTarball later picks gzip by extension and fails with
+// "gzip: invalid header". Whether the bug bites depends on which mirror the
+// 302 redirect lands on, so it is intermittent. Keeping the bytes raw makes
+// the cached archive match its filename regardless of mirror.
+var httpClient = &http.Client{
+	Transport: &http.Transport{DisableCompression: true},
+}
+
 // decodeAPKChecksum parses Alpine's APKINDEX `C:` value and returns the
 // raw expected sha1 bytes. Format: "Q1<base64-encoded-sha1>=" — the "Q1"
 // prefix is a hash-type tag (Q1 = sha1; Q2 = sha256 was reserved but
@@ -166,7 +179,7 @@ func fetchHTTP(cacheDir string, unit *yoestar.Unit, w io.Writer) (string, error)
 
 	fmt.Fprintf(w, "Fetching %s...\n", unit.Source)
 
-	resp, err := http.Get(unit.Source)
+	resp, err := httpClient.Get(unit.Source)
 	if err != nil {
 		return "", fmt.Errorf("downloading %s: %w", unit.Source, err)
 	}
@@ -329,7 +342,7 @@ func isGitURL(url string) bool {
 }
 
 func guessExt(url string) string {
-	for _, ext := range []string{".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".zip", ".apk"} {
+	for _, ext := range []string{".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".zip", ".apk", ".deb"} {
 		if strings.HasSuffix(url, ext) {
 			return ext
 		}

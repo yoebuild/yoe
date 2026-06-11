@@ -55,8 +55,17 @@ Module names are used in `load()` statements:
 2. **Phase 1b** — Machine definitions from all modules are evaluated.
 3. **Phase 2** — Units and images from all modules are evaluated. A single `ctx`
    struct is predeclared, exposing the active build context: `ctx.arch`,
-   `ctx.machine`, `ctx.project_version`, `ctx.machine_config`, `ctx.provides`,
-   and `ctx.runtime_deps`.
+   `ctx.machine`, `ctx.project_version`, `ctx.machine_config`, and
+   `ctx.provides` (a callable dict — use `ctx.provides.get(name)` to resolve a
+   virtual to a concrete unit name).
+
+   The closure walk that used to live in Starlark — and that needed
+   `ctx.runtime_deps`, a dict pre-populated with every unit's deps — is now a
+   Go-side `resolve_closure(artifacts)` builtin. It walks the runtime-dep graph
+   on demand and materializes synthetic-module units (see
+   [Feeds as synthetic modules](#feeds-as-synthetic-modules)) lazily, so the
+   working set stays bounded by closure size rather than catalog size. Image
+   classes call it directly: `resolved = resolve_closure(explicit_artifacts)`.
 
 Within each phase, modules are evaluated in declaration order. Within a module,
 `.star` files are evaluated in filesystem walk order.
@@ -395,6 +404,146 @@ collision with the upstream `openssh`. Images that need the vendor variant
 reference `openssh-vendor` in their artifacts list. This is explicit and
 traceable — `grep` for the function call to find all extensions. See
 [metadata-format.md](metadata-format.md) for details.
+
+---
+
+## Recursive module dependencies
+
+A module's `MODULE.star` can declare its own `deps = [...]` list of modules. The
+loader walks this transitively — each declared module is synced, peeked for its
+own deps, synced again, and so on until the dep set stabilizes:
+
+```python
+# module-bsp-imx8/MODULE.star
+module_info(
+    name = "bsp-imx8",
+    deps = [
+        module("https://github.com/yoebuild/module-alpine.git", ref = "v1.2"),
+        module("https://github.com/vendor/imx8-firmware.git", ref = "main"),
+    ],
+)
+```
+
+A project consuming `module-bsp-imx8` doesn't need to re-declare `module-alpine`
+or `imx8-firmware` — they come along automatically.
+
+### Canonical identity and dedup
+
+Two declarations of the same module collapse to one:
+
+- **Remote modules**: same `(URL, ref, path)` triple — `.git` suffix is stripped
+  before comparing, so `https://github.com/foo/bar` and
+  `https://github.com/foo/bar.git` are the same module.
+- **Local modules**: the absolute path after `filepath.EvalSymlinks` — two
+  relative paths that resolve to the same directory dedup.
+
+### Same-name conflicts
+
+When two declarations name the same module (`module_info(name = "shared")`) but
+resolve to different identities, the project-level declaration always wins — the
+transitive declaration is silently overridden. Two transitive declarations at
+incompatible refs error with both reference paths and a hint to pin one
+explicitly at the project level.
+
+### Cycle detection
+
+The loader runs DFS over the dep graph and surfaces any cycle as a clear path in
+the error: `module dep cycle: A → B → C → A`. Self-loops report the same way
+(`A → A`).
+
+---
+
+## Feeds as synthetic modules
+
+A `feed` is a third kind of module entry, alongside `directory` (local override)
+and `remote` (git clone). It absorbs an upstream package repo as a single
+declaration whose units materialize lazily on demand.
+
+Two feed builtins exist: `alpine_feed(...)` for Alpine's apk archive and
+`apt_feed(...)` for the apt/dpkg family (Debian and Ubuntu share it, picked
+apart by the `distro` kwarg):
+
+```python
+# module-alpine/MODULE.star
+module_info(name = "alpine")
+
+alpine_feed(
+    name    = "main",                    # synthetic module is alpine.main
+    url     = "https://dl-cdn.alpinelinux.org/alpine",
+    branch  = "v3.21",
+    section = "main",
+    index   = "feeds/main",              # dir holding <arch>/APKINDEX
+    keys    = ["keys/alpine-devel@lists.alpinelinux.org-6165ee59.rsa.pub"],
+)
+
+# module-ubuntu/MODULE.star
+module_info(name = "ubuntu")
+
+apt_feed(
+    name      = "main",                  # synthetic module is ubuntu.main
+    distro    = "ubuntu",                # stamped on every materialized unit
+    url       = "http://archive.ubuntu.com/ubuntu",
+    arch_urls = {"arm64": "http://ports.ubuntu.com/ubuntu-ports"},
+    suite     = "resolute",
+    component = "main",
+    arches    = ["amd64", "arm64"],
+    index     = "feeds/main",            # dir holding <arch>/Packages
+    keyring   = "keys/ubuntu-archive-keyring.gpg",
+)
+```
+
+Each call registers a **synthetic module** named `<parent>.<feed>` (e.g.,
+`alpine.main`, `alpine.community`). The resolver consults synthetics in priority
+order alongside real modules, but synthetics always rank below every non-feed
+module — a from-source override in `module-core` wins against the feed
+automatically without `prefer_modules`.
+
+The on-disk APKINDEX is checked into the module repo. `yoe update-feeds`
+refreshes it from upstream, verifying the RSA-SHA1 signature against
+`alpine_feed(keys=[...])` before writing. See
+[module-alpine.md](module-alpine.md#maintainer-playbook-yoe-update-feeds) for
+the maintainer workflow.
+
+### Lazy materialization
+
+Synthetic units don't allocate up front — `SyntheticModule.Lookup(name)` runs
+only when the closure walk references that name. A project pulling 300 packages
+from a 60k-entry feed allocates 300 `*Unit` pointers, not 60k. The on-disk
+APKINDEX cache (header-versioned, content-keyed) keeps re-parse times under
+~300ms even for the full Debian-class case.
+
+See [Catalog and Materialization](catalog.md) for the internal data structures
+and lifecycle that back this — the `SyntheticModule` contract, the closure
+walker's role as materialization driver, working-set sizes per feed, and the
+allocation invariants the resolver depends on.
+
+### Companion units (the enable-service pattern)
+
+A feed gives you every package's `.apk` but doesn't enable services — Alpine
+ships init scripts disabled (apk's `setup-<pkg>` is a human helper, and yoe has
+no humans on the image-assembly path). The convention is one tiny companion unit
+per service the maintainer wants to expose:
+
+```python
+# module-alpine/units/docker-enable.star
+unit(
+    name = "docker-enable",
+    version = "0.1.0",
+    runtime_deps = ["docker-openrc"],   # ships /etc/init.d/docker
+    services = ["docker"],              # → /etc/runlevels/default/docker
+)
+```
+
+The companion has no tasks. The build executor falls through to the apk-build
+path when `services = [...]` is non-empty so the runlevel symlink lands in the
+package's data tar. A project that wants Docker running adds `docker-enable` to
+its image's `artifacts` list (alongside `docker` itself, which the unit's
+`runtime_deps` will pull in).
+
+This keeps the policy where it belongs: the package author — not the image, not
+the project — decides whether installing the package also enables it. See
+[CLAUDE.md](../CLAUDE.md) "Key Design Decisions" → "Units declare their own
+services" for the rationale.
 
 ---
 
