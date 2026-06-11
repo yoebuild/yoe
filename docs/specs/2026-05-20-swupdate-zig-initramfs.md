@@ -256,8 +256,9 @@ key-deploy change, not a code change.
 ### Orchestration layer: Zig init
 
 A single static binary,
-`zig build -Dtarget=<arch>-linux-musl -Doptimize=ReleaseSmall`. Lives in the
-initramfs at `/init`. Responsibilities:
+`zig build -Dtarget=<arch>-linux-musl -Doptimize=ReleaseSmall`. Source lives at
+<https://github.com/yoebuild/yoe-init>; the binary lives in the initramfs at
+`/init`. Responsibilities:
 
 - **Early boot fixups.** `mount /proc`, `/sys`, `/dev` (devtmpfs); set console;
   configure kernel log level. All via `std.os.linux` syscalls.
@@ -332,12 +333,12 @@ cpio path, and the kernel's content-addressed cache key stays stable.
 
 ### New units
 
-| Unit       | Module                        | Purpose                                                                                                       |
-| ---------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `zig`      | `module-core` (toolchain)     | The Zig compiler, fetched from Alpine binary (Zig is packaged) or upstream tarball if Alpine's version trails |
-| `yoe-init` | `module-core`                 | The Zig init source tree; builds with `zig build` against `zig`. Produces a single static binary `init`       |
-| `swupdate` | `module-alpine` (passthrough) | Already in Alpine community. No source unit                                                                   |
-| `busybox`  | `module-alpine` (passthrough) | Already in Alpine                                                                                             |
+| Unit       | Module                        | Purpose                                                                                                                                                             |
+| ---------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `zig`      | `module-core` (toolchain)     | The Zig compiler, fetched from Alpine binary (Zig is packaged) or upstream tarball if Alpine's version trails                                                       |
+| `yoe-init` | `module-core`                 | The Zig init source tree ([yoebuild/yoe-init](https://github.com/yoebuild/yoe-init)); builds with `zig build` against `zig`. Produces a single static binary `init` |
+| `swupdate` | `module-alpine` (passthrough) | Already in Alpine community. No source unit                                                                                                                         |
+| `busybox`  | `module-alpine` (passthrough) | Already in Alpine                                                                                                                                                   |
 
 `yoe-init` is the first non-trivial Zig unit; expect a `zig.star` class to
 emerge from it (`zig_build()` wrapping the `zig build` invocation, vendor dir
@@ -489,6 +490,7 @@ rootfs, reboots, and comes up on the new rootfs.
 
 ## References
 
+- `yoe-init` source repo: <https://github.com/yoebuild/yoe-init>
 - `updater.installer` source:
   <https://github.com/YoeDistro/yoe-distro/blob/master/sources/meta-yoe/recipes-support/updater/files/updater.installer>
 - yoe-distro updater docs: <https://docs.yoedistro.org/updater.html>
