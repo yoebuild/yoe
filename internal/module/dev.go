@@ -76,13 +76,14 @@ func ModuleToUpstream(m yoestar.ResolvedModule, opts ModuleUpstreamOpts) error {
 	// Hide the state file from `git status` so it doesn't taint the
 	// dirty signal. .git/info/exclude is the clone-local gitignore,
 	// won't propagate via git add.
-	if err := excludeFromGit(repo, stateFile); err != nil {
-		// best effort — losing this just makes `git status` slightly
-		// noisier; it doesn't break dev-mode functionality once the
-		// state file exists.
-		_ = err
+	for _, entry := range []string{stateFile, syncInfoFile} {
+		if err := excludeFromGit(repo, entry); err != nil {
+			// best effort — losing this just makes `git status` slightly
+			// noisier; it doesn't break dev-mode functionality once the
+			// state file exists.
+			_ = err
+		}
 	}
-
 	return WriteState(repo, source.StateDev)
 }
 

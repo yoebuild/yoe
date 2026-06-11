@@ -118,6 +118,53 @@ func ProjectModuleRefs(startDir string, opts ...LoadOption) ([]ModuleRef, error)
 		o(&cfg)
 	}
 
+	return projectModuleRefsFromRoot(root, cfg)
+}
+
+// ResolveProjectModules finds the project root, evaluates only PROJECT.star,
+// and resolves the declared module refs to names and on-disk paths when they
+// are available. It intentionally avoids evaluating module unit files so CLI
+// metadata commands keep working when a module checkout is broken.
+func ResolveProjectModules(startDir string, opts ...LoadOption) ([]ResolvedModule, error) {
+	root, err := findProjectRoot(startDir)
+	if err != nil {
+		return nil, err
+	}
+
+	var cfg loadConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
+
+	refs, err := projectModuleRefsFromRoot(root, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	resolved := make([]ResolvedModule, 0, len(refs))
+	for _, m := range refs {
+		modulePath, cloneDir, ok := locateModulePath(m, root)
+		rm := ResolvedModule{
+			URL:       m.URL,
+			Ref:       m.Ref,
+			Path:      m.Path,
+			Local:     m.Local,
+			Available: ok,
+		}
+		if ok {
+			rm.Name = peekModuleName(modulePath)
+			rm.Dir = modulePath
+			rm.CloneDir = cloneDir
+		}
+		if rm.Name == "" {
+			rm.Name = pathBasename(m)
+		}
+		resolved = append(resolved, rm)
+	}
+	return resolved, nil
+}
+
+func projectModuleRefsFromRoot(root string, cfg loadConfig) ([]ModuleRef, error) {
 	eng := NewEngine()
 	eng.SetProjectRoot(root)
 
