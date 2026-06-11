@@ -142,8 +142,22 @@ func RunInit(projectDir string, machine string) error {
 		return fmt.Errorf("writing PROJECT.star: %w", err)
 	}
 
-	// Create .gitignore
-	gitignore := "/build\n/cache\n"
+	// Create .gitignore covering everything yoe generates in a project tree:
+	// build output, the module/source cache, the local apk repository, and the
+	// per-developer local.star overrides. .claude/skills is intentionally not
+	// ignored — those are project skills meant to be committed — but Claude
+	// Code's per-user settings.local.json is.
+	gitignore := `# Build output, caches, and the local apk repository
+/build
+/cache
+/repo
+
+# Per-developer settings written by yoe (machine, image, parallel builds)
+local.star
+
+# Claude Code per-user local settings (skills under .claude/ are committed)
+.claude/settings.local.json
+`
 	if err := os.WriteFile(filepath.Join(projectDir, ".gitignore"), []byte(gitignore), 0644); err != nil {
 		return fmt.Errorf("writing .gitignore: %w", err)
 	}

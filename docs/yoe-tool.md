@@ -76,6 +76,8 @@ Creates:
 ```
 my-project/
 ├── PROJECT.star
+├── .gitignore          # ignores build/, cache/, repo/, local.star
+├── .claude/skills/     # yoe's Claude Code skills (committed)
 ├── machines/
 ├── units/
 ├── classes/

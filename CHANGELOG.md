@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **New projects ignore the right files out of the box.** `yoe init` now writes
+  a `.gitignore` that also covers the local apk repository (`repo/`) and your
+  per-developer `local.star`, so a fresh project stays clean in Git without you
+  curating ignores by hand.
+
 ## [0.12.4] - 2026-06-11
 
 - **`yoe skills install` adds yoe's AI skills to your project.** The skills that
