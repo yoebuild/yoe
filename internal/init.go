@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/yoebuild/yoe/internal/skills"
 )
 
 func RunInit(projectDir string, machine string) error {
@@ -140,8 +142,22 @@ func RunInit(projectDir string, machine string) error {
 		return fmt.Errorf("writing PROJECT.star: %w", err)
 	}
 
-	// Create .gitignore
-	gitignore := "/build\n/cache\n"
+	// Create .gitignore covering everything yoe generates in a project tree:
+	// build output, the module/source cache, the local apk repository, and the
+	// per-developer local.star overrides. .claude/skills is intentionally not
+	// ignored — those are project skills meant to be committed — but Claude
+	// Code's per-user settings.local.json is.
+	gitignore := `# Build output, caches, and the local apk repository
+/build
+/cache
+/repo
+
+# Per-developer settings written by yoe (machine, image, parallel builds)
+local.star
+
+# Claude Code per-user local settings (skills under .claude/ are committed)
+.claude/settings.local.json
+`
 	if err := os.WriteFile(filepath.Join(projectDir, ".gitignore"), []byte(gitignore), 0644); err != nil {
 		return fmt.Errorf("writing .gitignore: %w", err)
 	}
@@ -153,6 +169,14 @@ func RunInit(projectDir string, machine string) error {
 	}
 
 	fmt.Printf("Created Yoe project at %s\n", projectDir)
+
+	// Drop yoe's Claude Code skills into the new project so Claude Code picks
+	// them up immediately. A failure here doesn't invalidate the project, so
+	// warn rather than abort.
+	if err := skills.Install(projectDir, false, os.Stdout); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not install skills: %v\n", err)
+	}
+
 	return nil
 }
 

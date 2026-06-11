@@ -71,6 +71,21 @@ Prerequisites: Linux or macOS with Git and Docker installed. Windows users:
 install WSL2 and use the Linux binary (Linux x86_64/Docker is the most tested
 configuration). Claude Code is highly recommended, but not required.
 
+To run a built image you also need QEMU. On Debian/Ubuntu:
+
+```sh
+sudo apt-get install qemu-system-x86
+```
+
+For KVM acceleration, your user must be in the `kvm` group. If `yoe run` reports
+`failed to initialize kvm: Permission denied`, add yourself and pick up the new
+group membership:
+
+```sh
+sudo usermod -aG kvm $(whoami)
+newgrp kvm   # or log out and back in
+```
+
 ```sh
 # Download the yoe binary (Linux x86_64)
 curl -L https://github.com/yoebuild/yoe/releases/latest/download/yoe-Linux-x86_64 -o yoe
@@ -104,8 +119,14 @@ The TUI user interface:
 ![screenshot](assets/yoe-screenshot.png)
 
 `dev-image` is another included image with a few more things in it. Press the
-`s` key to and configure the image. The `/` key modifies the unit query to
-change what is displayed.
+`s` key to navigate to the setup menu and select the image.
+
+The `/` key modifies the unit query to change what units are displayed.
+
+The `tab` key shifts between the unit, modules, and diagnostics pages.
+
+For more information on the TUI, see the
+[`[yoe]` tool documentation](/docs/yoe-tool.md).
 
 There are also CLI variants of the above commands (`build`, `run`, etc.).
 
@@ -191,7 +212,10 @@ this can:
 - **Generate machine definitions from board names** —
   `/new-machine "Raspberry Pi 5"`
 
-See [AI Skills](docs/ai-skills.md) for the full catalog of AI-driven workflows.
+Add these skills to your project with `yoe skills install` (or as a Claude Code
+plugin via `/plugin marketplace add yoebuild/yoe`). See
+[AI Skills](docs/ai-skills.md) for installation details and the full catalog of
+AI-driven workflows.
 
 ## 💡 Inspirations
 

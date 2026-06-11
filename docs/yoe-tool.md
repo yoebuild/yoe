@@ -50,12 +50,13 @@ yoe refs            Show reverse dependencies
 yoe graph           Visualize the dependency DAG
 yoe log             Show build log (most recent or specific unit)
 yoe diagnose        Launch Claude Code to diagnose a build failure
+yoe skills          Install/update yoe's Claude Code skills in this project
 yoe clean           Remove build artifacts
 yoe container       Manage the build container (build, binfmt, status)
 ```
 
-All commands except `init`, `version`, and `container` run inside an Alpine
-build container automatically. The container is built on first use from
+All commands except `init`, `version`, `skills`, and `container` run inside an
+Alpine build container automatically. The container is built on first use from
 `containers/Dockerfile.build`. See
 [Build Environment](build-environment.md#tier-0-bootstrap-module-automatic-container)
 for details.
@@ -75,6 +76,8 @@ Creates:
 ```
 my-project/
 ├── PROJECT.star
+├── .gitignore          # ignores build/, cache/, repo/, local.star
+├── .claude/skills/     # yoe's Claude Code skills (committed)
 ├── machines/
 ├── units/
 ├── classes/
@@ -86,6 +89,11 @@ Optionally specify a machine to start with:
 ```sh
 yoe init my-project --machine beaglebone-black
 ```
+
+`yoe init` also installs `[yoe]`'s Claude Code skills into the new project's
+`.claude/skills` directory (the same set `yoe skills install` provides), so
+Claude Code is ready to help the moment you open the project. See
+[`yoe skills`](#yoe-skills).
 
 ### `yoe build`
 
@@ -1016,6 +1024,40 @@ yoe diagnose util-linux  # diagnose util-linux build failure
 Requires `claude` to be in your PATH. Claude Code reads the build log and
 iteratively identifies root causes, applies fixes, and rebuilds until the unit
 succeeds.
+
+### `yoe skills`
+
+Installs `[yoe]`'s Claude Code skills — the workflows behind `/new-unit`,
+`/diagnose`, `/audit-unit`, `/update-unit`, and `/pull-alpine` — into your
+project's `.claude/skills` directory, where Claude Code discovers them.
+
+The skills are baked into the `yoe` binary, so installing them needs no network
+access and the versions always match the tool you're running.
+
+```sh
+# Copy the skills into ./.claude/skills (run from anywhere in the project)
+yoe skills install
+
+# List the skills embedded in this binary
+yoe skills list
+
+# Refresh the yoe-managed skills to this binary's versions after `yoe update`
+yoe skills update
+```
+
+`install` is conservative: a skill whose directory already exists is left
+untouched so your local edits survive, and the command reports it as skipped.
+Pass `--force` to overwrite, or use `update`, which always refreshes the
+yoe-managed skills to the binary's versions. Either way, only the skills `[yoe]`
+ships are touched — any skills you authored under `.claude/skills` are never
+read or modified.
+
+The installed copies are plain Markdown files that belong to your project. Edit
+them to fit your workflow; the next `yoe skills update` will overwrite your
+changes to the yoe-managed skills, so keep heavily customized variants under a
+different name. When run inside a project (a directory with `PROJECT.star`,
+found by walking up from the current directory), the skills land at the project
+root; otherwise they land in the current directory.
 
 ### Custom Commands
 

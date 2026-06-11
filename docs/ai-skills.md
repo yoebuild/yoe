@@ -5,6 +5,41 @@ CLI equivalent, the primary interface for many workflows is a conversation with
 an AI assistant that understands the build system deeply. This document defines
 the skills (AI-driven workflows) that ship with `[yoe]`.
 
+## Installing the skills
+
+The skills ship two ways — pick whichever fits how you like to work.
+
+**Bundled with `yoe` (editable copies you own).** The skills are baked into the
+`yoe` binary; install them into your project's `.claude/skills` directory, where
+Claude Code discovers them:
+
+```sh
+yoe skills install   # copy the skills into ./.claude/skills
+yoe skills list      # list the skills embedded in this binary
+yoe skills update    # refresh them after upgrading yoe
+```
+
+`yoe init` does this automatically for new projects. The installed files are
+plain Markdown that belong to your project — yours to read, tweak, and commit.
+`install` won't clobber a skill you've already edited (it skips and tells you);
+`yoe skills update` refreshes the yoe-managed skills to the running binary's
+versions, so keep heavily customized variants under a different name.
+
+**As a Claude Code plugin (managed, auto-updating).** If you'd rather let Claude
+Code manage updates, add the marketplace and install the plugin from inside
+Claude Code:
+
+```text
+/plugin marketplace add yoebuild/yoe
+/plugin install yoe@yoe
+```
+
+Both paths come from one source — `.claude/skills` in the
+[yoebuild/yoe](https://github.com/yoebuild/yoe) repository — so they deliver
+identical skills. Choose `yoe skills install` when you want to edit the skills,
+and the plugin when you want Claude Code to keep them updated for you. See
+[`yoe skills`](yoe-tool.md) for the full command behavior.
+
 ## Why AI-First
 
 Embedded Linux development has a steep learning curve — not because the concepts
@@ -254,7 +289,6 @@ References the actual Yocto documentation and provides side-by-side comparisons.
 
 ## Implementation Notes
 
-Skills are implemented as Claude Code plugins that ship with the `yoe` tool.
 Each skill:
 
 - Has access to the full project state via `yoe desc`, `yoe refs`, `yoe graph`,

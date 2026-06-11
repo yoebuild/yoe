@@ -1,5 +1,19 @@
 {
   "name": "yoe",
   "version": "0.1.0",
-  "description": "Yoe embedded Linux builder skills"
+  "description": "AI skills for building embedded Linux distributions with yoe",
+  "author": {
+    "name": "Cliff Brake",
+    "email": "cbrake@bec-systems.com"
+  },
+  "homepage": "https://github.com/yoebuild/yoe",
+  "repository": "https://github.com/yoebuild/yoe",
+  "license": "Apache-2.0",
+  "keywords": [
+    "embedded-linux",
+    "build-system",
+    "yoe",
+    "packaging",
+    "starlark"
+  ]
 }
