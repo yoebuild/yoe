@@ -5,6 +5,41 @@ CLI equivalent, the primary interface for many workflows is a conversation with
 an AI assistant that understands the build system deeply. This document defines
 the skills (AI-driven workflows) that ship with `[yoe]`.
 
+## Installing the skills
+
+The skills ship two ways — pick whichever fits how you like to work.
+
+**Bundled with `yoe` (editable copies you own).** The skills are baked into the
+`yoe` binary; install them into your project's `.claude/skills` directory, where
+Claude Code discovers them:
+
+```sh
+yoe skills install   # copy the skills into ./.claude/skills
+yoe skills list      # list the skills embedded in this binary
+yoe skills update    # refresh them after upgrading yoe
+```
+
+`yoe init` does this automatically for new projects. The installed files are
+plain Markdown that belong to your project — yours to read, tweak, and commit.
+`install` won't clobber a skill you've already edited (it skips and tells you);
+`yoe skills update` refreshes the yoe-managed skills to the running binary's
+versions, so keep heavily customized variants under a different name.
+
+**As a Claude Code plugin (managed, auto-updating).** If you'd rather let Claude
+Code manage updates, add the marketplace and install the plugin from inside
+Claude Code:
+
+```text
+/plugin marketplace add yoebuild/yoe
+/plugin install yoe@yoe
+```
+
+Both paths come from one source — `.claude/skills` in the
+[yoebuild/yoe](https://github.com/yoebuild/yoe) repository — so they deliver
+identical skills. Choose `yoe skills install` when you want to edit the skills,
+and the plugin when you want Claude Code to keep them updated for you. See
+[`yoe skills`](yoe-tool.md) for the full command behavior.
+
 ## Why AI-First
 
 Embedded Linux development has a steep learning curve — not because the concepts
@@ -251,42 +286,6 @@ References the actual Yocto documentation and provides side-by-side comparisons.
 /diff-from-yocto "MACHINE_FEATURES"
 /diff-from-yocto sstate-cache
 ```
-
-## Installing the skills
-
-The skills are baked into the `yoe` binary. To make them available to Claude
-Code in your project, install them into the project's `.claude/skills`
-directory:
-
-```sh
-yoe skills install   # copy the skills into ./.claude/skills
-yoe skills list      # list the skills embedded in this binary
-yoe skills update    # refresh them after upgrading yoe
-```
-
-This is a deliberate departure from Claude Code's plugin marketplace: rather than
-a managed plugin cache you can't easily edit, `yoe skills install` writes plain
-Markdown files that belong to your project. They're yours to read, tweak, and
-commit. `install` won't clobber a skill you've already edited (it skips and tells
-you); `yoe skills update` refreshes the yoe-managed skills to the running
-binary's versions, so keep heavily customized variants under a different name.
-See [`yoe skills`](yoe-tool.md) for the full behavior.
-
-### Or install as a Claude Code plugin
-
-`[yoe]` also publishes the same skills as a Claude Code plugin through a
-marketplace, for those who prefer managed, auto-updating installs over editable
-copies. From inside Claude Code:
-
-```text
-/plugin marketplace add yoebuild/yoe
-/plugin install yoe@yoe
-```
-
-The plugin and the embedded skills come from one source — `.claude/skills` in
-the [yoebuild/yoe](https://github.com/yoebuild/yoe) repository — so both paths
-deliver identical skills. Choose `yoe skills install` when you want to edit the
-skills, and the plugin when you want Claude Code to keep them updated for you.
 
 ## Implementation Notes
 

@@ -212,7 +212,10 @@ this can:
 - **Generate machine definitions from board names** —
   `/new-machine "Raspberry Pi 5"`
 
-See [AI Skills](docs/ai-skills.md) for the full catalog of AI-driven workflows.
+Add these skills to your project with `yoe skills install` (or as a Claude Code
+plugin via `/plugin marketplace add yoebuild/yoe`). See
+[AI Skills](docs/ai-skills.md) for installation details and the full catalog of
+AI-driven workflows.
 
 ## 💡 Inspirations
 
