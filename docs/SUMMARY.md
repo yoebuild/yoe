@@ -54,5 +54,6 @@
 # Project
 
 - [Comparisons](comparisons.md)
+- [yoe and Nix](nix.md)
 - [Roadmap](roadmap.md)
 - [Changelog](CHANGELOG.md)

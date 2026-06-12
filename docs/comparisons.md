@@ -1062,6 +1062,11 @@ Nix is the most intellectually ambitious of the systems `[yoe]` draws from. Its
 ideas about reproducibility and declarative configuration are adopted wholesale;
 its implementation complexity is not.
 
+This section is the head-to-head comparison. For a deeper exploration of the
+inverse question — whether `[yoe]` could _build with_ Nix rather than against it,
+letting Nix realize the package graph while `[yoe]` provides orchestration,
+custom units, image generation, and BSPs — see [yoe and Nix](nix.md).
+
 **What `[yoe]` adopts from Nix:**
 
 - **Content-addressed build cache** — build outputs keyed by their inputs so

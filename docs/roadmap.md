@@ -13,6 +13,9 @@
 
 ## Next Features
 
+- Can we watch the unit state files and automatically update the TUI if
+  something changes? The idea is you could be building in two different TUIs and
+  both TUIs would show current status of the other.
 - Be able to specify distro deps by version if necessary (another optional
   nested level).
 - Update landing page to include reflect latest developments.
@@ -67,9 +70,6 @@
   source and record this in the unit build state file. Display this state on
   main unit and unit detail page. Thinking several states: nothing, up,
   modified, etc.
-- Can we watch the unit state files and automatically update the TUI if
-  something changes? The idea is you could be building in two different TUIs and
-  both TUIs would show current status of the other.
 - Alpine should have unit deps, not just runtime deps
 - Alpine packages like gvim provides vim. This could be a source of pain.
 - Document BSP and package moat
