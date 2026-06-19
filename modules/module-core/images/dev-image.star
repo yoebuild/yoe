@@ -23,16 +23,21 @@ _APT_BASE = [
     "network-manager",
 ]
 
-# Diagnostic/editor userland shared by the apt distros.
-_APT_DEV = [
+# Tools whose package name is identical on every distro, so they live once in
+# the shared artifacts list rather than being repeated per distro_artifacts branch.
+_COMMON_DEV = [
+    "strace",
     "ca-certificates",
     "curl",
     "less",
     "file",
     "htop",
-    "strace",
-    "procps",
     "iproute2",
+]
+
+# Apt-only leaf tools (names differ from or are absent on Alpine).
+_APT_DEV = [
+    "procps",
     "iputils-ping",
     "vim-tiny",
 ]
@@ -47,14 +52,14 @@ base_files(
 
 image(
     name = "dev-image",
-    artifacts = ["linux", "bash"],
+    artifacts = ["linux", "bash"] + _COMMON_DEV,
     distro_artifacts = {
         "alpine": [
             "base-files-dev", "busybox", "busybox-binsh", "musl", "kmod",
             "util-linux", "e2fsprogs", "eudev", "openrc",
-            "network-config", "iproute2", "dhcpcd", "ntp-client", "mdnsd",
-            "openssh", "ca-certificates", "curl", "simpleiot", "less", "file",
-            "procps-ng", "htop", "strace", "apk-tools", "yazi", "zellij", "helix",
+            "network-config", "dhcpcd", "ntp-client", "mdnsd",
+            "openssh", "simpleiot",
+            "procps-ng", "apk-tools", "yazi", "zellij", "helix",
         ],
         "debian": _APT_BASE + _APT_DEV,
         "ubuntu": _APT_BASE + ["nm-manage-ethernet"] + _APT_DEV,
