@@ -110,11 +110,33 @@ def image(name, artifacts=[], distro_artifacts={}, hostname=None, timezone="", l
     elif _is_apt_distro(effective_distro):
         all_artifacts = all_artifacts + _DEBIAN_ESSENTIAL
 
+    # Resolve the machine kernel for this image's distro. ctx.provides is built
+    # once from the project default machine and is distro-blind, so a per-distro
+    # kernel (machine_config.kernel.distro_unit) can only be picked here, where
+    # the effective distro is known. Single-unit machines register
+    # provides["linux"] globally and need no override; per-distro machines carry
+    # no global entry, so image() substitutes the unit for effective_distro.
+    kernel_provides = None
+    kernel_unit = None
+    mc = getattr(ctx, "machine_config", None)
+    if mc != None:
+        k = getattr(mc, "kernel", None)
+        if k != None:
+            kernel_provides = getattr(k, "provides", None)
+            du = getattr(k, "distro_unit", None)
+            if du:
+                if effective_distro not in du:
+                    fail("image %s: machine kernel has no entry for distro %r" % (name, effective_distro))
+                kernel_unit = du[effective_distro]
+
     # Resolve provides (e.g., "linux" → "linux-rpi4")
     explicit = []
     for a in all_artifacts:
-        r = ctx.provides.get(a, None)
-        explicit.append(r if r != None else a)
+        if kernel_unit != None and a == kernel_provides:
+            explicit.append(kernel_unit)
+        else:
+            r = ctx.provides.get(a, None)
+            explicit.append(r if r != None else a)
 
     # Resolve transitive runtime dependencies for the rootfs / build path.
     # `explicit` (above) is preserved separately for UX surfaces like the
