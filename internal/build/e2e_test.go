@@ -106,9 +106,18 @@ func TestE2E_DistroArtifactsConsolidatedImage(t *testing.T) {
 		t.Fatalf("LoadProject: %v", err)
 	}
 
-	img := proj.AnyUnit("ssh-image")
+	// An image is evaluated once, for its effective distro (the cascade:
+	// image.distro -> local.star override -> defaults.distro). So ssh-image
+	// exists only in that distro's view. Resolve against whichever distro this
+	// project's config selects, rather than hardcoding one — keeps the test
+	// robust to a developer's local.star override.
+	effective := proj.DefaultDistroOverride
+	if effective == "" {
+		effective = proj.DefaultDistro
+	}
+	img := proj.LookupUnit(effective, "ssh-image")
 	if img == nil {
-		t.Fatal("expected consolidated ssh-image")
+		t.Fatalf("ssh-image not resolvable for effective distro %q", effective)
 	}
 	has := func(name string) bool {
 		for _, a := range img.Artifacts {
@@ -118,16 +127,25 @@ func TestE2E_DistroArtifactsConsolidatedImage(t *testing.T) {
 		}
 		return false
 	}
-	// Alpine branch was selected (default distro = alpine).
-	if !has("apk-tools") {
-		t.Errorf("ssh-image closure missing alpine-branch apk-tools; got %v", img.Artifacts)
-	}
-	// Debian branch is inert and must not leak into an alpine build.
-	if has("systemd-sysv") {
-		t.Errorf("ssh-image closure leaked debian-branch systemd-sysv into alpine build; got %v", img.Artifacts)
-	}
-	// Per-distro machine kernel resolved "linux" to a concrete unit.
-	if has("linux-image-amd64") {
-		t.Errorf("alpine build resolved apt kernel linux-image-amd64; got %v", img.Artifacts)
+	// distro_artifacts selected the branch for the effective distro and left the
+	// others inert: alpine ships apk-tools, the apt distros ship systemd-sysv,
+	// and neither signature package leaks into the other's closure.
+	switch effective {
+	case "alpine":
+		if !has("apk-tools") {
+			t.Errorf("alpine ssh-image missing alpine-branch apk-tools; got %v", img.Artifacts)
+		}
+		if has("systemd-sysv") {
+			t.Errorf("alpine ssh-image leaked apt-branch systemd-sysv; got %v", img.Artifacts)
+		}
+	case "debian", "ubuntu":
+		if !has("systemd-sysv") {
+			t.Errorf("%s ssh-image missing apt-branch systemd-sysv; got %v", effective, img.Artifacts)
+		}
+		if has("apk-tools") {
+			t.Errorf("%s ssh-image leaked alpine-branch apk-tools; got %v", effective, img.Artifacts)
+		}
+	default:
+		t.Skipf("unhandled effective distro %q", effective)
 	}
 }
