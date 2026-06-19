@@ -35,6 +35,7 @@
 - [Naming and Resolution](naming-and-resolution.md)
 - [Catalog and Materialization](catalog.md)
 - [File Templates](file-templates.md)
+- [Language Choices: Go and Starlark](language-choices.md)
 - [Build & Configuration Languages](build-languages.md)
 - [Security and Threat Model](security.md)
 
