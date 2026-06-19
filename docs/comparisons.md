@@ -602,6 +602,44 @@ comfortable with BitBake and the Yocto layer model, and want native-under-QEMU
 builds without cross-compilation — particularly if your team already knows Yocto
 tooling and would rather reuse it against Debian than learn a new system.
 
+**[ELBE](https://elbe-rfs.org/)** ("Embedded Linux Build Environment",
+[source](https://github.com/Linutronix/elbe)) is a mature, Python, GPLv3 image
+builder maintained by [Linutronix](https://linutronix.de/). It is the
+longest-running of the embedded-Debian tools here and shares two of `[yoe]`'s
+core bets while differing sharply on configuration:
+
+- **A single XML file describes the whole image.** One project XML lists the
+  Debian suite, architecture, package set, partition layout, and finishing
+  steps. This is a declarative model like `[yoe]`'s, but flat — a document, not a
+  dependency graph — and the customization escape hatch is embedded shell
+  (`<finetuning>`/`<command>` blocks) rather than a typed unit DAG.
+- **Native builds under QEMU, not cross-compilation.** ELBE runs the whole build
+  inside a privileged VM it calls the `initvm` (QEMU, optionally via libvirt),
+  bootstraps the rootfs with `debootstrap`, and builds any custom source packages
+  natively in a `qemu`-emulated chroot with `pbuilder` — the same
+  native-under-emulation choice `[yoe]` and isar make, at VM rather than
+  container granularity.
+- **Prebuilt distro packages for the base, source only where needed.** Standard
+  packages come straight from the Debian archive; only a project's own
+  applications are built from source. This is the same two-tier split `[yoe]`
+  gets from `alpine_pkg`/`apt_feed` plus source units.
+- **Strong license and bill-of-materials reporting.** ELBE's standout feature is
+  compliance tooling: it emits a per-package source and licence manifest and can
+  archive the exact sources that went into an image. This is precisely the
+  legal-compliance tooling the introduction notes `[yoe]` does not yet have, and
+  ELBE is good prior art for it.
+
+Contrast with `[yoe]`: ELBE inherits Debian's size floor (~150 MB+ and the
+`.deb` maintainer-script model), expresses an image as one flat XML document with
+shell finetuning rather than a content-addressed Starlark unit graph, and has no
+per-unit cache that doubles as the on-device package feed. Its build unit is a
+whole-image VM run, where `[yoe]` caches and reuses at per-unit grain.
+
+**When to prefer ELBE:** when you want a Debian/Ubuntu device image with
+first-class license and source-archive reporting for compliance audits, are
+comfortable describing the image in XML with shell finetuning, and value a mature
+tool with years of production use over a finer-grained from-source build graph.
+
 **[aptly](https://www.aptly.info/)** is the canonical tool for running a
 private, pinned Debian/Ubuntu repository. For teams that do ship Debian-based
 devices, aptly plays the role that `[yoe]`'s S3 package cache plays:
