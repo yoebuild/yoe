@@ -188,31 +188,31 @@ system closure lands around **1–1.5 GB uncompressed** — versus yoe's
 single-digit-MB base, two to three orders of magnitude more. For context against
 the other systems in [Comparisons](comparisons.md):
 
-| Target                                   | On-device floor (no app payload)   |
-| ---------------------------------------- | ---------------------------------- |
-| yoe / Alpine (musl + busybox, FHS)       | ~5 MB                              |
-| Debian `minbase` (glibc, no systemd)     | ~150 MB                           |
-| NixOS minimal closure (glibc + systemd)  | ~1,500 MB (~400–600 MB compressed) |
-| Ubuntu Core (snaps, 4× retention)        | ~2,500 MB                         |
+| Target                                  | On-device floor (no app payload)   |
+| --------------------------------------- | ---------------------------------- |
+| yoe / Alpine (musl + busybox, FHS)      | ~5 MB                              |
+| Debian `minbase` (glibc, no systemd)    | ~150 MB                            |
+| NixOS minimal closure (glibc + systemd) | ~1,500 MB (~400–600 MB compressed) |
+| Ubuntu Core (snaps, 4× retention)       | ~2,500 MB                          |
 
 The useful question is _where_ that comes from, because most of it is **not**
 Nix-specific:
 
-- **The dominant cost is the userland choice, not the store model.** glibc + full
-  GNU coreutils/util-linux + bash + perl + **systemd** is roughly the same floor
-  Debian and Avocado pay; systemd's closure alone (dbus, kmod, util-linux, pam,
-  lvm2, …) is ~100–200 MB. Swap that against yoe's musl + busybox (one
-  multiplexed binary, single-digit MB) and you have already explained most of the
-  gap — and it is the _same_ gap [Comparisons](comparisons.md#vs-debian) draws
-  against Debian, not something unique to Nix.
+- **The dominant cost is the userland choice, not the store model.** glibc +
+  full GNU coreutils/util-linux + bash + perl + **systemd** is roughly the same
+  floor Debian and Avocado pay; systemd's closure alone (dbus, kmod, util-linux,
+  pam, lvm2, …) is ~100–200 MB. Swap that against yoe's musl + busybox (one
+  multiplexed binary, single-digit MB) and you have already explained most of
+  the gap — and it is the _same_ gap [Comparisons](comparisons.md#vs-debian)
+  draws against Debian, not something unique to Nix.
 - **The genuinely Nix-specific surcharge is modest — tens of percent on top.**
-  Three store-model properties add weight beyond the userland choice: store paths
-  are atomic, so you cannot file-slice them the way Canonical's Chisel carves a
-  `.deb` or Alpine splits `-doc`/`-dev` (multi-output derivations recover much of
-  this, not all); multiple library versions coexist whenever the dependency graph
-  is not perfectly unified; and cross-package sharing happens only through
-  exact-file hardlink dedup (`nix-store --optimise`), never the natural FHS
-  sharing of a single `/usr/lib/libfoo.so`.
+  Three store-model properties add weight beyond the userland choice: store
+  paths are atomic, so you cannot file-slice them the way Canonical's Chisel
+  carves a `.deb` or Alpine splits `-doc`/`-dev` (multi-output derivations
+  recover much of this, not all); multiple library versions coexist whenever the
+  dependency graph is not perfectly unified; and cross-package sharing happens
+  only through exact-file hardlink dedup (`nix-store --optimise`), never the
+  natural FHS sharing of a single `/usr/lib/libfoo.so`.
 - **Compression and trimming soften it but cannot reach Alpine territory.** A
   read-only squashfs/erofs root cuts the closure ~2–3×, and aggressive embedded
   trimming (`environment.noXlibs`, dropping perl from activation, trimming
@@ -221,15 +221,15 @@ Nix-specific:
 - **One place the Nix model genuinely wins: rollback history is nearly free.**
   Each retained generation is mostly shared through hardlink dedup, so keeping N
   rollback points costs about one closure plus deltas — far cheaper than Ubuntu
-  Core's 4× full-squashfs retention or a naive A/B scheme's 2× full-image copies.
-  Once you have accepted the ~1 GB floor, keeping history is cheap.
+  Core's 4× full-squashfs retention or a naive A/B scheme's 2× full-image
+  copies. Once you have accepted the ~1 GB floor, keeping history is cheap.
 
 The bottom line: adopting Nix on the device means accepting roughly a
 Debian-with-systemd floor _plus_ a store-model surcharge, and trading away yoe's
 single-digit-MB thesis entirely below the image line. For a board with tens of
 GB of storage this is a non-issue; for a cost-sensitive product with 128–512 MB
-of flash it is disqualifying before any application code is added — the same line
-the [Ubuntu Core](comparisons.md#vs-ubuntu-core) comparison draws.
+of flash it is disqualifying before any application code is added — the same
+line the [Ubuntu Core](comparisons.md#vs-ubuntu-core) comparison draws.
 
 ### yoe's content-addressed cache becomes vestigial for the package layer
 
