@@ -24,8 +24,10 @@ The default and most mature configuration is:
   `/etc/runlevels/default/<name>`. busybox init remains PID 1; `/etc/inittab`
   triggers OpenRC's `sysinit`, `boot`, and `default` runlevels in order. There
   is no systemd integration and no plan to add one inside `module-core`.
-- **apk packaging.** All yoe units produce signed `.apk` artifacts. Packages are
-  installed with apk-tools at image-assembly time.
+- **apk packaging.** On the Alpine base, all yoe units produce signed `.apk`
+  artifacts, installed with apk-tools at image-assembly time. (On the Debian and
+  Ubuntu bases, units produce signed `.deb`s installed with dpkg/apt instead —
+  see below.)
 
 This stack runs cleanly on x86_64, arm64, and (with limitations) riscv64. It
 boots on QEMU, Raspberry Pi, BeagleBone, and any board where an upstream
@@ -303,8 +305,9 @@ upstream-mirror model, and the systemd image-assembly integration.
 Yoe does not have a "bootstrap" phase in the `debootstrap` sense — there is no
 separate first stage that builds a minimum environment before normal package
 installation can run. The rootfs assembly is a single procedure that works the
-same way today on Alpine and would work the same way on a glibc/systemd base
-tomorrow:
+same way across bases — Alpine today, and the glibc/systemd Debian and Ubuntu
+bases today as well. The shape is the same; the installer and metadata layout
+follow the base's package format. On the Alpine base it runs as:
 
 1. `mkdir <rootfs>` — the starting rootfs is an empty directory.
 2. Create the apk DB skeleton:
@@ -316,15 +319,19 @@ tomorrow:
 5. `apk add --root <rootfs> --initdb <package list>` — run from inside the
    toolchain container, against the project's feed.
 
-That is the whole assembly. Everything in the rootfs lands via apks. The first
-packages installed (`base-files`, `musl` or `libc6`, the userland shell,
-apk-tools, init system) carry the filesystem skeleton — `/etc/passwd`,
+That is the whole assembly. Everything in the rootfs lands via packages. The
+first packages installed (`base-files`, `musl` or `libc6`, the userland shell,
+the package tool, init system) carry the filesystem skeleton — `/etc/passwd`,
 `/etc/group`, `/dev`, `/proc` mountpoints, default config files — inside their
-data segments.
+data segments. The Debian and Ubuntu bases follow the equivalent steps with
+`dpkg`/`apt` against a signed apt repo instead: initialize the dpkg admin dir,
+trust the project key, point at the project's apt feed, and install the
+foundation set.
 
 The only things that have to exist before this loop runs are the **toolchain
-container** (provides apk-tools as the orchestrator binary) and the **project's
-signed feed** (provides the apks to install).
+container** (provides the package tool — apk-tools or dpkg/apt — as the
+orchestrator binary) and the **project's signed feed** (provides the packages to
+install).
 
 ### What varies by base
 

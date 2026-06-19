@@ -36,11 +36,11 @@ yoe shell           Open an interactive shell in a unit's build sandbox  [planne
 yoe dev             Manage source modifications (extract, diff, status)
 yoe flash           Write an image to a device/SD card
 yoe run             Run an image in QEMU
-yoe serve           Serve the project's apk repo over HTTP+mDNS
+yoe serve           Serve the project's package repo over HTTP+mDNS
 yoe deploy          Build and install a unit on a running yoe device
 yoe device          Manage repo configuration on a target device
 yoe module          Manage external modules (fetch, sync, list)
-yoe repo            Manage the local apk package repository
+yoe repo            Manage the local package repository
 yoe cache           Manage the build cache (local and remote)  [planned]
 yoe bundle          Export/import content-addressed bundles (air-gapped)  [planned]
 yoe source          Download and manage source archives/repos
@@ -98,10 +98,10 @@ Claude Code is ready to help the moment you open the project. See
 ### `yoe build`
 
 Builds one or more units. Package units (`unit()`, `autotools()`, etc.) produce
-`.apk` packages and publish them to the local repository. Image units
-(`image()`) assemble a root filesystem and produce a disk image. The class
-function used in the `.star` file determines the behavior — the command is the
-same for both.
+packages (`.apk` for Alpine/musl targets, `.deb` for Debian/Ubuntu/glibc
+targets) and publish them to the local repository. Image units (`image()`)
+assemble a root filesystem and produce a disk image. The class function used in
+the `.star` file determines the behavior — the command is the same for both.
 
 ```sh
 # Build a single package unit
@@ -163,22 +163,23 @@ up front rather than mid-build.
    dependencies. Validate that all referenced units exist and the graph is
    acyclic. **If any errors are found, stop here** — no partial builds.
 4. **Check cache** — compute a content hash of the unit + source + build
-   dependencies. If a cached `.apk` with that hash exists (locally or in a
-   remote cache), skip the build.
+   dependencies. If a cached package (`.apk` or `.deb`) with that hash exists
+   (locally or in a remote cache), skip the build.
 5. **Fetch source** — download the source archive or clone the git repo (see
    `yoe source` below). Sources are cached in `$YOE_CACHE/sources/`.
 6. **Prepare build environment** — set up an isolated build root with only
-   declared build dependencies installed via `apk`. This ensures hermetic
-   builds.
+   declared build dependencies installed via the target's package manager (`apk`
+   for Alpine, `apt` for Debian/Ubuntu). This ensures hermetic builds.
 7. **Execute build steps** — run the build commands defined by the class
    function in the build root. The environment provides:
    - `$PREFIX` — install prefix (typically `/usr`)
    - `$DESTDIR` — staging directory for installed files
    - `$NPROC` — number of available CPU cores
    - `$ARCH` — target architecture
-8. **Package** — collect files from `$DESTDIR`, generate `.PKGINFO` from the
-   unit metadata, and create the `.apk` archive.
-9. **Publish** — add the `.apk` to the local repository and update the repo
+8. **Package** — collect files from `$DESTDIR`, generate the package metadata
+   from the unit fields, and create the package archive (`.apk` for Alpine/musl
+   targets, `.deb` for Debian/Ubuntu/glibc targets).
+9. **Publish** — add the package to the local repository and update the repo
    index.
 
 **For image units** (`image()` class), steps 5-9 are replaced with image
@@ -191,9 +192,10 @@ assembly:
 5. **Read machine definition** — evaluate `machines/<name>.star` for
    architecture, kernel, bootloader, and partition layout.
 6. **Create empty rootfs** — set up a temporary directory.
-7. **Install packages** — run `apk add --root <rootfs>` with the `[yoe]`
-   repository to install all declared packages. apk handles dependency
-   resolution.
+7. **Install packages** — install all declared packages into `<rootfs>` from the
+   `[yoe]` repository using the target's package manager (`apk add --root` for
+   Alpine, `apt`/`dpkg` for Debian/Ubuntu). The package manager handles
+   dependency resolution.
 8. **Apply configuration** — set hostname, timezone, locale, and enable services
    per the image unit's configuration (via the active init system — busybox init
    today, systemd a possible future option).
@@ -417,17 +419,19 @@ yoe serve --no-mdns
 ```
 
 The default port is pinned (`8765`) so the URL written by `yoe device repo add`
-on a target survives `yoe serve` restarts. apks and `APKINDEX.tar.gz` are
-already signed by the project key, so plain HTTP transport is fine for
-development. See [feed-server.md](feed-server.md) for the full dev-loop guide.
+on a target survives `yoe serve` restarts. Packages and the repo index
+(`APKINDEX.tar.gz` for apk, the `Packages`/`Release` files for apt) are already
+signed by the project key, so plain HTTP transport is fine for development. See
+[feed-server.md](feed-server.md) for the full dev-loop guide.
 
 ### `yoe deploy`
 
 Builds a unit, exposes the project's repo as a feed (reusing a running
 `yoe serve` if one is up, otherwise spinning up an ephemeral feed on the same
-pinned port), then ssh's to the device and runs `apk add --upgrade <unit>`.
-Transitive dependencies resolve on the device against the same `APKINDEX.tar.gz`
-production OTA uses.
+pinned port), then ssh's to the device and installs the unit with the device's
+package manager (`apk add --upgrade <unit>` on Alpine, `apt install` on
+Debian/Ubuntu). Transitive dependencies resolve on the device against the same
+repo index production OTA uses.
 
 ```sh
 # Build myapp and install it on dev-pi over the LAN
@@ -443,24 +447,26 @@ yoe deploy myapp pi@dev-pi.local
 yoe deploy myapp 10.0.5.42 --host-ip 10.0.5.1
 ```
 
-The repo file `/etc/apk/repositories.d/yoe-dev.list` is left in place after
-deploy, so the device stays configured to pull from the dev host on any future
-`apk add` from the device. Use `yoe device repo remove <host>` to tear it down.
-Image targets error with a pointer to `yoe flash`.
+The dev-feed repo entry (under `/etc/apk/repositories.d/` on Alpine,
+`/etc/apt/sources.list.d/` on Debian/Ubuntu) is left in place after deploy, so
+the device stays configured to pull from the dev host on any future install from
+the device. Use `yoe device repo remove <host>` to tear it down. Image targets
+error with a pointer to `yoe flash`.
 
 ### `yoe device`
 
-Configures `/etc/apk/repositories.d/` on a target device so `apk add` from the
-device pulls from your dev feed. Useful standalone (without an immediate
-`yoe deploy`) to set up a fresh device, configure several devices for a
-multi-device QA bench, or inspect what's currently configured.
+Configures the device's package sources (`/etc/apk/repositories.d/` on Alpine,
+`/etc/apt/sources.list.d/` on Debian/Ubuntu) so an install from the device pulls
+from your dev feed. Useful standalone (without an immediate `yoe deploy`) to set
+up a fresh device, configure several devices for a multi-device QA bench, or
+inspect what's currently configured.
 
 ```sh
 # Auto-discover the running yoe serve on the LAN, configure dev-pi
 yoe device repo add dev-pi.local
 
-# Same, plus push the project signing pubkey to /etc/apk/keys/ on the
-# target — needed if the device was flashed before the project key existed
+# Same, plus push the project signing pubkey to the device's trusted-key
+# store — needed if the device was flashed before the project key existed
 yoe device repo add dev-pi.local --push-key
 
 # Configure a QEMU vm started with `yoe run` (default 2222→22 forward)
@@ -472,14 +478,15 @@ yoe device repo add 192.168.4.30 --feed http://laptop.local:8765/myproj
 # Tear down
 yoe device repo remove dev-pi.local
 
-# Inspect /etc/apk/repositories and /etc/apk/repositories.d/*.list
+# Inspect the device's configured package sources
 yoe device repo list dev-pi.local
 ```
 
-After `yoe device repo add`, run `apk update && apk add htop` (or any unit your
-project builds) directly on the device. `yoe deploy` writes the same file by
-default (`yoe-dev.list`), so the first deploy doubles as the persistent feed
-config.
+After `yoe device repo add`, run the device's index-refresh-then-install
+(`apk update && apk add htop` on Alpine, `apt update && apt install htop` on
+Debian/Ubuntu — or any unit your project builds) directly on the device.
+`yoe deploy` writes the same dev-feed entry by default, so the first deploy
+doubles as the persistent feed config.
 
 ### `yoe module`
 
@@ -544,7 +551,7 @@ Module                             Ref        Status
 
 ### `yoe repo`
 
-Manages the local apk package repository.
+Manages the local package repository.
 
 > **Status:** `yoe repo list`, `yoe repo info`, and `yoe repo remove` are
 > implemented. `yoe repo push` and `yoe repo pull` (S3-compatible remote
@@ -568,7 +575,8 @@ yoe repo pull                 # planned
 ```
 
 The local repository lives at `repo/<project-name>/` within the project
-directory. It's a standard apk-compatible repository — you can point `apk` on a
+directory. It's a standard distro-native repository (apk-format for Alpine,
+apt-format for Debian/Ubuntu) — you can point the matching package manager on a
 running device at it directly.
 
 ### `yoe cache` (planned)
@@ -614,13 +622,13 @@ yoe cache verify
 yoe cache stats
 ```
 
-**Cache push/pull vs. repo push/pull:** `yoe repo` manages the **apk package
-repository** (the repo index that `apk` consumes during image assembly).
-`yoe cache` manages the **build cache** (content-addressed build outputs keyed
-by input hash). In practice, both store `.apk` files, but the cache is keyed by
-build inputs while the repo is indexed by package name/version. Pushing to the
-cache shares _build avoidance_ with CI/team. Pushing to the repo shares
-_installable packages_ with devices.
+**Cache push/pull vs. repo push/pull:** `yoe repo` manages the **package
+repository** (the repo index the device's package manager consumes during image
+assembly). `yoe cache` manages the **build cache** (content-addressed build
+outputs keyed by input hash). In practice, both store package files (`.apk` or
+`.deb`), but the cache is keyed by build inputs while the repo is indexed by
+package name/version. Pushing to the cache shares _build avoidance_ with
+CI/team. Pushing to the repo shares _installable packages_ with devices.
 
 ### `yoe source`
 
@@ -894,8 +902,8 @@ The **Info** tab shows the unit's place in the project plus its build streams:
   build
 
 The **Files** tab lists every file the unit installed into its `destdir` (what
-`apk` packages into the unit's `.apk`) with its on-disk size. Sortable by path
-or size — handy for spotting the biggest payloads or confirming a binary
+gets packaged into the unit's `.apk` or `.deb`) with its on-disk size. Sortable
+by path or size — handy for spotting the biggest payloads or confirming a binary
 actually landed where you expected. Symlinks are dimmed; directories are
 omitted. Empty until the unit has been built at least once.
 
@@ -1202,9 +1210,10 @@ yoe shell --machine beaglebone-black
 
 Inside the shell, `$SRCDIR`, `$DESTDIR`, `$PREFIX`, `$ARCH`, and `$NPROC` are
 set exactly as `yoe build` would set them, and the unit's resolved `-dev`
-dependencies are already installed into the sandbox via `apk`. Exiting the shell
-tears down the sandbox — it is not persistent, so probing with `apk add <pkg>`
-for exploration does not pollute subsequent builds.
+dependencies are already installed into the sandbox via the target's package
+manager (`apk` or `apt`). Exiting the shell tears down the sandbox — it is not
+persistent, so probing with `apk add <pkg>` / `apt install <pkg>` for
+exploration does not pollute subsequent builds.
 
 This replaces the traditional SDK shell (Yocto's `environment-setup-*`). See
 [Development Environments](dev-env.md#yoe-shell) for the full model.
@@ -1237,10 +1246,10 @@ yoe bundle import bundle-base-v1.0.tar --verify keys/bundle.pub
 yoe bundle inspect bundle.tar
 ```
 
-A bundle contains built `.apk`s, source archives, module checkouts, and
-toolchain container OCI archives — all keyed by content hash. After
-`yoe bundle import`, subsequent `yoe build` runs resolve everything from the
-local cache with no network access required.
+A bundle contains built packages (`.apk` or `.deb`), source archives, module
+checkouts, and toolchain container OCI archives — all keyed by content hash.
+After `yoe bundle import`, subsequent `yoe build` runs resolve everything from
+the local cache with no network access required.
 
 ### `yoe clean`
 
@@ -1288,14 +1297,16 @@ privilege to remove root- and service-user-owned files. You don't need `sudo`.
    topologically sorts this graph and builds in order, parallelizing where the
    DAG allows.
 
-2. **Install-time** — unit `runtime_deps` entries are written into the `.apk`'s
-   `.PKGINFO`. When `apk add` runs during image assembly, it pulls in runtime
-   dependencies automatically.
+2. **Install-time** — unit `runtime_deps` entries are written into the package's
+   metadata (`.PKGINFO` for `.apk`, the control file for `.deb`). When the
+   package manager (`apk` or `apt`) runs during image assembly, it pulls in
+   runtime dependencies automatically.
 
 This means:
 
 - Build dependencies are resolved by `yoe` (it knows the unit graph).
-- Runtime dependencies are resolved by `apk` (it knows the package graph).
+- Runtime dependencies are resolved by the package manager (`apk` or `apt`,
+  which knows the package graph).
 - The unit author declares both; the tools handle the rest.
 
 ### Config Propagation (planned)
@@ -1340,8 +1351,8 @@ fine-grained parallelism (start fetching C while B is still compiling) and
 per-task caching (sstate), but it is also the primary source of Yocto's
 debugging complexity. Unit-level dependencies are easier to reason about, and
 the parallelism loss is minor since independent units still build concurrently
-across the DAG. Per-unit caching via content-addressed `.apk` hashes provides
-sufficient granularity for fast incremental rebuilds.
+across the DAG. Per-unit caching via content-addressed package hashes (`.apk` or
+`.deb`) provides sufficient granularity for fast incremental rebuilds.
 
 ## Caching Strategy
 
@@ -1350,10 +1361,11 @@ Builds are cached at multiple levels:
 1. **Source cache** — downloaded tarballs and git clones in
    `$YOE_CACHE/sources/`. Keyed by URL + hash.
 2. **Build cache** — content-addressed by hashing the unit, source, and all
-   build dependency `.apk` hashes. If the combined hash matches, the build is
-   skipped and the cached `.apk` is used.
-3. **Package repository** — built `.apk` files in the local repo. Once
-   published, packages are available for image assembly and on-device updates.
+   build dependency package hashes. If the combined hash matches, the build is
+   skipped and the cached package (`.apk` or `.deb`) is used.
+3. **Package repository** — built package files (`.apk` or `.deb`) in the local
+   repo. Once published, packages are available for image assembly and on-device
+   updates.
 4. **Remote cache** _(planned — optional)_ — push/pull packages to an
    S3-compatible store so CI and team members share build results. Not yet
    implemented: there is no remote cache backend, no S3 integration, and no
@@ -1385,9 +1397,10 @@ yoe flash base-image /dev/sdX
 # Later, update just your app and rebuild the image
 $EDITOR units/myapp.star  # bump version
 yoe build myapp
-yoe build base-image         # only myapp's .apk changed, fast rebuild
+yoe build base-image         # only myapp's package changed, fast rebuild
 
-# Or update the device directly
+# Or update the device directly (Alpine target shown; on Debian/Ubuntu copy the
+# .deb and `dpkg -i` / `apt install` it instead)
 scp repo/myapp-1.3.0-r0.apk device:/tmp/
 ssh device apk add /tmp/myapp-1.3.0-r0.apk
 ```

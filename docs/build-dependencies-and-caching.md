@@ -17,10 +17,11 @@ build dependencies, and they should be managed differently:
   minimal C toolchain container. A Go application can use the official
   `golang:1.23` image. A Rust service can pin a specific Rust nightly.
 - **Library dependencies** (headers, shared libraries your code links against) —
-  these come from a shared sysroot populated by apk packages. Each unit produces
-  an apk package when it builds; that package is either built locally or pulled
-  from a cache (team-level or global). Before a unit builds, its declared
-  dependencies are installed from these packages into the sysroot — the same way
+  these come from a shared sysroot populated by packages (`.apk` on Alpine
+  targets, `.deb` on Debian/Ubuntu targets). Each unit produces a package when
+  it builds; that package is either built locally or pulled from a cache
+  (team-level or global). Before a unit builds, its declared dependencies are
+  installed from these packages into the sysroot — the same way
   `apt install libssl-dev` populates `/usr/include` and `/usr/lib` on a Debian
   system. Most developers never build OpenSSL themselves; they pull the cached
   package and get the headers and libraries they need in seconds.
@@ -36,17 +37,19 @@ build dependencies, and they should be managed differently:
   usual.
 
 **Caching is symmetric at the unit level.** Every unit — regardless of language
-— produces an apk package that is cached and shared across developers, CI, and
-build machines. Most people never rebuild a unit; they pull the cached apk.
+— produces a package (`.apk` or `.deb`) that is cached and shared across
+developers, CI, and build machines. Most people never rebuild a unit; they pull
+the cached package.
 
 The difference shows up when you _do_ rebuild: a C unit finds its dependencies
-already in the sysroot (from other units' cached apks), while a Rust unit has
-Cargo recompile its crate dependencies using its local cache. This is fine — the
-person rebuilding a Rust unit is the developer actively working on it, and their
-local Cargo cache handles repeat builds. Go builds so fast it does not matter.
-Some ecosystems go further: PyPI distributes pre-compiled wheels globally, so
-`pip install` pulls binaries for most packages without compiling anything.
-`[yoe]` doesn't need to replicate what these ecosystems already provide.
+already in the sysroot (from other units' cached packages), while a Rust unit
+has Cargo recompile its crate dependencies using its local cache. This is fine —
+the person rebuilding a Rust unit is the developer actively working on it, and
+their local Cargo cache handles repeat builds. Go builds so fast it does not
+matter. Some ecosystems go further: PyPI distributes pre-compiled wheels
+globally, so `pip install` pulls binaries for most packages without compiling
+anything. `[yoe]` doesn't need to replicate what these ecosystems already
+provide.
 
 **Native builds unlock existing package ecosystems.** This is especially clear
 with Python. In traditional cross-compilation systems like Yocto or Buildroot,

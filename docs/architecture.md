@@ -82,22 +82,22 @@ consuming image's distro, not per unit. A small set of subpackage splits
 (`-dev`, `-dbg`) is planned for cases where the runtime image should not carry
 headers or debug info. See
 [metadata-format.md#units-vs-packages](metadata-format.md#units-vs-packages) for
-the contract between units and packages, [apk Signing](signing.md) for the
+the contract between units and packages, [Package Signing](signing.md) for the
 alpine pipeline, [module-debian.md](module-debian.md) for the debian pipeline,
 and [Feed Server](feed-server.md) for how packages get published and deployed.
 
 ### How they fit together
 
-The build flow is **unit → build → .apk → repository → image / device**. The
-conceptual flow is **project references modules, modules provide units, units
-produce packages, packages assemble into images**:
+The build flow is **unit → build → package (`.apk`/`.deb`) → repository → image
+/ device**. The conceptual flow is **project references modules, modules provide
+units, units produce packages, packages assemble into images**:
 
-| Concept | Lives in            | Produced by              | Consumed by                 |
-| ------- | ------------------- | ------------------------ | --------------------------- |
-| Project | Your product repo   | You                      | The `yoe` CLI               |
-| Module  | A Git repo          | Module authors           | Projects                    |
-| Unit    | A module or project | Module / project authors | The build system            |
-| Package | A package repo      | The build system         | `apk` (image and on-device) |
+| Concept | Lives in            | Produced by              | Consumed by                         |
+| ------- | ------------------- | ------------------------ | ----------------------------------- |
+| Project | Your product repo   | You                      | The `yoe` CLI                       |
+| Module  | A Git repo          | Module authors           | Projects                            |
+| Unit    | A module or project | Module / project authors | The build system                    |
+| Package | A package repo      | The build system         | `apk` / `apt` (image and on-device) |
 
 For an explanation of why this split exists — versus Yocto's recipe/layer model
 — see [Comparisons](comparisons.md). For the language used to express units and
@@ -130,10 +130,11 @@ tool for the job:
 ![Build dependencies](assets/build-dependencies.png)
 
 Host tools (compilers, language runtimes) come from Docker containers; library
-deps from the apk sysroot built up by other yoe units; distro packages (full
-libraries, runtime services, applications) come from prebuilt upstream apks via
-`module-alpine`; and language-native deps (Go modules, Cargo crates, pip wheels)
-are handled by each language's own package manager inside the container. See
+deps from the sysroot built up by other yoe units; distro packages (full
+libraries, runtime services, applications) come from prebuilt upstream packages
+via `module-alpine` (apks) or `module-debian` (debs); and language-native deps
+(Go modules, Cargo crates, pip wheels) are handled by each language's own
+package manager inside the container. See
 [Build Dependencies and Caching](build-dependencies-and-caching.md) for why this
 split exists and how it interacts with the build cache, and
 [Alpine apk Passthrough](apk-passthrough.md) for the prebuilt-apk path.
@@ -224,15 +225,15 @@ per-project key bootstrapped under `~/.config/yoe/keys/<project>/`:
 
 For both: the private key never leaves the workstation, and the public key
 travels through two independent channels (the project repo for inspection, the
-rootfs for verification). See [apk Signing](signing.md) for the alpine key
+rootfs for verification). See [Package Signing](signing.md) for the alpine key
 generation / rotation surface and the exact apk bytes that get signed. See
 [module-debian.md](module-debian.md) for the deb trust details.
 
 ## Deployment
 
-A unit's job ends when its package lands on a running device. The same apk repo
-and signing key serve image-time installs, the dev loop, and on-device OTA, so
-there's only one delivery mechanism to understand.
+A unit's job ends when its package lands on a running device. The same
+per-distro repo and project signing key serve image-time installs, the dev loop,
+and on-device OTA, so there's only one delivery mechanism to understand.
 
 ### Reaching a running device
 
@@ -258,8 +259,9 @@ split is on-device tooling, not on-workstation infrastructure.
 ![Feed server topology](assets/feed-server-topology.png)
 
 `yoe serve` is the long-lived HTTP + mDNS server, `yoe device repo add` does the
-one-time `/etc/apk/repositories` setup, and `yoe deploy` orchestrates the whole
-"build → ship → install" round trip. See
+one-time on-device repo setup (`/etc/apk/repositories` for alpine,
+`/etc/apt/sources.list.d/<project>.sources` for debian), and `yoe deploy`
+orchestrates the whole "build → ship → install" round trip. See
 [Feed Server and yoe deploy](feed-server.md) for the workflows, command
 reference, and trust model, and [module-debian](module-debian.md) for the apt
 side end-to-end.

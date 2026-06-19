@@ -338,7 +338,7 @@ partitions = [
 ]
 ```
 
-Image assembly scans the assembled rootfs (built from all `packages` apks) and
+Image assembly scans the assembled rootfs (built from all `packages`) and
 matches each `contents` glob against `/boot/`. Every file listed lands in the
 FAT partition at the root level (yoe's vfat assembly flattens paths currently —
 that's why `uEnv.txt` is at the partition root, not under `extlinux/`).

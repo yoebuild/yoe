@@ -274,13 +274,17 @@ distros separated:
   `UnitsByModule` buckets and different `DistroViews` cells; they never clobber
   each other.
 
-The one architectural cost mixing distros DOES pay:
+What this implies for builds — expected behavior, not a special case:
 
-- **Source-built units build per consuming distro.** A source-built `openssl`
-  consumed by both an alpine and a debian image builds twice — once in each
-  toolchain container — producing two binaries cached separately. This is the
-  correctness mechanism, not a bug; the cost is one cache entry per (unit,
-  distro) pair, and every subsequent build hits the cache.
+- **Source-built units build once per consuming distro.** A source-built
+  `openssl` consumed by both an alpine and a debian image builds twice — once in
+  each toolchain container — producing two binaries cached separately. Building
+  the same unit more than once along the distro axis is normal: musl-built and
+  glibc-built binaries cannot share at the ABI level, so a libc-correct artifact
+  per distro is the correctness mechanism, not a bug. The unit stays the single
+  definition of how the package is built; only the build context (toolchain,
+  libc) differs. The cost is one cache entry per (unit, distro) pair, and every
+  subsequent build hits the cache.
 
 ### The primary multi-distro use case: alpine app containers on a debian host
 
@@ -374,7 +378,7 @@ per-distro views resolve cross-distro collisions, how effective distro flows
 into cache keys — see [Catalog and Materialization](catalog.md). For the
 apk-specific mirror-verbatim mechanism, see
 [Alpine apk Passthrough](apk-passthrough.md). For the apk signing trust chain,
-see [apk Signing](signing.md).
+see [Package Signing](signing.md).
 
 ## Adding a new distro
 

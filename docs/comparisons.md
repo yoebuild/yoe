@@ -20,15 +20,17 @@ existing solutions along these axes:
   running native toolchains inside foreign-arch containers under QEMU, never by
   a cross-compile toolchain. Yocto, Buildroot, and Avocado all center on cross
   toolchains; `[yoe]` deliberately does not.
-- **The build cache _is_ the package feed.** A unit's content-addressed `.apk`
-  lives in a plain S3-compatible bucket — the same bytes CI builds, the cache
-  serves, and a device installs. There is no separate sstate, REAPI server, or
-  artifact registry to stand up; the cache is a bucket URL. Caching is
+- **The build cache _is_ the package feed.** A unit's content-addressed package
+  — an `.apk` on an Alpine target, a `.deb` on a Debian or Ubuntu target — lives
+  in a plain S3-compatible bucket, the same bytes CI builds, the cache serves,
+  and a device installs. There is no separate sstate, REAPI server, or artifact
+  registry to stand up; the cache is a bucket URL. Caching is
   per-unit/per-package, not per-task (Yocto) or per-action (Bazel/Buck2).
-- **apk into a shared FHS root.** Packages install into a normal filesystem, not
-  snap/sysext/SquashFS loopback mounts (contrast: Ubuntu Core, Avocado, distri)
-  and not a `/nix/store` closure model. This keeps the base in the
-  single-digit-MB class and the runtime conventional.
+- **Packages into a shared FHS root.** `.apk` (Alpine) or `.deb` (Debian/Ubuntu)
+  packages install into a normal filesystem, not snap/sysext/SquashFS loopback
+  mounts (contrast: Ubuntu Core, Avocado, distri) and not a `/nix/store` closure
+  model. On the Alpine base this keeps the system in the single-digit-MB class;
+  the runtime stays conventional on every target.
 - **Embedded and BSP are first-class.** Machine definitions, per-board kernel
   config and device trees, bootloader handling, and image/partition assembly are
   built in — the layer general-purpose distros (Alpine, Arch, Debian, NixOS) and
@@ -140,18 +142,18 @@ of why `[yoe]` replaces BitBake rather than wrapping it:
 
 **Key differences:**
 
-|                     | Yocto                                        | `[yoe]`                                       |
-| ------------------- | -------------------------------------------- | --------------------------------------------- |
-| Build system        | BitBake (Python)                             | `yoe` (Go)                                    |
-| Package format      | rpm / deb / ipk                              | apk                                           |
-| Config format       | BitBake units (.bb/.bbappend)                | Starlark (Python-like)                        |
-| Cross-compilation   | Required, central design assumption          | None — native builds only                     |
-| Dependency model    | Task-level DAG (do_fetch → do_compile → ...) | Unit-level DAG (simpler, atomic per-unit)     |
-| Language ecosystems | Wrapped in units                             | Native toolchains (go modules, cargo, etc.)   |
-| Learning curve      | Steep — weeks to become productive           | Shallow — Starlark (Python-like)              |
-| Build caching       | sstate (per-task, hash-based, complex setup) | Per-unit `.apk` hashes in S3-compatible cache |
-| Multi-image support | Yes — multiple images from one project       | Yes — image inheritance + machine matrix      |
-| On-device updates   | Possible but complex (smart image)           | Built-in via apk repositories                 |
+|                     | Yocto                                        | `[yoe]`                                              |
+| ------------------- | -------------------------------------------- | ---------------------------------------------------- |
+| Build system        | BitBake (Python)                             | `yoe` (Go)                                           |
+| Package format      | rpm / deb / ipk                              | apk / deb                                            |
+| Config format       | BitBake units (.bb/.bbappend)                | Starlark (Python-like)                               |
+| Cross-compilation   | Required, central design assumption          | None — native builds only                            |
+| Dependency model    | Task-level DAG (do_fetch → do_compile → ...) | Unit-level DAG (simpler, atomic per-unit)            |
+| Language ecosystems | Wrapped in units                             | Native toolchains (go modules, cargo, etc.)          |
+| Learning curve      | Steep — weeks to become productive           | Shallow — Starlark (Python-like)                     |
+| Build caching       | sstate (per-task, hash-based, complex setup) | Per-unit `.apk`/`.deb` hashes in S3-compatible cache |
+| Multi-image support | Yes — multiple images from one project       | Yes — image inheritance + machine matrix             |
+| On-device updates   | Possible but complex (smart image)           | Built-in via apk/apt repositories                    |
 
 **When to use Yocto instead:** when you need extremely fine-grained control over
 every component, must support exotic architectures with no native build
@@ -177,17 +179,17 @@ shares `[yoe]`'s preference for simplicity.
 
 **Key differences:**
 
-|                    | Buildroot                                     | `[yoe]`                                             |
-| ------------------ | --------------------------------------------- | --------------------------------------------------- |
-| Configuration      | Kconfig (menuconfig)                          | Starlark files                                      |
-| Build engine       | Make                                          | `yoe` (Go)                                          |
-| Cross-compilation  | Required                                      | None — native builds only                           |
-| On-device packages | None — monolithic image only                  | apk — incremental updates                           |
-| Incremental builds | Limited — config change triggers full rebuild | Content-addressed cache, only rebuild what changed  |
-| Modern languages   | Wraps Go/Rust/etc. in Make, often poorly      | Delegates to native toolchains                      |
-| Build caching      | ccache at best, no output caching             | Content-addressed `.apk` cache, shareable across CI |
-| CI/team sharing    | Everyone rebuilds from scratch                | Push/pull from shared package repo                  |
-| Composable images  | No — single image output                      | Yes — assemble different images from same packages  |
+|                    | Buildroot                                     | `[yoe]`                                                    |
+| ------------------ | --------------------------------------------- | ---------------------------------------------------------- |
+| Configuration      | Kconfig (menuconfig)                          | Starlark files                                             |
+| Build engine       | Make                                          | `yoe` (Go)                                                 |
+| Cross-compilation  | Required                                      | None — native builds only                                  |
+| On-device packages | None — monolithic image only                  | apk/deb — incremental updates                              |
+| Incremental builds | Limited — config change triggers full rebuild | Content-addressed cache, only rebuild what changed         |
+| Modern languages   | Wraps Go/Rust/etc. in Make, often poorly      | Delegates to native toolchains                             |
+| Build caching      | ccache at best, no output caching             | Content-addressed `.apk`/`.deb` cache, shareable across CI |
+| CI/team sharing    | Everyone rebuilds from scratch                | Push/pull from shared package repo                         |
+| Composable images  | No — single image output                      | Yes — assemble different images from same packages         |
 
 **The biggest structural difference** is the unit/package split. Buildroot has
 no concept of installable packages — it builds everything into a monolithic
@@ -290,7 +292,7 @@ whatever busybox init + plain scripts give you.
 | Build system      | `abuild` + APKBUILD shell scripts | `yoe build` + Starlark units                         |
 | Prebuilt packages | builds its own (`abuild`)         | reuses Alpine's via `alpine_pkg` + source units      |
 | Kernel management | Generic kernels                   | Per-machine kernel config, device trees              |
-| OTA updates       | Standard apk upgrade              | apk + full image update + rollback                   |
+| OTA updates       | Standard apk upgrade              | apk/apt + full image update + rollback               |
 
 **When to use Alpine instead:** when you're targeting containers or generic
 server hardware and don't need custom BSP, kernel configuration, or image
@@ -326,8 +328,8 @@ transparency directly influences `[yoe]`'s design.
 |                   | Arch                      | `[yoe]`                         |
 | ----------------- | ------------------------- | ------------------------------- |
 | Target            | Desktop/server, x86-first | Embedded, multi-arch            |
-| Package manager   | pacman                    | apk                             |
-| Package format    | tar.zst + .PKGINFO        | apk (tar.gz + .PKGINFO)         |
+| Package manager   | pacman                    | apk / apt                       |
+| Package format    | tar.zst + .PKGINFO        | apk or .deb                     |
 | Build definitions | PKGBUILD (bash)           | Starlark units                  |
 | Reproducibility   | Not a goal                | Content-addressed builds        |
 | Image assembly    | Manual (pacstrap)         | Automated (`yoe build <image>`) |
@@ -384,8 +386,8 @@ before hitting its limits on custom hardware.
 **What `[yoe]` adopts from Debian:**
 
 - **Signed binary package repositories** — apt's approach to package
-  authenticity and repository signing is the model. `[yoe]`'s apk repositories
-  follow the same principle.
+  authenticity and repository signing is the model. `[yoe]`'s apk/apt
+  repositories follow the same principle.
 - **Policy-driven package conventions** — Debian Policy defines where files go,
   how services are declared, and how packages relate. `[yoe]` inherits this
   culture through Alpine's `abuild` conventions.
@@ -424,18 +426,18 @@ the smoothest fit is still leaf packages rather than base-system pieces.
 
 **Key differences:**
 
-|                   | Debian                            | `[yoe]`                         |
-| ----------------- | --------------------------------- | ------------------------------- |
-| Target            | General-purpose server/desktop    | Embedded, custom hardware       |
-| Package manager   | apt / dpkg                        | apk                             |
-| Package format    | .deb (ar + tar)                   | apk (tar.gz + .PKGINFO)         |
-| Release model     | Stable/testing/unstable + LTS     | Rolling, pinned snapshots       |
-| Build definitions | `debian/` dir (rules + control)   | Starlark units                  |
-| Image assembly    | debootstrap / live-build          | `yoe build <image>`             |
-| BSP support       | Generic kernels; no board tooling | Per-board machine definitions   |
-| Kernel management | Distro-provided kernel packages   | Per-machine kernel config + DTs |
-| OTA updates       | `apt upgrade` (in-place)          | apk + atomic image + rollback   |
-| Footprint         | Standard install ~1 GB+           | Target single-digit MB base     |
+|                   | Debian                            | `[yoe]`                            |
+| ----------------- | --------------------------------- | ---------------------------------- |
+| Target            | General-purpose server/desktop    | Embedded, custom hardware          |
+| Package manager   | apt / dpkg                        | apk (Alpine) / apt (Debian/Ubuntu) |
+| Package format    | .deb (ar + tar)                   | apk or .deb                        |
+| Release model     | Stable/testing/unstable + LTS     | Rolling, pinned snapshots          |
+| Build definitions | `debian/` dir (rules + control)   | Starlark units                     |
+| Image assembly    | debootstrap / live-build          | `yoe build <image>`                |
+| BSP support       | Generic kernels; no board tooling | Per-board machine definitions      |
+| Kernel management | Distro-provided kernel packages   | Per-machine kernel config + DTs    |
+| OTA updates       | `apt upgrade` (in-place)          | apk/apt + atomic image + rollback  |
+| Footprint         | Standard install ~1 GB+           | Target single-digit MB base        |
 
 **Debian derivatives (Raspberry Pi OS, Ubuntu, etc.)** inherit most of these
 properties. Teams often start on Raspberry Pi OS and hit three walls: (1) it's
@@ -533,7 +535,7 @@ the Debian ecosystem:
 
 `[yoe]` and debos cover overlapping ground. Key differences: debos starts from
 existing Debian `.deb`s (inheriting the size and package-model properties
-above), while `[yoe]` builds from source into content-addressed apks; debos
+above), while `[yoe]` builds from source into content-addressed apks/debs; debos
 recipes are flat action sequences, while `[yoe]`'s Starlark units form a
 dependency graph with a shared, content-addressed build cache.
 
@@ -602,6 +604,45 @@ comfortable with BitBake and the Yocto layer model, and want native-under-QEMU
 builds without cross-compilation — particularly if your team already knows Yocto
 tooling and would rather reuse it against Debian than learn a new system.
 
+**[ELBE](https://elbe-rfs.org/)** ("Embedded Linux Build Environment",
+[source](https://github.com/Linutronix/elbe)) is a mature, Python, GPLv3 image
+builder maintained by [Linutronix](https://linutronix.de/). It is the
+longest-running of the embedded-Debian tools here and shares two of `[yoe]`'s
+core bets while differing sharply on configuration:
+
+- **A single XML file describes the whole image.** One project XML lists the
+  Debian suite, architecture, package set, partition layout, and finishing
+  steps. This is a declarative model like `[yoe]`'s, but flat — a document, not
+  a dependency graph — and the customization escape hatch is embedded shell
+  (`<finetuning>`/`<command>` blocks) rather than a typed unit DAG.
+- **Native builds under QEMU, not cross-compilation.** ELBE runs the whole build
+  inside a privileged VM it calls the `initvm` (QEMU, optionally via libvirt),
+  bootstraps the rootfs with `debootstrap`, and builds any custom source
+  packages natively in a `qemu`-emulated chroot with `pbuilder` — the same
+  native-under-emulation choice `[yoe]` and isar make, at VM rather than
+  container granularity.
+- **Prebuilt distro packages for the base, source only where needed.** Standard
+  packages come straight from the Debian archive; only a project's own
+  applications are built from source. This is the same two-tier split `[yoe]`
+  gets from `alpine_pkg`/`apt_feed` plus source units.
+- **Strong license and bill-of-materials reporting.** ELBE's standout feature is
+  compliance tooling: it emits a per-package source and licence manifest and can
+  archive the exact sources that went into an image. This is precisely the
+  legal-compliance tooling the introduction notes `[yoe]` does not yet have, and
+  ELBE is good prior art for it.
+
+Contrast with `[yoe]`: ELBE inherits Debian's size floor (~150 MB+ and the
+`.deb` maintainer-script model), expresses an image as one flat XML document
+with shell finetuning rather than a content-addressed Starlark unit graph, and
+has no per-unit cache that doubles as the on-device package feed. Its build unit
+is a whole-image VM run, where `[yoe]` caches and reuses at per-unit grain.
+
+**When to prefer ELBE:** when you want a Debian/Ubuntu device image with
+first-class license and source-archive reporting for compliance audits, are
+comfortable describing the image in XML with shell finetuning, and value a
+mature tool with years of production use over a finer-grained from-source build
+graph.
+
 **[aptly](https://www.aptly.info/)** is the canonical tool for running a
 private, pinned Debian/Ubuntu repository. For teams that do ship Debian-based
 devices, aptly plays the role that `[yoe]`'s S3 package cache plays:
@@ -614,7 +655,7 @@ devices, aptly plays the role that `[yoe]`'s S3 package cache plays:
 - CLI plus REST API for CI integration.
 
 The snapshot model is what gives a Debian-based deployment the reproducibility
-`[yoe]` gets from content-addressed apks — different mechanism, same goal.
+`[yoe]` gets from content-addressed apks/debs — different mechanism, same goal.
 
 **[Gaia Build System](https://github.com/gaiaBuildSystem)** is the most active
 modern example of a full build system (not just an image builder) layered on
@@ -643,10 +684,10 @@ Architecturally:
 Contrast with `[yoe]`:
 
 - Gaia inherits Debian's size and package-model properties (huge archive, `.deb`
-  maintainer scripts, ~150 MB+ floor); `[yoe]` is apk-based and targets
+  maintainer scripts, ~150 MB+ floor); `[yoe]` is apk/deb-based and targets
   single-digit MB bases.
 - Gaia's deployment model is **OSTree + Aktualizr** (Torizon-compatible);
-  `[yoe]` uses apk plus atomic image updates with rollback.
+  `[yoe]` uses apk/apt plus atomic image updates with rollback.
 - Gaia's recipe surface is multi-language (TS + Xonsh + Shell + JSON); `[yoe]`
   is Starlark end-to-end.
 - Both build inside containers, both target custom ARM hardware, both aim for
@@ -682,8 +723,6 @@ targets production IoT, edge, and appliance devices.
 
 **What `[yoe]` adopts from Ubuntu Core:**
 
-- **Immutable root filesystem** — the shipping OS is never mutated in place;
-  changes flow through an update mechanism with rollback.
 - **Gadget-snap-style board config** — Ubuntu Core's
   [gadget snap](https://documentation.ubuntu.com/core/how-to-guides/image-creation/build-a-gadget-snap/)
   bundles bootloader assets, partition layout, and device-specific defaults.
@@ -694,19 +733,19 @@ targets production IoT, edge, and appliance devices.
   the structural analogue (which packages + which hardware = which shipping
   image).
 - **Atomic updates with rollback** — shared goal, different mechanism (snap
-  revisions plus a recovery seed system vs. `[yoe]`'s apk + atomic image
+  revisions plus a recovery seed system vs. `[yoe]`'s apk/apt + atomic image
   update).
 
 **What `[yoe]` leaves behind:**
 
-- **Snaps** — the squashfs-per-app loopback model. `[yoe]` uses apk, which
-  installs into a shared FHS root.
+- **Snaps** — the squashfs-per-app loopback model. `[yoe]` uses `.apk`/`.deb`
+  packages, which install into a shared FHS root.
 - **snapd** — UC's always-running daemon mediating confinement, updates, and
   interfaces. Significant runtime footprint and attack surface.
 - **Brand store requirement** — commercial UC deployments require a
   [Canonical-hosted dedicated snap store](https://documentation.ubuntu.com/core/explanation/stores/dedicated-snap-store/)
   to control what runs on devices. This is a commercial gate. `[yoe]` ships its
-  own signed apk repository with no vendor lock-in.
+  own signed apk/apt repository with no vendor lock-in.
 - **Default-strict AppArmor confinement** — UC apps run in a sandbox with
   explicit interfaces. Valuable for general-purpose appliances, often
   heavyweight for single-purpose embedded where the whole image is already
@@ -749,20 +788,20 @@ MiB of flash it's disqualifying before any application code is added.
 
 ### Key differences
 
-|                  | Ubuntu Core                           | `[yoe]`                                |
-| ---------------- | ------------------------------------- | -------------------------------------- |
-| Packaging format | Snaps (squashfs, loopback-mounted)    | apk (installed into shared rootfs)     |
-| Root filesystem  | Composed read-only snap mounts        | Standard FHS, shipped read-only        |
-| Package daemon   | snapd (always running)                | apk (run at build + update time only)  |
-| Board config     | Gadget snap                           | Machine definition (Starlark)          |
-| Image metadata   | Signed model assertion                | Image + machine Starlark               |
-| Updates          | Snap revisions + recovery seed system | Atomic image update + rollback         |
-| Confinement      | AppArmor interfaces (default strict)  | Standard Linux DAC; sandboxing per app |
-| Distribution     | Canonical brand store (hosted)        | Self-hosted signed apk repository      |
-| Size floor       | ~2.5 GiB                              | Single-digit MiB                       |
-| Build tool       | `ubuntu-image`, `snapcraft`           | `yoe build <image>`                    |
-| Recipe language  | YAML (snapcraft.yaml, model, gadget)  | Starlark                               |
-| LTS              | 12 years (Canonical)                  | N/A — project is pre-1.0               |
+|                  | Ubuntu Core                           | `[yoe]`                                   |
+| ---------------- | ------------------------------------- | ----------------------------------------- |
+| Packaging format | Snaps (squashfs, loopback-mounted)    | apk/deb (installed into shared rootfs)    |
+| Root filesystem  | Composed read-only snap mounts        | Standard FHS                              |
+| Package daemon   | snapd (always running)                | apk/apt (run at build + update time only) |
+| Board config     | Gadget snap                           | Machine definition (Starlark)             |
+| Image metadata   | Signed model assertion                | Image + machine Starlark                  |
+| Updates          | Snap revisions + recovery seed system | Atomic image update + rollback            |
+| Confinement      | AppArmor interfaces (default strict)  | Standard Linux DAC; sandboxing per app    |
+| Distribution     | Canonical brand store (hosted)        | Self-hosted signed apk/apt repository     |
+| Size floor       | ~2.5 GiB                              | Single-digit MiB                          |
+| Build tool       | `ubuntu-image`, `snapcraft`           | `yoe build <image>`                       |
+| Recipe language  | YAML (snapcraft.yaml, model, gadget)  | Starlark                                  |
+| LTS              | 12 years (Canonical)                  | N/A — project is pre-1.0                  |
 
 **When to use Ubuntu Core instead:** when you want Canonical's 12-year LTS
 commitment, when strict per-app confinement via snaps/AppArmor is a product
@@ -792,19 +831,19 @@ backed by a commercial OTA SaaS
   to hide BitBake's rough edges. `[yoe]` shares the diagnosis (the underlying
   tooling needs an ergonomic front door) but reaches a different conclusion:
   replace BitBake rather than wrap it.
-- **Immutable rootfs + atomic updates as the deployment model** — Avocado uses
-  btrfs + `systemd-sysext` overlays verified with `dm-verity`. `[yoe]` shares
-  the immutability goal (already drawn from Ubuntu Core and NixOS), though the
-  mechanism is still an open design decision (apk + atomic image, A/B, RAUC,
-  etc.).
+- **Atomic updates with rollback as the deployment goal** — Avocado builds on an
+  immutable root using btrfs + `systemd-sysext` overlays verified with
+  `dm-verity`. `[yoe]` shares the goal of a robust, roll-back-on-failure update
+  path, but has not yet decided either the update mechanism (apk/apt + atomic
+  image, A/B, RAUC, etc.) or whether the root filesystem is immutable.
 - **Binary extension feeds for the common case** — Avocado bets that most teams
   consume pre-built extensions rather than customizing the base. `[yoe]`'s
-  S3-backed apk repository plays the same role: a CI build seeds the cache and
-  most developers never compile from source.
+  S3-backed package repository plays the same role: a CI build seeds the cache
+  and most developers never compile from source.
 - **Live development against the deployed image** — Avocado's NFS-mounted sysext
   lets a developer iterate on an extension without reflashing. `yoe dev` aims at
   the same pain point from a different angle (edit a unit's source git tree,
-  rebuild the apk, push to the device).
+  rebuild the package, push to the device).
 
 **What `[yoe]` leaves behind:**
 
@@ -813,8 +852,8 @@ backed by a commercial OTA SaaS
   the whole engine; see the Yocto section above for why.
 - **`systemd-sysext` as the runtime composition primitive** — sysext is powerful
   but ties the OS tightly to systemd, dm-verity, and a particular filesystem
-  layout. `[yoe]` uses apk into a shared FHS rootfs; composition is at build
-  time (image units), not runtime (overlay mounts).
+  layout. `[yoe]` installs `.apk`/`.deb` packages into a shared FHS rootfs;
+  composition is at build time (image units), not runtime (overlay mounts).
 - **glibc baseline** — Avocado inherits Yocto's glibc default. `[yoe]` is
   musl-first via Alpine.
 - **Cross-compilation toolchains** — Avocado uses Yocto's standard cross
@@ -828,31 +867,31 @@ backed by a commercial OTA SaaS
 
 **Key differences:**
 
-|                     | Avocado OS                                 | `[yoe]`                                        |
-| ------------------- | ------------------------------------------ | ---------------------------------------------- |
-| Build engine        | Yocto / BitBake (Python)                   | `yoe` (Go)                                     |
-| Recipe language     | BitBake (`.bb`/`.bbappend`)                | Starlark                                       |
-| CLI language        | Rust (`avocado-cli`)                       | Go (`yoe`)                                     |
-| Cross-compilation   | Yes (Yocto default)                        | None — native builds only                      |
-| C library           | glibc                                      | musl                                           |
-| Package format      | IPK/RPM internally; sysext DDI on device   | apk                                            |
-| Runtime composition | `systemd-sysext` overlays + `dm-verity`    | apk into shared FHS rootfs                     |
-| Init system         | systemd (required by sysext model)         | busybox init (Alpine); systemd (Debian/Ubuntu) |
-| Filesystem          | btrfs root, immutable                      | ext4 today; immutability planned               |
-| OTA mechanism       | Peridio Core (commercial SaaS)             | Self-hosted; mechanism TBD                     |
-| Build caching       | Yocto sstate                               | Content-addressed apk in S3-compatible cache   |
-| Container model     | SDK containers for dev                     | Container as build worker                      |
-| Hardware focus      | Edge AI: Jetson, i.MX, Rockchip, RPi       | Generic embedded; RPi/BBB/QEMU first           |
-| Commercial backing  | Peridio (VC-backed)                        | None — open project                            |
-| Status              | Production (April 2025+), paying customers | Pre-1.0                                        |
+|                     | Avocado OS                                 | `[yoe]`                                          |
+| ------------------- | ------------------------------------------ | ------------------------------------------------ |
+| Build engine        | Yocto / BitBake (Python)                   | `yoe` (Go)                                       |
+| Recipe language     | BitBake (`.bb`/`.bbappend`)                | Starlark                                         |
+| CLI language        | Rust (`avocado-cli`)                       | Go (`yoe`)                                       |
+| Cross-compilation   | Yes (Yocto default)                        | None — native builds only                        |
+| C library           | glibc                                      | musl (Alpine); glibc (Debian/Ubuntu)             |
+| Package format      | IPK/RPM internally; sysext DDI on device   | apk / deb                                        |
+| Runtime composition | `systemd-sysext` overlays + `dm-verity`    | apk/deb into shared FHS rootfs                   |
+| Init system         | systemd (required by sysext model)         | busybox init (Alpine); systemd (Debian/Ubuntu)   |
+| Filesystem          | btrfs root, immutable                      | ext4 today; mutability not yet decided           |
+| OTA mechanism       | Peridio Core (commercial SaaS)             | Self-hosted; mechanism TBD                       |
+| Build caching       | Yocto sstate                               | Content-addressed apk/deb in S3-compatible cache |
+| Container model     | SDK containers for dev                     | Container as build worker                        |
+| Hardware focus      | Edge AI: Jetson, i.MX, Rockchip, RPi       | Generic embedded; RPi/BBB/QEMU first             |
+| Commercial backing  | Peridio (VC-backed)                        | None — open project                              |
+| Status              | Production (April 2025+), paying customers | Pre-1.0                                          |
 
 **Structural distance.** Avocado OS and `[yoe]` agree on the _symptoms_ —
 unwrapped Yocto is too sharp, embedded teams need atomic updates with rollback,
 most users want to consume binaries rather than rebuild — but disagree on the
 _cure_. Avocado keeps Yocto and bets that systemd-sysext + btrfs + dm-verity is
 the modern way to ship and update a device. `[yoe]` replaces Yocto and bets that
-a smaller, single-language, apk-based stack with content-addressed caching is
-enough, without taking on the systemd/btrfs/ dm-verity dependency.
+a smaller, single-language, package-based stack with content-addressed caching
+is enough, without taking on the systemd/btrfs/ dm-verity dependency.
 
 **When to use Avocado OS instead:** when you're shipping edge-AI hardware today
 on the platforms Peridio supports (especially NVIDIA Jetson Orin), want a
@@ -924,10 +963,11 @@ split is the most interesting thing about it relative to `[yoe]`:
   through a declarative DAG and a single configuration language.
 - **Image assembly vs. a package feed + cache.** Bakery's output is the image
   (plus a Ctrl update bundle); it has no notion of a per-unit content-addressed
-  `.apk` that is simultaneously the build cache and the on-device package feed.
-  `[yoe]`'s "the cache _is_ the feed" property — the same bytes CI builds, the
-  cache serves, and a device installs — has no direct Bakery analogue, because
-  Bakery consumes upstream apt/apk feeds rather than producing its own.
+  package (`.apk` or `.deb`) that is simultaneously the build cache and the
+  on-device package feed. `[yoe]`'s "the cache _is_ the feed" property — the
+  same bytes CI builds, the cache serves, and a device installs — has no direct
+  Bakery analogue, because Bakery consumes upstream apt/apk feeds rather than
+  producing its own.
 - **One container + chroot vs. a container-per-unit with sysroots.** Bakery runs
   the whole build inside a single privileged Docker container and applies recipe
   steps to the in-progress root filesystem in place — `install` steps `chroot`
@@ -946,9 +986,9 @@ split is the most interesting thing about it relative to `[yoe]`:
   Bakery concept.)
 - **From-source-by-default vs. binary-base-by-default.** Bakery's first-class
   path is layering a binary distribution; its from-source story is Yocto,
-  carried as a proof of concept. `[yoe]` builds its core from source into apks
-  and treats prebuilt-distro consumption as the long-tail supplement — the
-  inverse default.
+  carried as a proof of concept. `[yoe]` builds its core from source into native
+  packages (`.apk` on Alpine, `.deb` on Debian/Ubuntu) and treats
+  prebuilt-distro consumption as the long-tail supplement — the inverse default.
 - **Rust throughout vs. Go + Starlark.** Like Avocado's CLI, Rugix is a Rust
   codebase; `[yoe]` is Go for the engine and Starlark for units, machines, and
   images.
@@ -972,20 +1012,20 @@ studying as prior art at minimum, and a plausible direct dependency should
 
 **Key differences:**
 
-|                     | Rugix                                       | `[yoe]`                                      |
-| ------------------- | ------------------------------------------- | -------------------------------------------- |
-| Core language       | Rust (~98%)                                 | Go engine + Starlark units                   |
-| Shape               | Two tools: Bakery (build) + Ctrl (update)   | One tool: `yoe` (build + planned update)     |
-| Build inputs        | Debian/Alpine/RPi OS binaries; Yocto (PoC)  | Source-built apks + `alpine_pkg` prebuilt    |
-| Recipe model        | TOML + numbered shell/Python steps (chroot) | Starlark units in a content-addressed DAG    |
-| Config language(s)  | TOML + arbitrary script languages           | Starlark end to end                          |
-| Build isolation     | One privileged container; chroot per step   | A build container per unit + staged sysroot  |
-| Build caching       | Cached rootfs layers (Docker-layer-style)   | Per-unit content-addressed `.apk` in S3      |
-| Package feed        | Upstream apt/apk (consumed)                 | Own content-addressed apk feed (cache==feed) |
-| Update mechanism    | Ctrl: A/B atomic + adaptive delta, signed   | Planned; mechanism undecided                 |
-| Update engine reuse | Standalone; works with Yocto/Buildroot      | Built-in; could adopt an engine like Ctrl    |
-| Bootloaders         | U-Boot, GRUB, systemd-boot, RPi tryboot     | Per-machine bootloader handling              |
-| Backing             | Silitics (commercial support + Nexigon)     | None — open project                          |
+|                     | Rugix                                       | `[yoe]`                                                |
+| ------------------- | ------------------------------------------- | ------------------------------------------------------ |
+| Core language       | Rust (~98%)                                 | Go engine + Starlark units                             |
+| Shape               | Two tools: Bakery (build) + Ctrl (update)   | One tool: `yoe` (build + planned update)               |
+| Build inputs        | Debian/Alpine/RPi OS binaries; Yocto (PoC)  | Source-built apks/debs + Alpine/Debian/Ubuntu prebuilt |
+| Recipe model        | TOML + numbered shell/Python steps (chroot) | Starlark units in a content-addressed DAG              |
+| Config language(s)  | TOML + arbitrary script languages           | Starlark end to end                                    |
+| Build isolation     | One privileged container; chroot per step   | A build container per unit + staged sysroot            |
+| Build caching       | Cached rootfs layers (Docker-layer-style)   | Per-unit content-addressed `.apk`/`.deb` in S3         |
+| Package feed        | Upstream apt/apk (consumed)                 | Own content-addressed apk/apt feed (cache==feed)       |
+| Update mechanism    | Ctrl: A/B atomic + adaptive delta, signed   | Planned; mechanism undecided                           |
+| Update engine reuse | Standalone; works with Yocto/Buildroot      | Built-in; could adopt an engine like Ctrl              |
+| Bootloaders         | U-Boot, GRUB, systemd-boot, RPi tryboot     | Per-machine bootloader handling                        |
+| Backing             | Silitics (commercial support + Nexigon)     | None — open project                                    |
 
 **When to use Rugix instead:** when you want a proven, turnkey OTA update engine
 _today_ — A/B atomic updates, automatic rollback, bandwidth-efficient delta
@@ -1039,8 +1079,8 @@ than embedded devices on custom silicon.
   upstream distro repositories and caches packages and base images for
   incremental rebuilds, but there is no per-package content-addressed artifact
   that is simultaneously the build cache and the on-device feed. `[yoe]` builds
-  its core from source into content-addressed apks where "the cache _is_ the
-  feed."
+  its core from source into content-addressed apks/debs where "the cache _is_
+  the feed."
 - **systemd-coupled by design.** mkosi's most valuable features assume systemd
   on the build host and in the image (`ukify`, `systemd-repart`, credentials,
   measured boot). `[yoe]` deliberately avoids that coupling so the base stays in
@@ -1063,8 +1103,8 @@ ideas about reproducibility and declarative configuration are adopted wholesale;
 its implementation complexity is not.
 
 This section is the head-to-head comparison. For a deeper exploration of the
-inverse question — whether `[yoe]` could _build with_ Nix rather than against it,
-letting Nix realize the package graph while `[yoe]` provides orchestration,
+inverse question — whether `[yoe]` could _build with_ Nix rather than against
+it, letting Nix realize the package graph while `[yoe]` provides orchestration,
 custom units, image generation, and BSPs — see [yoe and Nix](nix.md).
 
 **What `[yoe]` adopts from Nix:**
@@ -1087,24 +1127,24 @@ custom units, image generation, and BSPs — see [yoe and Nix](nix.md).
 
 **Key differences:**
 
-|                 | NixOS                                | `[yoe]`                                    |
-| --------------- | ------------------------------------ | ------------------------------------------ |
-| Config language | Nix (custom functional language)     | Starlark (Python-like)                     |
-| Store model     | Content-addressed `/nix/store` paths | Standard FHS with apk                      |
-| Closure size    | Often 1GB+ for simple systems        | Target single-digit MB base                |
-| Target          | Desktop, server, CI                  | Embedded hardware                          |
-| BSP support     | Minimal                              | Per-board machine definitions              |
-| Package manager | Nix                                  | apk                                        |
-| Reproducibility | Bit-for-bit (aspirational)           | Content-addressed, functionally equivalent |
-| Rollback        | Via Nix generations                  | Planned; mechanism TBD (apk, A/B, RAUC, …) |
-| Learning curve  | Steep (must learn Nix language)      | Shallow (Starlark, Python-like)            |
+|                 | NixOS                                | `[yoe]`                                        |
+| --------------- | ------------------------------------ | ---------------------------------------------- |
+| Config language | Nix (custom functional language)     | Starlark (Python-like)                         |
+| Store model     | Content-addressed `/nix/store` paths | Standard FHS with apk/dpkg                     |
+| Closure size    | Often 1GB+ for simple systems        | Target single-digit MB base                    |
+| Target          | Desktop, server, CI                  | Embedded hardware                              |
+| BSP support     | Minimal                              | Per-board machine definitions                  |
+| Package manager | Nix                                  | apk / apt                                      |
+| Reproducibility | Bit-for-bit (aspirational)           | Content-addressed, functionally equivalent     |
+| Rollback        | Via Nix generations                  | Planned; mechanism TBD (apk/apt, A/B, RAUC, …) |
+| Learning curve  | Steep (must learn Nix language)      | Shallow (Starlark, Python-like)                |
 
 **Caching comparison:** Nix's binary cache (Cachix, or self-hosted with
 `nix-serve`) is conceptually similar to `[yoe]`'s remote cache — both store
 content-addressed build outputs in S3-compatible storage. The key differences:
 Nix caches _closures_ (a package plus all its transitive runtime dependencies),
-which can be very large. `[yoe]` caches individual `.apk` packages, which are
-smaller and more granular. Nix's content addressing is based on the full
+which can be very large. `[yoe]` caches individual `.apk`/`.deb` packages, which
+are smaller and more granular. Nix's content addressing is based on the full
 derivation hash (all inputs); `[yoe]` uses a similar scheme but at unit
 granularity rather than Nix's per-output granularity.
 
@@ -1135,9 +1175,10 @@ results validate several instincts `[yoe]` shares.
   parallel installs, no hooks) is the same conclusion that drives `[yoe]`'s
   adoption of Alpine's near-empty-install-script culture and fast apk
   operations.
-- **Read-only OS, atomic updates** — distri's images are immutable and activated
-  atomically with no per-file extraction. That is the same direction `[yoe]`
-  draws from Ubuntu Core and NixOS: ship the OS read-only, update atomically.
+- **Atomic updates, no per-file extraction** — distri's images are immutable and
+  activated atomically. `[yoe]` shares the interest in a fast, atomic update
+  path (the update mechanism is still an open design decision), though it has
+  not taken a position on shipping the OS read-only the way distri does.
 - **Hermetic builds with explicit dependency views** — distri builds see only
   declared dependencies through a filtered package store; `[yoe]` builds inside
   a container worker with declared inputs and content-addressed outputs.
@@ -1147,13 +1188,13 @@ results validate several instincts `[yoe]` shares.
 - **The `/ro` FUSE-mounted squashfs-per-package model.** distri mounts each
   package as a read-only SquashFS image at `/ro/<name-arch-version>` via a FUSE
   daemon, with "exchange directories" union-merging the locations where multiple
-  packages must contribute files (headers, shared data). `[yoe]` installs apks
-  into a shared FHS root — the same contrast drawn against Ubuntu Core's
-  snap-per-app loopback model.
+  packages must contribute files (headers, shared data). `[yoe]` installs
+  `.apk`/`.deb` packages into a shared FHS root — the same contrast drawn
+  against Ubuntu Core's snap-per-app loopback model.
 - **Store addressing.** distri's store is _versioned-name-addressed_ — image
   names carry a monotonic distri revision, not a content hash. This is **not**
   Nix-style content addressing. `[yoe]`'s cache is input/content-addressed (a
-  hash of a unit's inputs selects its `.apk`). The two are different mechanisms
+  hash of a unit's inputs selects its package). The two are different mechanisms
   for "don't rebuild what hasn't changed."
 - **Build definitions.** distri's package definitions are Go code under `pkgs/`,
   compiled into the `distri` tool — programmatic, not a declarative DSL. `[yoe]`
@@ -1170,23 +1211,24 @@ results validate several instincts `[yoe]` shares.
 
 **Key differences:**
 
-|                   | distri                             | `[yoe]`                          |
-| ----------------- | ---------------------------------- | -------------------------------- |
-| Nature            | Research proof-of-concept          | Embedded distro build system     |
-| Package model     | Per-package SquashFS, FUSE-mounted | apk into shared FHS root         |
-| Store addressing  | Versioned-name (distri revision)   | Input/content-addressed `.apk`   |
-| Build definitions | Go code compiled into the tool     | Starlark units loaded at runtime |
-| Build isolation   | Path-pinning + `execve` wrappers   | Container build worker           |
-| Target            | x86_64 desktop/server (research)   | Embedded, multi-arch, custom BSP |
-| Status            | Dormant since ~2020; research-only | Pre-1.0, active                  |
+|                   | distri                             | `[yoe]`                               |
+| ----------------- | ---------------------------------- | ------------------------------------- |
+| Nature            | Research proof-of-concept          | Embedded distro build system          |
+| Package model     | Per-package SquashFS, FUSE-mounted | apk/deb into shared FHS root          |
+| Store addressing  | Versioned-name (distri revision)   | Input/content-addressed `.apk`/`.deb` |
+| Build definitions | Go code compiled into the tool     | Starlark units loaded at runtime      |
+| Build isolation   | Path-pinning + `execve` wrappers   | Container build worker                |
+| Target            | x86_64 desktop/server (research)   | Embedded, multi-arch, custom BSP      |
+| Status            | Dormant since ~2020; research-only | Pre-1.0, active                       |
 
 **When to use distri instead:** for production or embedded work, you wouldn't —
 that is not what it is for. Read distri for its ideas: fast, hook-free, parallel
 package operations and a concrete demonstration that the slowness of mainstream
 package managers is an architectural choice, not a law of nature. For the
-shipping equivalents of its immutability and atomic-update properties, NixOS and
-Ubuntu Core are the general-purpose options; for embedded hardware, that is the
-gap `[yoe]` aims to fill.
+shipping equivalents of its atomic-update and immutability properties, NixOS and
+Ubuntu Core are the general-purpose options; the embedded-hardware gap is what
+`[yoe]` aims to fill, with fast, hook-free apk operations and BSP support at its
+core.
 
 ## vs. Google GN
 
@@ -1220,14 +1262,14 @@ tooling design.
 
 **Key differences:**
 
-|                        | GN                      | `[yoe]`                             |
-| ---------------------- | ----------------------- | ----------------------------------- |
-| Purpose                | C/C++ meta-build system | Embedded Linux distribution builder |
-| Output                 | Ninja build files       | `.apk` packages and disk images     |
-| Config language        | GN (custom)             | Starlark (Python-like)              |
-| Dependency granularity | Source file / target    | Unit (package)                      |
-| Build execution        | Ninja                   | `yoe` directly                      |
-| Introspection          | `gn desc`, `gn refs`    | `yoe desc`, `yoe refs`, `yoe graph` |
+|                        | GN                      | `[yoe]`                                |
+| ---------------------- | ----------------------- | -------------------------------------- |
+| Purpose                | C/C++ meta-build system | Embedded Linux distribution builder    |
+| Output                 | Ninja build files       | `.apk`/`.deb` packages and disk images |
+| Config language        | GN (custom)             | Starlark (Python-like)                 |
+| Dependency granularity | Source file / target    | Unit (package)                         |
+| Build execution        | Ninja                   | `yoe` directly                         |
+| Introspection          | `gn desc`, `gn refs`    | `yoe desc`, `yoe refs`, `yoe graph`    |
 
 GN is not an alternative to `[yoe]` — they solve different problems. But GN's
 approach to graph resolution, config propagation, and introspection are
@@ -1300,9 +1342,9 @@ a Bazel concern.
 The closest "research a radically different distribution model with a custom
 tool" prior art is Michael Stapelberg's [distri](https://distr1.org/) — but that
 is a research distro with its own tool, not Bazel, and its kinship with `[yoe]`
-is on fast, hook-free package management and immutable atomic updates, not on
-content-addressed caching (distri's store is versioned-name-addressed) or any
-BSP/image story. See the [distri section](#vs-distri) above.
+is on fast, hook-free package management, not on content-addressed caching
+(distri's store is versioned-name-addressed) or any BSP/image story. See the
+[distri section](#vs-distri) above.
 
 **Phase model.** Classical Bazel runs **loading → analysis → execution** as
 strict global phases: analysis of the requested graph completes, and
@@ -1323,17 +1365,18 @@ that cache across developers and CI. The difference is everything else.
   line + input content hashes + environment + platform) to its result. Change
   one source file and Bazel reuses every cached action except the handful that
   transitively depend on it. `[yoe]` caches at the _unit_ level: one unit
-  produces one `.apk`, and its cache key is a hash of the unit's declared inputs
+  produces one package (`.apk` on Alpine, `.deb` on Debian/Ubuntu), and its
+  cache key is a hash of the unit's declared inputs
   (`internal/resolve/hash.go`). Change anything a unit hashes and the whole unit
   rebuilds from source — intra-unit incrementality is delegated to the native
   toolchain underneath (`go build`, `cargo`, `make` doing their own object-level
   caching inside the unit build).
 - **What is cached.** Bazel caches _intermediate_ artifacts — object files,
   generated headers, partial trees — in the CAS. `[yoe]` caches the _final
-  distributable_ artifact: the same `.apk` bytes that ship to and install on the
-  device. The build cache and the package feed are the same S3-compatible store,
-  so "what CI built," "what the cache serves," and "what a device pulls" are one
-  thing, not three.
+  distributable_ artifact: the same package bytes (`.apk` or `.deb`) that ship
+  to and install on the device. The build cache and the package feed are the
+  same S3-compatible store, so "what CI built," "what the cache serves," and
+  "what a device pulls" are one thing, not three.
 - **Correctness model.** Bazel's cache correctness depends on every action
   declaring its inputs completely; an under-declared input silently poisons the
   cache, which is why Bazel leans on sandboxing to enforce hermeticity at action
@@ -1346,8 +1389,8 @@ that cache across developers and CI. The difference is everything else.
   Execution API server (bazel-remote, Buildbarn, BuildBuddy), usually paired
   with remote _execution_ so actions run on a cluster. `[yoe]` needs only a
   bucket URL; there is no remote execution — builds always run in the local
-  container worker, and the cache only ever serves or stores whole `.apk`s. This
-  is the same simplicity argument the Yocto section makes against sstate,
+  container worker, and the cache only ever serves or stores whole packages.
+  This is the same simplicity argument the Yocto section makes against sstate,
   applied to Bazel's REAPI stack.
 
 The trade is deliberate. Bazel's fine grain extracts maximum reuse from a
@@ -1360,20 +1403,20 @@ devices install.
 
 **Key differences:**
 
-|                        | Bazel                                | `[yoe]`                             |
-| ---------------------- | ------------------------------------ | ----------------------------------- |
-| Purpose                | General-purpose build system         | Embedded Linux distribution builder |
-| Output                 | Arbitrary build artifacts            | `.apk` packages and disk images     |
-| Config language        | Starlark                             | Starlark                            |
-| Dependency granularity | Action / target                      | Unit (package)                      |
-| Rule implementation    | Java core + Starlark rules           | Starlark units/classes              |
-| Phase model            | Analysis then execution (phased)     | Resolve then build (phased)         |
-| Build execution        | Sandboxed action graph               | `yoe` orchestrates unit builds      |
-| Cache granularity      | Per action (compiler/link step)      | Per unit (one `.apk`)               |
-| What is cached         | Intermediate artifacts in a CAS      | Final distributable `.apk`          |
-| Cache == package feed  | No — separate from any artifact repo | Yes — same S3-compatible store      |
-| Remote cache infra     | REAPI server (bazel-remote, etc.)    | Plain object bucket (URL only)      |
-| Remote execution       | Yes (action offload to a cluster)    | No — always local container worker  |
+|                        | Bazel                                | `[yoe]`                                |
+| ---------------------- | ------------------------------------ | -------------------------------------- |
+| Purpose                | General-purpose build system         | Embedded Linux distribution builder    |
+| Output                 | Arbitrary build artifacts            | `.apk`/`.deb` packages and disk images |
+| Config language        | Starlark                             | Starlark                               |
+| Dependency granularity | Action / target                      | Unit (package)                         |
+| Rule implementation    | Java core + Starlark rules           | Starlark units/classes                 |
+| Phase model            | Analysis then execution (phased)     | Resolve then build (phased)            |
+| Build execution        | Sandboxed action graph               | `yoe` orchestrates unit builds         |
+| Cache granularity      | Per action (compiler/link step)      | Per unit (one package)                 |
+| What is cached         | Intermediate artifacts in a CAS      | Final distributable `.apk`/`.deb`      |
+| Cache == package feed  | No — separate from any artifact repo | Yes — same S3-compatible store         |
+| Remote cache infra     | REAPI server (bazel-remote, etc.)    | Plain object bucket (URL only)         |
+| Remote execution       | Yes (action offload to a cluster)    | No — always local container worker     |
 
 Bazel is not an alternative to `[yoe]` — it builds artifacts, `[yoe]` builds a
 distribution and bootable images. But Starlark, resolve-then-build, and an
@@ -1488,10 +1531,10 @@ the build.
 ## vs. Container Image Builders (planned)
 
 > **Status:** `[yoe]` does not emit OCI container images today. Build outputs
-> are `.apk` packages plus bootable disk images (see
+> are `.apk`/`.deb` packages plus bootable disk images (see
 > [`modules/module-core/classes/image.star`](../modules/module-core/classes/image.star)).
 > This section describes the design question: if a `format = "oci"` mode were
-> added to the image class — assembling the same content-addressed `.apk` set
+> added to the image class — assembling the same content-addressed package set
 > into an OCI manifest plus layers — how would it compare to dedicated container
 > image builders? The intent is to clarify when the feature would earn its keep,
 > so it is added for the right audience rather than as default scope creep.
@@ -1532,7 +1575,7 @@ other use for `[yoe]`. The conclusion is calibrated accordingly.
 The four alternatives above exist to bridge "source code" to "container image."
 If `[yoe]` is already that bridge for the embedded side, _the same unit produces
 the binary that ships to a device and the binary that ships in a container_ —
-one source of truth, one cached `.apk`, two delivery shapes. The structural win
+one source of truth, one cached package, two delivery shapes. The structural win
 is not technical superiority on any axis; it is **eliminating a parallel build
 definition** that teams running both embedded and container deployments
 otherwise maintain (and watch drift).
@@ -1748,9 +1791,9 @@ simpler than Yocto's but more capable than anything desktop distros offer.
 
 **Incremental builds and shared caching.** Buildroot rebuilds everything from
 scratch. Yocto's sstate is powerful but complex to set up. `[yoe]`'s
-content-addressed `.apk` cache in S3-compatible storage is conceptually simpler:
-push packages to a bucket, pull them on other machines. CI builds once,
-developers reuse the output.
+content-addressed package cache (`.apk`/`.deb`) in S3-compatible storage is
+conceptually simpler: push packages to a bucket, pull them on other machines. CI
+builds once, developers reuse the output.
 
 **AI-assisted unit generation.** With prebuilt distro packages already
 consumable via feeds (Alpine, plus experimental Debian and Ubuntu), the gap is

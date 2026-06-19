@@ -1,8 +1,16 @@
-# On-Device Package Management
+# On-Device Package Management (apk / Alpine)
 
 `apk-tools` ships in `dev-image` and any other image that includes it, so booted
 yoe systems can install, upgrade, and inspect packages against the project's
 signed repo using stock Alpine `apk` commands.
+
+This page covers the **apk** path used by Alpine/musl images. yoe also produces
+`.deb` packages for Debian/Ubuntu/glibc images, where the on-device flow is the
+same shape (point at the signed project repo, refresh the index,
+install/upgrade) but driven by `apt`/`dpkg` against an apt-format repository.
+The concepts below — signed repo, index refresh, OTA rebuild-publish-upgrade,
+non-atomic in-place upgrades — carry over; the commands and on-disk paths
+differ.
 
 ## What's already on the device
 
