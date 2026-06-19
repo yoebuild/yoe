@@ -354,6 +354,32 @@ func structString(s *starlarkstruct.Struct, field string) string {
 	return ""
 }
 
+func structStringMap(s *starlarkstruct.Struct, field string) map[string]string {
+	if s == nil {
+		return nil
+	}
+	v, err := s.Attr(field)
+	if err != nil {
+		return nil
+	}
+	dict, ok := v.(*starlark.Dict)
+	if !ok {
+		return nil
+	}
+	result := make(map[string]string, dict.Len())
+	for _, item := range dict.Items() {
+		k, kok := item[0].(starlark.String)
+		val, vok := item[1].(starlark.String)
+		if kok && vok {
+			result[string(k)] = string(val)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
 func structStringList(s *starlarkstruct.Struct, field string) []string {
 	if s == nil {
 		return nil
@@ -575,21 +601,30 @@ func (e *Engine) fnMachine(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.T
 
 	kernelS := kwStruct(kwargs, "kernel")
 
+	kc := KernelConfig{
+		Repo:        structString(kernelS, "repo"),
+		Branch:      structString(kernelS, "branch"),
+		Tag:         structString(kernelS, "tag"),
+		Defconfig:   structString(kernelS, "defconfig"),
+		DeviceTrees: structStringList(kernelS, "device_trees"),
+		Unit:        structString(kernelS, "unit"),
+		Cmdline:     structString(kernelS, "cmdline"),
+		Provides:    structString(kernelS, "provides"),
+		DistroUnit:  structStringMap(kernelS, "distro_unit"),
+	}
+	// `unit` and `distro_unit` are two spellings of "which unit provides this
+	// kernel" — one flat, one per-distro. Setting both is ambiguous. (A
+	// repo/branch source kernel sets neither, which is fine.)
+	if kc.Unit != "" && len(kc.DistroUnit) > 0 {
+		return nil, fmt.Errorf("machine %q: kernel sets both unit and distro_unit (use one)", name)
+	}
+
 	m := &Machine{
 		Name:        name,
 		Arch:        arch,
 		Description: kwString(kwargs, "description"),
-		Kernel: KernelConfig{
-			Repo:        structString(kernelS, "repo"),
-			Branch:      structString(kernelS, "branch"),
-			Tag:         structString(kernelS, "tag"),
-			Defconfig:   structString(kernelS, "defconfig"),
-			DeviceTrees: structStringList(kernelS, "device_trees"),
-			Unit:        structString(kernelS, "unit"),
-			Cmdline:     structString(kernelS, "cmdline"),
-			Provides:    structString(kernelS, "provides"),
-		},
-		Packages: kwStringList(kwargs, "packages"),
+		Kernel:      kc,
+		Packages:    kwStringList(kwargs, "packages"),
 	}
 
 	// Handle bootloader, qemu, and partitions from kwargs

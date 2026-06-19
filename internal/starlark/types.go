@@ -214,6 +214,12 @@ type KernelConfig struct {
 	Unit        string
 	Cmdline     string
 	Provides    string // virtual package name (e.g., "linux")
+	// DistroUnit selects the kernel unit per distro, e.g.
+	// {"alpine": "linux-qemu", "debian": "linux-image-amd64"}. Empty for
+	// single-form machines (which set Unit). image() resolves the entry
+	// for the build's effective distro, since the global provides table is
+	// distro-blind. Mutually exclusive with Unit.
+	DistroUnit map[string]string
 }
 
 type BootloaderConfig struct {
