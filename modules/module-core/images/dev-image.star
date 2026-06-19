@@ -5,21 +5,6 @@ load("@core//units/base/base-files.star", "base_files")
 # Dev image, one definition for every distro: the base-image closure plus a
 # diagnostic + editor userland so the device is usable for real work over SSH.
 
-# Distro-neutral dev tools: leaf CLI utilities whose package name is identical on
-# Alpine, Debian, and Ubuntu, so they're listed once in the shared artifacts
-# rather than repeated per distro. Tools whose name differs across distros
-# (openssh vs openssh-server, procps-ng vs procps) stay in the per-distro
-# branches below.
-_COMMON_DEV = [
-    "ca-certificates",
-    "curl",
-    "less",
-    "file",
-    "htop",
-    "strace",
-    "iproute2",
-]
-
 # Minimal boot + SSH closure shared by the apt distros (see base-image).
 _APT_BASE = [
     "systemd-sysv",
@@ -56,7 +41,14 @@ base_files(
 
 image(
     name = "dev-image",
-    artifacts = ["linux", "bash"] + _COMMON_DEV,
+    # Distro-neutral entries: the kernel (resolved per distro by the machine),
+    # the shell, and the leaf CLI tools whose package name is identical on every
+    # distro. Tools whose name differs (openssh vs openssh-server, procps-ng vs
+    # procps) stay in the per-distro branches below.
+    artifacts = [
+        "linux", "bash",
+        "ca-certificates", "curl", "less", "file", "htop", "strace", "iproute2",
+    ],
     distro_artifacts = {
         "alpine": [
             "base-files-dev", "busybox", "busybox-binsh", "musl", "kmod",
