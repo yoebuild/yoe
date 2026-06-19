@@ -91,6 +91,11 @@
 - yoe chain commands
 - Can we limit random starlark commands in privledged containers? Saved the
   privileged stuff for image building, etc. that is all controlled Go code?
+- [Closure as a first-class output](https://docs.yoebuild.org/nix.html#whats-worth-borrowing-regardless).
+  Nix records a build’s runtime closure explicitly; yoe resolves the closure at
+  assembly time from declared runtime dependencies. Nix’s model catches
+  under-declared dependencies that yoe’s can miss. A verification pass that pins
+  down the realized closure is worth a look independent of any Nix integration.
 
 ## Bugs / Improvements
 
@@ -267,10 +272,12 @@ also compares to Yocto's `oeqa` / `INSANE.bbclass` / `ptest` / `buildhistory`.
 
 ## A/B Updates
 
-Read-only rootfs with A/B partitions and signed update bundles. Reference
-architecture (Home Assistant OS) in
-[containers.md](containers.md#reference-point-home-assistant-os). The Software
-update item under Developer Experience evolves toward this once a runtime ships.
+A/B partitions and signed update bundles for atomic updates with rollback. The
+Home Assistant OS reference architecture in
+[containers.md](containers.md#reference-point-home-assistant-os) pairs this with
+a read-only rootfs; whether yoe adopts an immutable root is undecided. The
+Software update item under Developer Experience evolves toward this once a
+runtime ships.
 
 ## CLI Surface
 

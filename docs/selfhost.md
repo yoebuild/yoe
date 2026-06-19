@@ -121,7 +121,7 @@ running yoe device on the same network.
 - No multi-arch builds **from** the RPi5. To build x86_64 or RISC-V on the
   device, install `qemu-user-static` and register `binfmt` handlers yourself;
   baking this into the image is a follow-up.
-- No A/B partitions or read-only rootfs.
+- No A/B partitions or atomic update/rollback.
 - No headless installer or kiosk variant — serial console + ssh only.
 - The same image is not yet validated on the RPi4, though the manifest should
   work with a `linux-rpi4` swap.

@@ -3,10 +3,10 @@
 > **Status:** Shipped on x86_64 QEMU and Raspberry Pi 5; kernel config also
 > merged for Raspberry Pi 4 and BeaglePlay. Docker (engine + CLI + buildx +
 > containerd + runc + libseccomp + iptables) ships via Alpine apk passthrough,
-> started under OpenRC. The HAOS-style hardening pattern (read-only rootfs,
-> separate data partition, A/B atomic updates) and a source-built runtime are
-> still on the roadmap — see [What is not yet shipped](#what-is-not-yet-shipped)
-> below.
+> started under OpenRC. A separate data partition, A/B atomic updates, and a
+> source-built runtime are still on the roadmap; HAOS's read-only-rootfs
+> hardening is noted as reference prior art, not a direction yoe has committed to
+> — see [What is not yet shipped](#what-is-not-yet-shipped) below.
 
 Running container workloads on yoe-built devices turns a minimal embedded Linux
 into something people actually want to deploy. Two shipped images cover the
@@ -132,8 +132,9 @@ with 2 GB RAM. Source and kernel fragments are at
 <https://github.com/home-assistant/operating-system>.
 
 The takeaway: Buildroot-with-Docker has been a proven path for years. yoe
-matches the basic shape today; the read-only + A/B story is where the bulk of
-the remaining engineering sits.
+matches the basic shape today; a separate data partition and A/B atomic updates
+are where the bulk of the remaining engineering sits. HAOS's read-only squashfs
+root is one hardening option in that space, but not a choice yoe has made.
 
 ## Resource envelope
 
@@ -148,24 +149,24 @@ experience:
   multi-container workloads. The RPi5 self-host workflow wants 8 GB and benefits
   from 16 GB.
 - **Rootfs:** writable `/var` today. `/var/lib/docker` lives on the shared
-  rootfs, so there is no second data partition to worry about — with the
-  trade-off that the rootfs cannot yet be read-only.
+  rootfs, so there is no second data partition to worry about.
 
 ## What is not yet shipped
 
-### Read-only rootfs + separate data partition
+### Separate data partition
 
-Today `/var/lib/docker` is on the shared rootfs. The HAOS pattern — read-only
-squashfs rootfs with a dedicated writable data partition for container state —
-is the long-term target. This is where the bulk of the remaining engineering
-sits, because it touches the image-assembly flow, the bootloader, and the update
-mechanism.
+Today `/var/lib/docker` is on the shared rootfs. Moving container state to a
+dedicated writable data partition is a roadmap item; it touches the
+image-assembly flow, the bootloader, and the update mechanism. HAOS pairs that
+data partition with a read-only squashfs root, but whether yoe adopts an
+immutable root is an open question — the project has not yet settled on a
+deployment/immutability model.
 
 ### A/B atomic updates
 
 `grow-rootfs` handles first-boot expansion, but there are no A/B partitions and
-no rollback on a failed update. Pairing the read-only rootfs change above with
-an A/B layout + signed update bundles is the HAOS-style hardening goal.
+no rollback on a failed update. An A/B layout plus signed update bundles is the
+hardening goal here.
 
 ### `check-config.sh` QA
 

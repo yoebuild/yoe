@@ -610,13 +610,13 @@ core bets while differing sharply on configuration:
 
 - **A single XML file describes the whole image.** One project XML lists the
   Debian suite, architecture, package set, partition layout, and finishing
-  steps. This is a declarative model like `[yoe]`'s, but flat — a document, not a
-  dependency graph — and the customization escape hatch is embedded shell
+  steps. This is a declarative model like `[yoe]`'s, but flat — a document, not
+  a dependency graph — and the customization escape hatch is embedded shell
   (`<finetuning>`/`<command>` blocks) rather than a typed unit DAG.
 - **Native builds under QEMU, not cross-compilation.** ELBE runs the whole build
   inside a privileged VM it calls the `initvm` (QEMU, optionally via libvirt),
-  bootstraps the rootfs with `debootstrap`, and builds any custom source packages
-  natively in a `qemu`-emulated chroot with `pbuilder` — the same
+  bootstraps the rootfs with `debootstrap`, and builds any custom source
+  packages natively in a `qemu`-emulated chroot with `pbuilder` — the same
   native-under-emulation choice `[yoe]` and isar make, at VM rather than
   container granularity.
 - **Prebuilt distro packages for the base, source only where needed.** Standard
@@ -630,15 +630,16 @@ core bets while differing sharply on configuration:
   ELBE is good prior art for it.
 
 Contrast with `[yoe]`: ELBE inherits Debian's size floor (~150 MB+ and the
-`.deb` maintainer-script model), expresses an image as one flat XML document with
-shell finetuning rather than a content-addressed Starlark unit graph, and has no
-per-unit cache that doubles as the on-device package feed. Its build unit is a
-whole-image VM run, where `[yoe]` caches and reuses at per-unit grain.
+`.deb` maintainer-script model), expresses an image as one flat XML document
+with shell finetuning rather than a content-addressed Starlark unit graph, and
+has no per-unit cache that doubles as the on-device package feed. Its build unit
+is a whole-image VM run, where `[yoe]` caches and reuses at per-unit grain.
 
 **When to prefer ELBE:** when you want a Debian/Ubuntu device image with
 first-class license and source-archive reporting for compliance audits, are
-comfortable describing the image in XML with shell finetuning, and value a mature
-tool with years of production use over a finer-grained from-source build graph.
+comfortable describing the image in XML with shell finetuning, and value a
+mature tool with years of production use over a finer-grained from-source build
+graph.
 
 **[aptly](https://www.aptly.info/)** is the canonical tool for running a
 private, pinned Debian/Ubuntu repository. For teams that do ship Debian-based
@@ -720,8 +721,6 @@ targets production IoT, edge, and appliance devices.
 
 **What `[yoe]` adopts from Ubuntu Core:**
 
-- **Immutable root filesystem** — the shipping OS is never mutated in place;
-  changes flow through an update mechanism with rollback.
 - **Gadget-snap-style board config** — Ubuntu Core's
   [gadget snap](https://documentation.ubuntu.com/core/how-to-guides/image-creation/build-a-gadget-snap/)
   bundles bootloader assets, partition layout, and device-specific defaults.
@@ -790,7 +789,7 @@ MiB of flash it's disqualifying before any application code is added.
 |                  | Ubuntu Core                           | `[yoe]`                                |
 | ---------------- | ------------------------------------- | -------------------------------------- |
 | Packaging format | Snaps (squashfs, loopback-mounted)    | apk (installed into shared rootfs)     |
-| Root filesystem  | Composed read-only snap mounts        | Standard FHS, shipped read-only        |
+| Root filesystem  | Composed read-only snap mounts        | Standard FHS                           |
 | Package daemon   | snapd (always running)                | apk (run at build + update time only)  |
 | Board config     | Gadget snap                           | Machine definition (Starlark)          |
 | Image metadata   | Signed model assertion                | Image + machine Starlark               |
@@ -830,11 +829,11 @@ backed by a commercial OTA SaaS
   to hide BitBake's rough edges. `[yoe]` shares the diagnosis (the underlying
   tooling needs an ergonomic front door) but reaches a different conclusion:
   replace BitBake rather than wrap it.
-- **Immutable rootfs + atomic updates as the deployment model** — Avocado uses
-  btrfs + `systemd-sysext` overlays verified with `dm-verity`. `[yoe]` shares
-  the immutability goal (already drawn from Ubuntu Core and NixOS), though the
-  mechanism is still an open design decision (apk + atomic image, A/B, RAUC,
-  etc.).
+- **Atomic updates with rollback as the deployment goal** — Avocado builds on an
+  immutable root using btrfs + `systemd-sysext` overlays verified with
+  `dm-verity`. `[yoe]` shares the goal of a robust, roll-back-on-failure update
+  path, but has not yet decided either the update mechanism (apk + atomic image,
+  A/B, RAUC, etc.) or whether the root filesystem is immutable.
 - **Binary extension feeds for the common case** — Avocado bets that most teams
   consume pre-built extensions rather than customizing the base. `[yoe]`'s
   S3-backed apk repository plays the same role: a CI build seeds the cache and
@@ -876,7 +875,7 @@ backed by a commercial OTA SaaS
 | Package format      | IPK/RPM internally; sysext DDI on device   | apk                                            |
 | Runtime composition | `systemd-sysext` overlays + `dm-verity`    | apk into shared FHS rootfs                     |
 | Init system         | systemd (required by sysext model)         | busybox init (Alpine); systemd (Debian/Ubuntu) |
-| Filesystem          | btrfs root, immutable                      | ext4 today; immutability planned               |
+| Filesystem          | btrfs root, immutable                      | ext4 today; mutability not yet decided         |
 | OTA mechanism       | Peridio Core (commercial SaaS)             | Self-hosted; mechanism TBD                     |
 | Build caching       | Yocto sstate                               | Content-addressed apk in S3-compatible cache   |
 | Container model     | SDK containers for dev                     | Container as build worker                      |
@@ -1101,8 +1100,8 @@ ideas about reproducibility and declarative configuration are adopted wholesale;
 its implementation complexity is not.
 
 This section is the head-to-head comparison. For a deeper exploration of the
-inverse question — whether `[yoe]` could _build with_ Nix rather than against it,
-letting Nix realize the package graph while `[yoe]` provides orchestration,
+inverse question — whether `[yoe]` could _build with_ Nix rather than against
+it, letting Nix realize the package graph while `[yoe]` provides orchestration,
 custom units, image generation, and BSPs — see [yoe and Nix](nix.md).
 
 **What `[yoe]` adopts from Nix:**
@@ -1173,9 +1172,10 @@ results validate several instincts `[yoe]` shares.
   parallel installs, no hooks) is the same conclusion that drives `[yoe]`'s
   adoption of Alpine's near-empty-install-script culture and fast apk
   operations.
-- **Read-only OS, atomic updates** — distri's images are immutable and activated
-  atomically with no per-file extraction. That is the same direction `[yoe]`
-  draws from Ubuntu Core and NixOS: ship the OS read-only, update atomically.
+- **Atomic updates, no per-file extraction** — distri's images are immutable and
+  activated atomically. `[yoe]` shares the interest in a fast, atomic update path
+  (the update mechanism is still an open design decision), though it has not
+  taken a position on shipping the OS read-only the way distri does.
 - **Hermetic builds with explicit dependency views** — distri builds see only
   declared dependencies through a filtered package store; `[yoe]` builds inside
   a container worker with declared inputs and content-addressed outputs.
@@ -1222,9 +1222,10 @@ results validate several instincts `[yoe]` shares.
 that is not what it is for. Read distri for its ideas: fast, hook-free, parallel
 package operations and a concrete demonstration that the slowness of mainstream
 package managers is an architectural choice, not a law of nature. For the
-shipping equivalents of its immutability and atomic-update properties, NixOS and
-Ubuntu Core are the general-purpose options; for embedded hardware, that is the
-gap `[yoe]` aims to fill.
+shipping equivalents of its atomic-update and immutability properties, NixOS and
+Ubuntu Core are the general-purpose options; the embedded-hardware gap is what
+`[yoe]` aims to fill, with fast, hook-free apk operations and BSP support at its
+core.
 
 ## vs. Google GN
 
@@ -1338,7 +1339,7 @@ a Bazel concern.
 The closest "research a radically different distribution model with a custom
 tool" prior art is Michael Stapelberg's [distri](https://distr1.org/) — but that
 is a research distro with its own tool, not Bazel, and its kinship with `[yoe]`
-is on fast, hook-free package management and immutable atomic updates, not on
+is on fast, hook-free package management, not on
 content-addressed caching (distri's store is versioned-name-addressed) or any
 BSP/image story. See the [distri section](#vs-distri) above.
 
