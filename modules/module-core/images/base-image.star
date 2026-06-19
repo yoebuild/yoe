@@ -18,7 +18,6 @@ _APT_BASE = [
     "init",
     "libc6",
     "libc-bin",
-    "base-files",
     "base-passwd",
     "dash",
     "diffutils",
@@ -32,10 +31,12 @@ _APT_BASE = [
 
 image(
     name = "base-image",
-    artifacts = ["linux"],
+    # base-files is yoe's own distro-agnostic unit (one definition for every
+    # distro), so it lives in the shared artifacts list, not each branch.
+    artifacts = ["linux", "base-files"],
     distro_artifacts = {
         "alpine": [
-            "musl", "base-files", "busybox", "busybox-binsh",
+            "musl", "busybox", "busybox-binsh",
             "apk-tools", "openrc", "network-config",
         ],
         "debian": _APT_BASE,
