@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`yoe clean` no longer fails trying to pull a toolchain image.** Cleaning
+  root-owned build files now uses whichever toolchain image is already on your
+  machine instead of a fixed version, so it works after toolchain bumps and
+  across distros, and never reaches out to a registry for an image that only
+  exists locally.
+
 ## [0.12.5] - 2026-06-19
 
 - **One image definition can now target multiple distros.** Set

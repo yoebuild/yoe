@@ -34,7 +34,6 @@ func hostArch() string {
 	}
 }
 
-
 // Mount describes a bind mount for the container.
 type Mount struct {
 	Host      string
@@ -76,6 +75,34 @@ func DefaultContainerImage(proj *yoestar.Project) string {
 		}
 	}
 	return fmt.Sprintf("yoe/toolchain-musl:15-%s", arch)
+}
+
+// LocalToolchainImage returns a locally-present yoe toolchain image tagged for
+// the given arch (e.g. "yoe/toolchain-musl:19-x86_64"), or "" if none is
+// installed. Any toolchain image suffices for maintenance tasks like a
+// container-side `rm -rf`, so the caller need not know the exact version or
+// distro — it just needs a root-capable container that exists locally.
+//
+// This avoids hardcoding a toolchain version (which drifts as units bump) and
+// avoids docker silently attempting a registry pull for a yoe-local image tag
+// that was never pushed anywhere.
+func LocalToolchainImage(arch string) string {
+	runtime, err := detectRuntime()
+	if err != nil {
+		return ""
+	}
+	out, err := exec.Command(runtime, "images", "--format", "{{.Repository}}:{{.Tag}}").Output()
+	if err != nil {
+		return ""
+	}
+	suffix := "-" + arch
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "yoe/toolchain") && strings.HasSuffix(line, suffix) {
+			return line
+		}
+	}
+	return ""
 }
 
 // RunInContainer executes a shell command inside a container.
@@ -162,7 +189,11 @@ func containerRunArgs(cfg ContainerRunConfig) ([]string, error) {
 		arch = hostArch()
 	}
 
-	args := []string{"run", "--rm", "--privileged"}
+	// --pull=never: yoe toolchain images are built locally and never pushed
+	// to a registry, so an absent image must fail fast with a clear "image
+	// not present" error rather than docker attempting a doomed registry pull
+	// that surfaces as an opaque "pull access denied".
+	args := []string{"run", "--rm", "--privileged", "--pull=never"}
 
 	// Add platform for cross-arch containers
 	if arch != hostArch() {
@@ -207,7 +238,6 @@ func containerRunArgs(cfg ContainerRunConfig) ([]string, error) {
 
 	return args, nil
 }
-
 
 // checkBinfmt verifies that binfmt_misc is registered for the given arch.
 // CheckBinfmt verifies that binfmt_misc is registered for the given
@@ -261,7 +291,6 @@ func RegisterBinfmt(w io.Writer) error {
 	fmt.Fprintln(w, "Done. Registered: arm64, riscv64")
 	return nil
 }
-
 
 func detectRuntime() (string, error) {
 	for _, rt := range []string{"docker", "podman"} {
