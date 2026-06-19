@@ -252,6 +252,28 @@ func TestBuildQEMUArgsDirectBoot(t *testing.T) {
 	}
 }
 
+// TestBuildQEMUArgsDirectBootDistroUnit guards the per-distro machine kernel:
+// a machine declaring its kernel via distro_unit (so Kernel.Unit is empty) must
+// still take the direct-kernel-boot path. Gating on Unit != "" instead of
+// HasKernel() silently dropped -kernel and broke `yoe run` on qemu machines.
+func TestBuildQEMUArgsDirectBootDistroUnit(t *testing.T) {
+	machine := &yoestar.Machine{
+		Arch: "arm64",
+		Kernel: yoestar.KernelConfig{
+			DistroUnit: map[string]string{"alpine": "linux", "debian": "linux-image-arm64"},
+			Cmdline:    "console=ttyAMA0 root=/dev/vda1 rw",
+		},
+		QEMU: &yoestar.QEMUConfig{Machine: "virt"},
+	}
+	args := BuildQEMUArgs(machine, QEMUOptions{}, "/img.img", "/boot/vmlinuz-x", "/boot/initrd.img-x")
+	if !containsPair(args, "-kernel", "/boot/vmlinuz-x") {
+		t.Errorf("distro_unit machine should still direct-boot a kernel, got %v", args)
+	}
+	if !containsPair(args, "-initrd", "/boot/initrd.img-x") {
+		t.Errorf("expected -initrd, got %v", args)
+	}
+}
+
 // writeKernelFile creates a fake arm64 kernel: a bare Image carries the "ARMd"
 // magic at offset 56; an EFI-only (zboot) image is a PE stub without it.
 func writeKernelFile(t *testing.T, bareImage bool) string {

@@ -179,7 +179,7 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 	// the kernel the image actually ships.
 	hostKernel, hostInitrd := "", ""
 	needsDirectBoot := machine.QEMU == nil || machine.QEMU.Firmware == ""
-	if needsDirectBoot && machine.Kernel.Unit != "" {
+	if needsDirectBoot && machine.Kernel.HasKernel() {
 		hostKernel, hostInitrd = findBootKernel(imgPath)
 	}
 
@@ -511,7 +511,7 @@ func BuildQEMUArgs(machine *yoestar.Machine, opts QEMUOptions, imgPath, kernelPa
 	// -append for architectures that need it (arm64, riscv64). Skipped if
 	// the caller couldn't resolve a kernel path.
 	needsDirectBoot := machine.QEMU == nil || machine.QEMU.Firmware == ""
-	if needsDirectBoot && machine.Kernel.Unit != "" && kernelPath != "" {
+	if needsDirectBoot && machine.Kernel.HasKernel() && kernelPath != "" {
 		// An EFI-only kernel (Ubuntu's arm64 zboot) can't be started by the
 		// firmware-less -kernel path, so boot it through UEFI firmware. edk2
 		// still loads the -kernel/-initrd/-append below via fw_cfg, running
