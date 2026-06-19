@@ -168,13 +168,13 @@ image(
 Effective artifacts = `artifacts + distro_artifacts[effective_distro]`. Only the
 branch matching the build's effective distro is consulted; the others are inert
 lists — never resolved, never forcing their feed module to load — so a shared
-image carrying a `debian` branch builds fine in an Alpine-only project that never
-loads `module-debian`. There is no closed-distro key check: the distro set is
-open, and a typo'd key for a distro you never build is simply never reached.
+image carrying a `debian` branch builds fine in an Alpine-only project that
+never loads `module-debian`. There is no closed-distro key check: the distro set
+is open, and a typo'd key for a distro you never build is simply never reached.
 
-This is what lets `module-core` define `base-image`, `dev-image`, and `ssh-image`
-once, each targeting Alpine, Debian, and Ubuntu, rather than maintaining three
-near-parallel copies per distro module.
+This is what lets `module-core` define `base-image`, `dev-image`, and
+`ssh-image` once, each targeting Alpine, Debian, and Ubuntu, rather than
+maintaining three near-parallel copies per distro module.
 
 ### Per-distro kernel selection
 
@@ -202,10 +202,10 @@ machine(
 An image's `"linux"` artifact resolves to `distro_unit[effective_distro]` — the
 resolution happens when the image is evaluated, the only point at which the
 effective distro is known. A machine whose kernel is the same across distros
-keeps the flat single-`unit` form (`kernel(unit = "linux-rpi5", provides =
-"linux", ...)`): a Raspberry Pi 5 image, for instance, carries the same custom
-`linux-rpi5` on Alpine and Debian alike. Setting both `unit` and `distro_unit`
-on one kernel is an error.
+keeps the flat single-`unit` form
+(`kernel(unit = "linux-rpi5", provides = "linux", ...)`): a Raspberry Pi 5
+image, for instance, carries the same custom `linux-rpi5` on Alpine and Debian
+alike. Setting both `unit` and `distro_unit` on one kernel is an error.
 
 ## Choosing a distro
 
