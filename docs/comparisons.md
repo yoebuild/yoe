@@ -1173,9 +1173,9 @@ results validate several instincts `[yoe]` shares.
   adoption of Alpine's near-empty-install-script culture and fast apk
   operations.
 - **Atomic updates, no per-file extraction** — distri's images are immutable and
-  activated atomically. `[yoe]` shares the interest in a fast, atomic update path
-  (the update mechanism is still an open design decision), though it has not
-  taken a position on shipping the OS read-only the way distri does.
+  activated atomically. `[yoe]` shares the interest in a fast, atomic update
+  path (the update mechanism is still an open design decision), though it has
+  not taken a position on shipping the OS read-only the way distri does.
 - **Hermetic builds with explicit dependency views** — distri builds see only
   declared dependencies through a filtered package store; `[yoe]` builds inside
   a container worker with declared inputs and content-addressed outputs.
@@ -1339,9 +1339,9 @@ a Bazel concern.
 The closest "research a radically different distribution model with a custom
 tool" prior art is Michael Stapelberg's [distri](https://distr1.org/) — but that
 is a research distro with its own tool, not Bazel, and its kinship with `[yoe]`
-is on fast, hook-free package management, not on
-content-addressed caching (distri's store is versioned-name-addressed) or any
-BSP/image story. See the [distri section](#vs-distri) above.
+is on fast, hook-free package management, not on content-addressed caching
+(distri's store is versioned-name-addressed) or any BSP/image story. See the
+[distri section](#vs-distri) above.
 
 **Phase model.** Classical Bazel runs **loading → analysis → execution** as
 strict global phases: analysis of the requested graph completes, and

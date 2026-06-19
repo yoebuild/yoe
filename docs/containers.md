@@ -5,8 +5,8 @@
 > containerd + runc + libseccomp + iptables) ships via Alpine apk passthrough,
 > started under OpenRC. A separate data partition, A/B atomic updates, and a
 > source-built runtime are still on the roadmap; HAOS's read-only-rootfs
-> hardening is noted as reference prior art, not a direction yoe has committed to
-> — see [What is not yet shipped](#what-is-not-yet-shipped) below.
+> hardening is noted as reference prior art, not a direction yoe has committed
+> to — see [What is not yet shipped](#what-is-not-yet-shipped) below.
 
 Running container workloads on yoe-built devices turns a minimal embedded Linux
 into something people actually want to deploy. Two shipped images cover the
