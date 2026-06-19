@@ -46,7 +46,7 @@ _APT_DISTROS = ["debian", "ubuntu"]
 def _is_apt_distro(d):
     return d in _APT_DISTROS
 
-def image(name, artifacts=[], hostname=None, timezone="", locale="",
+def image(name, artifacts=[], distro_artifacts={}, hostname=None, timezone="", locale="",
           partitions=[], scope="machine",
           container="toolchain", container_arch="target", deps=[],
           version=None, distro=None, **kwargs):
@@ -65,6 +65,15 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
     `defaults.distro` (overridable per-developer via `local.star`'s
     `default_distro_override`) supplies the fallback. With nothing set in
     either, image evaluation errors — every image must resolve to a distro.
+
+    `distro_artifacts` is a `{distro: [names]}` map letting one image definition
+    target multiple distros whose package names differ (musl/openrc/apk vs
+    systemd/glibc/dpkg). Only the branch matching the effective distro is
+    consulted; the others are inert lists — never resolved, never forcing their
+    feed module to load — so a shared image carrying a `"debian"` branch builds
+    fine in an Alpine-only project. There is no closed-distro key check: the
+    distro set is open, and a typo'd key for a distro you never build is simply
+    never reached.
     """
     if version == None:
         version = ctx.project_version
@@ -92,7 +101,10 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
     # bootloader requirements come in via apt's transitive closure
     # instead, and machine-specific board firmware should be declared
     # explicitly per-image.
-    all_artifacts = list(artifacts)
+    # distro_artifacts: merge only the branch for this image's effective distro.
+    # Non-selected branches are never read, so they cost nothing and don't force
+    # their distro's feed module to be present.
+    all_artifacts = list(artifacts) + list(distro_artifacts.get(effective_distro, []))
     if effective_distro == "alpine":
         all_artifacts = all_artifacts + list(ctx.machine_config.packages)
     elif _is_apt_distro(effective_distro):
