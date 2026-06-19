@@ -295,7 +295,7 @@ runtime ships.
 - `yoe shell` — drop into the build container interactively.
 - `yoe bundle` — package modules into a single distributable.
 - `yoe module list|info|check-updates` — inspect and update external modules.
-- `yoe repo push|pull` — sync the local apk repo to a remote (S3 / HTTP).
+- `yoe repo push|pull` — sync the local package repo to a remote (S3 / HTTP).
 - `yoe build` query flags: `--class <type>`, `--with-deps`, `--list-targets`,
   `--no-remote-cache`.
 - Config propagation across modules.
@@ -305,7 +305,7 @@ sections.
 
 ## Format / Modules
 
-- Sub-packages — one unit producing multiple `.apks`.
+- Sub-packages — one unit producing multiple packages (`.apk` or `.deb`).
 - `MODULE.star` manifests for module versioning and inter-module deps.
 - Per-task container overrides.
 - Track the Starlark class function used to define each unit on the resolved
@@ -321,9 +321,11 @@ See [metadata-format.md](metadata-format.md).
 
 ## Distribution Variants
 
-- **glibc target.** Currently musl-only. glibc support would enable workloads
-  whose binaries require it (some cgo, prebuilt vendor SDKs, the upstream Helix
-  release, etc.).
+- **glibc target — landed.** yoe now builds glibc/`.deb` images via the Debian
+  and Ubuntu backends (`apt_feed`), in addition to the musl/`.apk` Alpine path.
+  Both Debian and Ubuntu are CI boot- and SSH-verified on arm64 and x86_64. This
+  enables workloads whose binaries require glibc (some cgo, prebuilt vendor
+  SDKs, the upstream Helix release, etc.). Still planned: Jetson / L4T.
 
 ## Self-Hosting
 

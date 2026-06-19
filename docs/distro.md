@@ -315,7 +315,7 @@ per-distro views resolve cross-distro collisions, how effective distro flows
 into cache keys — see [Catalog and Materialization](catalog.md). For the
 apk-specific mirror-verbatim mechanism, see
 [Alpine apk Passthrough](apk-passthrough.md). For the apk signing trust chain,
-see [apk Signing](signing.md).
+see [Package Signing](signing.md).
 
 ## Adding a new distro
 

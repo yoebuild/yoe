@@ -2,18 +2,19 @@
 
 This page covers how to ship Node.js apps with their npm dependencies on a yoe
 image. yoe doesn't use npm as a package manager — npm-installed packages live in
-a per-app `node_modules` tree baked into a regular apk, so the on-device package
-manager stays apk-only and rebuilding the image rebuilds `node_modules` from
-your `package.json` (and `package-lock.json` if present).
+a per-app `node_modules` tree baked into a regular package (`.apk` or `.deb`),
+so the on-device package manager stays the system one and rebuilding the image
+rebuilds `node_modules` from your `package.json` (and `package-lock.json` if
+present).
 
 ## Packaging a Node.js app with npm dependencies
 
 The `nodejs_app` class in `module-core/classes/nodejs.star` creates an app
 directory under `/usr/lib/node-apps/<name>` on the target, runs `npm install`
 against your `package.json` so the listed packages land in `node_modules/` next
-to your code, and ships the whole tree as a regular `.apk`. It gets the same
-caching and signing as any other unit and brings in `nodejs` automatically via
-`runtime_deps`.
+to your code, and ships the whole tree as a regular package (`.apk` or `.deb`).
+It gets the same caching and signing as any other unit and brings in `nodejs`
+automatically via `runtime_deps`.
 
 Each app lives in its own source directory next to the unit's `.star` file and
 uses a normal Node.js project layout — `package.json` is the source of truth for

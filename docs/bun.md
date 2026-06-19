@@ -3,9 +3,9 @@
 This page covers how to ship [Bun](https://bun.sh/) apps with their npm
 dependencies on a yoe image. yoe doesn't use bun (or npm) as a system package
 manager — bun-installed packages live in a per-app `node_modules` tree baked
-into a regular apk, so the on-device package manager stays apk-only and
-rebuilding the image rebuilds `node_modules` from your `package.json` (and
-`bun.lockb` if present).
+into a regular package (`.apk` or `.deb`), so the on-device package manager
+stays the system one and rebuilding the image rebuilds `node_modules` from your
+`package.json` (and `bun.lockb` if present).
 
 Bun is a single binary that bundles a JavaScript runtime, a package manager, and
 a bundler. It runs TypeScript directly with no separate compile step, so the
@@ -16,9 +16,9 @@ entry point of a bun app can be a plain `.ts` file.
 The `bun_app` class in `module-core/classes/bun.star` creates an app directory
 under `/usr/lib/bun-apps/<name>` on the target, runs `bun install --production`
 against your `package.json` so the listed packages land in `node_modules/` next
-to your code, and ships the whole tree as a regular `.apk`. It gets the same
-caching and signing as any other unit and brings in `bun` automatically via
-`runtime_deps`.
+to your code, and ships the whole tree as a regular package (`.apk` or `.deb`).
+It gets the same caching and signing as any other unit and brings in `bun`
+automatically via `runtime_deps`.
 
 Each app lives in its own source directory next to the unit's `.star` file and
 uses a normal Bun project layout — `package.json` is the source of truth for

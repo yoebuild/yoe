@@ -21,8 +21,8 @@ In particular:
   files, every module you list in `modules = [...]`, every upstream source URL
   and git remote those units pull from.
 - **Untrusted.** The booted target device, network traffic to/from on-device
-  package installs (`apk add`, `yoe deploy`). These are protected by the apk
-  signing chain — see [apk Signing](signing.md).
+  package installs (`apk add` / `apt install`, `yoe deploy`). These are
+  protected by the package signing chain — see [Package Signing](signing.md).
 - **Out of scope.** Running other people's `PROJECT.star` files, hosting `yoe`
   builds on a multi-tenant machine, sandboxing one project from another on the
   same host. `yoe` does not attempt any of this today.
@@ -216,11 +216,13 @@ effects in `yoe build` output:
   - Trigger any of the well-known privileged-container escapes
     (`/sys/kernel/uevent_helper`, `core_pattern`, cgroup `release_agent`, etc.)
     to spawn a process on the host as root.
-- **Tamper with the apk signing pipeline.** The project signing key lives at
-  `~/.config/yoe/keys/<project>.rsa`. A `run(host = True)` step trivially reads
-  it. A privileged in-container step can read it if it lives under `/project` or
-  any mounted cache dir; the default location is in your home, which the
-  container does not see — but `run(host = True)` does.
+- **Tamper with the package signing pipeline.** The project's apk signing key
+  lives under `~/.config/yoe/keys/` (the RSA key at `<project>.rsa`); the apt
+  repository served to Debian/Ubuntu targets is likewise signed by a per-project
+  key. A `run(host = True)` step trivially reads it. A privileged in-container
+  step can read it if it lives under `/project` or any mounted cache dir; the
+  default location is in your home, which the container does not see — but
+  `run(host = True)` does.
 - **Poison the cache.** A unit can plant files in `cache/sources/`,
   `cache/modules/`, or per-unit `cache_dirs` mounts so the next build of another
   unit picks up tampered content.
@@ -238,11 +240,12 @@ The container does provide some friction. It is worth being precise about what:
   non-root container process cannot write block devices owned by `root:disk` or
   call `mount(2)` directly. A unit has to deliberately escalate via
   `privileged = True`, `unit_class = "image"`, or `host = True` to escape this.
-- **Apks are signed and verified.** Output `.apk` files are signed with the
-  project key, the public key is published to the repo and embedded in the
-  rootfs, and on-device `apk add` / `yoe deploy` reject unsigned or
-  wrongly-signed packages. See [apk Signing](signing.md). This protects the
-  device → repo channel; it does not protect the host that produces the apks.
+- **Packages are signed and verified.** Output packages (`.apk` on Alpine,
+  `.deb` on Debian/Ubuntu) are signed with the project key, the public key is
+  published to the repo and embedded in the rootfs, and on-device installs
+  (`apk add` / `apt install`, `yoe deploy`) reject unsigned or wrongly-signed
+  packages. See [Package Signing](signing.md). This protects the device → repo
+  channel; it does not protect the host that produces the packages.
 - **Source archives can declare integrity hashes.** Units that set
   `sha256 = "…"` or `apk_checksum = "…"` get post-download verification in
   `internal/source/fetch.go`. Units that omit both run whatever the upstream

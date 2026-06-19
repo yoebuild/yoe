@@ -99,9 +99,9 @@ That's it. Everything else is inside the container.
 ### Tier 1: `[yoe]` Build Root
 
 An environment populated from `[yoe]`'s own package repository. This is where
-the actual compilers, toolchains, and language SDKs live. `[yoe]` targets musl
-today (Alpine-based); the libc choice is a separate decision from the tier
-structure.
+the actual compilers, toolchains, and language SDKs live. `[yoe]` supports both
+musl (Alpine-based) and glibc (Debian/Ubuntu-based) targets; the libc choice is
+a separate decision from the tier structure.
 
 ```sh
 # yoe creates this automatically during build
@@ -370,12 +370,12 @@ First time setup (only requires yoe binary + git + docker/podman):
 Day-to-day development:
   $EDITOR units/myapp.star
   yoe build myapp            ← builds in isolated bwrap sandbox
-  yoe build base-image       ← assembles rootfs with apk
+  yoe build base-image       ← assembles rootfs (apk on Alpine, apt on Debian/Ubuntu)
   yoe flash base-image /dev/sdX
 
 Adding a host tool:
   $EDITOR units/cmake.star ← write a unit for the tool
-  yoe build cmake            ← produces cmake.apk
+  yoe build cmake            ← produces cmake package (.apk or .deb)
   (cmake is now available as a build dependency for other units)
 
 Updating the base toolchain:
@@ -403,8 +403,8 @@ $YOE_CACHE/
 │   │   └── 34/567890...abcd.git/       # bare git repo, keyed by url#ref hash
 │   └── packages/
 │       ├── x86_64/
-│       │   ├── a1/b2c3d4...e5f6.apk    # built .apk, keyed by unit input hash
-│       │   └── 78/90abcd...1234.apk
+│       │   ├── a1/b2c3d4...e5f6.apk    # built package, keyed by unit input hash
+│       │   └── 78/90abcd...1234.deb
 │       └── aarch64/
 │           └── ...
 ├── index/
@@ -441,10 +441,10 @@ yoe build openssh
   │
   ├─ 2. For each unit in topological order:
   │     │
-  │     ├─ Check local object store: objects/packages/<arch>/<hash>.apk
+  │     ├─ Check local object store: objects/packages/<arch>/<hash>.{apk,deb}
   │     │   Hit → publish to build/repo/, skip to next unit
   │     │
-  │     ├─ Check remote cache: GET s3://bucket/packages/<arch>/<hash>.apk
+  │     ├─ Check remote cache: GET s3://bucket/packages/<arch>/<hash>.{apk,deb}
   │     │   Hit → download to local object store, publish to repo, skip
   │     │
   │     ├─ Cache miss → need to build:
@@ -455,13 +455,13 @@ yoe build openssh
   │     │   │
   │     │   ├─ Build unit (sandbox or direct)
   │     │   │
-  │     │   ├─ Package output as .apk
+  │     │   ├─ Package output (.apk for Alpine, .deb for Debian/Ubuntu)
   │     │   │
-  │     │   ├─ Store .apk in local object store under input hash
+  │     │   ├─ Store package in local object store under input hash
   │     │   │
   │     │   ├─ Push to remote cache (if configured): PUT s3://bucket/...
   │     │   │
-  │     │   └─ Publish .apk to build/repo/ for image assembly
+  │     │   └─ Publish package to build/repo/ for image assembly
   │     │
   │     └─ Next unit
   │
@@ -542,7 +542,7 @@ S3 API, and works in air-gapped environments.
 | ----------------- | ---------------------------- | -------------------------- | ------------------------------- |
 | Cache granularity | Per derivation output        | Per task                   | Per unit                        |
 | Key computation   | Full derivation hash         | Task hash + signatures     | Unit input hash (SHA256)        |
-| Object size       | Closures (can be 1GB+)       | Individual task outputs    | Single `.apk` file              |
+| Object size       | Closures (can be 1GB+)       | Individual task outputs    | Single package (`.apk`/`.deb`)  |
 | Remote backend    | Cachix, nix-serve, S3        | sstate-mirror (HTTP/S3)    | Any S3-compatible               |
 | Setup complexity  | Moderate (Cachix simplifies) | High (mirrors, hashequiv)  | Low (just a bucket URL)         |
 | Sharing model     | Binary cache + substituters  | sstate mirrors + hashequiv | Push/pull to S3                 |
@@ -610,11 +610,11 @@ Build matrix:
 
 ### Package Sharing Across Targets
 
-Because units produce architecture-specific `.apk` packages that live in a
-shared repository, packages built for one machine are reused by any other
-machine with the same architecture. Building `openssh` for the BeagleBone also
-satisfies the Raspberry Pi — both are `aarch64` and produce identical packages
-(same unit, same source, same arch flags → same cache key).
+Because units produce architecture-specific packages (`.apk` or `.deb`) that
+live in a shared repository, packages built for one machine are reused by any
+other machine with the same architecture. Building `openssh` for the BeagleBone
+also satisfies the Raspberry Pi — both are `aarch64` and produce identical
+packages (same unit, same source, same arch flags → same cache key).
 
 This means a multi-machine project does **not** rebuild the world for each
 board. Only machine-specific packages (kernel, bootloader, device trees) are

@@ -2,17 +2,17 @@
 
 This page covers how to ship Python apps with their pip dependencies on a yoe
 image. yoe doesn't use pip as a package manager — pip-installed packages live in
-a per-app **virtualenv** baked into a regular apk, so the on-device package
-manager stays apk-only and rebuilding the image rebuilds the venv from a
-declared list of pins.
+a per-app **virtualenv** baked into a regular package (`.apk` or `.deb`), so the
+on-device package manager stays the system one and rebuilding the image rebuilds
+the venv from a declared list of pins.
 
 ## Packaging a Python app with pip dependencies
 
 The `python_venv` class in `module-core/classes/python.star` creates a
 virtualenv under `/usr/lib/python-venvs/<name>` on the target and pip-installs
-the listed packages into it. The result is packaged as a regular `.apk`, gets
-the same caching and signing as any other unit, and brings in `python3`
-automatically via `runtime_deps`.
+the listed packages into it. The result is packaged as a regular package (`.apk`
+or `.deb`), gets the same caching and signing as any other unit, and brings in
+`python3` automatically via `runtime_deps`.
 
 A minimal app:
 

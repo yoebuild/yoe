@@ -74,7 +74,7 @@ Within each phase, modules are evaluated in declaration order. Within a module,
 
 A **unit** is a named build definition declared via `unit()`, `image()`, or a
 class function like `autotools()` or `cmake()`. Each unit produces one or more
-`.apk` packages.
+packages (`.apk` or `.deb`, per the consuming image's distro).
 
 ### Current naming model
 
@@ -92,8 +92,9 @@ Units declare two kinds of dependencies:
 
 - **`deps`** — build-time. The dependency's output is available in the build
   sysroot during compilation. Resolved by the `yoe` DAG.
-- **`runtime_deps`** — install-time. Recorded in the `.apk` package metadata and
-  resolved by `apk` during image assembly or on-device install.
+- **`runtime_deps`** — install-time. Recorded in the package metadata
+  (`.PKGINFO` for `.apk`, `control` for `.deb`) and resolved by `apk` or `apt`
+  during image assembly or on-device install.
 
 Both reference units by name:
 
@@ -110,7 +111,8 @@ autotools(
 Build-time deps are resolved transitively by the DAG. If `curl` depends on
 `openssl` and `openssl` depends on `zlib`, curl's build sysroot includes both.
 
-Runtime deps are resolved transitively by `apk` at install time.
+Runtime deps are resolved transitively by the on-device package manager (`apk`
+or `apt`) at install time.
 
 ## Load references
 
@@ -269,10 +271,10 @@ tells the whole story.
 
 `provides` is powerful but has a hidden cost: the build cache hashes resolved
 deps recursively, so a `provides` swap forks **every transitive consumer** into
-a machine-specific apk variant. Used carelessly it can turn a clean cross-
-machine apk repo into hundreds of near-identical packages.
+a machine-specific package variant. Used carelessly it can turn a clean cross-
+machine package repo into hundreds of near-identical packages.
 
-The rule that keeps the apk repo lean:
+The rule that keeps the package repo lean:
 
 > `provides` is for **leaf artifacts** referenced by other units only as
 > `runtime_deps` — kernel, base-files, init, bootloader. It is **not** for
@@ -282,12 +284,12 @@ The rule that keeps the apk repo lean:
 This means:
 
 - **Don't `provides` a build-time library.** Swapping `openssl` ↔ `libressl` via
-  `provides` would fan out every `curl`, `openssh`, `python` apk per selection.
-  If you need a different crypto library, give it a different name and have
-  consumers reference it explicitly.
+  `provides` would fan out every `curl`, `openssh`, `python` package per
+  selection. If you need a different crypto library, give it a different name
+  and have consumers reference it explicitly.
 - **Don't put machine-flavored units in a generic library's build-time `deps`.**
   A library should depend on other libraries, never on `linux`, `base-files`, or
-  any unit that varies by machine — otherwise the library's apk forks per
+  any unit that varies by machine — otherwise the library's package forks per
   machine even though its compiled output is identical.
 - **Don't use `provides` for runtime alternatives.** For pairs like `mdev`
   (busybox) vs `eudev`, `udhcpc` (busybox) vs `dhcpcd`, or busybox `ntpd` vs
@@ -350,10 +352,10 @@ of:
 ## Keep units generic — resolve variation at runtime
 
 The previous section is one expression of a broader principle: **a unit produces
-one .apk that every project and every machine shares.** When two images need
-different behavior from the same package, the answer is almost never "fork the
-package." It's "resolve the difference at runtime, in a component that's allowed
-to vary."
+one package (`.apk` or `.deb`) that every project and every machine of its
+distro shares.** When two images need different behavior from the same package,
+the answer is almost never "fork the package." It's "resolve the difference at
+runtime, in a component that's allowed to vary."
 
 Concretely, when you reach for a per-project or per-machine variant of a generic
 unit, prefer instead:
@@ -366,15 +368,16 @@ unit, prefer instead:
   flavored, so they're the right place for choices that have to vary.
 - **`replaces:` annotations on the unit that owns the shadow.** When busybox and
   ncurses both ship `/usr/bin/clear`, declaring `replaces` on one of them lets
-  apk pick a winner without touching either build. Both apks stay generic.
+  the package manager pick a winner without touching either build. Both packages
+  stay generic.
 - **Runtime alternative selection at boot** — install both candidates, start one
   from an init script.
 
 Reach for build-flag forking only when runtime resolution is genuinely
 impossible: kernel `defconfig` (the kernel binary literally varies by machine),
 bootloader target, machine-specific firmware blobs. Everything else — busybox
-config knobs, library build flags, optional features — has to stay one .apk for
-every consumer.
+config knobs, library build flags, optional features — has to stay one package
+for every consumer.
 
 The cost of forking generic units is real: build cache surface multiplies,
 binary reuse across projects breaks, and complexity moves from a few clean
@@ -672,23 +675,25 @@ This lets a developer run `yoe build` without specifying `--project` while
 keeping per-product project definitions separate. No new concepts needed —
 Starlark's `load()` handles composition naturally.
 
-## Per-project APK repo
+## Per-project package repo
 
-The APK repo is scoped per project. If two projects share a single repo (e.g.,
-one uses systemd, the other busybox-init), switching projects would leave stale
-packages in the APKINDEX. Since `apk` resolves runtime dependencies from the
-index, it could transitively pull in packages from the wrong project.
+The package repo is scoped per project. If two projects share a single repo
+(e.g., one uses systemd, the other busybox-init), switching projects would leave
+stale packages in the repo index. Since the on-device package manager (`apk` or
+`apt`) resolves runtime dependencies from the index, it could transitively pull
+in packages from the wrong project.
 
-Build output is scoped as:
+Build output is scoped per project and per distro, e.g.:
 
 ```
-repo/<project>/APKINDEX.tar.gz
+repo/<project>/alpine/<arch>/APKINDEX.tar.gz     # apk repo
+repo/<project>/debian/dists/<suite>/             # debian-format repo
 ```
 
 Each project gets a clean repo containing only packages from its resolved module
 and unit set. Individual unit builds are still cached by content hash — if two
 projects build the same unit with the same inputs, the build runs once and the
-resulting apk is placed into both project repos.
+resulting package is placed into both project repos.
 
 The build cache handles provides swapouts automatically: each unit's cache key
 includes the hashes of its resolved dependencies (recursively). When `init`
