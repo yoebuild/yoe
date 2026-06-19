@@ -82,14 +82,14 @@ Two workflows run under `.github/workflows/`:
 
 ## Build-time Package QA (planned)
 
-> **Status:** Not implemented. Today the only built-in check is apk-level
+> **Status:** Not implemented. Today the only built-in check is package-level
 > path-conflict detection (a file installed by two packages without an explicit
 > `replaces=` annotation fails image assembly). No checks run against an
 > individual unit's destdir before packaging.
 
-Every unit's destdir is sanity-checked before it is packaged into an apk.
-Failures fail the build. This is the cheapest tier of testing — runs on every
-build with no opt-in — and catches the most common shipping bugs:
+Every unit's destdir is sanity-checked before it is packaged (into an `.apk` or
+`.deb`). Failures fail the build. This is the cheapest tier of testing — runs on
+every build with no opt-in — and catches the most common shipping bugs:
 
 - **File ownership and mode:** all installed files must be owned by `0:0` (root)
   with mode that matches the unit's policy. Setuid binaries must be declared
@@ -100,7 +100,7 @@ build with no opt-in — and catches the most common shipping bugs:
     (`/build/sysroot/...` baked into a target binary is the classic bug).
   - All `NEEDED` libraries are satisfied by the unit's `runtime_deps` (catches a
     unit linking libfoo without depending on it).
-  - Architecture matches the target arch (no x86_64 binary in an arm64 apk
+  - Architecture matches the target arch (no x86_64 binary in an arm64 package
     because the build slipped to host gcc).
 - **Path leaks:** no absolute paths under `/build/`, `$DESTDIR`, `/tmp/build-*`,
   or the host build user's home directory in installed files (binaries, scripts,
@@ -176,12 +176,13 @@ unit(
 )
 ```
 
-`yoe build` produces a separate `openssl-tests-<version>.apk` alongside the main
-package. On the booted device:
+`yoe build` produces a separate `openssl-tests` package (`.apk` or `.deb`)
+alongside the main package. On the booted device:
 
 ```sh
 yoe test openssl --on-device dev-pi.local
-# → ssh dev-pi.local 'apk add openssl-tests && /usr/lib/yoe-tests/openssl/run.sh'
+# Alpine: ssh dev-pi.local 'apk add openssl-tests && /usr/lib/yoe-tests/openssl/run.sh'
+# Debian: ssh dev-pi.local 'apt-get install openssl-tests && /usr/lib/yoe-tests/openssl/run.sh'
 ```
 
 This catches regressions that destdir assertions cannot:
@@ -191,7 +192,7 @@ This catches regressions that destdir assertions cannot:
 - An optimization flag that breaks a corner case the upstream covers.
 
 Test packages stay out of the default image (`dev-image` does not list them) but
-ship in the project's apk repo so they can be installed on-demand.
+ship in the project's package repo so they can be installed on-demand.
 
 ### Image-level tests
 

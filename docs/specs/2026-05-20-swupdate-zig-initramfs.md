@@ -14,8 +14,9 @@ Replace yoe's update story — currently modelled on the
 1. **Image transaction layer: [swupdate](https://github.com/sbabic/swupdate).**
    Drives the actual update: cpio bundle parsing, sha256 verification, streaming
    xz decompression, partition write, bootloader-env update, optional
-   signing/encryption, optional Hawkbit/OTA. Pulled from `module-alpine` as a
-   binary, not built from source.
+   signing/encryption, optional Hawkbit/OTA. Built from source as a yoe unit
+   (swupdate is not packaged in Alpine), statically linked, so yoe controls the
+   compile-time feature set — signing support and the v1 handler list.
 2. **Orchestration layer: a Zig init binary, PID 1 in the initramfs.** Probes
    block devices, decides between normal-boot / update / rescue, mounts
    overlays, spawns `swupdate -i …`, watches its progress socket, and `execve`s
@@ -97,8 +98,10 @@ filesystem support) work without changes.
   partition.
 - A new yoe unit type for the Zig init binary, statically linked against musl,
   no runtime dependencies.
-- swupdate consumed as an Alpine binary via `module-alpine`, not built from
-  source.
+- swupdate built from source as a `module-core` unit (git, tag-pinned),
+  statically linked against musl, with signing compiled in and only the v1
+  handlers enabled. Its build deps (libconfig, libubootenv, json-c, zlib,
+  openssl) become `deps` entries per the no-container-installs rule.
 - A new yoe image type (or extended `image` class) that assembles the initramfs
   cpio from a declared content set.
 - A `kernel`-unit field that points at an initramfs source directory/cpio so the
@@ -109,8 +112,14 @@ filesystem support) work without changes.
   drops to a shell for rescue.
 - Update progress is reported on `/dev/console` and on swupdate's progress IPC
   socket so a splash/audio driver can subscribe.
-- yoe's signing story: `.swu` bundles are signed with a project key, swupdate
-  verifies on the target.
+- yoe's signing story: every `.swu` is signed with a project key and swupdate
+  verifies on the target, from the first dev image on. Until the signing spec
+  lands, the key is a per-project development key generated at project init.
+- Distro-agnostic: the same update mechanism serves every distro yoe images ship
+  (Alpine, Debian, Ubuntu). The initramfs is assembled from the same static-musl
+  binaries regardless of the target rootfs's distro, and swupdate writes the
+  rootfs partition as an opaque image; neither the `initramfs` image type nor
+  `package_swu()` may grow distro-specific assumptions.
 
 ## Non-Goals
 
@@ -178,6 +187,25 @@ as a producer of OCI images for application workloads, deliberately not for the
 host itself. bootc is the inversion — the host as an OCI image — and lives at
 this spec's layer, not that one.
 
+### Why Zig (and not Go or C)
+
+The orchestrator could plausibly be written in Go — the language this codebase
+already maintains, with u-root and gokrazy as precedent for Go as PID 1 in an
+initramfs — or in C against the static musl toolchain every build container
+already ships. Both were weighed:
+
+- **Go.** A static Go binary starts at ~1.5–2 MiB before the orchestrator does
+  anything, against a budget where every megabyte rides inside every kernel
+  image; and the runtime (GC, signal handling, scheduler) is more machinery than
+  a PID-1 decision tree needs in a crash-must-not-happen context.
+- **C.** No new toolchain units, but no errors-as-values — the decision tree's
+  main failure mode is exactly the lost-error-context problem the Problem Frame
+  calls out in shell, and C shares it absent disciplined conventions.
+- **Zig.** Tens-of-KiB static binaries, `std.os.linux` syscall coverage,
+  errors-as-values for the decision tree. The accepted costs: a `zig` toolchain
+  unit, a pre-1.0 version pin (see Open Questions), and validating the compiler
+  under QEMU in foreign-arch containers.
+
 ---
 
 ## Architecture
@@ -198,15 +226,17 @@ power-on
                  │
                  ├── decision tree:
                  │     1. rescue-trigger file on any media?     → rescue
-                 │     2. .swu present on USB/SD?               → update
+                 │     2. .swu newer than installed version on
+                 │        USB / SD / eMMC data partition?       → update
                  │     3. rootfs partition present and clean?    → boot
                  │     else                                     → rescue
                  │
                  ├── (update path)
-                 │     mount media RO, locate newest .swu by lexicographic
-                 │     version, spawn `swupdate -i <path>`, attach to
-                 │     progress socket, stream phase/percent to console.
-                 │     on success: optionally reboot or fall through to boot.
+                 │     mount media RO, pick newest .swu by numeric-aware
+                 │     version compare, spawn `swupdate -i <path>`, attach
+                 │     to progress socket, stream phase/percent to console.
+                 │     on success: reboot if bundle wrote kernel/dtb;
+                 │     fall through to boot for rootfs-only bundles.
                  │     on failure: rescue.
                  │
                  ├── (boot path)
@@ -220,13 +250,32 @@ power-on
                        execve /bin/sh on /dev/console
 ```
 
+The update branch is version-gated. The installed version is recorded
+persistently at install time (a version file on the data partition, written by
+`sw-description` post-install); `package_swu()`'s emitted filename
+(`<name>-<version>.swu`) is the canonical version source. The init compares
+versions numeric-aware (split on `.`, compare components as integers, fall back
+to string compare) and takes the update branch only when the candidate is
+strictly newer than what is installed. This one rule provides idempotence (media
+left inserted does not re-flash on every boot), correct selection among multiple
+bundles (no lexicographic `1.10` < `1.9` inversion), and anti-rollback (older
+bundles are never installed). A `.swu` staged on the eMMC data partition is
+scanned like removable media; it is also the natural staging location for a
+future network-pulled update flow.
+
+A bundle that wrote kernel/dtb images to the boot partition always ends in a
+reboot — the in-memory kernel must never `switch_root` into a rootfs staged for
+a newer kernel (`/lib/modules` would mismatch). Fall-through to boot without a
+reboot is permitted only for rootfs-only bundles.
+
 ### Image transaction layer: swupdate
 
 The `.swu` bundle is a cpio archive containing:
 
 ```
 sw-description           # libconfig-style manifest
-sw-description.sig       # CMS or RSA-PKCS1 signature (optional v1, required v2)
+sw-description.sig       # CMS or RSA-PKCS1 signature (always present; dev
+                         # project key until the signing spec lands)
 rootfs.ext4.xz           # streaming-decompressed by swupdate
 boot/Image               # kernel for the boot partition (if changed)
 boot/<board>.dtb         # device tree (if changed)
@@ -248,16 +297,24 @@ Handlers used in v1:
 | `bootloader` | u-boot-env (or grub/EFI Boot Guard) bookkeeping |
 
 Signing key management is **out of scope for this spec** — separate spec — but
-the architectural commitment is: signing is built into v1's binary layer
-(swupdate is compiled with `CONFIG_SIGNED_IMAGES=y`), and the v1 cut ships with
-verification disabled by configuration. Enabling it is a sw-description and
-key-deploy change, not a code change.
+the architectural commitment is: **verification is always on, from the first dev
+image**. swupdate's `CONFIG_SIGNED_IMAGES=y` is a compile-time property — a
+binary built with it refuses unsigned bundles, and no configuration state
+disables verification — so a "ship unsigned now, flip it on later" posture does
+not exist in swupdate's model. Retrofitting verification onto a deployed fleet
+would also mean rebuilding the kernel-embedded initramfs (where the public key
+lives) and delivering it over the still-unverified channel. Instead, yoe
+generates a per-project development signing key at project init; every `.swu` is
+signed and every initramfs carries the matching public key from day one.
+Dev-key-signed builds are a development posture — production deployment requires
+the signing spec's key management.
 
 ### Orchestration layer: Zig init
 
 A single static binary,
-`zig build -Dtarget=<arch>-linux-musl -Doptimize=ReleaseSmall`. Lives in the
-initramfs at `/init`. Responsibilities:
+`zig build -Dtarget=<arch>-linux-musl -Doptimize=ReleaseSmall`. Source lives at
+<https://github.com/yoebuild/yoe-init>; the binary lives in the initramfs at
+`/init`. Responsibilities:
 
 - **Early boot fixups.** `mount /proc`, `/sys`, `/dev` (devtmpfs); set console;
   configure kernel log level. All via `std.os.linux` syscalls.
@@ -286,21 +343,37 @@ socket, **v1 hand-rolls the protocol** in Zig and links against nothing LGPL.
 Documented in the Zig init's source; if it becomes a maintenance burden later,
 switching to `@cImport` and shipping relinkable objects is a one-week change.
 
+**Threat-model boundary.** Physical console access is assumed equivalent to
+device compromise — the standard embedded posture — so the rescue shell grants
+no privilege an attacker with the device in hand does not already have, and the
+rescue-trigger-file-on-media mechanism rides on the same assumption. Deployments
+where that assumption fails (publicly reachable consoles or USB ports) need a
+hardening pass that is out of scope for v1.
+
+**Trajectory.** In this spec yoe-init is initramfs-scoped and always hands off
+to `/sbin/init`. It is a candidate seed for a broader yoe init / service
+supervisor role later, but v1 makes no design commitments to that future beyond
+what falls out naturally: the binary stays self-contained and depends only on
+the kernel ABI.
+
 ### Initramfs contents
 
 ```
 /init                    # Zig binary, statically linked
 /bin/sh                  # busybox (from module-alpine)
 /bin/busybox             # busybox itself
-/usr/sbin/swupdate       # from module-alpine
+/usr/sbin/swupdate       # from-source unit, static musl
+/usr/sbin/e2fsck         # e2fsprogs (from module-alpine); busybox's fsck
+                         # applet only dispatches to an external fsck.<type>
 /etc/hwrevision          # machine identifier (templated per-image)
 /lib/...                 # only if a binary genuinely needs it; goal is none
 /dev, /proc, /sys, /run  # empty mount points
 /newroot                 # mount point for final rootfs
 ```
 
-Target size: under 4 MiB compressed (xz). swupdate's binary is the heaviest item
-(~1–2 MiB depending on configured handlers).
+Target size: under 4 MiB compressed (xz). swupdate's static binary is the
+heaviest item; re-baseline the budget once the from-source static build (with
+the signing/crypto stack linked in) and e2fsck are measured.
 
 ### Kernel-embedded initramfs
 
@@ -332,25 +405,24 @@ cpio path, and the kernel's content-addressed cache key stays stable.
 
 ### New units
 
-| Unit       | Module                        | Purpose                                                                                                       |
-| ---------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `zig`      | `module-core` (toolchain)     | The Zig compiler, fetched from Alpine binary (Zig is packaged) or upstream tarball if Alpine's version trails |
-| `yoe-init` | `module-core`                 | The Zig init source tree; builds with `zig build` against `zig`. Produces a single static binary `init`       |
-| `swupdate` | `module-alpine` (passthrough) | Already in Alpine community. No source unit                                                                   |
-| `busybox`  | `module-alpine` (passthrough) | Already in Alpine                                                                                             |
+| Unit        | Module                        | Purpose                                                                                                                                                                                                     |
+| ----------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `zig`       | `module-core` (toolchain)     | The Zig compiler. Alpine packages zig only for aarch64/x86_64, so the upstream-tarball path is required for other target arches (armv7, riscv64), not just version freshness; v1 targets aarch64 and x86_64 |
+| `yoe-init`  | `module-core`                 | The Zig init source tree ([yoebuild/yoe-init](https://github.com/yoebuild/yoe-init)); builds with `zig build` against `zig`. Produces a single static binary `init`                                         |
+| `swupdate`  | `module-core`                 | Built from source (git, tag-pinned), static against musl, signing compiled in, only the v1 handlers enabled — swupdate is not packaged in Alpine, so no passthrough is possible                             |
+| `busybox`   | `module-alpine` (passthrough) | Already in Alpine                                                                                                                                                                                           |
+| `e2fsprogs` | `module-alpine` (passthrough) | e2fsck for the boot path's rootfs check; busybox's fsck applet only dispatches to an external checker                                                                                                       |
 
-`yoe-init` is the first non-trivial Zig unit; expect a `zig.star` class to
-emerge from it (`zig_build()` wrapping the `zig build` invocation, vendor dir
-handling, target triple selection). v1 of this spec just inlines the build steps
-in the unit.
+`yoe-init` is the first non-trivial Zig unit; v1 inlines the build steps in the
+unit.
 
 ### New image type: `initramfs`
 
 A new image kind that assembles a cpio archive instead of a partitioned disk.
 Inputs:
 
-- A list of packages (`yoe-init`, `swupdate`, `busybox`) to install into a
-  staging root.
+- A list of packages (`yoe-init`, `swupdate`, `busybox`, `e2fsprogs`) to install
+  into a staging root.
 - A list of files/dirs to inject (config files, the `/init` symlink, mount
   points).
 - A compression choice (`xz`, `zstd`, `none`).
@@ -389,8 +461,10 @@ When set:
 
 ### `.swu` packaging
 
-A new build step (likely a `package_swu()` builtin invoked from a machine or
-project task) takes:
+A new Starlark builtin, `package_swu()`, registered in
+`internal/starlark/builtins.go` alongside the existing machine-level builtins
+(`kernel()`, `uboot()`, `partition()`) and invoked from a machine or project
+task. It takes:
 
 - A rootfs image artifact.
 - A kernel image artifact (optional, for boot-partition updates).
@@ -437,10 +511,13 @@ the new initramfs.
 
 ### Phase 3 — swupdate integration
 
-- Land `swupdate` as a passthrough Alpine unit; add to initramfs.
+- Land the from-source `swupdate` unit (static musl, v1 handlers, signing
+  compiled in); add to initramfs.
 - Generate `sw-description` from Starlark for the qemu-x86 machine.
-- Build a `package_swu()` step; produce a `.swu` from the qemu-x86 image.
-- Extend Zig init: search USB for `.swu`, spawn swupdate, watch progress,
+- Build the `package_swu()` builtin; generate the per-project dev signing key;
+  produce a signed `.swu` from the qemu-x86 image.
+- Extend Zig init: scan USB/SD and the eMMC data partition for `.swu`,
+  version-gate against the installed version, spawn swupdate, watch progress,
   succeed-and-reboot.
 
 **Exit criterion:** boot the QEMU machine with `-drive` pointing at a
@@ -449,10 +526,15 @@ rootfs, reboots, and comes up on the new rootfs.
 
 ### Phase 4 — signing, rescue UX, real hardware
 
-- Enable signing in swupdate config; document key generation/deploy.
+- Replace the dev-key workflow with production key management per the signing
+  spec; document key generation, deploy, and rotation.
 - Polish rescue path: rescue-trigger file, console banner.
 - Bring up one real board (likely a Raspberry Pi from `module-rpi`).
 - Move the documentation out of `(planned)`.
+
+**Exit criterion:** the real board boots the embedded-initramfs kernel from its
+standard bootloader and applies a signed `.swu` from USB end-to-end, coming up
+on the new rootfs.
 
 ---
 
@@ -462,6 +544,9 @@ rootfs, reboots, and comes up on the new rootfs.
   Pin to a specific Zig version per branch; bump deliberately. Decide whether
   the `zig` unit pulls Alpine's `zig` (which version?) or pins upstream
   tarballs.
+- **`zig.star` class.** A `zig_build()` class (wrapping the `zig build`
+  invocation, vendor-dir handling, target-triple selection) is deferred until a
+  second Zig unit appears; one consumer doesn't justify the abstraction.
 - **Initramfs as a yoe `image` mode vs. a new type.** Lean separate; revisit
   once the second cpio-style artifact appears.
 - **Overlay upper-dir lifecycle.** When the rootfs is rewritten by an update,
@@ -483,12 +568,18 @@ rootfs, reboots, and comes up on the new rootfs.
   mechanism are a custom-handler problem, not a yoe problem.
 - **Where signing keys live.** Specifically: project key in the project repo
   (under git, not committed plaintext), public key baked into the initramfs at
-  build time. Mechanism for the private side TBD in the signing spec.
+  build time. Mechanism for the private side TBD in the signing spec. The
+  signing spec must also address key rotation under the bake-in constraint:
+  replacing a compromised or expired key means delivering a new kernel image
+  that the old key must verify — e.g. multiple key slots baked in, or a
+  rotate-before-expiry policy. That constraint is an input requirement for the
+  signing spec, not an implementation detail.
 
 ---
 
 ## References
 
+- `yoe-init` source repo: <https://github.com/yoebuild/yoe-init>
 - `updater.installer` source:
   <https://github.com/YoeDistro/yoe-distro/blob/master/sources/meta-yoe/recipes-support/updater/files/updater.installer>
 - yoe-distro updater docs: <https://docs.yoedistro.org/updater.html>

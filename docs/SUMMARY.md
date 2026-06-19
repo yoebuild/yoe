@@ -24,7 +24,7 @@
 - [Yoe and distributions](distro.md)
 - [module-alpine](module-alpine.md)
 - [Alpine apk Passthrough](apk-passthrough.md)
-- [apk Signing](signing.md)
+- [Package Signing](signing.md)
 - [module-debian](module-debian.md)
 - [module-ubuntu](module-ubuntu.md)
 
@@ -35,6 +35,7 @@
 - [Naming and Resolution](naming-and-resolution.md)
 - [Catalog and Materialization](catalog.md)
 - [File Templates](file-templates.md)
+- [Language Choices: Go and Starlark](language-choices.md)
 - [Build & Configuration Languages](build-languages.md)
 - [Security and Threat Model](security.md)
 
@@ -54,5 +55,6 @@
 # Project
 
 - [Comparisons](comparisons.md)
+- [yoe and Nix](nix.md)
 - [Roadmap](roadmap.md)
 - [Changelog](CHANGELOG.md)

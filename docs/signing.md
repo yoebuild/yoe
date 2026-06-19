@@ -1,10 +1,27 @@
-# apk Signing
+# Package Signing
 
-yoe signs every `.apk` and the `APKINDEX.tar.gz` at build time with an
-RSA-PKCS#1 v1.5 SHA-1 signature, matching what apk-tools 2.x verifies. Booted
-systems include the matching public key under `/etc/apk/keys/`, so on-target
-`apk add`, `apk upgrade`, and image-time package installation all run without
-`--allow-untrusted`.
+yoe signs the packages it produces and the repository index they are published
+into, so on-target installs run without an "untrusted" override. The signing
+mechanism follows the package format of the target:
+
+- **Alpine / musl targets (`.apk`).** yoe signs every `.apk` and the
+  `APKINDEX.tar.gz` at build time with an RSA-PKCS#1 v1.5 SHA-1 signature,
+  matching what apk-tools 2.x verifies. Booted systems include the matching
+  public key under `/etc/apk/keys/`, so on-target `apk add`, `apk upgrade`, and
+  image-time package installation all run without `--allow-untrusted`. This is
+  the path described in detail below.
+- **Debian / Ubuntu targets (`.deb`).** yoe builds its units as `.deb`s and
+  serves them from a project-signed apt repository, so on-target `apt install` /
+  `apt upgrade` trust the project's feed. The apt/dpkg signing model differs
+  from apk's: apt verifies a signed `InRelease` file over the repository
+  metadata (re-signed each time the repo is regenerated, with a configurable
+  `Valid-Until` window) rather than a per-package index signature, and the
+  booted system trusts it via a per-project keyring at
+  `/etc/apt/keyrings/<project>.gpg` referenced from the `Signed-By` of the
+  project's `sources.list.d` entry. See [module-debian.md](module-debian.md) and
+  [module-ubuntu.md](module-ubuntu.md) for the full trust chain.
+
+The remainder of this page covers the apk signing chain in detail.
 
 ![apk signing trust chain](assets/apk-signing-trust-chain.png)
 

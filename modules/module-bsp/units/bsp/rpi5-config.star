@@ -27,7 +27,7 @@ EOF
 """,
             """
 cat > $DESTDIR/boot/cmdline.txt << 'EOF'
-console=ttyAMA10,115200 root=/dev/mmcblk0p2 rootfstype=ext4 rootwait rw
+console=ttyAMA0,115200 root=/dev/mmcblk0p2 rootfstype=ext4 rootwait rw
 EOF
 """,
         ]),

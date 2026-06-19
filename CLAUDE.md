@@ -40,20 +40,33 @@ architecture description live under `docs/` (start with `docs/intro.md` and
   files, or other intermediate artifacts that are then executed or parsed. When
   something fails, the user should be looking at the code they wrote, not
   machine-generated output. Prefer direct execution over code generation.
-- **One unit, one .apk; resolve variation at runtime.** A unit produces a single
-  binary artifact that every project and every machine shares. When two images
-  need different behavior from the same package, prefer runtime mechanisms —
-  init scripts that detect what's installed, conditional config files,
-  alternative selection at boot, `replaces:` annotations that declare ownership
-  of shared paths — over per-project or per-machine build configurations.
-  Forking a unit's build flags into machine- or project- scoped variants is a
-  last resort: it multiplies the cache surface, breaks binary reuse across
-  projects, and pushes complexity from a few clean conditionals into N parallel
-  build configurations. Reach for it only when runtime resolution is genuinely
-  impossible — kernel defconfig, bootloader target, and libc family (musl-built
-  and glibc-built binaries cannot share at the ABI level, so a unit consumed by
-  both Alpine and Debian images builds twice along the distro axis; see
-  `docs/specs/2026-05-25-module-debian.md` R14a).
+- **One unit is the single definition; reuse binaries, resolve variation at
+  runtime.** A unit is the one place a package's build is defined. Its output is
+  content-addressed and keyed by `(distro/libc, arch, machine scope)`: every
+  project and machine that lands on the same key shares the same artifact. The
+  same source unit therefore builds more than once whenever those keys differ —
+  most commonly along the distro axis, where musl-built and glibc-built binaries
+  cannot share at the ABI level, so a unit consumed by both Alpine and Debian
+  images builds twice. That fan-out is normal, not an exception. A unit may also
+  emit more than one package artifact where split packages (e.g. `-dev`, `-doc`,
+  `-libs`) apply; the unit stays the single definition while its outputs fan
+  out. So "one .apk" is the common case, not an invariant — the invariant is
+  that the unit is the single source of truth for the build. Within a given key,
+  the goal is still one shared artifact rather than per-project or per-machine
+  forks. When two images need different behavior from the same package, reach
+  for runtime mechanisms first — init scripts that detect what's installed,
+  conditional config files, alternative selection at boot, `replaces:`
+  annotations that declare ownership of shared paths — before forking build
+  configuration. Forking a unit's build flags into machine- or project-scoped
+  variants is the most expensive option: it multiplies the cache surface, breaks
+  binary reuse across projects, and pushes complexity from a few clean
+  conditionals into N parallel build configurations. Some axes can only be
+  resolved at build time — kernel defconfig, bootloader target, libc family —
+  and a build-time split is also fair on other axes when it is genuinely simpler
+  and more robust than the runtime path and the reuse cost is acceptable. The
+  bar is "the build-time split is the cleaner design," not "runtime resolution
+  is impossible." Default to reuse and runtime resolution; fork deliberately,
+  not reflexively.
 - **Explicit over implicit.** Values in Starlark units and configuration should
   not have hidden defaults. Require fields to be set explicitly — this makes it
   easier for AI to reason about the system and for humans to understand what a

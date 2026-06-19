@@ -264,6 +264,65 @@ image(
 	}
 }
 
+func TestMachineKernelDistroUnit(t *testing.T) {
+	src := `
+machine(
+    name = "qemu-x86_64",
+    arch = "x86_64",
+    kernel = kernel(
+        distro_unit = {
+            "alpine": "linux-qemu",
+            "debian": "linux-image-amd64",
+        },
+        provides = "linux",
+        cmdline = "console=ttyS0",
+    ),
+)
+`
+	eng := NewEngine()
+	if err := eng.ExecString("machines/qemu.star", src); err != nil {
+		t.Fatalf("ExecString: %v", err)
+	}
+	m, ok := eng.Machines()["qemu-x86_64"]
+	if !ok {
+		t.Fatal("machine 'qemu-x86_64' not found")
+	}
+	if got := m.Kernel.DistroUnit["alpine"]; got != "linux-qemu" {
+		t.Errorf("DistroUnit[alpine] = %q, want %q", got, "linux-qemu")
+	}
+	if got := m.Kernel.DistroUnit["debian"]; got != "linux-image-amd64" {
+		t.Errorf("DistroUnit[debian] = %q, want %q", got, "linux-image-amd64")
+	}
+	if m.Kernel.Unit != "" {
+		t.Errorf("Unit = %q, want empty (distro_unit form)", m.Kernel.Unit)
+	}
+	if m.Kernel.Provides != "linux" {
+		t.Errorf("Provides = %q, want %q", m.Kernel.Provides, "linux")
+	}
+}
+
+func TestMachineKernelUnitAndDistroUnitConflict(t *testing.T) {
+	src := `
+machine(
+    name = "bad",
+    arch = "x86_64",
+    kernel = kernel(
+        unit = "linux-qemu",
+        distro_unit = {"alpine": "linux-qemu"},
+        provides = "linux",
+    ),
+)
+`
+	eng := NewEngine()
+	err := eng.ExecString("machines/bad.star", src)
+	if err == nil {
+		t.Fatal("expected error when kernel sets both unit and distro_unit, got nil")
+	}
+	if !strings.Contains(err.Error(), "distro_unit") {
+		t.Errorf("error = %q, want it to mention distro_unit", err)
+	}
+}
+
 func TestEvalInvalidArch(t *testing.T) {
 	src := `machine(name = "bad", arch = "mips")`
 	eng := NewEngine()

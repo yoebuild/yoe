@@ -46,7 +46,7 @@ _APT_DISTROS = ["debian", "ubuntu"]
 def _is_apt_distro(d):
     return d in _APT_DISTROS
 
-def image(name, artifacts=[], hostname=None, timezone="", locale="",
+def image(name, artifacts=[], distro_artifacts={}, hostname=None, timezone="", locale="",
           partitions=[], scope="machine",
           container="toolchain", container_arch="target", deps=[],
           version=None, distro=None, **kwargs):
@@ -65,6 +65,15 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
     `defaults.distro` (overridable per-developer via `local.star`'s
     `default_distro_override`) supplies the fallback. With nothing set in
     either, image evaluation errors — every image must resolve to a distro.
+
+    `distro_artifacts` is a `{distro: [names]}` map letting one image definition
+    target multiple distros whose package names differ (musl/openrc/apk vs
+    systemd/glibc/dpkg). Only the branch matching the effective distro is
+    consulted; the others are inert lists — never resolved, never forcing their
+    feed module to load — so a shared image carrying a `"debian"` branch builds
+    fine in an Alpine-only project. There is no closed-distro key check: the
+    distro set is open, and a typo'd key for a distro you never build is simply
+    never reached.
     """
     if version == None:
         version = ctx.project_version
@@ -92,17 +101,42 @@ def image(name, artifacts=[], hostname=None, timezone="", locale="",
     # bootloader requirements come in via apt's transitive closure
     # instead, and machine-specific board firmware should be declared
     # explicitly per-image.
-    all_artifacts = list(artifacts)
+    # distro_artifacts: merge only the branch for this image's effective distro.
+    # Non-selected branches are never read, so they cost nothing and don't force
+    # their distro's feed module to be present.
+    all_artifacts = list(artifacts) + list(distro_artifacts.get(effective_distro, []))
     if effective_distro == "alpine":
         all_artifacts = all_artifacts + list(ctx.machine_config.packages)
     elif _is_apt_distro(effective_distro):
         all_artifacts = all_artifacts + _DEBIAN_ESSENTIAL
 
+    # Resolve the machine kernel for this image's distro. ctx.provides is built
+    # once from the project default machine and is distro-blind, so a per-distro
+    # kernel (machine_config.kernel.distro_unit) can only be picked here, where
+    # the effective distro is known. Single-unit machines register
+    # provides["linux"] globally and need no override; per-distro machines carry
+    # no global entry, so image() substitutes the unit for effective_distro.
+    kernel_provides = None
+    kernel_unit = None
+    mc = getattr(ctx, "machine_config", None)
+    if mc != None:
+        k = getattr(mc, "kernel", None)
+        if k != None:
+            kernel_provides = getattr(k, "provides", None)
+            du = getattr(k, "distro_unit", None)
+            if du:
+                if effective_distro not in du:
+                    fail("image %s: machine kernel has no entry for distro %r" % (name, effective_distro))
+                kernel_unit = du[effective_distro]
+
     # Resolve provides (e.g., "linux" → "linux-rpi4")
     explicit = []
     for a in all_artifacts:
-        r = ctx.provides.get(a, None)
-        explicit.append(r if r != None else a)
+        if kernel_unit != None and a == kernel_provides:
+            explicit.append(kernel_unit)
+        else:
+            r = ctx.provides.get(a, None)
+            explicit.append(r if r != None else a)
 
     # Resolve transitive runtime dependencies for the rootfs / build path.
     # `explicit` (above) is preserved separately for UX surfaces like the
