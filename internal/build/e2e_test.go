@@ -80,3 +80,54 @@ func TestE2E_DryRun(t *testing.T) {
 		t.Error("dry run produced no output")
 	}
 }
+
+// TestE2E_DistroArtifactsConsolidatedImage verifies the consolidated
+// module-core ssh-image resolves its distro_artifacts: the project's default
+// distro is alpine, so the resolved closure must contain the alpine branch
+// (busybox/apk-tools) and none of the inert debian branch (systemd-sysv) —
+// proving both the per-distro merge and that non-selected branches are never
+// walked. It also exercises the per-distro machine kernel: "linux" must resolve
+// (to the qemu-x86_64 alpine kernel unit) rather than appearing unresolved.
+func TestE2E_DistroArtifactsConsolidatedImage(t *testing.T) {
+	projectDir := filepath.Join("..", "..", "testdata", "e2e-project")
+	if _, err := os.Stat(filepath.Join(projectDir, "PROJECT.star")); os.IsNotExist(err) {
+		t.Skip("e2e test project not found")
+	}
+	abs, _ := filepath.Abs(projectDir)
+	t.Setenv("YOE_CACHE", filepath.Join(abs, "cache"))
+
+	proj, err := yoestar.LoadProject(projectDir,
+		yoestar.WithModuleSync(module.SyncIfNeeded),
+		yoestar.WithAllowDuplicateProvides(true),
+		yoestar.WithBuiltin("alpine_feed", alpine.Builtin),
+		yoestar.WithBuiltin("apt_feed", apt.Builtin),
+	)
+	if err != nil {
+		t.Fatalf("LoadProject: %v", err)
+	}
+
+	img := proj.AnyUnit("ssh-image")
+	if img == nil {
+		t.Fatal("expected consolidated ssh-image")
+	}
+	has := func(name string) bool {
+		for _, a := range img.Artifacts {
+			if a == name {
+				return true
+			}
+		}
+		return false
+	}
+	// Alpine branch was selected (default distro = alpine).
+	if !has("apk-tools") {
+		t.Errorf("ssh-image closure missing alpine-branch apk-tools; got %v", img.Artifacts)
+	}
+	// Debian branch is inert and must not leak into an alpine build.
+	if has("systemd-sysv") {
+		t.Errorf("ssh-image closure leaked debian-branch systemd-sysv into alpine build; got %v", img.Artifacts)
+	}
+	// Per-distro machine kernel resolved "linux" to a concrete unit.
+	if has("linux-image-amd64") {
+		t.Errorf("alpine build resolved apt kernel linux-image-amd64; got %v", img.Artifacts)
+	}
+}

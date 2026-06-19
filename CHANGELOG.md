@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **One image definition can now target multiple distros.** Set
+  `distro_artifacts` on an `image(...)` to give Alpine, Debian, and Ubuntu their
+  own package lists from a single definition, and reference `linux` so each
+  machine picks the right kernel per distro. yoe's `base-image`, `dev-image`, and
+  `ssh-image` now ship this way — one definition each instead of a separate copy
+  per distro.
+
 ## [0.12.4] - 2026-06-11
 
 - **`yoe skills install` adds yoe's AI skills to your project.** The skills that

@@ -12,30 +12,30 @@ import (
 // builtins returns the predeclared names available in all .star files.
 func (e *Engine) builtins() starlark.StringDict {
 	d := starlark.StringDict{
-		"project":     starlark.NewBuiltin("project", e.fnProject),
-		"defaults":    starlark.NewBuiltin("defaults", fnDefaults),
-		"cache":       starlark.NewBuiltin("cache", fnCache),
-		"s3_cache":    starlark.NewBuiltin("s3_cache", fnS3Cache),
-		"sources":     starlark.NewBuiltin("sources", fnSources),
-		"module":      starlark.NewBuiltin("module", fnModule),
-		"module_info": starlark.NewBuiltin("module_info", e.fnModuleInfo),
-		"machine":     starlark.NewBuiltin("machine", e.fnMachine),
-		"kernel":      starlark.NewBuiltin("kernel", fnKernel),
-		"uboot":       starlark.NewBuiltin("uboot", fnUboot),
-		"qemu_config": starlark.NewBuiltin("qemu_config", fnQEMUConfig),
-		"unit":        starlark.NewBuiltin("unit", e.fnUnit),
-		"image":       starlark.NewBuiltin("image", e.fnImage),
-		"partition":   starlark.NewBuiltin("partition", fnPartition),
-		"task":        starlark.NewBuiltin("task", fnTask),
-		"command":     starlark.NewBuiltin("command", e.fnCommand),
-		"arg":         starlark.NewBuiltin("arg", fnArg),
-		"run":            starlark.NewBuiltin("run", fnRunPlaceholder),
-		"dir_size_mb":    starlark.NewBuiltin("dir_size_mb", fnDirSizeMBPlaceholder),
+		"project":          starlark.NewBuiltin("project", e.fnProject),
+		"defaults":         starlark.NewBuiltin("defaults", fnDefaults),
+		"cache":            starlark.NewBuiltin("cache", fnCache),
+		"s3_cache":         starlark.NewBuiltin("s3_cache", fnS3Cache),
+		"sources":          starlark.NewBuiltin("sources", fnSources),
+		"module":           starlark.NewBuiltin("module", fnModule),
+		"module_info":      starlark.NewBuiltin("module_info", e.fnModuleInfo),
+		"machine":          starlark.NewBuiltin("machine", e.fnMachine),
+		"kernel":           starlark.NewBuiltin("kernel", fnKernel),
+		"uboot":            starlark.NewBuiltin("uboot", fnUboot),
+		"qemu_config":      starlark.NewBuiltin("qemu_config", fnQEMUConfig),
+		"unit":             starlark.NewBuiltin("unit", e.fnUnit),
+		"image":            starlark.NewBuiltin("image", e.fnImage),
+		"partition":        starlark.NewBuiltin("partition", fnPartition),
+		"task":             starlark.NewBuiltin("task", fnTask),
+		"command":          starlark.NewBuiltin("command", e.fnCommand),
+		"arg":              starlark.NewBuiltin("arg", fnArg),
+		"run":              starlark.NewBuiltin("run", fnRunPlaceholder),
+		"dir_size_mb":      starlark.NewBuiltin("dir_size_mb", fnDirSizeMBPlaceholder),
 		"install_file":     starlark.NewBuiltin("install_file", fnInstallFile),
 		"install_template": starlark.NewBuiltin("install_template", fnInstallTemplate),
 		"resolve_closure":  starlark.NewBuiltin("resolve_closure", e.fnResolveClosure),
-		"True":        starlark.True,
-		"False":       starlark.False,
+		"True":             starlark.True,
+		"False":            starlark.False,
 	}
 
 	// Merge engine variables (e.g., ARCH set after machine loading).
@@ -263,13 +263,13 @@ var reservedUnitKwargs = map[string]bool{
 	"name": true, "version": true, "release": true, "scope": true,
 	"description": true, "license": true, "distro": true,
 	"source": true, "sha256": true,
-	"apk_checksum": true,
+	"apk_checksum":    true,
 	"passthrough_apk": true,
-	"tag": true, "branch": true, "patches": true, "deps": true,
-	"runtime_deps": true,
-	"distro_deps":        true,
+	"tag":             true, "branch": true, "patches": true, "deps": true,
+	"runtime_deps":        true,
+	"distro_deps":         true,
 	"distro_runtime_deps": true,
-	"container": true, "container_arch": true,
+	"container":           true, "container_arch": true,
 	"sandbox": true, "shell": true, "tasks": true, "provides": true,
 	"replaces": true,
 	"services": true, "conffiles": true, "environment": true,
@@ -352,6 +352,32 @@ func structString(s *starlarkstruct.Struct, field string) string {
 		return string(str)
 	}
 	return ""
+}
+
+func structStringMap(s *starlarkstruct.Struct, field string) map[string]string {
+	if s == nil {
+		return nil
+	}
+	v, err := s.Attr(field)
+	if err != nil {
+		return nil
+	}
+	dict, ok := v.(*starlark.Dict)
+	if !ok {
+		return nil
+	}
+	result := make(map[string]string, dict.Len())
+	for _, item := range dict.Items() {
+		k, kok := item[0].(starlark.String)
+		val, vok := item[1].(starlark.String)
+		if kok && vok {
+			result[string(k)] = string(val)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 func structStringList(s *starlarkstruct.Struct, field string) []string {
@@ -575,21 +601,30 @@ func (e *Engine) fnMachine(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.T
 
 	kernelS := kwStruct(kwargs, "kernel")
 
+	kc := KernelConfig{
+		Repo:        structString(kernelS, "repo"),
+		Branch:      structString(kernelS, "branch"),
+		Tag:         structString(kernelS, "tag"),
+		Defconfig:   structString(kernelS, "defconfig"),
+		DeviceTrees: structStringList(kernelS, "device_trees"),
+		Unit:        structString(kernelS, "unit"),
+		Cmdline:     structString(kernelS, "cmdline"),
+		Provides:    structString(kernelS, "provides"),
+		DistroUnit:  structStringMap(kernelS, "distro_unit"),
+	}
+	// `unit` and `distro_unit` are two spellings of "which unit provides this
+	// kernel" — one flat, one per-distro. Setting both is ambiguous. (A
+	// repo/branch source kernel sets neither, which is fine.)
+	if kc.Unit != "" && len(kc.DistroUnit) > 0 {
+		return nil, fmt.Errorf("machine %q: kernel sets both unit and distro_unit (use one)", name)
+	}
+
 	m := &Machine{
 		Name:        name,
 		Arch:        arch,
 		Description: kwString(kwargs, "description"),
-		Kernel: KernelConfig{
-			Repo:        structString(kernelS, "repo"),
-			Branch:      structString(kernelS, "branch"),
-			Tag:         structString(kernelS, "tag"),
-			Defconfig:   structString(kernelS, "defconfig"),
-			DeviceTrees: structStringList(kernelS, "device_trees"),
-			Unit:        structString(kernelS, "unit"),
-			Cmdline:     structString(kernelS, "cmdline"),
-			Provides:    structString(kernelS, "provides"),
-		},
-		Packages: kwStringList(kwargs, "packages"),
+		Kernel:      kc,
+		Packages:    kwStringList(kwargs, "packages"),
 	}
 
 	// Handle bootloader, qemu, and partitions from kwargs
@@ -671,41 +706,41 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 	}
 
 	r := &Unit{
-		Name:        name,
-		Version:     kwString(kwargs, "version"),
-		Release:     kwInt(kwargs, "release"),
-		Class:       cls,
-		Scope:       kwString(kwargs, "scope"),
-		Description: kwString(kwargs, "description"),
-		License:     kwString(kwargs, "license"),
-		Distro:      kwString(kwargs, "distro"),
-		Source:      kwString(kwargs, "source"),
-		SHA256:      kwString(kwargs, "sha256"),
-		APKChecksum: kwString(kwargs, "apk_checksum"),
-		PassthroughAPK: kwString(kwargs, "passthrough_apk"),
-		Tag:         kwString(kwargs, "tag"),
-		Branch:      kwString(kwargs, "branch"),
-		Patches:     kwStringList(kwargs, "patches"),
-		Deps:        kwStringList(kwargs, "deps"),
-		RuntimeDeps: kwStringList(kwargs, "runtime_deps"),
+		Name:              name,
+		Version:           kwString(kwargs, "version"),
+		Release:           kwInt(kwargs, "release"),
+		Class:             cls,
+		Scope:             kwString(kwargs, "scope"),
+		Description:       kwString(kwargs, "description"),
+		License:           kwString(kwargs, "license"),
+		Distro:            kwString(kwargs, "distro"),
+		Source:            kwString(kwargs, "source"),
+		SHA256:            kwString(kwargs, "sha256"),
+		APKChecksum:       kwString(kwargs, "apk_checksum"),
+		PassthroughAPK:    kwString(kwargs, "passthrough_apk"),
+		Tag:               kwString(kwargs, "tag"),
+		Branch:            kwString(kwargs, "branch"),
+		Patches:           kwStringList(kwargs, "patches"),
+		Deps:              kwStringList(kwargs, "deps"),
+		RuntimeDeps:       kwStringList(kwargs, "runtime_deps"),
 		DistroDeps:        kwStringListMap(kwargs, "distro_deps"),
 		DistroRuntimeDeps: kwStringListMap(kwargs, "distro_runtime_deps"),
-		Container:     kwString(kwargs, "container"),
-		ContainerArch: kwString(kwargs, "container_arch"),
-		Sandbox:       kwBool(kwargs, "sandbox"),
-		Shell:         kwString(kwargs, "shell"),
-		Provides:    kwStringList(kwargs, "provides"),
-		Replaces:    kwStringList(kwargs, "replaces"),
-		Services:    kwStringList(kwargs, "services"),
-		Conffiles:   kwStringList(kwargs, "conffiles"),
-		Environment: kwStringMap(kwargs, "environment"),
-		CacheDirs:   kwStringMap(kwargs, "cache_dirs"),
+		Container:         kwString(kwargs, "container"),
+		ContainerArch:     kwString(kwargs, "container_arch"),
+		Sandbox:           kwBool(kwargs, "sandbox"),
+		Shell:             kwString(kwargs, "shell"),
+		Provides:          kwStringList(kwargs, "provides"),
+		Replaces:          kwStringList(kwargs, "replaces"),
+		Services:          kwStringList(kwargs, "services"),
+		Conffiles:         kwStringList(kwargs, "conffiles"),
+		Environment:       kwStringMap(kwargs, "environment"),
+		CacheDirs:         kwStringMap(kwargs, "cache_dirs"),
 		Artifacts:         kwStringList(kwargs, "artifacts"),
 		ArtifactsExplicit: kwStringList(kwargs, "artifacts_explicit"),
 		Exclude:           kwStringList(kwargs, "exclude"),
-		Hostname:    kwString(kwargs, "hostname"),
-		Timezone:    kwString(kwargs, "timezone"),
-		Locale:      kwString(kwargs, "locale"),
+		Hostname:          kwString(kwargs, "hostname"),
+		Timezone:          kwString(kwargs, "timezone"),
+		Locale:            kwString(kwargs, "locale"),
 	}
 
 	// Parse tasks
@@ -930,4 +965,3 @@ func (e *Engine) fnCommand(thread *starlark.Thread, _ *starlark.Builtin, _ starl
 
 	return starlark.None, nil
 }
-

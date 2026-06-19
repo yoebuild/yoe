@@ -51,10 +51,9 @@ choice is too consequential to pick silently.
 
 `yoe build` also accepts a `--distro` flag that overrides the default for a
 single invocation, sitting at the same level as `default_distro_override` (an
-image's own explicit `distro` still wins). This is mainly useful when the same
-image name is defined in more than one distro — for example a `base-image` in
-both `module-alpine` and `module-debian` — and you want to build a specific
-variant without editing `local.star`:
+image's own explicit `distro` still wins). This is how you build a multi-distro
+image — one definition that carries a `distro_artifacts` map (see below) — as a
+specific distro without editing `local.star`:
 
 ```sh
 yoe build --distro alpine base-image
@@ -143,6 +142,70 @@ only makes sense for one libc family (musl-only configure flags, distro-
 specific patches), or when the two backends warrant materially different build
 recipes — then maintain two tagged units rather than one unit with branching
 build steps.
+
+### Per-distro image artifacts
+
+An `image(...)` often ships the same role across distros whose package _names_
+differ entirely: Alpine boots busybox + OpenRC + apk, the apt distros boot
+systemd + glibc + dpkg, and even a shared role like SSH is `openssh` on Alpine
+and `openssh-server` on Debian. A single flat `artifacts` list can't express
+"this image, every distro," so an image splits per distro via `distro_artifacts`
+— the image-level analog of `distro_deps`:
+
+```python
+image(
+    name = "ssh-image",
+    artifacts = ["linux", "bash"],          # distro-neutral entries
+    distro_artifacts = {
+        "alpine": ["busybox", "openrc", "apk-tools", "openssh", ...],
+        "debian": ["systemd-sysv", "libc6", "dpkg", "openssh-server", ...],
+        "ubuntu": ["systemd-sysv", "libc6", "dpkg", "openssh-server",
+                   "nm-manage-ethernet", ...],
+    },
+)
+```
+
+Effective artifacts = `artifacts + distro_artifacts[effective_distro]`. Only the
+branch matching the build's effective distro is consulted; the others are inert
+lists — never resolved, never forcing their feed module to load — so a shared
+image carrying a `debian` branch builds fine in an Alpine-only project that never
+loads `module-debian`. There is no closed-distro key check: the distro set is
+open, and a typo'd key for a distro you never build is simply never reached.
+
+This is what lets `module-core` define `base-image`, `dev-image`, and `ssh-image`
+once, each targeting Alpine, Debian, and Ubuntu, rather than maintaining three
+near-parallel copies per distro module.
+
+### Per-distro kernel selection
+
+The kernel differs across distros — a from-source kernel on Alpine, the stock
+feed meta-package (`linux-image-amd64` / `linux-image-arm64`) on the apt distros
+— so a machine declares its kernel per distro and images simply reference the
+virtual name `"linux"`:
+
+```python
+machine(
+    name = "qemu-x86_64",
+    arch = "x86_64",
+    kernel = kernel(
+        distro_unit = {
+            "alpine": "linux",
+            "debian": "linux-image-amd64",
+            "ubuntu": "linux-image-generic",
+        },
+        provides = "linux",
+        cmdline = "console=ttyS0 root=/dev/vda1 rw",
+    ),
+)
+```
+
+An image's `"linux"` artifact resolves to `distro_unit[effective_distro]` — the
+resolution happens when the image is evaluated, the only point at which the
+effective distro is known. A machine whose kernel is the same across distros
+keeps the flat single-`unit` form (`kernel(unit = "linux-rpi5", provides =
+"linux", ...)`): a Raspberry Pi 5 image, for instance, carries the same custom
+`linux-rpi5` on Alpine and Debian alike. Setting both `unit` and `distro_unit`
+on one kernel is an error.
 
 ## Choosing a distro
 

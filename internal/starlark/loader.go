@@ -1136,14 +1136,24 @@ func buildMachineConfigStruct(m *Machine) *starlarkstruct.Struct {
 	}
 	machineDict["partitions"] = starlark.NewList(partList)
 
-	if m.Kernel.Unit != "" {
-		machineDict["kernel"] = starlarkstruct.FromStringDict(
-			starlark.String("kernel"), starlark.StringDict{
-				"unit":      starlark.String(m.Kernel.Unit),
-				"provides":  starlark.String(m.Kernel.Provides),
-				"defconfig": starlark.String(m.Kernel.Defconfig),
-				"cmdline":   starlark.String(m.Kernel.Cmdline),
-			})
+	if m.Kernel.Unit != "" || len(m.Kernel.DistroUnit) > 0 {
+		kfields := starlark.StringDict{
+			"unit":      starlark.String(m.Kernel.Unit),
+			"provides":  starlark.String(m.Kernel.Provides),
+			"defconfig": starlark.String(m.Kernel.Defconfig),
+			"cmdline":   starlark.String(m.Kernel.Cmdline),
+		}
+		// Expose distro_unit only when set, so image()'s
+		// getattr(kernel, "distro_unit", None) falls back cleanly for
+		// single-form (flat unit) machines.
+		if len(m.Kernel.DistroUnit) > 0 {
+			du := starlark.NewDict(len(m.Kernel.DistroUnit))
+			for k, v := range m.Kernel.DistroUnit {
+				_ = du.SetKey(starlark.String(k), starlark.String(v))
+			}
+			kfields["distro_unit"] = du
+		}
+		machineDict["kernel"] = starlarkstruct.FromStringDict(starlark.String("kernel"), kfields)
 	}
 	return starlarkstruct.FromStringDict(starlark.String("machine_config"), machineDict)
 }
