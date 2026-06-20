@@ -8,10 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
-- **arm64 QEMU images boot again.** A machine that selects its kernel per
-  distro (such as `qemu-arm64`) no longer launches with a blank serial
-  console; the direct-kernel-boot path now recognizes per-distro kernels and
-  passes the image's kernel and initramfs to QEMU as expected.
+## [0.12.7] - 2026-06-20
+
+- **arm64 QEMU images boot again.** A machine that selects its kernel per distro
+  (such as `qemu-arm64`) no longer launches with a blank serial console; the
+  direct-kernel-boot path now recognizes per-distro kernels and passes the
+  image's kernel and initramfs to QEMU as expected.
 - **Units that build in an upstream base image work again.** Builds that run in
   an external container image (for example the Go toolchain image) can pull it
   from the registry again; only yoe's own locally-built toolchain images are
