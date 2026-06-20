@@ -18,6 +18,7 @@ type LoadOption func(*loadConfig)
 type loadConfig struct {
 	moduleSync             func([]ModuleRef, io.Writer) error
 	machine                string // override default machine before evaluating units/images
+	distroOverride         string // override default_distro_override before evaluating units/images
 	projectFile            string // alternative project file (instead of PROJECT.star)
 	showShadows            bool   // emit shadow / provides-override notices (default off)
 	allowDuplicateProvides bool   // accept multiple intra-module providers of the same virtual
@@ -53,6 +54,18 @@ func WithModuleSync(fn func([]ModuleRef, io.Writer) error) LoadOption {
 // the correct architecture for the specified machine.
 func WithMachine(name string) LoadOption {
 	return func(c *loadConfig) { c.machine = name }
+}
+
+// WithDistroOverride sets the per-invocation default-distro override (the
+// `yoe build/run --distro` flag) before units and images are evaluated. It
+// must be applied at load time, not patched onto the returned Project: the
+// image() builtin resolves its distro_artifacts branch, packaging format,
+// and rootfs/disk functions eagerly during evaluation against the
+// effective-distro cascade (image.distro -> default_distro_override ->
+// default_distro). Setting it afterward leaves the closure baked against the
+// wrong distro. This sits at the local.star override level and wins over it.
+func WithDistroOverride(distro string) LoadOption {
+	return func(c *loadConfig) { c.distroOverride = distro }
 }
 
 // WithProjectFile specifies an alternative project file to evaluate instead
@@ -207,6 +220,13 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 			if ov.DefaultDistroOverride != "" {
 				proj.DefaultDistroOverride = ov.DefaultDistroOverride
 			}
+		}
+		// A per-invocation --distro flag wins over local.star's
+		// default_distro_override. Applied here (before ctx is built and
+		// units/images are evaluated) so image() resolves its
+		// distro_artifacts branch against the requested distro.
+		if cfg.distroOverride != "" {
+			proj.DefaultDistroOverride = cfg.distroOverride
 		}
 	}
 

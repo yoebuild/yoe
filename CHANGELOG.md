@@ -8,6 +8,19 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.12.6] - 2026-06-20
+
+- **`yoe build --distro` and `yoe run --distro` now select the right distro
+  again.** The flag took effect too late, so a `--distro debian` build could
+  resolve and build the Alpine (or your `local.star`) package set into the
+  Debian output directory, producing no bootable image. The requested distro is
+  now honored when the image is resolved, so each distro builds its own closure.
+- **`yoe clean` no longer fails trying to pull a toolchain image.** Cleaning
+  root-owned build files now uses whichever toolchain image is already on your
+  machine instead of a fixed version, so it works after toolchain bumps and
+  across distros, and never reaches out to a registry for an image that only
+  exists locally.
+
 ## [0.12.5] - 2026-06-19
 
 - **One image definition can now target multiple distros.** Set

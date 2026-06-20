@@ -49,11 +49,14 @@ When unset, yoe resolves the effective distro through a three-level cascade:
 If none of the three is set, image evaluation errors immediately. The distro
 choice is too consequential to pick silently.
 
-`yoe build` also accepts a `--distro` flag that overrides the default for a
-single invocation, sitting at the same level as `default_distro_override` (an
-image's own explicit `distro` still wins). This is how you build a multi-distro
-image — one definition that carries a `distro_artifacts` map (see below) — as a
-specific distro without editing `local.star`:
+`yoe build` and `yoe run` also accept a `--distro` flag that overrides the
+default for a single invocation. It sits at the `default_distro_override` level
+and takes precedence over `local.star`'s value for that one command (an image's
+own explicit `distro` still wins). The flag is applied while the image is
+resolved, so the requested distro's `distro_artifacts` branch and package format
+are what actually build. This is how you build a multi-distro image — one
+definition that carries a `distro_artifacts` map (see below) — as a specific
+distro without editing `local.star`:
 
 ```sh
 yoe build --distro alpine base-image
