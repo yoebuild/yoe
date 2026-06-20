@@ -302,8 +302,10 @@ func cmdModule(args []string) {
 			os.Exit(1)
 		}
 	case "info":
-		fmt.Fprintf(os.Stderr, "module info: not yet implemented\n")
-		os.Exit(1)
+		if err := yoe.ListModuleInfo(dir, os.Stdout, projectLoadOpts()...); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 	case "check-updates":
 		fmt.Fprintf(os.Stderr, "module check-updates: not yet implemented\n")
 		os.Exit(1)

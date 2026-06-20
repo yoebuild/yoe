@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
@@ -76,6 +77,11 @@ func Sync(modules []yoestar.ModuleRef, w io.Writer) (map[string]string, error) {
 			cmd.Stderr = os.Stderr
 			cmd.Run() // best effort
 		}
+
+		if err := WriteSyncInfo(moduleDir, time.Now()); err != nil {
+			return nil, fmt.Errorf("recording sync metadata for module %s: %w", name, err)
+		}
+		_ = excludeFromGit(moduleDir, syncInfoFile)
 
 		// If module specifies a subdirectory path, use that
 		moduleRoot := moduleDir
