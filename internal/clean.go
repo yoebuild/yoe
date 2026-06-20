@@ -94,7 +94,17 @@ func RemoveDirAnyOwner(dir, projectDir string) error {
 		return fmt.Errorf("refusing to container-rm a path outside the project tree: %s", dir)
 	}
 	cPath := "/project/" + filepath.ToSlash(rel)
-	image := fmt.Sprintf("yoe/toolchain-musl:15-%s", HostArch())
+	// Use whichever toolchain image is present locally rather than a
+	// hardcoded version. The toolchain-musl version bumps over time and
+	// other distro toolchains (debian, ubuntu) may be the only ones
+	// installed; any of them can run `rm -rf`. Pinning a stale version
+	// (e.g. "15") made docker try to pull a yoe-local-only tag and fail
+	// with "pull access denied".
+	image := LocalToolchainImage(HostArch())
+	if image == "" {
+		return fmt.Errorf("cannot remove root-owned files in %s: no local yoe toolchain image found to run container-side rm "+
+			"(build a target first, or remove the directory manually with sudo)", dir)
+	}
 	return RunInContainer(ContainerRunConfig{
 		Image:      image,
 		Command:    "rm -rf " + cPath,

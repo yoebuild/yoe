@@ -166,8 +166,8 @@ The helpers exist to keep the kernel meta-package **arch-generic**
 Resolution: make the **machine config distro-aware**, so the names an image
 references resolve to the right concrete unit per `(machine, distro)`. This is
 the machine-layer member of the same `distro_*` family as `distro_artifacts`
-(images) and `distro_deps` (units) — not a kernel one-off. Two parts of a machine
-legitimately vary by distro:
+(images) and `distro_deps` (units) — not a kernel one-off. Two parts of a
+machine legitimately vary by distro:
 
 - **Kernel** — `qemu-x86_64` wants a from-source kernel on Alpine but the stock
   feed kernel on apt distros; `raspberrypi5` wants the custom `linux-rpi5` on
@@ -184,7 +184,7 @@ are retired.
 `cmdline` is board-level.** A from-source kernel's `defconfig` lives in that
 unit's own build (e.g. `linux-rpi5` runs `make bcm2712_defconfig` itself), and a
 feed kernel has none; `cmdline` is a property of the board, identical across
-distros. So in practice the only thing that varies per distro is *which unit*
+distros. So in practice the only thing that varies per distro is _which unit_
 `"linux"` resolves to — a `distro_unit` name-map on the `kernel(...)` block. The
 flat single-`unit` form stays valid where the kernel is distro-neutral:
 
@@ -210,23 +210,23 @@ kernel = kernel(
 ```
 
 (If a machine ever needed a genuinely per-distro `cmdline`, the whole
-`kernel(...)` block could go per-distro via a `distro_kernel({...})` wrapper — but
-no known board requires it, so `distro_unit` is the form we ship.)
+`kernel(...)` block could go per-distro via a `distro_kernel({...})` wrapper —
+but no known board requires it, so `distro_unit` is the form we ship.)
 
 The machine `packages` list gains the matching per-distro form (a
 `distro_packages` map, the machine analog of `distro_artifacts`) for the
 bootloader/firmware split.
 
 **Where resolution happens — `image()`, not the global `provides` table.**
-`ctx.provides` is built once, from the project's _default_ machine, with no distro
-in scope (`internal/starlark/loader.go:300-334` registers a single
+`ctx.provides` is built once, from the project's _default_ machine, with no
+distro in scope (`internal/starlark/loader.go:300-334` registers a single
 `provides["linux"] = machine.Kernel.Unit`). A distro-blind global table cannot
 pick a per-distro kernel. So `image()` — the one place the effective distro is
 known — does the resolution: it reads the machine's per-distro kernel from
-`ctx.machine_config.kernel` and substitutes the unit for `effective_distro` while
-resolving the `"linux"` entry in the artifact list. Single-`unit` machines (rpi5)
-keep the global registration and need no override; per-distro machines (qemu)
-carry no global entry and are resolved entirely in `image()`.
+`ctx.machine_config.kernel` and substitutes the unit for `effective_distro`
+while resolving the `"linux"` entry in the artifact list. Single-`unit` machines
+(rpi5) keep the global registration and need no override; per-distro machines
+(qemu) carry no global entry and are resolved entirely in `image()`.
 
 The **rpi5 proving case does not actually exercise per-distro kernels**:
 `linux-rpi5` is the kernel on every distro there, so its flat
@@ -240,8 +240,8 @@ kernel unit could declare `provides "linux"`, be distro-tagged, and let the
 distro-scoped closure pick the matching one with no new machine field. Rejected
 as the primary mechanism because `provides` is global, not per-board: several
 units provide `"linux"`, and the machine is precisely what pins "for _this
-board_, the linux provider is X." The machine selector still rides `provides` for
-the final name resolution; it only adds the board×distro disambiguation that
+board_, the linux provider is X." The machine selector still rides `provides`
+for the final name resolution; it only adds the board×distro disambiguation that
 `provides` alone cannot express.
 
 **Implementation landing sites.** `kernel()` is a Go builtin, not a Starlark
@@ -255,24 +255,24 @@ accepted-and-stored today. The real work lands in two places:
   (`internal/starlark/types.go`), which gains a `DistroUnit map[string]string`.
   `fnMachine` only **parses, validates, and stores** the per-distro map — the
   build distro is not in scope at machine-parse time, so no selection happens
-  here. Fail loud when a kernel sets neither `unit` nor `distro_unit`, or both. The
-  same per-distro treatment applies to the machine `packages` extraction
-  (`builtins.go:592`) for the `distro_packages` split. The stored map is re-exposed
-  to Starlark as `ctx.machine_config.kernel.distro_unit` at
+  here. Fail loud when a kernel sets neither `unit` nor `distro_unit`, or both.
+  The same per-distro treatment applies to the machine `packages` extraction
+  (`builtins.go:592`) for the `distro_packages` split. The stored map is
+  re-exposed to Starlark as `ctx.machine_config.kernel.distro_unit` at
   `internal/starlark/loader.go:1140`. `distro_unit` is a plain dict kwarg on the
   existing `kernel()` builtin — `fnKernel`/`makeStruct` already accept arbitrary
   kwargs, so no new builtin is needed.
-- **`image()` (`modules/module-core/classes/image.star`) — the resolution point.**
-  Where the artifact list is resolved against `ctx.provides`, `image()` overrides
-  the kernel provides-name (`"linux"`): it reads `ctx.machine_config.kernel` and,
-  when a `distro_unit` map is present, substitutes the unit for the image's
-  `effective_distro` (failing loud if that distro has no entry). This is the only
-  place the effective distro is known.
+- **`image()` (`modules/module-core/classes/image.star`) — the resolution
+  point.** Where the artifact list is resolved against `ctx.provides`, `image()`
+  overrides the kernel provides-name (`"linux"`): it reads
+  `ctx.machine_config.kernel` and, when a `distro_unit` map is present,
+  substitutes the unit for the image's `effective_distro` (failing loud if that
+  distro has no entry). This is the only place the effective distro is known.
 
 Because `fnKernel` / `makeStruct` accept any kwarg with no validation, a typo'd
 kernel field is silently dropped today; per the "explicit over implicit / fail
-loud" rule, R4 adds field validation in `fnMachine`'s typed extraction (where the
-field set is known), not in the deliberately permissive `fnKernel`.
+loud" rule, R4 adds field validation in `fnMachine`'s typed extraction (where
+the field set is known), not in the deliberately permissive `fnKernel`.
 
 ### R5 — Relocate image definitions to `module-core/images/`
 
@@ -306,12 +306,11 @@ a target for unification.
 A consolidated `rpi5` image (or the shared `dev-image`/`ssh-image` built for the
 `raspberrypi5` machine) builds as both Alpine and Debian from one definition,
 carrying the custom `linux-rpi5` kernel in both — the same flat
-`kernel(unit = ...)` on every distro, so the board needs no per-distro kernel map
-(R4). The Debian build
-packages `linux-rpi5` as a `.deb` (the from-source → `.deb` → local repo →
-mmdebstrap path is already implemented), installs it, and lays down
-`/boot/kernel_2712.img`, the `bcm2712-rpi-5-b.dtb`, and overlays for the
-VideoCore firmware. Because Debian does not merge machine `packages`
+`kernel(unit = ...)` on every distro, so the board needs no per-distro kernel
+map (R4). The Debian build packages `linux-rpi5` as a `.deb` (the from-source →
+`.deb` → local repo → mmdebstrap path is already implemented), installs it, and
+lays down `/boot/kernel_2712.img`, the `bcm2712-rpi-5-b.dtb`, and overlays for
+the VideoCore firmware. Because Debian does not merge machine `packages`
 (`image.star:96-99`), the board-support packages (`rpi-firmware`, `rpi5-config`)
 are listed explicitly in the Debian branch of `distro_artifacts`.
 
@@ -322,8 +321,8 @@ are listed explicitly in the Debian branch of `distro_artifacts`.
   `*_distro` field in the codebase; rejected for consistency.
 - **Per-distro selection is a machine-level `distro_*` family, not a core
   `apt_kernel()` helper.** A distro-aware machine config (a per-distro kernel
-  `distro_unit` map plus a `distro_packages` list) keeps arch implicit
-  (the machine is already arch-specific), handles both "custom kernel on every
+  `distro_unit` map plus a `distro_packages` list) keeps arch implicit (the
+  machine is already arch-specific), handles both "custom kernel on every
   distro" (rpi5) and "stock feed kernel per distro" (qemu), and extends to the
   bootloader/firmware split — all with one mechanism. A core helper would
   re-derive arch, solve only the kernel, and could not express the rpi5 "custom
@@ -342,11 +341,11 @@ are listed explicitly in the Debian branch of `distro_artifacts`.
   (`base/dev/ssh`) at once, or land `distro_artifacts` + the apt-only
   consolidation (debian/ubuntu) first and fold Alpine in afterward? The apt pair
   is the lowest-risk, highest-dedup slice.
-- **qemu apt kernels: stock vs from-source.** R4's per-distro machine kernel lets
-  a qemu Debian/Ubuntu image keep the stock feed kernel (full driver tree) while
-  Alpine uses a from-source kernel. Confirm that is the desired split, versus
-  unifying qemu on a from-source kernel across all distros for parity with the
-  rpi5 case.
+- **qemu apt kernels: stock vs from-source.** R4's per-distro machine kernel
+  lets a qemu Debian/Ubuntu image keep the stock feed kernel (full driver tree)
+  while Alpine uses a from-source kernel. Confirm that is the desired split,
+  versus unifying qemu on a from-source kernel across all distros for parity
+  with the rpi5 case.
 - **`yoe init` / e2e template.** The `e2e-project` PROJECT.star and
   `internal/init.go` reference images by name; consolidating image locations
   must keep both building out of the box (`CLAUDE.md`: "`yoe init` mirrors the

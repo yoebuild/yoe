@@ -49,11 +49,14 @@ When unset, yoe resolves the effective distro through a three-level cascade:
 If none of the three is set, image evaluation errors immediately. The distro
 choice is too consequential to pick silently.
 
-`yoe build` also accepts a `--distro` flag that overrides the default for a
-single invocation, sitting at the same level as `default_distro_override` (an
-image's own explicit `distro` still wins). This is how you build a multi-distro
-image — one definition that carries a `distro_artifacts` map (see below) — as a
-specific distro without editing `local.star`:
+`yoe build` and `yoe run` also accept a `--distro` flag that overrides the
+default for a single invocation. It sits at the `default_distro_override` level
+and takes precedence over `local.star`'s value for that one command (an image's
+own explicit `distro` still wins). The flag is applied while the image is
+resolved, so the requested distro's `distro_artifacts` branch and package format
+are what actually build. This is how you build a multi-distro image — one
+definition that carries a `distro_artifacts` map (see below) — as a specific
+distro without editing `local.star`:
 
 ```sh
 yoe build --distro alpine base-image
@@ -168,13 +171,13 @@ image(
 Effective artifacts = `artifacts + distro_artifacts[effective_distro]`. Only the
 branch matching the build's effective distro is consulted; the others are inert
 lists — never resolved, never forcing their feed module to load — so a shared
-image carrying a `debian` branch builds fine in an Alpine-only project that never
-loads `module-debian`. There is no closed-distro key check: the distro set is
-open, and a typo'd key for a distro you never build is simply never reached.
+image carrying a `debian` branch builds fine in an Alpine-only project that
+never loads `module-debian`. There is no closed-distro key check: the distro set
+is open, and a typo'd key for a distro you never build is simply never reached.
 
-This is what lets `module-core` define `base-image`, `dev-image`, and `ssh-image`
-once, each targeting Alpine, Debian, and Ubuntu, rather than maintaining three
-near-parallel copies per distro module.
+This is what lets `module-core` define `base-image`, `dev-image`, and
+`ssh-image` once, each targeting Alpine, Debian, and Ubuntu, rather than
+maintaining three near-parallel copies per distro module.
 
 ### Per-distro kernel selection
 
@@ -202,10 +205,10 @@ machine(
 An image's `"linux"` artifact resolves to `distro_unit[effective_distro]` — the
 resolution happens when the image is evaluated, the only point at which the
 effective distro is known. A machine whose kernel is the same across distros
-keeps the flat single-`unit` form (`kernel(unit = "linux-rpi5", provides =
-"linux", ...)`): a Raspberry Pi 5 image, for instance, carries the same custom
-`linux-rpi5` on Alpine and Debian alike. Setting both `unit` and `distro_unit`
-on one kernel is an error.
+keeps the flat single-`unit` form
+(`kernel(unit = "linux-rpi5", provides = "linux", ...)`): a Raspberry Pi 5
+image, for instance, carries the same custom `linux-rpi5` on Alpine and Debian
+alike. Setting both `unit` and `distro_unit` on one kernel is an error.
 
 ## Choosing a distro
 
