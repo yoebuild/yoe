@@ -189,11 +189,18 @@ func containerRunArgs(cfg ContainerRunConfig) ([]string, error) {
 		arch = hostArch()
 	}
 
-	// --pull=never: yoe toolchain images are built locally and never pushed
-	// to a registry, so an absent image must fail fast with a clear "image
-	// not present" error rather than docker attempting a doomed registry pull
-	// that surfaces as an opaque "pull access denied".
-	args := []string{"run", "--rm", "--privileged", "--pull=never"}
+	args := []string{"run", "--rm", "--privileged"}
+
+	// --pull=never only for yoe-local images (the `yoe/` prefix): toolchain
+	// and container units are built locally and never pushed to a registry,
+	// so an absent one must fail fast with a clear "image not present" error
+	// rather than docker attempting a doomed registry pull that surfaces as
+	// an opaque "pull access denied". External base images (e.g. golang:1.26
+	// for the go build class, debian:trixie) genuinely live on a registry and
+	// must stay pullable, so they keep docker's default pull-if-missing policy.
+	if strings.HasPrefix(cfg.Image, "yoe/") {
+		args = append(args, "--pull=never")
+	}
 
 	// Add platform for cross-arch containers
 	if arch != hostArch() {

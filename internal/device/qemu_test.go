@@ -252,6 +252,29 @@ func TestBuildQEMUArgsDirectBoot(t *testing.T) {
 	}
 }
 
+// machineHasKernel must recognize both single-form (Kernel.Unit) and
+// per-distro (Kernel.DistroUnit) machines. A regression here disables direct
+// kernel boot for qemu-arm64 (which uses DistroUnit), leaving the guest with
+// no -kernel and a black serial console that boot-tests as a 5m timeout.
+func TestMachineHasKernel(t *testing.T) {
+	unitForm := &yoestar.Machine{Kernel: yoestar.KernelConfig{Unit: "linux"}}
+	if !machineHasKernel(unitForm) {
+		t.Error("single-form machine (Kernel.Unit set) should have a kernel")
+	}
+
+	distroForm := &yoestar.Machine{Kernel: yoestar.KernelConfig{
+		DistroUnit: map[string]string{"debian": "linux-image-arm64"},
+	}}
+	if !machineHasKernel(distroForm) {
+		t.Error("per-distro machine (Kernel.DistroUnit set) should have a kernel")
+	}
+
+	none := &yoestar.Machine{}
+	if machineHasKernel(none) {
+		t.Error("machine with no kernel configured should report no kernel")
+	}
+}
+
 // writeKernelFile creates a fake arm64 kernel: a bare Image carries the "ARMd"
 // magic at offset 56; an EFI-only (zboot) image is a PE stub without it.
 func writeKernelFile(t *testing.T, bareImage bool) string {
