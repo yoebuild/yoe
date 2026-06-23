@@ -252,26 +252,25 @@ func TestBuildQEMUArgsDirectBoot(t *testing.T) {
 	}
 }
 
-// machineHasKernel must recognize both single-form (Kernel.Unit) and
-// per-distro (Kernel.DistroUnit) machines. A regression here disables direct
-// kernel boot for qemu-arm64 (which uses DistroUnit), leaving the guest with
-// no -kernel and a black serial console that boot-tests as a 5m timeout.
-func TestMachineHasKernel(t *testing.T) {
-	unitForm := &yoestar.Machine{Kernel: yoestar.KernelConfig{Unit: "linux"}}
-	if !machineHasKernel(unitForm) {
-		t.Error("single-form machine (Kernel.Unit set) should have a kernel")
+// TestBuildQEMUArgsDirectBootDistroUnit guards the per-distro machine kernel:
+// a machine declaring its kernel via distro_unit (so Kernel.Unit is empty) must
+// still take the direct-kernel-boot path. Gating on Unit != "" instead of
+// HasKernel() silently dropped -kernel and broke `yoe run` on qemu machines.
+func TestBuildQEMUArgsDirectBootDistroUnit(t *testing.T) {
+	machine := &yoestar.Machine{
+		Arch: "arm64",
+		Kernel: yoestar.KernelConfig{
+			DistroUnit: map[string]string{"alpine": "linux", "debian": "linux-image-arm64"},
+			Cmdline:    "console=ttyAMA0 root=/dev/vda1 rw",
+		},
+		QEMU: &yoestar.QEMUConfig{Machine: "virt"},
 	}
-
-	distroForm := &yoestar.Machine{Kernel: yoestar.KernelConfig{
-		DistroUnit: map[string]string{"debian": "linux-image-arm64"},
-	}}
-	if !machineHasKernel(distroForm) {
-		t.Error("per-distro machine (Kernel.DistroUnit set) should have a kernel")
+	args := BuildQEMUArgs(machine, QEMUOptions{}, "/img.img", "/boot/vmlinuz-x", "/boot/initrd.img-x")
+	if !containsPair(args, "-kernel", "/boot/vmlinuz-x") {
+		t.Errorf("distro_unit machine should still direct-boot a kernel, got %v", args)
 	}
-
-	none := &yoestar.Machine{}
-	if machineHasKernel(none) {
-		t.Error("machine with no kernel configured should report no kernel")
+	if !containsPair(args, "-initrd", "/boot/initrd.img-x") {
+		t.Errorf("expected -initrd, got %v", args)
 	}
 }
 

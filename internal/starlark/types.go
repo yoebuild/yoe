@@ -222,6 +222,14 @@ type KernelConfig struct {
 	DistroUnit map[string]string
 }
 
+// HasKernel reports whether the machine declares a kernel at all — either the
+// flat single-Unit form or the per-distro DistroUnit map. Callers that gate
+// "does this machine boot a kernel" (e.g. QEMU direct-kernel boot) must use
+// this rather than `Unit != ""`, which is empty for distro_unit machines.
+func (k KernelConfig) HasKernel() bool {
+	return k.Unit != "" || len(k.DistroUnit) > 0
+}
+
 type BootloaderConfig struct {
 	Type      string
 	Repo      string

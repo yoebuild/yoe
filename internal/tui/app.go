@@ -4038,10 +4038,7 @@ func (m model) renderQEMUCommandPreview() string {
 	kernelPlaceholder := ""
 	initrdPlaceholder := ""
 	needsDirectBoot := machine.QEMU == nil || machine.QEMU.Firmware == ""
-	// Single-form machines set Kernel.Unit; per-distro machines (e.g.
-	// qemu-arm64) set Kernel.DistroUnit instead. Either means the machine
-	// direct-kernel-boots, so the preview shows a <vmlinuz> placeholder.
-	if needsDirectBoot && (machine.Kernel.Unit != "" || len(machine.Kernel.DistroUnit) > 0) {
+	if needsDirectBoot && machine.Kernel.HasKernel() {
 		kernelPlaceholder = "<vmlinuz>"
 		// The actual launcher adds -initrd only for distros that boot
 		// through an initramfs (Debian). The preview can't know the image's

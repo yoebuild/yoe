@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **New Glossary in the docs.** A single reference page defines yoe's vocabulary
+  — units, packages, classes, images, machines, distros, modules, feeds — along
+  with every field you can set in a unit file, the build-time environment
+  variables your build steps can use, and the Starlark builtins.
+
 ## [0.12.7] - 2026-06-20
 
 - **arm64 QEMU images boot again.** A machine that selects its kernel per distro

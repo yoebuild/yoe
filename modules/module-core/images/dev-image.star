@@ -4,8 +4,8 @@ load("@core//units/base/base-files.star", "base_files")
 
 # Dev image, one definition for every distro: the base-image closure plus a
 # diagnostic + editor userland so the device is usable for real work over SSH.
-# Each distro's leaf tools differ by name (procps-ng vs procps, helix/yazi/zellij
-# on Alpine vs vim-tiny on apt), which is exactly what distro_artifacts expresses.
+
+# Minimal boot + SSH closure shared by the apt distros (see base-image).
 _APT_BASE = [
     "systemd-sysv",
     "systemd-resolved",
@@ -23,19 +23,8 @@ _APT_BASE = [
     "network-manager",
 ]
 
-# Tools whose package name is identical on every distro, so they live once in
-# the shared artifacts list rather than being repeated per distro_artifacts branch.
-_COMMON_DEV = [
-    "strace",
-    "ca-certificates",
-    "curl",
-    "less",
-    "file",
-    "htop",
-    "iproute2",
-]
-
-# Apt-only leaf tools (names differ from or are absent on Alpine).
+# apt-specific dev tools — the apt names for roles whose package differs from
+# Alpine's, plus apt-only additions.
 _APT_DEV = [
     "procps",
     "iputils-ping",
@@ -52,14 +41,21 @@ base_files(
 
 image(
     name = "dev-image",
-    artifacts = ["linux", "bash"] + _COMMON_DEV,
+    # Distro-neutral entries: the kernel (resolved per distro by the machine),
+    # the shell, and the leaf CLI tools whose package name is identical on every
+    # distro. Tools whose name differs (openssh vs openssh-server, procps-ng vs
+    # procps) stay in the per-distro branches below.
+    artifacts = [
+        "linux", "bash",
+        "ca-certificates", "curl", "less", "file", "htop", "strace", "iproute2",
+    ],
     distro_artifacts = {
         "alpine": [
             "base-files-dev", "busybox", "busybox-binsh", "musl", "kmod",
             "util-linux", "e2fsprogs", "eudev", "openrc",
             "network-config", "dhcpcd", "ntp-client", "mdnsd",
-            "openssh", "simpleiot",
-            "procps-ng", "apk-tools", "yazi", "zellij", "helix",
+            "openssh", "simpleiot", "procps-ng", "apk-tools",
+            "yazi", "zellij", "helix",
         ],
         "debian": _APT_BASE + _APT_DEV,
         "ubuntu": _APT_BASE + ["nm-manage-ethernet"] + _APT_DEV,

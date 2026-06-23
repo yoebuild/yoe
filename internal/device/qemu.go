@@ -179,7 +179,7 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 	// the kernel the image actually ships.
 	hostKernel, hostInitrd := "", ""
 	needsDirectBoot := machine.QEMU == nil || machine.QEMU.Firmware == ""
-	if needsDirectBoot && machineHasKernel(machine) {
+	if needsDirectBoot && machine.Kernel.HasKernel() {
 		hostKernel, hostInitrd = findBootKernel(imgPath)
 	}
 
@@ -273,16 +273,6 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 		Interactive: !opts.Daemon,
 		NoUser:      true,
 	})
-}
-
-// machineHasKernel reports whether a machine configures a kernel at all,
-// covering both single-form machines (Kernel.Unit set) and per-distro
-// machines (Kernel.DistroUnit map populated). The two are mutually
-// exclusive, so checking only Unit silently disables direct kernel boot for
-// per-distro machines like qemu-arm64 — leaving a firmware-less arm64 guest
-// with no -kernel and a black serial console.
-func machineHasKernel(machine *yoestar.Machine) bool {
-	return machine.Kernel.Unit != "" || len(machine.Kernel.DistroUnit) > 0
 }
 
 // findBootKernel locates the kernel and any initrd inside a built image's
@@ -521,7 +511,7 @@ func BuildQEMUArgs(machine *yoestar.Machine, opts QEMUOptions, imgPath, kernelPa
 	// -append for architectures that need it (arm64, riscv64). Skipped if
 	// the caller couldn't resolve a kernel path.
 	needsDirectBoot := machine.QEMU == nil || machine.QEMU.Firmware == ""
-	if needsDirectBoot && machineHasKernel(machine) && kernelPath != "" {
+	if needsDirectBoot && machine.Kernel.HasKernel() && kernelPath != "" {
 		// An EFI-only kernel (Ubuntu's arm64 zboot) can't be started by the
 		// firmware-less -kernel path, so boot it through UEFI firmware. edk2
 		// still loads the -kernel/-initrd/-append below via fw_cfg, running
