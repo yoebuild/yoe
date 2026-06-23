@@ -1216,6 +1216,57 @@ reproducibility guarantees, are building for desktop/server/CI, and are willing
 to invest in learning the Nix ecosystem. NixOS is unmatched for declarative
 system management on general-purpose hardware.
 
+## vs. GNU Guix
+
+[GNU Guix](https://guix.gnu.org/) shares Nix's core model — a functional,
+content-addressed store (`/gnu/store`), declarative whole-system configuration,
+and atomic rollback — so almost everything in the Nix comparison above applies
+unchanged. Guix swaps the Nix expression language for Guile Scheme and adds a
+strict free-software policy. Both of those distinctions push it further from
+`[yoe]`'s goals, not closer.
+
+**What carries over from the Nix comparison:** the `/gnu/store` closure model and
+its closure sizes, the custom functional config language, channels pinned to git
+refs (`[yoe]` already pins modules to git refs), and `guix time-machine` for
+reproducing exact environments. None of these change the verdict reached against
+Nix. If anything, Guile Scheme is a steeper onboarding cost for embedded
+developers than the Nix language, which strengthens `[yoe]`'s choice of Starlark.
+
+**The one genuinely distinctive idea — full-source bootstrap.** Guix drives the
+[Bootstrappable Builds](https://bootstrappable.org/) effort: it bootstraps the
+entire toolchain from a tiny reduced binary seed (a few hundred bytes of `hex0`)
+up to a working GCC, with no opaque prebuilt compiler in the trust path. That is
+the reference design for toolchain supply-chain provenance, and the one place
+Guix goes meaningfully beyond Nix. It cuts against `[yoe]`'s grain, though:
+`[yoe]` deliberately targets functional equivalence rather than bit-for-bit
+reproducibility and bootstraps from a container toolchain on purpose (see
+[Reproducibility](architecture.md#-reproducibility)). Worth knowing as the
+reference if provenance ever becomes a goal; not something to adopt today.
+
+**The structural blocker — free-software-only policy.** Guix mainline follows the
+GNU Free System Distribution Guidelines and refuses proprietary firmware and
+blobs. That is fatal for most embedded BSP work, where vendor firmware (Jetson,
+many SoCs, common Wi-Fi/GPU parts) is unavoidable. `[yoe]` is vendor-neutral and
+welcomes BSPs and blobs from any vendor; Guix's identity rejects them. The
+unofficial `nonguix` channel exists but is second-class and unsupported by the
+project. This is a philosophical mismatch, not a gap a unit could close — which
+is why the "could `[yoe]` build _with_ it" question explored for Nix in
+[yoe and Nix](nix.md) has no Guix analog.
+
+|                  | GNU Guix                            | `[yoe]`                                    |
+| ---------------- | ----------------------------------- | ------------------------------------------ |
+| Config language  | Guile Scheme                        | Starlark (Python-like)                     |
+| Store model      | Content-addressed `/gnu/store`      | Standard FHS with apk/dpkg                 |
+| Bootstrap        | Full-source from a tiny binary seed | Container toolchain (functional eq.)       |
+| Firmware / blobs | Refused upstream (FSDG)             | Welcomed; vendor-neutral BSPs              |
+| Target           | Desktop, server                     | Embedded hardware, multi-arch              |
+| Learning curve   | Steep (Guile Scheme)                | Shallow (Starlark, Python-like)            |
+
+**When to use Guix instead:** when you want Nix's guarantees with a Scheme
+config language and a fully free-software, fully bootstrappable stack on
+general-purpose hardware — and your targets need no proprietary firmware. For
+embedded products that depend on vendor blobs, it is not an option.
+
 ## vs. distri
 
 [distri](https://distr1.org/) is Michael Stapelberg's research Linux
