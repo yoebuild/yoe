@@ -996,6 +996,69 @@ you build images some other way, Rugix Ctrl is worth evaluating on its own as
 the update layer, since it is designed to drop into an existing build rather
 than replace it.
 
+## vs. ZethraOS
+
+[ZethraOS](https://www.zethraos.com/) ([source](https://github.com/ZethraOS/os))
+is an early-stage, AI-native mobile operating system built from scratch on the
+Linux kernel — positioned as an Android alternative ("AI-Native OS for Every
+Screen," clean-room with zero AOSP code). It is less a build system than a
+ground-up OS, but it is worth comparing because it shares two of `[yoe]`'s bets
+— a Rust/Go-modern toolchain over a minimal Linux base, and AI as a first-class
+participant in the workflow — while pushing the AI angle much further than
+`[yoe]` does.
+
+**Where `[yoe]` and ZethraOS agree:**
+
+- **AI as a first-class part of the system, not an afterthought.** ZethraOS's
+  headline feature is the **ZethraAI daemon**, which watches crash logs and CVE
+  feeds, sends diagnostics to a configured AI provider (local Ollama or a cloud
+  API), generates candidate patches with regression tests, validates them by
+  booting a QEMU image, and triggers an OTA release once confidence and risk
+  thresholds are met — autonomous self-healing with humans notified but not
+  required. `[yoe]` shares the conviction that AI belongs in the loop, but
+  applies it at a different layer: the design goal is that a unit is simple
+  enough for an AI to author and audit (one Starlark file, Alpine APKBUILD as
+  the reference), so the human-or-AI authoring a package is the integration
+  point, not an on-device daemon shipping unattended patches to fleets.
+- **A modern-language stack over upstream Linux.** ZethraOS is Rust-first
+  userspace (a Rust PID 1 called `zethrad`, a Smithay Wayland compositor) on an
+  unmodified upstream kernel; `[yoe]`'s engine is Go with Starlark units. Both
+  reject the older C-plus-shell-plus-bespoke-DSL toolchains.
+- **Native/glibc target under QEMU for development.** ZethraOS cross-compiles to
+  `aarch64-unknown-linux-gnu` and tests under QEMU; `[yoe]` runs native
+  toolchains in foreign-arch containers under QEMU. Both treat QEMU as the
+  development convenience and ARM64 hardware as the real target.
+
+**Where `[yoe]` differs:**
+
+- **A build system vs. an OS product.** `[yoe]` is the tool you use to build and
+  ship _your_ product's OS image, agnostic to what runs on top. ZethraOS is
+  itself the product — a specific mobile OS with its own init, compositor, and
+  app model. They occupy different layers: you could imagine building something
+  ZethraOS-shaped _with_ a tool like `[yoe]`, but ZethraOS is not a build system
+  others assemble their own distributions from.
+- **Authoring-time AI vs. autonomous on-device patching.** `[yoe]` keeps the AI
+  on the authoring side of the line — generating and auditing units a human
+  reviews and a content-addressed build reproduces. ZethraOS's daemon closes the
+  loop on the device: it writes, tests, and ships patches to running fleets when
+  a confidence score clears a threshold. That is a far more ambitious (and, for
+  many regulated embedded products, far riskier) trust model than `[yoe]` takes
+  on.
+- **Mobile/handset focus vs. general embedded.** ZethraOS targets phones and
+  screens (Wayland compositor, no Google Play Services, on-device inference);
+  `[yoe]` targets general custom embedded hardware with per-board machine
+  definitions, kernel config, and device trees, and makes no assumption about a
+  graphical app stack.
+- **Maturity.** ZethraOS is at the bootable-QEMU-image stage with a multi-phase
+  roadmap toward a v1.0 and reference-device ports; `[yoe]` is also pre-1.0.
+  Neither is a production choice today, but they are aiming at different
+  destinations.
+
+**When to look at ZethraOS instead:** when your goal is a de-Googled,
+AI-native mobile/handset OS as a finished platform — not a build system for your
+own embedded product — and the autonomous self-healing update model is something
+you want rather than something you need to keep out of the trust boundary.
+
 ## vs. mkosi
 
 [mkosi](https://github.com/systemd/mkosi) ("make operating system image") is the
