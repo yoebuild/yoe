@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.12.8] - 2026-06-22
+
 - **Debian and Ubuntu images now boot on real boards.** Board firmware and boot
   configuration (the Raspberry Pi GPU blobs and `config.txt`, BeaglePlay's
   U-Boot stages) declared by a machine now land in the image on every distro,
