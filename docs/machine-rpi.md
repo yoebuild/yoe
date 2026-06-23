@@ -232,8 +232,10 @@ fragment is also used by `linux-beagleplay`; see
 
 Overlays go to `/boot/overlays/*.dtbo`. Kernel modules install into the rootfs
 under `/lib/modules/<kver>/`, with `DEPMOD=true` skipping depmod at build time
-(the build container doesn't have it; the target runs `depmod -a` at first boot
-via OpenRC).
+(the build container doesn't have it). Image assembly runs `depmod -a` against
+the assembled rootfs — for every installed kernel, on both Alpine and Debian/
+Ubuntu — so the `modules.dep` index ships in the image and `modprobe` works on
+first boot without any on-target generation step.
 
 ### `rpi4-config` / `rpi5-config`
 
