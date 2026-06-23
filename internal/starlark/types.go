@@ -201,8 +201,15 @@ type Machine struct {
 	Kernel      KernelConfig
 	Bootloader  BootloaderConfig
 	QEMU        *QEMUConfig // nil if not a QEMU machine
-	Packages    []string    // packages added to every image for this machine
-	Partitions  []Partition // default partition layout for images
+	Packages    []string    // distro-neutral board packages merged into every image for this machine
+	// DistroPackages adds per-distro board packages on top of Packages, e.g.
+	// {"alpine": ["syslinux"]} on qemu-x86_64 — the from-source syslinux is an
+	// Alpine-only rootfs package (apt images get extlinux from the toolchain
+	// container), so it must never force-resolve into an apt closure. The
+	// machine analog of an image's distro_artifacts. Empty for machines whose
+	// board support is identical across distros.
+	DistroPackages map[string][]string
+	Partitions     []Partition // default partition layout for images
 }
 
 type KernelConfig struct {

@@ -44,6 +44,39 @@ func TestMachineConfigDistroUnit(t *testing.T) {
 	}
 }
 
+// TestMachineConfigDistroPackages: a machine with DistroPackages set exposes
+// machine_config.distro_packages as a dict-of-lists so image() can merge the
+// board's per-distro packages for its effective distro. Machines without it
+// omit the attr entirely (image() falls back via getattr).
+func TestMachineConfigDistroPackages(t *testing.T) {
+	m := &Machine{
+		Name:           "qemu-x86_64",
+		Arch:           "x86_64",
+		Kernel:         KernelConfig{Unit: "linux-qemu", Provides: "linux"},
+		DistroPackages: map[string][]string{"alpine": {"syslinux"}},
+	}
+	mc := buildMachineConfigStruct(m)
+	dpv, err := mc.Attr("distro_packages")
+	if err != nil {
+		t.Fatalf("machine_config has no distro_packages attr: %v", err)
+	}
+	dp, ok := dpv.(*starlark.Dict)
+	if !ok {
+		t.Fatalf("distro_packages is %T, want *starlark.Dict", dpv)
+	}
+	got, _, _ := dp.Get(starlark.String("alpine"))
+	lst, ok := got.(*starlark.List)
+	if !ok || lst.Len() != 1 || lst.Index(0) != starlark.String("syslinux") {
+		t.Errorf("distro_packages[alpine] = %v, want [syslinux]", got)
+	}
+
+	// No DistroPackages → attr is absent, not an empty dict.
+	plain := buildMachineConfigStruct(&Machine{Name: "rpi5", Arch: "arm64", Kernel: KernelConfig{Unit: "linux-rpi5", Provides: "linux"}})
+	if _, err := plain.Attr("distro_packages"); err == nil {
+		t.Error("distro_packages attr should be absent on a machine that doesn't set it")
+	}
+}
+
 // countAllUnits returns the count of distinct unit names in the
 // project's catalog — deduplicated across modules so a name
 // registered for multiple distros yields one count, matching the

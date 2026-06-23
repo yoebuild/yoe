@@ -301,6 +301,36 @@ machine(
 	}
 }
 
+func TestMachineDistroPackages(t *testing.T) {
+	src := `
+machine(
+    name = "qemu-x86_64",
+    arch = "x86_64",
+    kernel = kernel(unit = "linux-qemu", provides = "linux", cmdline = "console=ttyS0"),
+    distro_packages = {"alpine": ["syslinux"]},
+)
+`
+	eng := NewEngine()
+	if err := eng.ExecString("machines/qemu.star", src); err != nil {
+		t.Fatalf("ExecString: %v", err)
+	}
+	m, ok := eng.Machines()["qemu-x86_64"]
+	if !ok {
+		t.Fatal("machine 'qemu-x86_64' not found")
+	}
+	if got := m.DistroPackages["alpine"]; len(got) != 1 || got[0] != "syslinux" {
+		t.Errorf("DistroPackages[alpine] = %v, want [syslinux]", got)
+	}
+	if _, ok := m.DistroPackages["debian"]; ok {
+		t.Error("DistroPackages[debian] should be absent — apt images get extlinux from the container")
+	}
+	// A board with no per-distro split leaves the map empty (so image()'s
+	// getattr fallback kicks in).
+	if len(m.Packages) != 0 {
+		t.Errorf("Packages = %v, want empty (syslinux moved to distro_packages)", m.Packages)
+	}
+}
+
 func TestMachineKernelUnitAndDistroUnitConflict(t *testing.T) {
 	src := `
 machine(

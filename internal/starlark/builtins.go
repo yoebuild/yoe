@@ -625,6 +625,10 @@ func (e *Engine) fnMachine(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.T
 		Description: kwString(kwargs, "description"),
 		Kernel:      kc,
 		Packages:    kwStringList(kwargs, "packages"),
+		// distro_packages is parsed-and-stored here; the build distro is not in
+		// scope at machine-parse time, so the per-distro selection happens later
+		// in image(), the only place the effective distro is known.
+		DistroPackages: kwStringListMap(kwargs, "distro_packages"),
 	}
 
 	// Handle bootloader, qemu, and partitions from kwargs

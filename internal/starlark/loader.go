@@ -1156,6 +1156,17 @@ func buildMachineConfigStruct(m *Machine) *starlarkstruct.Struct {
 	}
 	machineDict["partitions"] = starlark.NewList(partList)
 
+	// Expose distro_packages only when set, so image()'s
+	// getattr(machine_config, "distro_packages", None) falls back cleanly for
+	// machines whose board support is identical across distros.
+	if len(m.DistroPackages) > 0 {
+		dp := starlark.NewDict(len(m.DistroPackages))
+		for k, v := range m.DistroPackages {
+			_ = dp.SetKey(starlark.String(k), toStarlarkStringList(v))
+		}
+		machineDict["distro_packages"] = dp
+	}
+
 	if m.Kernel.Unit != "" || len(m.Kernel.DistroUnit) > 0 {
 		kfields := starlark.StringDict{
 			"unit":      starlark.String(m.Kernel.Unit),
