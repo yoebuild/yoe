@@ -364,38 +364,26 @@ This is where `[yoe]` tooling (written in Go and Starlark) provides value —
 similar to what `bitbake` and `wic` do in Yocto, but simpler and more
 opinionated.
 
-### 📋 Package Management: apk
+### 📋 Package Management
 
-`[yoe]` uses [apk](https://wiki.alpinelinux.org/wiki/Alpine_Package_Keeper)
-(Alpine Package Keeper) as its package manager. It is important to distinguish
-between **units** and **packages** — these are separate concepts:
+`[yoe]` uses the target distro's native package manager —
+[apk](https://wiki.alpinelinux.org/wiki/Alpine_Package_Keeper) (Alpine Package
+Keeper) on the default Alpine base, and apt/dpkg on the Debian/Ubuntu bases. It
+is important to distinguish between **units** and **packages** — these are
+separate concepts:
 
 - **Units** are build-time definitions (Starlark `.star` files in the project
   tree) that describe _how_ to build software. See
   [Unit & Configuration Format](docs/metadata-format.md).
-- **Packages** are installable artifacts (`.apk` files) that units produce. They
-  are what gets installed into root filesystem images and onto devices.
+- **Packages** are installable artifacts (`.apk` or `.deb` files) that units
+  produce. They are what gets installed into root filesystem images and onto
+  devices.
 
 This separation means units are a development/CI concern, while packages are a
 deployment/device concern. You can build packages once and install them on many
 devices without needing the unit tree. Rebuilding from source is first class but
 not required — every package is fully traceable to its unit, with no golden
 images.
-
-Why apk over apt and dnf:
-
-- **Speed** — apk operations are near-instantaneous. Install, remove, and
-  upgrade are measured in milliseconds, not seconds.
-- **Simple format** — an `.apk` package is a signed tar.gz with a `.PKGINFO`
-  metadata file. No complex archive-in-archive wrapping.
-- **Small footprint** — apk-tools is tiny, appropriate for embedded targets.
-- **Active development** — apk 3.x adds content-addressed storage and atomic
-  transactions, aligning with `[yoe]`'s Nix-inspired reproducibility goals.
-- **Works with glibc** — apk is not tied to musl; it works with any libc.
-  `[yoe]` runs its own package repositories, not Alpine's.
-- **On-device package management** — devices can pull updates from a `[yoe]`
-  package repository, enabling incremental OTA updates (install only changed
-  packages) alongside full image updates.
 
 The `[yoe]` build tooling invokes units to produce packages — `.apk` on the
 default Alpine base, `.deb` on the experimental Debian/Ubuntu bases — which are
@@ -452,7 +440,7 @@ This is a deliberate trade-off:
   affect functionality or caching.
 
 The caching model does not depend on output determinism. Cache keys are computed
-from _inputs_ (unit content, source hash, dependency `.apk` hashes, build
+from _inputs_ (unit content, source hash, dependency package hashes, build
 flags), not _outputs_. If inputs haven't changed, the cached output is used
 regardless of whether a fresh build would produce identical bytes.
 

@@ -28,7 +28,7 @@ generating and distributing it.
 the project repo, and runs:
 
 ```sh
-yoe build myapp           # packages myapp.apk against target libs
+yoe build myapp           # packages myapp (.apk or .deb) against target libs
 yoe shell myapp           # drops into the same sandbox for interactive work
 yoe build base-image      # folds myapp into the device image
 ```
@@ -45,10 +45,10 @@ What makes this work:
   device will run.
 - **Per-unit containers.** Each unit declares the container it builds in. An app
   developer opening a shell for `myapp` gets the container `myapp` was designed
-  to build in, with the resolved `-dev` deps already installed via `apk` — no
-  manual sysroot wrangling.
-- **Cached packages, not cached environments.** Heavy `.apk` artifacts
-  (`qt6-dev`, `chromium-dev`, `glibc-dev`) live in the build cache,
+  to build in, with the resolved `-dev` deps already installed via the target's
+  package manager (apk or apt) — no manual sysroot wrangling.
+- **Cached packages, not cached environments.** Heavy package artifacts (`.apk`
+  or `.deb` — `qt6-dev`, `chromium-dev`, `glibc-dev`) live in the build cache,
   content-addressed by input hash. An app developer pulls them on first build
   and never rebuilds them unless inputs change. The cache is the SDK's sysroot,
   decomposed into reusable pieces.
@@ -180,9 +180,10 @@ Inside the shell the developer can:
 - Edit source in `$SRCDIR` (live-mounted from `build/<arch>/<unit>/src/`).
 - Run the unit's build commands manually (`./configure && make`, `go build`,
   `cargo build`) — exactly what `yoe build` would run.
-- Add extra deps interactively with `apk add <pkg>` for probing; the next
-  `yoe shell` invocation starts fresh so probes don't pollute the recorded
-  environment.
+- Add extra deps interactively with the target's package manager
+  (`apk add <pkg>` on Alpine, `apt-get install <pkg>` on Debian/Ubuntu) for
+  probing; the next `yoe shell` invocation starts fresh so probes don't pollute
+  the recorded environment.
 - Use `yoe dev extract <unit>` from inside the container to turn local commits
   into patch files for the unit.
 
@@ -213,13 +214,13 @@ yoe build base-image              # all hits from cache — no network
 
 A bundle contains:
 
-| Piece            | Source                     | What it's for                              |
-| ---------------- | -------------------------- | ------------------------------------------ |
-| Built `.apk`s    | `$YOE_CACHE/build/`        | Pre-built packages matching current hash   |
-| Source archives  | `$YOE_CACHE/sources/`      | Tarballs + git bundles for rebuild-ability |
-| Module checkouts | `$YOE_CACHE/modules/`      | Vendored external modules at their refs    |
-| Container images | OCI archives               | Toolchain / build containers as tarballs   |
-| Project snapshot | `PROJECT.star` + `units/*` | Optional; for bundles that include source  |
+| Piece            | Source                     | What it's for                                 |
+| ---------------- | -------------------------- | --------------------------------------------- |
+| Built packages   | `$YOE_CACHE/build/`        | Pre-built `.apk`/`.deb` matching current hash |
+| Source archives  | `$YOE_CACHE/sources/`      | Tarballs + git bundles for rebuild-ability    |
+| Module checkouts | `$YOE_CACHE/modules/`      | Vendored external modules at their refs       |
+| Container images | OCI archives               | Toolchain / build containers as tarballs      |
+| Project snapshot | `PROJECT.star` + `units/*` | Optional; for bundles that include source     |
 
 Everything is keyed by content hash, so importing the same bundle on two
 machines produces byte-identical build results.

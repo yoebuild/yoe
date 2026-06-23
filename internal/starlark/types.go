@@ -214,6 +214,20 @@ type KernelConfig struct {
 	Unit        string
 	Cmdline     string
 	Provides    string // virtual package name (e.g., "linux")
+	// DistroUnit selects the kernel unit per distro, e.g.
+	// {"alpine": "linux-qemu", "debian": "linux-image-amd64"}. Empty for
+	// single-form machines (which set Unit). image() resolves the entry
+	// for the build's effective distro, since the global provides table is
+	// distro-blind. Mutually exclusive with Unit.
+	DistroUnit map[string]string
+}
+
+// HasKernel reports whether the machine declares a kernel at all — either the
+// flat single-Unit form or the per-distro DistroUnit map. Callers that gate
+// "does this machine boot a kernel" (e.g. QEMU direct-kernel boot) must use
+// this rather than `Unit != ""`, which is empty for distro_unit machines.
+func (k KernelConfig) HasKernel() bool {
+	return k.Unit != "" || len(k.DistroUnit) > 0
 }
 
 type BootloaderConfig struct {
@@ -427,7 +441,6 @@ func (p *Project) ResolveProvidesForDistro(virtual, effectiveDistro string) stri
 	return p.Provides[virtual]
 }
 
-
 // EffectiveDistro returns the project's effective distro without an
 // image scope: DefaultDistroOverride -> DefaultDistro -> error.
 //
@@ -525,16 +538,16 @@ type Unit struct {
 	Distro string
 
 	// Source
-	Source  string // URL or git repo
-	SHA256  string
+	Source string // URL or git repo
+	SHA256 string
 	// APKChecksum is Alpine's APKINDEX `C:` field — "Q1<base64-sha1>=".
 	// Mutually exclusive with SHA256: a unit declares one or the other.
 	// Used by module-alpine to verify against the hash Alpine itself
 	// publishes, avoiding a per-package sha256 download at unit-gen time.
 	APKChecksum string
-	Tag     string
-	Branch  string
-	Patches []string // patch files applied after source fetch, before build
+	Tag         string
+	Branch      string
+	Patches     []string // patch files applied after source fetch, before build
 
 	// PassthroughAPK names a .apk file fetched as the unit's source whose
 	// contents should be republished verbatim instead of repackaged from
@@ -569,12 +582,12 @@ type Unit struct {
 	ContainerArch string // "target" or "host"
 	Sandbox       bool   // use bwrap sandbox inside container (default false)
 	Shell         string // shell for build commands: "sh" (default) or "bash"
-	Tasks     []Task
-	Provides    []string // virtual package names this unit satisfies (e.g., "linux", "ssh")
-	Replaces    []string // package names whose files this unit may overwrite at install time
-	Module      string   // module that registered this unit (empty = project root)
-	ModuleIndex int    // priority for shadowing/provides resolution: modules use 1..N (declaration order, last wins among modules), project root uses N+1 (highest)
-	DefinedIn   string // directory containing the .star file that defined this unit
+	Tasks         []Task
+	Provides      []string // virtual package names this unit satisfies (e.g., "linux", "ssh")
+	Replaces      []string // package names whose files this unit may overwrite at install time
+	Module        string   // module that registered this unit (empty = project root)
+	ModuleIndex   int      // priority for shadowing/provides resolution: modules use 1..N (declaration order, last wins among modules), project root uses N+1 (highest)
+	DefinedIn     string   // directory containing the .star file that defined this unit
 
 	// Artifact metadata
 	Services    []string
@@ -583,13 +596,13 @@ type Unit struct {
 	CacheDirs   map[string]string // container_path:host_subdir cache mounts
 
 	// Image-specific (class == "image")
-	Artifacts          []string // artifacts to install in rootfs (full runtime closure, resolved by image())
-	ArtifactsExplicit  []string // user-specified artifacts before runtime-closure expansion; for UX (TUI tree, etc.)
-	Exclude    []string
-	Hostname   string
-	Timezone   string
-	Locale     string
-	Partitions []Partition
+	Artifacts         []string // artifacts to install in rootfs (full runtime closure, resolved by image())
+	ArtifactsExplicit []string // user-specified artifacts before runtime-closure expansion; for UX (TUI tree, etc.)
+	Exclude           []string
+	Hostname          string
+	Timezone          string
+	Locale            string
+	Partitions        []Partition
 
 	// Arbitrary kwargs passed to unit() that don't map to a typed field.
 	// Used for template context rendering and will be included in the unit

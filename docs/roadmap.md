@@ -91,6 +91,11 @@
 - yoe chain commands
 - Can we limit random starlark commands in privledged containers? Saved the
   privileged stuff for image building, etc. that is all controlled Go code?
+- [Closure as a first-class output](https://docs.yoebuild.org/nix.html#whats-worth-borrowing-regardless).
+  Nix records a build’s runtime closure explicitly; yoe resolves the closure at
+  assembly time from declared runtime dependencies. Nix’s model catches
+  under-declared dependencies that yoe’s can miss. A verification pass that pins
+  down the realized closure is worth a look independent of any Nix integration.
 
 ## Bugs / Improvements
 
@@ -267,10 +272,12 @@ also compares to Yocto's `oeqa` / `INSANE.bbclass` / `ptest` / `buildhistory`.
 
 ## A/B Updates
 
-Read-only rootfs with A/B partitions and signed update bundles. Reference
-architecture (Home Assistant OS) in
-[containers.md](containers.md#reference-point-home-assistant-os). The Software
-update item under Developer Experience evolves toward this once a runtime ships.
+A/B partitions and signed update bundles for atomic updates with rollback. The
+Home Assistant OS reference architecture in
+[containers.md](containers.md#reference-point-home-assistant-os) pairs this with
+a read-only rootfs; whether yoe adopts an immutable root is undecided. The
+Software update item under Developer Experience evolves toward this once a
+runtime ships.
 
 ## CLI Surface
 
@@ -288,7 +295,7 @@ update item under Developer Experience evolves toward this once a runtime ships.
 - `yoe shell` — drop into the build container interactively.
 - `yoe bundle` — package modules into a single distributable.
 - `yoe module list|info|check-updates` — inspect and update external modules.
-- `yoe repo push|pull` — sync the local apk repo to a remote (S3 / HTTP).
+- `yoe repo push|pull` — sync the local package repo to a remote (S3 / HTTP).
 - `yoe build` query flags: `--class <type>`, `--with-deps`, `--list-targets`,
   `--no-remote-cache`.
 - Config propagation across modules.
@@ -298,7 +305,7 @@ sections.
 
 ## Format / Modules
 
-- Sub-packages — one unit producing multiple `.apks`.
+- Sub-packages — one unit producing multiple packages (`.apk` or `.deb`).
 - `MODULE.star` manifests for module versioning and inter-module deps.
 - Per-task container overrides.
 - Track the Starlark class function used to define each unit on the resolved
@@ -314,9 +321,11 @@ See [metadata-format.md](metadata-format.md).
 
 ## Distribution Variants
 
-- **glibc target.** Currently musl-only. glibc support would enable workloads
-  whose binaries require it (some cgo, prebuilt vendor SDKs, the upstream Helix
-  release, etc.).
+- **glibc target — landed.** yoe now builds glibc/`.deb` images via the Debian
+  and Ubuntu backends (`apt_feed`), in addition to the musl/`.apk` Alpine path.
+  Both Debian and Ubuntu are CI boot- and SSH-verified on arm64 and x86_64. This
+  enables workloads whose binaries require glibc (some cgo, prebuilt vendor
+  SDKs, the upstream Helix release, etc.). Still planned: Jetson / L4T.
 
 ## Self-Hosting
 

@@ -80,3 +80,72 @@ func TestE2E_DryRun(t *testing.T) {
 		t.Error("dry run produced no output")
 	}
 }
+
+// TestE2E_DistroArtifactsConsolidatedImage verifies the consolidated
+// module-core ssh-image resolves its distro_artifacts: the project's default
+// distro is alpine, so the resolved closure must contain the alpine branch
+// (busybox/apk-tools) and none of the inert debian branch (systemd-sysv) —
+// proving both the per-distro merge and that non-selected branches are never
+// walked. It also exercises the per-distro machine kernel: "linux" must resolve
+// (to the qemu-x86_64 alpine kernel unit) rather than appearing unresolved.
+func TestE2E_DistroArtifactsConsolidatedImage(t *testing.T) {
+	projectDir := filepath.Join("..", "..", "testdata", "e2e-project")
+	if _, err := os.Stat(filepath.Join(projectDir, "PROJECT.star")); os.IsNotExist(err) {
+		t.Skip("e2e test project not found")
+	}
+	abs, _ := filepath.Abs(projectDir)
+	t.Setenv("YOE_CACHE", filepath.Join(abs, "cache"))
+
+	proj, err := yoestar.LoadProject(projectDir,
+		yoestar.WithModuleSync(module.SyncIfNeeded),
+		yoestar.WithAllowDuplicateProvides(true),
+		yoestar.WithBuiltin("alpine_feed", alpine.Builtin),
+		yoestar.WithBuiltin("apt_feed", apt.Builtin),
+	)
+	if err != nil {
+		t.Fatalf("LoadProject: %v", err)
+	}
+
+	// An image is evaluated once, for its effective distro (the cascade:
+	// image.distro -> local.star override -> defaults.distro). So ssh-image
+	// exists only in that distro's view. Resolve against whichever distro this
+	// project's config selects, rather than hardcoding one — keeps the test
+	// robust to a developer's local.star override.
+	effective := proj.DefaultDistroOverride
+	if effective == "" {
+		effective = proj.DefaultDistro
+	}
+	img := proj.LookupUnit(effective, "ssh-image")
+	if img == nil {
+		t.Fatalf("ssh-image not resolvable for effective distro %q", effective)
+	}
+	has := func(name string) bool {
+		for _, a := range img.Artifacts {
+			if a == name {
+				return true
+			}
+		}
+		return false
+	}
+	// distro_artifacts selected the branch for the effective distro and left the
+	// others inert: alpine ships apk-tools, the apt distros ship systemd-sysv,
+	// and neither signature package leaks into the other's closure.
+	switch effective {
+	case "alpine":
+		if !has("apk-tools") {
+			t.Errorf("alpine ssh-image missing alpine-branch apk-tools; got %v", img.Artifacts)
+		}
+		if has("systemd-sysv") {
+			t.Errorf("alpine ssh-image leaked apt-branch systemd-sysv; got %v", img.Artifacts)
+		}
+	case "debian", "ubuntu":
+		if !has("systemd-sysv") {
+			t.Errorf("%s ssh-image missing apt-branch systemd-sysv; got %v", effective, img.Artifacts)
+		}
+		if has("apk-tools") {
+			t.Errorf("%s ssh-image leaked alpine-branch apk-tools; got %v", effective, img.Artifacts)
+		}
+	default:
+		t.Skipf("unhandled effective distro %q", effective)
+	}
+}

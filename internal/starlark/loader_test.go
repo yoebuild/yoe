@@ -4,7 +4,45 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"go.starlark.net/starlark"
+	"go.starlark.net/starlarkstruct"
 )
+
+// TestMachineConfigDistroUnit: a per-distro machine (Kernel.DistroUnit set,
+// Unit empty) still emits ctx.machine_config.kernel, exposing distro_unit as
+// a dict so image() can resolve the kernel per effective distro.
+func TestMachineConfigDistroUnit(t *testing.T) {
+	m := &Machine{
+		Name: "qemu-x86_64",
+		Arch: "x86_64",
+		Kernel: KernelConfig{
+			Provides:   "linux",
+			DistroUnit: map[string]string{"alpine": "linux-qemu", "debian": "linux-image-amd64"},
+		},
+	}
+	mc := buildMachineConfigStruct(m)
+	kv, err := mc.Attr("kernel")
+	if err != nil {
+		t.Fatalf("machine_config has no kernel attr: %v", err)
+	}
+	ks, ok := kv.(*starlarkstruct.Struct)
+	if !ok {
+		t.Fatalf("kernel attr is %T, want *starlarkstruct.Struct", kv)
+	}
+	duv, err := ks.Attr("distro_unit")
+	if err != nil {
+		t.Fatalf("kernel has no distro_unit attr: %v", err)
+	}
+	du, ok := duv.(*starlark.Dict)
+	if !ok {
+		t.Fatalf("distro_unit is %T, want *starlark.Dict", duv)
+	}
+	got, _, _ := du.Get(starlark.String("debian"))
+	if got != starlark.String("linux-image-amd64") {
+		t.Errorf("distro_unit[debian] = %v, want linux-image-amd64", got)
+	}
+}
 
 // countAllUnits returns the count of distinct unit names in the
 // project's catalog — deduplicated across modules so a name

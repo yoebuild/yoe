@@ -3,27 +3,32 @@
 The dev loop for installing in-progress builds onto a running yoe device. Three
 commands, layered:
 
-- **`yoe serve`** — long-lived HTTP feed for the project's apk repo, advertised
-  via mDNS so devices and `yoe deploy` find it without configuration.
-- **`yoe device repo {add,remove,list}`** — configure `/etc/apk/repositories` on
-  a target device so `apk add` from the device pulls from your dev feed.
+- **`yoe serve`** — long-lived HTTP feed for the project's package repo,
+  advertised via mDNS so devices and `yoe deploy` find it without configuration.
+- **`yoe device repo {add,remove,list}`** — configure the target's package
+  sources (`/etc/apk/repositories` on Alpine, `/etc/apt/sources.list.d/` on
+  Debian/Ubuntu) so an install from the device pulls from your dev feed.
 - **`yoe deploy <unit> <host>`** — build, ship, and install a unit on a running
-  device in one command. Pulls the unit and all its transitive deps via apk on
-  the device side, so dependency resolution mirrors production OTA.
+  device in one command. Pulls the unit and all its transitive deps via the
+  device's package manager (apk or apt), so dependency resolution mirrors
+  production OTA.
 
 ![Feed server topology](assets/feed-server-topology.png)
 
 The model is **pull**, not push. Every install — image-time, on-device OTA, and
-the dev loop — uses the same apk repo, the same `APKINDEX.tar.gz`, and the same
-signing key. Adding a new runtime dep to a unit doesn't require updating deploy
-machinery; apk on the device resolves it.
+the dev loop — uses the same package repo, the same repo index
+(`APKINDEX.tar.gz` for apk, the `Packages`/`Release` files for apt), and the
+same signing key. Adding a new runtime dep to a unit doesn't require updating
+deploy machinery; the package manager on the device resolves it.
 
 ## Trust
 
-apks and APKINDEX are signed by the project key (`docs/signing.md`). Every yoe
-device has the matching public key in `/etc/apk/keys/` via `base-files`. apk
-verifies signatures unconditionally, so the HTTP transport is plain — package
-integrity is enforced at the package layer, not the network layer.
+Packages and the repo index are signed by the project key (`docs/signing.md`).
+Every yoe device has the matching public key in its trusted-key store
+(`/etc/apk/keys/` on Alpine, an apt keyring on Debian/Ubuntu) via `base-files`.
+The package manager verifies signatures unconditionally, so the HTTP transport
+is plain — package integrity is enforced at the package layer, not the network
+layer.
 
 For production OTA, layer HTTPS via reverse proxy (`docs/on-device-apk.md`).
 
@@ -32,7 +37,8 @@ For production OTA, layer HTTPS via reverse proxy (`docs/on-device-apk.md`).
 ### One-time setup on a fresh device
 
 A device that was just flashed with an image built by your project needs nothing
-— the public key is already in `/etc/apk/keys/`. Configure the repo:
+— the public key is already in the device's trusted-key store (`/etc/apk/keys/`
+on Alpine, the apt keyring on Debian/Ubuntu). Configure the repo:
 
 ```bash
 # Dev host, in your project dir
@@ -42,7 +48,8 @@ yoe serve &
 yoe device repo add dev-pi.local
 ```
 
-After this, on the device:
+After this, on the device (Alpine shown; on Debian/Ubuntu use
+`apt update && apt install`):
 
 ```bash
 apk update
@@ -63,19 +70,23 @@ yoe deploy myapp dev-pi.local
 ```
 
 Builds `myapp`, starts an ephemeral feed (or reuses your running `yoe serve` if
-it's advertising the same project), ssh's to the device, and runs
-`apk add --upgrade myapp`. Transitive deps are resolved on the device.
+it's advertising the same project), ssh's to the device, and installs `myapp`
+with the device's package manager (`apk add --upgrade myapp` on Alpine,
+`apt install myapp` on Debian/Ubuntu). Transitive deps are resolved on the
+device.
 
-A `# >>> yoe-dev` … `# <<< yoe-dev` block in `/etc/apk/repositories` on the
-target is left in place after deploy — same block `yoe device repo add` would
-have written. So the first deploy to a fresh device doubles as the persistent
-feed config.
+A marker block in the target's package sources (`# >>> yoe-dev` …
+`# <<< yoe-dev` in `/etc/apk/repositories` on Alpine, the equivalent under
+`/etc/apt/sources.list.d/` on Debian/Ubuntu) is left in place after deploy —
+same entry `yoe device repo add` would have written. So the first deploy to a
+fresh device doubles as the persistent feed config.
 
 ### Multiple devices on a LAN
 
 Run `yoe serve` once on the dev host. Each device runs `yoe device repo add`
-once. After that, `apk update && apk upgrade` on each device picks up new
-builds.
+once. After that, the device's index-refresh-then-upgrade
+(`apk update && apk upgrade` on Alpine, `apt update && apt upgrade` on
+Debian/Ubuntu) on each device picks up new builds.
 
 ### Tearing it down
 
@@ -83,8 +94,10 @@ builds.
 yoe device repo remove dev-pi.local
 ```
 
-Strips the `# >>> yoe-dev` block from `/etc/apk/repositories`. The device falls
-back to whatever else is configured (typically nothing, in dev).
+Strips the `yoe-dev` marker block from the target's package sources
+(`/etc/apk/repositories` on Alpine, the corresponding file under
+`/etc/apt/sources.list.d/` on Debian/Ubuntu). The device falls back to whatever
+else is configured (typically nothing, in dev).
 
 ### Inspecting the device's repo config
 
@@ -92,9 +105,11 @@ back to whatever else is configured (typically nothing, in dev).
 yoe device repo list dev-pi.local
 ```
 
-Cats `/etc/apk/repositories`, prefixed with the source filename. (Also reads
-`/etc/apk/repositories.d/*.list` if present, though apk-tools 2.x does not read
-those itself — they're informational only.)
+Prints the device's configured package sources, prefixed with the source
+filename. On Alpine this is `/etc/apk/repositories` (and any
+`/etc/apk/repositories.d/*.list`, though apk-tools 2.x does not read those
+itself — they're informational only); on Debian/Ubuntu it is the files under
+`/etc/apt/sources.list.d/`.
 
 ## Command reference
 
@@ -121,11 +136,13 @@ yoe device repo add <[user@]host[:port]> [--feed URL] [--name NAME]
   `pi@dev-pi.local`, `localhost:2222` (QEMU), `pi@dev-pi.local:2200`.
 - `--feed URL` — explicit URL. If omitted, browses mDNS for `_yoe-feed._tcp` on
   the LAN; errors clearly on 0 or >1 matches.
-- `--name NAME` — name suffix for the marker block written into
-  `/etc/apk/repositories` (`# >>> yoe-<name>` … `# <<< yoe-<name>`). Default
-  `yoe-dev`.
-- `--push-key` — copy the project signing pubkey to `/etc/apk/keys/` on the
-  target before configuring.
+- `--name NAME` — name suffix for the marker block written into the target's
+  package sources (`# >>> yoe-<name>` … `# <<< yoe-<name>` in
+  `/etc/apk/repositories` on Alpine, the equivalent under
+  `/etc/apt/sources.list.d/` on Debian/Ubuntu). Default `yoe-dev`.
+- `--push-key` — copy the project signing pubkey to the target's trusted-key
+  store (`/etc/apk/keys/` on Alpine, the apt keyring on Debian/Ubuntu) before
+  configuring.
 - `--user USER` — default ssh user when the target spec has no `user@` prefix.
   Default `root`. ssh shells out to the user's `ssh` so `~/.ssh/config`,
   ssh-agent, known_hosts, and jump hosts all work.

@@ -118,6 +118,29 @@ func TestContainerRunArgs_NoUser(t *testing.T) {
 	}
 }
 
+// A yoe-local image (yoe/ prefix) is built locally and never pushed, so it
+// gets --pull=never to fail fast on an absent image. An external base image
+// (e.g. golang:1.26 for the go build class) genuinely lives on a registry and
+// must keep docker's default pull-if-missing policy, or a fresh runner can't
+// build any unit whose container is an upstream image.
+func TestContainerRunArgs_PullPolicy(t *testing.T) {
+	local, err := containerRunArgs(ContainerRunConfig{
+		Command: "true", Image: "yoe/toolchain-musl:15-x86_64", ProjectDir: "/p",
+	})
+	if err != nil {
+		t.Fatalf("containerRunArgs (local): %v", err)
+	}
+	assertContains(t, local, "--pull=never")
+
+	external, err := containerRunArgs(ContainerRunConfig{
+		Command: "true", Image: "golang:1.26", ProjectDir: "/p",
+	})
+	if err != nil {
+		t.Fatalf("containerRunArgs (external): %v", err)
+	}
+	assertNotContains(t, external, "--pull=never")
+}
+
 func assertContains(t *testing.T, args []string, want string) {
 	t.Helper()
 	for _, a := range args {
@@ -126,4 +149,14 @@ func assertContains(t *testing.T, args []string, want string) {
 		}
 	}
 	t.Errorf("args %v does not contain %q", args, want)
+}
+
+func assertNotContains(t *testing.T, args []string, unwanted string) {
+	t.Helper()
+	for _, a := range args {
+		if a == unwanted {
+			t.Errorf("args %v unexpectedly contains %q", args, unwanted)
+			return
+		}
+	}
 }

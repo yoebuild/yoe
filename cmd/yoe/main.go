@@ -350,15 +350,17 @@ func cmdBuild(args []string) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	proj := loadProjectWithMachine(*machineName)
 	// --distro is a per-invocation distro override. It sits exactly where
 	// local.star's default_distro_override does in the cascade
 	// (image.distro -> override -> defaults.distro), so for a same-named
 	// image across distros it selects which variant builds — without
 	// editing local.star. An image's own explicit distro still wins.
-	if *distroName != "" {
-		proj.DefaultDistroOverride = *distroName
-	}
+	//
+	// Threaded into the loader (not patched onto proj afterward) because
+	// image() resolves its distro_artifacts branch and packaging/disk
+	// functions eagerly during Starlark evaluation; a post-load override
+	// would leave that closure baked against the wrong distro.
+	proj := loadProjectWithMachineDistro(*machineName, *distroName)
 	targetArch, err := resolveTargetArch(proj, *machineName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -706,6 +708,17 @@ func tryLoadProject() *yoestar.Project {
 }
 
 func loadProjectWithMachine(machineName string) *yoestar.Project {
+	return loadProjectWithMachineDistro(machineName, "")
+}
+
+// loadProjectWithMachineDistro loads the project with an optional --machine
+// and --distro override threaded into the loader so both take effect before
+// Starlark evaluates units and images. The distro override in particular must
+// be set pre-eval: image() resolves its distro_artifacts branch and
+// rootfs/disk functions eagerly during evaluation, so patching the override
+// onto the returned Project would leave the closure baked against the wrong
+// distro.
+func loadProjectWithMachineDistro(machineName, distroOverride string) *yoestar.Project {
 	dir := os.Getenv("YOE_PROJECT")
 	if dir == "" {
 		dir = "."
@@ -730,6 +743,9 @@ func loadProjectWithMachine(machineName string) *yoestar.Project {
 	opts := projectLoadOpts()
 	if machineName != "" {
 		opts = append(opts, yoestar.WithMachine(machineName))
+	}
+	if distroOverride != "" {
+		opts = append(opts, yoestar.WithDistroOverride(distroOverride))
 	}
 	proj, err := yoestar.LoadProject(dir, opts...)
 	if err != nil {
@@ -1283,14 +1299,13 @@ func cmdRun(args []string) {
 		opts.Memory = *memory
 	}
 
-	proj := loadProject()
 	// Apply the distro override the same way `yoe build --distro` does, so a
 	// run targets the matching distro's built image when an image name (e.g.
 	// dev-image) exists in more than one distro. Sits at the local.star
-	// override level in the cascade.
-	if *distroName != "" {
-		proj.DefaultDistroOverride = *distroName
-	}
+	// override level in the cascade. Threaded into the loader so image()
+	// resolves its distro_artifacts branch against the requested distro
+	// during evaluation rather than against a stale local.star override.
+	proj := loadProjectWithMachineDistro(*machineName, *distroName)
 	unitName := ""
 	if len(positional) > 0 {
 		unitName = positional[0]

@@ -3,7 +3,14 @@ machine(
     arch = "arm64",
     description = "QEMU ARM64 virtual machine",
     kernel = kernel(
-        unit = "linux",
+        # Per-distro kernel: the from-source `linux` unit on Alpine, the stock
+        # feed kernel meta-package on the apt distros. image() resolves the
+        # "linux" provides-name to the entry for the build's effective distro.
+        distro_unit = {
+            "alpine": "linux",
+            "debian": "linux-image-arm64",
+            "ubuntu": "linux-image-generic",
+        },
         provides = "linux",
         defconfig = "defconfig",
         cmdline = "console=ttyAMA0 root=/dev/vda1 rw",

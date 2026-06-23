@@ -4,6 +4,8 @@
 deterministic, sandboxed dialect of Python — for all build definitions. Units,
 classes, machine definitions, and project configuration are all `.star` files.
 See [Build Languages](build-languages.md) for the rationale behind this choice.
+The [Glossary](glossary.md) defines every field and builtin referenced below in
+one place.
 
 ## Units vs. Packages
 
@@ -11,12 +13,12 @@ These are distinct concepts in `[yoe]`:
 
 - **Units** — `.star` files in the project tree that describe _how to build_
   software. They live in version control and are a development/CI concern.
-- **Packages** — `.apk` files that units _produce_. They are installable
-  artifacts published to a repository and consumed by `apk` during image
-  assembly or on-device updates.
+- **Packages** — the `.apk` or `.deb` files that units _produce_. They are
+  installable artifacts published to a repository and consumed by `apk` (alpine)
+  or `apt` (debian/ubuntu) during image assembly or on-device updates.
 
-The build flow is: **unit → build → .apk unit(s) → repository → image /
-device**.
+The build flow is: **unit → build → package (`.apk`/`.deb`) → repository → image
+/ device**.
 
 Units are inputs to the build system. Packages are outputs. A developer edits
 units; a device only ever sees packages.
@@ -77,9 +79,9 @@ autotools(
 )
 ```
 
-With no `subpackages` field, the unit produces a single `.apk` containing
-everything in `$DESTDIR` after the class's default strip. That is the expected
-case for most units.
+With no `subpackages` field, the unit produces a single package (`.apk` or
+`.deb`, per the consuming image's distro) containing everything in `$DESTDIR`
+after the class's default strip. That is the expected case for most units.
 
 **Planned split rules:**
 
@@ -327,8 +329,9 @@ if machine.arch == "arm64":
 ### Package Unit (`units/<name>.star`)
 
 Describes how to build a system-level package (C/C++ libraries, system daemons,
-etc.) and produce an `.apk`. Uses a class function like `autotools()`,
-`cmake()`, or the generic `unit()`.
+etc.) and produce a package (`.apk` or `.deb`, per the consuming image's
+distro). Uses a class function like `autotools()`, `cmake()`, or the generic
+`unit()`.
 
 ```python
 load("//classes/autotools.star", "autotools")
@@ -777,9 +780,9 @@ my-project/
        ▼
   yoe build                    (evaluate Starlark, resolve DAG, build)
        │
-       ├─ unit() ──▶ compile source ──▶ *.apk artifacts ──▶ repository/
+       ├─ unit() ──▶ compile source ──▶ *.apk / *.deb artifacts ──▶ repository/
        │
-       └─ image()   ──▶ apk install deps into rootfs
+       └─ image()   ──▶ apk/apt install deps into rootfs
                         ──▶ apply overlays + config
                         ──▶ partition + format
                         ──▶ disk image (.img / .wic)
@@ -972,15 +975,17 @@ function call to find all modifications.
 - **Units and packages are separate concerns** — units are version-controlled
   build instructions; packages are binary artifacts. This separation enables
   building once and deploying many times, sharing packages across teams, and
-  on-device incremental updates via `apk`.
+  on-device incremental updates via `apk` (alpine) or `apt` (debian/ubuntu).
 - **Classes as functions** — build patterns (autotools, cmake, go) are Starlark
   functions, not a type system. Multiple classes compose through function calls.
   This is simpler and more flexible than Yocto's class inheritance.
 - **Unified unit directory** — system packages, application packages, and images
   all live in `units/`. The class function determines the output: `unit()` /
-  `autotools()` / etc. produce `.apk` files, `image()` produces disk images. One
-  concept (unit), one directory, one DAG.
-- **apk for image assembly** — image units declare their packages as
-  dependencies. `yoe build <image>` creates a clean rootfs and runs `apk add` to
-  populate it from the repository, exactly like Alpine's image builder. This
-  leverages apk's dependency resolution rather than reimplementing it.
+  `autotools()` / etc. produce packages (`.apk` or `.deb`), `image()` produces
+  disk images. One concept (unit), one directory, one DAG.
+- **Native package manager for image assembly** — image units declare their
+  packages as dependencies. `yoe build <image>` creates a clean rootfs and runs
+  the distro's package manager (`apk add` for alpine, `apt`/`dpkg` for
+  debian/ubuntu) to populate it from the repository, exactly like the upstream
+  distro's image builder. This leverages the package manager's dependency
+  resolution rather than reimplementing it.
