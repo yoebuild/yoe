@@ -30,6 +30,7 @@
 
 # Reference
 
+- [Glossary](glossary.md)
 - [Architecture](architecture.md)
 - [Unit & Configuration Format](metadata-format.md)
 - [Naming and Resolution](naming-and-resolution.md)

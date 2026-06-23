@@ -5,7 +5,8 @@ How modules, units, and dependencies are named, referenced, and resolved in
 
 See [metadata-format.md](metadata-format.md) for the full unit/class/module
 Starlark API. See [build-environment.md](build-environment.md) for how build
-isolation and caching work.
+isolation and caching work. The [Glossary](glossary.md) gives one-line
+definitions of the terms used here.
 
 ## Modules
 
