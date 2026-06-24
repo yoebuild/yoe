@@ -2,7 +2,8 @@
 
 This page introduces yoe's core concepts and traces a unit through its lifecycle
 — **build**, **packaging**, **deployment**, and **development**. Use it as a map
-before diving into the reference docs.
+before diving into the reference docs. For a quick definition of any single
+term, see the [Glossary](glossary.md).
 
 ![Project, modules, units, and packages](assets/project-module-unit-package.png)
 
