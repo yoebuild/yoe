@@ -447,7 +447,8 @@ regardless of whether a fresh build would produce identical bytes.
 ## 📚 Documentation
 
 See the [main documentation site](https://docs.yoebuild.org/) for more
-information.
+information. New to the project's vocabulary? Start with the
+[Glossary](docs/glossary.md).
 
 ## 🤝 Contributing
 
