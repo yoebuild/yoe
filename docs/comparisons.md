@@ -1036,6 +1036,69 @@ you build images some other way, Rugix Ctrl is worth evaluating on its own as
 the update layer, since it is designed to drop into an existing build rather
 than replace it.
 
+## vs. ZethraOS
+
+[ZethraOS](https://www.zethraos.com/) ([source](https://github.com/ZethraOS/os))
+is an early-stage, AI-native mobile operating system built from scratch on the
+Linux kernel — positioned as an Android alternative ("AI-Native OS for Every
+Screen," clean-room with zero AOSP code). It is less a build system than a
+ground-up OS, but it is worth comparing because it shares two of `[yoe]`'s bets
+— a Rust/Go-modern toolchain over a minimal Linux base, and AI as a first-class
+participant in the workflow — while pushing the AI angle much further than
+`[yoe]` does.
+
+**Where `[yoe]` and ZethraOS agree:**
+
+- **AI as a first-class part of the system, not an afterthought.** ZethraOS's
+  headline feature is the **ZethraAI daemon**, which watches crash logs and CVE
+  feeds, sends diagnostics to a configured AI provider (local Ollama or a cloud
+  API), generates candidate patches with regression tests, validates them by
+  booting a QEMU image, and triggers an OTA release once confidence and risk
+  thresholds are met — autonomous self-healing with humans notified but not
+  required. `[yoe]` shares the conviction that AI belongs in the loop, but
+  applies it at a different layer: the design goal is that a unit is simple
+  enough for an AI to author and audit (one Starlark file, Alpine APKBUILD as
+  the reference), so the human-or-AI authoring a package is the integration
+  point, not an on-device daemon shipping unattended patches to fleets.
+- **A modern-language stack over upstream Linux.** ZethraOS is Rust-first
+  userspace (a Rust PID 1 called `zethrad`, a Smithay Wayland compositor) on an
+  unmodified upstream kernel; `[yoe]`'s engine is Go with Starlark units. Both
+  reject the older C-plus-shell-plus-bespoke-DSL toolchains.
+- **Native/glibc target under QEMU for development.** ZethraOS cross-compiles to
+  `aarch64-unknown-linux-gnu` and tests under QEMU; `[yoe]` runs native
+  toolchains in foreign-arch containers under QEMU. Both treat QEMU as the
+  development convenience and ARM64 hardware as the real target.
+
+**Where `[yoe]` differs:**
+
+- **A build system vs. an OS product.** `[yoe]` is the tool you use to build and
+  ship _your_ product's OS image, agnostic to what runs on top. ZethraOS is
+  itself the product — a specific mobile OS with its own init, compositor, and
+  app model. They occupy different layers: you could imagine building something
+  ZethraOS-shaped _with_ a tool like `[yoe]`, but ZethraOS is not a build system
+  others assemble their own distributions from.
+- **Authoring-time AI vs. autonomous on-device patching.** `[yoe]` keeps the AI
+  on the authoring side of the line — generating and auditing units a human
+  reviews and a content-addressed build reproduces. ZethraOS's daemon closes the
+  loop on the device: it writes, tests, and ships patches to running fleets when
+  a confidence score clears a threshold. That is a far more ambitious (and, for
+  many regulated embedded products, far riskier) trust model than `[yoe]` takes
+  on.
+- **Mobile/handset focus vs. general embedded.** ZethraOS targets phones and
+  screens (Wayland compositor, no Google Play Services, on-device inference);
+  `[yoe]` targets general custom embedded hardware with per-board machine
+  definitions, kernel config, and device trees, and makes no assumption about a
+  graphical app stack.
+- **Maturity.** ZethraOS is at the bootable-QEMU-image stage with a multi-phase
+  roadmap toward a v1.0 and reference-device ports; `[yoe]` is also pre-1.0.
+  Neither is a production choice today, but they are aiming at different
+  destinations.
+
+**When to look at ZethraOS instead:** when your goal is a de-Googled,
+AI-native mobile/handset OS as a finished platform — not a build system for your
+own embedded product — and the autonomous self-healing update model is something
+you want rather than something you need to keep out of the trust boundary.
+
 ## vs. mkosi
 
 [mkosi](https://github.com/systemd/mkosi) ("make operating system image") is the
@@ -1152,6 +1215,57 @@ granularity rather than Nix's per-output granularity.
 reproducibility guarantees, are building for desktop/server/CI, and are willing
 to invest in learning the Nix ecosystem. NixOS is unmatched for declarative
 system management on general-purpose hardware.
+
+## vs. GNU Guix
+
+[GNU Guix](https://guix.gnu.org/) shares Nix's core model — a functional,
+content-addressed store (`/gnu/store`), declarative whole-system configuration,
+and atomic rollback — so almost everything in the Nix comparison above applies
+unchanged. Guix swaps the Nix expression language for Guile Scheme and adds a
+strict free-software policy. Both of those distinctions push it further from
+`[yoe]`'s goals, not closer.
+
+**What carries over from the Nix comparison:** the `/gnu/store` closure model and
+its closure sizes, the custom functional config language, channels pinned to git
+refs (`[yoe]` already pins modules to git refs), and `guix time-machine` for
+reproducing exact environments. None of these change the verdict reached against
+Nix. If anything, Guile Scheme is a steeper onboarding cost for embedded
+developers than the Nix language, which strengthens `[yoe]`'s choice of Starlark.
+
+**The one genuinely distinctive idea — full-source bootstrap.** Guix drives the
+[Bootstrappable Builds](https://bootstrappable.org/) effort: it bootstraps the
+entire toolchain from a tiny reduced binary seed (a few hundred bytes of `hex0`)
+up to a working GCC, with no opaque prebuilt compiler in the trust path. That is
+the reference design for toolchain supply-chain provenance, and the one place
+Guix goes meaningfully beyond Nix. It cuts against `[yoe]`'s grain, though:
+`[yoe]` deliberately targets functional equivalence rather than bit-for-bit
+reproducibility and bootstraps from a container toolchain on purpose (see
+[Reproducibility](architecture.md#-reproducibility)). Worth knowing as the
+reference if provenance ever becomes a goal; not something to adopt today.
+
+**The structural blocker — free-software-only policy.** Guix mainline follows the
+GNU Free System Distribution Guidelines and refuses proprietary firmware and
+blobs. That is fatal for most embedded BSP work, where vendor firmware (Jetson,
+many SoCs, common Wi-Fi/GPU parts) is unavoidable. `[yoe]` is vendor-neutral and
+welcomes BSPs and blobs from any vendor; Guix's identity rejects them. The
+unofficial `nonguix` channel exists but is second-class and unsupported by the
+project. This is a philosophical mismatch, not a gap a unit could close — which
+is why the "could `[yoe]` build _with_ it" question explored for Nix in
+[yoe and Nix](nix.md) has no Guix analog.
+
+|                  | GNU Guix                            | `[yoe]`                                    |
+| ---------------- | ----------------------------------- | ------------------------------------------ |
+| Config language  | Guile Scheme                        | Starlark (Python-like)                     |
+| Store model      | Content-addressed `/gnu/store`      | Standard FHS with apk/dpkg                 |
+| Bootstrap        | Full-source from a tiny binary seed | Container toolchain (functional eq.)       |
+| Firmware / blobs | Refused upstream (FSDG)             | Welcomed; vendor-neutral BSPs              |
+| Target           | Desktop, server                     | Embedded hardware, multi-arch              |
+| Learning curve   | Steep (Guile Scheme)                | Shallow (Starlark, Python-like)            |
+
+**When to use Guix instead:** when you want Nix's guarantees with a Scheme
+config language and a fully free-software, fully bootstrappable stack on
+general-purpose hardware — and your targets need no proprietary firmware. For
+embedded products that depend on vendor blobs, it is not an option.
 
 ## vs. distri
 

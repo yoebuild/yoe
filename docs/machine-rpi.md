@@ -1,10 +1,10 @@
 # Raspberry Pi BSP (RPi4, RPi5)
 
 yoe supports the Raspberry Pi 4 (BCM2711) and the Raspberry Pi 5 (BCM2712)
-through the `raspberrypi4` and `raspberrypi5` machines. Both target the 64-bit
-application cores and share the same firmware unit, the same config-file
-mechanism, and the same partition layout — they differ mainly in which kernel
-image and DTB land on the boot partition.
+_(NOTE, rPI5 is not booting yet)_ through the `raspberrypi4` and `raspberrypi5`
+machines. Both target the 64-bit application cores and share the same firmware
+unit, the same config-file mechanism, and the same partition layout — they
+differ mainly in which kernel image and DTB land on the boot partition.
 
 Machine descriptors:
 
