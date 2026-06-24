@@ -12,6 +12,18 @@
 # ncurses-bin): module-core's source-built ncurses already ships those
 # files, and pulling Debian's split packages alongside it makes both
 # own /usr/bin/clear, which dpkg refuses to unpack.
+#
+# udev and kmod are seeded because a systemd rootfs is broken on real
+# hardware without them, yet neither is pulled implicitly here. The
+# `systemd` package only *Recommends* udev (not Depends), and assembly
+# runs with Recommends disabled, so udev — and the systemd-udevd it
+# ships — never lands. Without udev, no `.device` unit ever activates,
+# so systemd-getty-generator's serial-getty@<console> blocks forever on
+# `dev-<tty>.device` and the board never shows a serial login prompt
+# even though the kernel console works. kmod supplies /sbin/modprobe
+# (its absence is the `modprobe@*` "Unable to locate executable" and
+# `systemd-modules-load` failures); it rides in as a udev dependency but
+# is listed explicitly so module loading never silently degrades.
 _DEBIAN_ESSENTIAL = [
     "base-files",
     "base-passwd",
@@ -27,6 +39,7 @@ _DEBIAN_ESSENTIAL = [
     "gzip",
     "hostname",
     "init-system-helpers",
+    "kmod",
     "libc-bin",
     "login",
     "mawk",
@@ -34,6 +47,7 @@ _DEBIAN_ESSENTIAL = [
     "sed",
     "sysvinit-utils",
     "tar",
+    "udev",
     "util-linux",
 ]
 
@@ -93,21 +107,27 @@ def image(name, artifacts=[], distro_artifacts={}, hostname=None, timezone="", l
     if not effective_distro:
         fail("image %s: no distro set and project has no defaults.distro" % name)
 
-    # Merge machine packages. The machine config's `packages` list
-    # (e.g. ["syslinux"] on qemu-x86_64) names module-core source units
-    # that build against musl/Alpine; pulling them into a Debian image's
-    # closure contaminates the per-unit sysroot with musl-linked
-    # binaries. Skip the merge on non-alpine distros — the Debian image
-    # bootloader requirements come in via apt's transitive closure
-    # instead, and machine-specific board firmware should be declared
-    # explicitly per-image.
+    # Merge machine packages. The machine config's `packages` list is the
+    # board's distro-neutral boot requirements — GPU firmware and config.txt
+    # on the Pi (rpi-firmware, rpi5-config), the U-Boot/TIFS stages on
+    # BeaglePlay — and they must land on every distro's image or the board
+    # won't boot. `distro_packages` adds the per-distro exceptions: a board
+    # whose bootloader genuinely varies by distro lists it there. qemu-x86_64's
+    # from-source `syslinux` is Alpine-only (it installs mbr.bin into the
+    # rootfs; apt images instead pull extlinux from the glibc toolchain
+    # container at disk-creation time), so it lives under
+    # distro_packages["alpine"] and never force-resolves into an apt closure —
+    # resolve_closure errors on a root the distro filter would drop.
+    #
     # distro_artifacts: merge only the branch for this image's effective distro.
     # Non-selected branches are never read, so they cost nothing and don't force
     # their distro's feed module to be present.
     all_artifacts = list(artifacts) + list(distro_artifacts.get(effective_distro, []))
-    if effective_distro == "alpine":
-        all_artifacts = all_artifacts + list(ctx.machine_config.packages)
-    elif _is_apt_distro(effective_distro):
+    all_artifacts = all_artifacts + list(ctx.machine_config.packages)
+    distro_packages = getattr(ctx.machine_config, "distro_packages", None)
+    if distro_packages != None:
+        all_artifacts = all_artifacts + list(distro_packages.get(effective_distro, []))
+    if _is_apt_distro(effective_distro):
         all_artifacts = all_artifacts + _DEBIAN_ESSENTIAL
 
     # Resolve the machine kernel for this image's distro. ctx.provides is built
@@ -365,6 +385,19 @@ if [ -n "$broken" ]; then
     echo "$broken" >&2
     exit 1
 fi
+
+# Generate the modules.dep index for every installed kernel. yoe's BSP
+# kernels run `make modules_install DEPMOD=true`, which ships the .ko tree
+# without a modules.dep index (the toolchain container has no depmod), so
+# modprobe fails on the target until depmod runs. dpkg never fixes this:
+# these are yoe-built kernel packages, not Debian linux-image packages with
+# a postinst that calls depmod. Run it here, before update-initramfs, so the
+# initramfs generator resolves modules against a valid index. kmod inside
+# the rootfs supplies depmod; chroot is native here.
+for kvdir in $DESTDIR/rootfs/lib/modules/*/; do
+    [ -d "$kvdir" ] || continue
+    chroot $DESTDIR/rootfs depmod -a $(basename "$kvdir")
+done
 
 # Regenerate the initramfs after the whole userland is configured.
 # mmdebstrap runs dpkg as a single --configure pass, so linux-image's

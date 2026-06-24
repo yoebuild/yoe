@@ -1,10 +1,10 @@
 # Raspberry Pi BSP (RPi4, RPi5)
 
 yoe supports the Raspberry Pi 4 (BCM2711) and the Raspberry Pi 5 (BCM2712)
-through the `raspberrypi4` and `raspberrypi5` machines. Both target the 64-bit
-application cores and share the same firmware unit, the same config-file
-mechanism, and the same partition layout — they differ mainly in which kernel
-image and DTB land on the boot partition.
+_(NOTE, rPI5 is not booting yet)_ through the `raspberrypi4` and `raspberrypi5`
+machines. Both target the 64-bit application cores and share the same firmware
+unit, the same config-file mechanism, and the same partition layout — they
+differ mainly in which kernel image and DTB land on the boot partition.
 
 Machine descriptors:
 
@@ -95,7 +95,7 @@ control, on three pins of the 40-pin header:
 The Linux device name differs between boards:
 
 - **RPi4** — mini-UART on `ttyS0` (cmdline.txt's `console=ttyS0,115200`)
-- **RPi5** — PL011 on `ttyAMA10` (cmdline.txt's `console=ttyAMA10,115200`)
+- **RPi5** — PL011 on `ttyAMA0` (cmdline.txt's `console=ttyAMA0,115200`)
 
 Raspberry Pi boards do **not** have an on-board USB-to-serial bridge. The header
 is wired in the standard **Raspberry Pi USB-to-TTL serial cable** pinout, so
@@ -232,8 +232,10 @@ fragment is also used by `linux-beagleplay`; see
 
 Overlays go to `/boot/overlays/*.dtbo`. Kernel modules install into the rootfs
 under `/lib/modules/<kver>/`, with `DEPMOD=true` skipping depmod at build time
-(the build container doesn't have it; the target runs `depmod -a` at first boot
-via OpenRC).
+(the build container doesn't have it). Image assembly runs `depmod -a` against
+the assembled rootfs — for every installed kernel, on both Alpine and Debian/
+Ubuntu — so the `modules.dep` index ships in the image and `modprobe` works on
+first boot without any on-target generation step.
 
 ### `rpi4-config` / `rpi5-config`
 
@@ -273,12 +275,14 @@ disable_splash=1
 
 ```
 RPi4: console=ttyS0,115200 root=/dev/mmcblk0p2 rootfstype=ext4 rootwait rw
-RPi5: console=ttyAMA10,115200 root=/dev/mmcblk0p2 rootfstype=ext4 rootwait rw
+RPi5: console=ttyAMA0,115200 root=/dev/mmcblk0p2 rootfstype=ext4 rootwait rw
 ```
 
 - RPi4 uses the BCM2711 mini-UART, exposed as `ttyS0`.
-- RPi5 uses a different UART (PL011 routed differently in the BCM2712 GPIO
-  multiplexer), exposed as `ttyAMA10`.
+- RPi5 routes the 40-pin header UART through the RP1 southbridge PL011, exposed
+  as `ttyAMA0` — this is the port the kernel console binds to and where boot
+  output appears. (The BCM2712 also has a separate dedicated debug UART that
+  enumerates as `ttyAMA10`; that is _not_ the GPIO-header console.)
 - Both root from `/dev/mmcblk0p2` — second partition on the SD card.
 
 ## Image assembly
@@ -323,6 +327,14 @@ partition 2 as `/`.
 
 - Same upstream kernel tree, same branch, same container.cfg fragment.
 - Same `rpi-firmware` package (RPi5 ignores the SD copies but they're harmless).
+  The machine's `packages = ["rpi-firmware", "rpiN-config"]` list is the board's
+  distro-neutral boot requirement — the GPU firmware blobs plus `config.txt` /
+  `cmdline.txt` — and merges into the image on **every distro** (Alpine, Debian,
+  Ubuntu). Without `config.txt` the Pi firmware never enables the UART or learns
+  which kernel to load, so a board image that drops these packages comes up with
+  a silent serial console. (A board whose bootloader genuinely differs per
+  distro would use the machine `distro_packages` map instead; the Pi's does
+  not.)
 - Same partition layout and root device.
 - Same OpenRC / busybox / apk userspace.
 

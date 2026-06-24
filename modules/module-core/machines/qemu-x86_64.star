@@ -15,7 +15,12 @@ machine(
         defconfig = "x86_64_defconfig",
         cmdline = "console=ttyS0 root=/dev/vda1 rw",
     ),
-    packages = ["syslinux"],
+    # syslinux is the x86 BIOS bootloader for Alpine images only: it installs
+    # mbr.bin into the rootfs for the disk-creation step. Apt images get
+    # extlinux from the glibc toolchain container instead, so syslinux must not
+    # enter their closure. Distro-neutral board packages would go in `packages`;
+    # this one is Alpine-only, hence distro_packages.
+    distro_packages = {"alpine": ["syslinux"]},
     partitions = [
         partition(label = "rootfs", type = "ext4", size = "2G", root = True),
     ],

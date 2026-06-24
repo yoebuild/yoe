@@ -28,7 +28,7 @@ units.
 | Console          | `ttyAMA0` (PL011 UART)            | `ttyS0` (16550 UART)         |
 | Root device      | `/dev/vda1` (single part)         | `/dev/vda2`                  |
 | Kernel unit      | `linux` (generic)                 | `linux` (`x86_64_defconfig`) |
-| Extra packages   | none                              | `syslinux`                   |
+| Extra packages   | none                              | `syslinux` (Alpine only)     |
 | Default forwards | `2222:22`, `8080:80`, `8118:8118` | same                         |
 
 Both default to 4 GB RAM and `display = "none"`; the `-nographic` flag sends
@@ -117,7 +117,7 @@ machine(
         defconfig = "x86_64_defconfig",
         cmdline = "console=ttyS0 root=/dev/vda2 rw",
     ),
-    packages = ["syslinux"],
+    distro_packages = {"alpine": ["syslinux"]},
     partitions = [
         partition(label = "rootfs", type = "ext4", size = "600M", root = True),
     ],
@@ -133,6 +133,15 @@ machine(
 x86_64 goes through a real bootloader: SeaBIOS (QEMU's built-in legacy BIOS,
 used by default on `q35`) reads the MBR off the virtio disk and jumps into
 `syslinux`, which loads the kernel from the ext4 rootfs.
+
+`syslinux` sits under `distro_packages` rather than the plain `packages` list
+because it is the bootloader for **Alpine images only**: the from-source unit
+installs `mbr.bin` into the rootfs for the disk-creation step. Apt images
+(Debian, Ubuntu) get extlinux from the glibc toolchain container at
+disk-creation time instead, so `syslinux` must never enter their closure —
+`distro_packages = {"alpine": [...]}` keeps it out. A board package that every
+distro needs (GPU firmware, U-Boot stages, `config.txt`) goes in `packages`,
+which merges into every image regardless of distro.
 
 This mirrors how a physical x86 board with legacy BIOS boots, so the same image
 will also boot on bare metal that lacks UEFI. (UEFI/OVMF support is set up in

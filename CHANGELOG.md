@@ -8,10 +8,22 @@ and this project adheres to
 
 ## [Unreleased]
 
-- **New Glossary in the docs.** A single reference page defines yoe's vocabulary
-  — units, packages, classes, images, machines, distros, modules, feeds — along
-  with every field you can set in a unit file, the build-time environment
-  variables your build steps can use, and the Starlark builtins.
+## [0.12.8] - 2026-06-22
+
+- **Debian and Ubuntu images now boot on real boards.** Board firmware and boot
+  configuration (the Raspberry Pi GPU blobs and `config.txt`, BeaglePlay's
+  U-Boot stages) declared by a machine now land in the image on every distro,
+  not just Alpine. Previously an apt image on a Pi came up with a silent serial
+  console because `config.txt` was missing, so the firmware never enabled the
+  UART or loaded the kernel.
+- **Debian and Ubuntu images now give you a serial login and load kernel
+  modules.** systemd's device manager (`udev`) and `kmod` are now part of every
+  apt image, so the serial console reaches a login prompt instead of hanging on
+  the tty device, and module loading works.
+- **`modprobe` works on Debian and Ubuntu images.** Apt images now ship the
+  `modules.dep` index that `modprobe` needs, so kernel modules load by name
+  instead of failing until you manually run `depmod` on the board. Alpine images
+  were already correct.
 
 ## [0.12.7] - 2026-06-20
 
