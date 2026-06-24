@@ -1094,10 +1094,10 @@ participant in the workflow — while pushing the AI angle much further than
   Neither is a production choice today, but they are aiming at different
   destinations.
 
-**When to look at ZethraOS instead:** when your goal is a de-Googled,
-AI-native mobile/handset OS as a finished platform — not a build system for your
-own embedded product — and the autonomous self-healing update model is something
-you want rather than something you need to keep out of the trust boundary.
+**When to look at ZethraOS instead:** when your goal is a de-Googled, AI-native
+mobile/handset OS as a finished platform — not a build system for your own
+embedded product — and the autonomous self-healing update model is something you
+want rather than something you need to keep out of the trust boundary.
 
 ## vs. mkosi
 
@@ -1225,12 +1225,13 @@ unchanged. Guix swaps the Nix expression language for Guile Scheme and adds a
 strict free-software policy. Both of those distinctions push it further from
 `[yoe]`'s goals, not closer.
 
-**What carries over from the Nix comparison:** the `/gnu/store` closure model and
-its closure sizes, the custom functional config language, channels pinned to git
-refs (`[yoe]` already pins modules to git refs), and `guix time-machine` for
+**What carries over from the Nix comparison:** the `/gnu/store` closure model
+and its closure sizes, the custom functional config language, channels pinned to
+git refs (`[yoe]` already pins modules to git refs), and `guix time-machine` for
 reproducing exact environments. None of these change the verdict reached against
 Nix. If anything, Guile Scheme is a steeper onboarding cost for embedded
-developers than the Nix language, which strengthens `[yoe]`'s choice of Starlark.
+developers than the Nix language, which strengthens `[yoe]`'s choice of
+Starlark.
 
 **The one genuinely distinctive idea — full-source bootstrap.** Guix drives the
 [Bootstrappable Builds](https://bootstrappable.org/) effort: it bootstraps the
@@ -1243,8 +1244,8 @@ reproducibility and bootstraps from a container toolchain on purpose (see
 [Reproducibility](architecture.md#-reproducibility)). Worth knowing as the
 reference if provenance ever becomes a goal; not something to adopt today.
 
-**The structural blocker — free-software-only policy.** Guix mainline follows the
-GNU Free System Distribution Guidelines and refuses proprietary firmware and
+**The structural blocker — free-software-only policy.** Guix mainline follows
+the GNU Free System Distribution Guidelines and refuses proprietary firmware and
 blobs. That is fatal for most embedded BSP work, where vendor firmware (Jetson,
 many SoCs, common Wi-Fi/GPU parts) is unavoidable. `[yoe]` is vendor-neutral and
 welcomes BSPs and blobs from any vendor; Guix's identity rejects them. The
@@ -1253,14 +1254,14 @@ project. This is a philosophical mismatch, not a gap a unit could close — whic
 is why the "could `[yoe]` build _with_ it" question explored for Nix in
 [yoe and Nix](nix.md) has no Guix analog.
 
-|                  | GNU Guix                            | `[yoe]`                                    |
-| ---------------- | ----------------------------------- | ------------------------------------------ |
-| Config language  | Guile Scheme                        | Starlark (Python-like)                     |
-| Store model      | Content-addressed `/gnu/store`      | Standard FHS with apk/dpkg                 |
-| Bootstrap        | Full-source from a tiny binary seed | Container toolchain (functional eq.)       |
-| Firmware / blobs | Refused upstream (FSDG)             | Welcomed; vendor-neutral BSPs              |
-| Target           | Desktop, server                     | Embedded hardware, multi-arch              |
-| Learning curve   | Steep (Guile Scheme)                | Shallow (Starlark, Python-like)            |
+|                  | GNU Guix                            | `[yoe]`                              |
+| ---------------- | ----------------------------------- | ------------------------------------ |
+| Config language  | Guile Scheme                        | Starlark (Python-like)               |
+| Store model      | Content-addressed `/gnu/store`      | Standard FHS with apk/dpkg           |
+| Bootstrap        | Full-source from a tiny binary seed | Container toolchain (functional eq.) |
+| Firmware / blobs | Refused upstream (FSDG)             | Welcomed; vendor-neutral BSPs        |
+| Target           | Desktop, server                     | Embedded hardware, multi-arch        |
+| Learning curve   | Steep (Guile Scheme)                | Shallow (Starlark, Python-like)      |
 
 **When to use Guix instead:** when you want Nix's guarantees with a Scheme
 config language and a fully free-software, fully bootstrappable stack on

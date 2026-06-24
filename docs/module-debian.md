@@ -224,7 +224,7 @@ substantial follow-up rather than routine work.
     image's closure. A package whose maintainer script reaches for a tool
     outside that baseline must add the tool to the image. The baseline also
     includes `udev` and `kmod`, which a systemd system needs but custom variant
-    drops: `systemd` only *Recommends* `udev`, and assembly runs with Recommends
+    drops: `systemd` only _Recommends_ `udev`, and assembly runs with Recommends
     disabled, so without seeding it the rootfs ships no `systemd-udevd`. That
     leaves every `.device` unit perpetually inactive, and a serial console hangs
     on `dev-<tty>.device` instead of reaching a login prompt; `kmod` supplies
