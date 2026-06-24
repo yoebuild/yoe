@@ -282,7 +282,7 @@ RPi5: console=ttyAMA0,115200 root=/dev/mmcblk0p2 rootfstype=ext4 rootwait rw
 - RPi5 routes the 40-pin header UART through the RP1 southbridge PL011, exposed
   as `ttyAMA0` — this is the port the kernel console binds to and where boot
   output appears. (The BCM2712 also has a separate dedicated debug UART that
-  enumerates as `ttyAMA10`; that is *not* the GPIO-header console.)
+  enumerates as `ttyAMA10`; that is _not_ the GPIO-header console.)
 - Both root from `/dev/mmcblk0p2` — second partition on the SD card.
 
 ## Image assembly
