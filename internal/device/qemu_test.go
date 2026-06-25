@@ -66,9 +66,9 @@ func TestMergeQEMUPorts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := mergeQEMUPorts(tt.machine, tt.cli)
+			got := MergeQEMUPorts(tt.machine, tt.cli)
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("mergeQEMUPorts(%v, %v) = %v, want %v", tt.machine, tt.cli, got, tt.want)
+				t.Errorf("MergeQEMUPorts(%v, %v) = %v, want %v", tt.machine, tt.cli, got, tt.want)
 			}
 		})
 	}
@@ -78,7 +78,7 @@ func TestMergeQEMUPorts(t *testing.T) {
 // and writing through the machine's declared slice.
 func TestMergeQEMUPortsDoesNotMutateMachine(t *testing.T) {
 	machine := []string{"2222:22", "8118:8118"}
-	_ = mergeQEMUPorts(machine, []string{"18118:8118"})
+	_ = MergeQEMUPorts(machine, []string{"18118:8118"})
 	if machine[1] != "8118:8118" {
 		t.Errorf("machine slice was mutated: %v", machine)
 	}
