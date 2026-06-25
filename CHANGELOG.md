@@ -25,9 +25,9 @@ and this project adheres to
   Debian/Ubuntu image now gets the real interpreter, libraries, and headers
   staged into its build sysroot, instead of only the (often empty) metapackage.
 - **libffi now builds on Ubuntu images.** The Ubuntu toolchain ships a newer
-  libtool that dropped a macro libffi's build configuration still referenced,
-  so its build failed during autoreconf; libffi no longer relies on that macro
-  and builds on Ubuntu as it already did on Alpine.
+  libtool that dropped a macro libffi's build configuration still referenced, so
+  its build failed during autoreconf; libffi no longer relies on that macro and
+  builds on Ubuntu as it already did on Alpine.
 - **Image builds now fail loudly if the boot files don't fit the boot
   partition.** Previously a `/boot` that overflowed the FAT boot partition was
   silently ignored, producing an image whose boot partition was missing

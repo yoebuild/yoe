@@ -385,12 +385,12 @@ Updating the base toolchain:
 
 ## Caching Architecture
 
-`[yoe]` uses a unified, content-addressed object store for both source
-archives and built packages, with a multi-level local → LAN → remote fallback
-chain. The full design — object store layout, build flow, cache key
-computation, cache levels, the S3 rationale, language-package-manager caches,
-and cache signing — now lives in its own chapter, alongside a survey of how
-Nix, Bazel, and Yocto cache and the planned Yoe cache design:
+`[yoe]` uses a unified, content-addressed object store for both source archives
+and built packages, with a multi-level local → LAN → remote fallback chain. The
+full design — object store layout, build flow, cache key computation, cache
+levels, the S3 rationale, language-package-manager caches, and cache signing —
+now lives in its own chapter, alongside a survey of how Nix, Bazel, and Yocto
+cache and the planned Yoe cache design:
 
 **See [Caching](caching.md).**
 

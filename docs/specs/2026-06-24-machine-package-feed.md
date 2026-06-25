@@ -1,7 +1,6 @@
 # Machine package feed
 
-**Date:** 2026-06-24
-**Status:** Spec only
+**Date:** 2026-06-24 **Status:** Spec only
 
 ## Problem
 
@@ -22,16 +21,16 @@ repo/<proj>/debian/pool/<component>/<initial>/<src>/...deb  # apt
 There is no machine axis. So an rpi5 build and an rpi4 build in one tree both
 write `base-files-14.0-r14.apk` into `repo/<proj>/alpine/aarch64/` — last writer
 wins, and the APKINDEX references only one of them. Two machines cannot coexist
-in one tree. This is the blocker called out in `docs/roadmap.md`
-("base-files is modified by machine … this needs to be solved before building
-multiple machines in one tree").
+in one tree. This is the blocker called out in `docs/roadmap.md` ("base-files is
+modified by machine … this needs to be solved before building multiple machines
+in one tree").
 
 Kernels escape the collision because they carry distinct names (`linux-rpi5` vs
 `linux-rpi4`, resolved per-machine through the `linux` virtual). `base-files`
 cannot be renamed: on the apt distros, `libc6` carries
-`Breaks: base-files (< 13.3~)` and `dbus` carries `Depends: base-files (>= 13.4~)`,
-so the package the rest of the closure constrains must be literally named
-`base-files`.
+`Breaks: base-files (< 13.3~)` and `dbus` carries
+`Depends: base-files (>= 13.4~)`, so the package the rest of the closure
+constrains must be literally named `base-files`.
 
 ## Why not name-qualification + `provides`
 
@@ -45,12 +44,12 @@ and emits versioned self-provides on both backends:
 - apt (`internal/build/executor.go` `debProvides`): bare `Provides: base-files`
   becomes `Provides: base-files (= 14.0)`.
 
-`14.0` satisfies both `dbus`'s `>= 13.4~` and `libc6`'s `Breaks: < 13.3~`, so the
-constraints are met. **But this is rejected**, for a decisive reason:
+`14.0` satisfies both `dbus`'s `>= 13.4~` and `libc6`'s `Breaks: < 13.3~`, so
+the constraints are met. **But this is rejected**, for a decisive reason:
 
 In a shared feed, `base-files-rpi5` and `base-files-rpi4` advertise the
-**identical** virtual `base-files=14.0-r14`. Anything that resolves the *bare
-virtual* freely — an on-device `apk add` of a package depending on `base-files`,
+**identical** virtual `base-files=14.0-r14`. Anything that resolves the _bare
+virtual_ freely — an on-device `apk add` of a package depending on `base-files`,
 an `apk fix`, an apt solve that has not already pinned the concrete name — is
 free to pull the **wrong machine's** package. Image assembly avoids this only
 because the closure pins the concrete name; the guarantee is "correct as long as
@@ -64,15 +63,15 @@ packages from view rather than hoping the solver picks right.
 
 Add a **machine axis** to the package feed. Machine-scoped packages publish into
 a per-machine subtree; the shared per-arch feed is unchanged. An image (and the
-device it produces) is assembled against *shared feed + its own machine feed*
+device it produces) is assembled against _shared feed + its own machine feed_
 and never sees another machine's packages. Canonical names are preserved — no
 `provides` hack, no rename — because a given canonical name is unique **within**
 each machine feed.
 
-Routing is driven entirely by `unit.Scope`: `scope == "machine"` publishes to the
-machine subtree, everything else to the shared feed. This reuses the
+Routing is driven entirely by `unit.Scope`: `scope == "machine"` publishes to
+the machine subtree, everything else to the shared feed. This reuses the
 `ScopeDir`/`RepoArchDir` seam already in `internal/build/executor.go`; the only
-new decision at publish time is *which repo root* (shared vs machine), based on
+new decision at publish time is _which repo root_ (shared vs machine), based on
 scope.
 
 ### apk layout
@@ -94,9 +93,9 @@ unconditionally appends `/$(apk --print-arch)/APKINDEX.tar.gz` to any repo URL
 (confirmed by the shipped `/etc/apk/repositories` template and the `RepoArchDir`
 comment). yoe cannot tell apk "arch is implied here," so the directory must
 exist. Because `<machine>` sits above `<arch>`, the existing `RepoArchDir` /
-`Publish` / `ArchDirs` / `GenerateIndex` logic keeps working **unchanged** inside
-each machine subtree — the new code only chooses the machine-scoped repo root vs
-the shared root.
+`Publish` / `ArchDirs` / `GenerateIndex` logic keeps working **unchanged**
+inside each machine subtree — the new code only chooses the machine-scoped repo
+root vs the shared root.
 
 Device `/etc/apk/repositories` gains a second line, the machine-level URL; apk
 fills in the single `<arch>`:
@@ -108,9 +107,10 @@ fills in the single `<arch>`:
 
 ### apt layout
 
-apt's repo has axes **suite × component × arch** (`internal/repo/deb_emitter.go`),
-with `Components` already a first-class field defaulting to `["main"]`. The
-natural mapping is **machine = component** — not a new directory dimension:
+apt's repo has axes **suite × component × arch**
+(`internal/repo/deb_emitter.go`), with `Components` already a first-class field
+defaulting to `["main"]`. The natural mapping is **machine = component** — not a
+new directory dimension:
 
 ```
 dists/<suite>/main/binary-<arch>/Packages         # shared
@@ -132,9 +132,9 @@ mechanisms apt already has:
    (`pool/<component>/...`), so rpi4's and rpi5's `base-files_14.0_arm64.deb`
    land in distinct paths — no filename collision while keeping the canonical
    name.
-2. **Isolation is exactly apt's component model.** An rpi5 device lists component
-   `rpi5` and never sees `rpi4`'s `base-files` — the same guarantee as the apk
-   machine feed, via a mechanism apt already understands.
+2. **Isolation is exactly apt's component model.** An rpi5 device lists
+   component `rpi5` and never sees `rpi4`'s `base-files` — the same guarantee as
+   the apk machine feed, via a mechanism apt already understands.
 3. **No second repo line, no extra signature.** Everything stays under one
    `dists/<suite>/`, so it is one `InRelease`, one suite — just an added
    component subtree. (Machine = suite was rejected: a separate `Release` /
@@ -143,10 +143,10 @@ mechanisms apt already has:
 
 ### Backend asymmetry (intended)
 
-| | shared | machine-scoped | device config |
-|---|---|---|---|
-| **apk** | `repo/<proj>/alpine/<arch>/` | `repo/<proj>/alpine/<machine>/<arch>/` | extra repo **root** line in `/etc/apk/repositories` |
-| **apt** | component `main` | component `<machine>` (`pool/<machine>/…`) | extra **component** token on the `deb` line |
+|         | shared                       | machine-scoped                             | device config                                       |
+| ------- | ---------------------------- | ------------------------------------------ | --------------------------------------------------- |
+| **apk** | `repo/<proj>/alpine/<arch>/` | `repo/<proj>/alpine/<machine>/<arch>/`     | extra repo **root** line in `/etc/apk/repositories` |
+| **apt** | component `main`             | component `<machine>` (`pool/<machine>/…`) | extra **component** token on the `deb` line         |
 
 The two backends express one concept ("machine feed") two ways because their
 repo formats differ — apk forces machine to be a directory level above `<arch>`;
@@ -155,8 +155,8 @@ visibility.
 
 ## Components and consumers to update
 
-- **Publish routing** (`internal/build/executor.go`, `internal/repo`): choose the
-  machine-scoped repo root for `scope == "machine"` units; shared root
+- **Publish routing** (`internal/build/executor.go`, `internal/repo`): choose
+  the machine-scoped repo root for `scope == "machine"` units; shared root
   otherwise. apk: publish under `<machine>/<arch>/`. apt: publish into
   `pool/<machine>/...` and add `<machine>` to the component set passed to
   `GenerateDebianIndex`.
@@ -174,8 +174,9 @@ visibility.
   template, `internal/device/deploy.go`): write both the shared and machine
   lines (apk) or both components (apt). The machine is known at image build
   time.
-- **`base-files` `repositories` template** (`modules/module-core/units/base/base-files/`):
-  document the two-URL (apk) / two-component (apt) shape.
+- **`base-files` `repositories` template**
+  (`modules/module-core/units/base/base-files/`): document the two-URL (apk) /
+  two-component (apt) shape.
 
 ## Scope
 

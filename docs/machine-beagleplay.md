@@ -224,15 +224,14 @@ All units build in the generic `toolchain` container with
 matching the image's distro (Alpine's musl toolchain for an Alpine image, the
 glibc toolchain for Debian/Ubuntu), all running aarch64-native under QEMU
 user-mode. There is no cross-compilation in the conventional sense — the build
-sees the target ISA as native. The firmware these units emit is freestanding,
-so it is identical regardless of which distro's toolchain compiled it; the
-board boots the same image on any backend. Build-time tools whose package
-names differ across backends (Alpine's `py3-*` vs the apt distros'
-`python3-*`, bundled `-dev` headers vs split `lib*-dev`) are expressed with
-`distro_deps` so each backend pulls its own names. The R5 SPL is the one
-exception to "native": Cortex-R5F is armv7-R, an ISA the aarch64 toolchain
-can't emit, so it pulls a bare-metal `gcc-arm-none-eabi` cross toolchain from
-the build distro's own feed.
+sees the target ISA as native. The firmware these units emit is freestanding, so
+it is identical regardless of which distro's toolchain compiled it; the board
+boots the same image on any backend. Build-time tools whose package names differ
+across backends (Alpine's `py3-*` vs the apt distros' `python3-*`, bundled
+`-dev` headers vs split `lib*-dev`) are expressed with `distro_deps` so each
+backend pulls its own names. The R5 SPL is the one exception to "native":
+Cortex-R5F is armv7-R, an ISA the aarch64 toolchain can't emit, so it pulls a
+bare-metal `gcc-arm-none-eabi` cross toolchain from the build distro's own feed.
 
 ## Stage-by-stage walkthrough
 
@@ -324,16 +323,16 @@ deps so their `/lib/firmware/...` outputs are visible in its sysroot at build
 time. The R5 SPL declares only `ti-linux-firmware` (it doesn't embed BL31 or
 BL32).
 
-Both U-Boot units also pull a substantial Python/host-tools chain from the
-build distro's feed — binman is a Python program with optional dependencies on
+Both U-Boot units also pull a substantial Python/host-tools chain from the build
+distro's feed — binman is a Python program with optional dependencies on
 `pyelftools`, `pyyaml`, `jsonschema`, `yamllint`, and friends. Which ones get
 exercised depends on the defconfig: the A53 build uses a smaller subset, the R5
 build's binman config invokes the `ti-board-config` entry type which drags in
 the full schema-validation stack. The dep lists in the two `.star` files reflect
 that — they intentionally differ. The distro-specific package names live in
 `distro_deps`; depending on a metapackage like `python3-dev` pulls its whole
-dependency closure (interpreter, libraries, headers) into the build sysroot,
-so the build sees a complete Python regardless of backend.
+dependency closure (interpreter, libraries, headers) into the build sysroot, so
+the build sees a complete Python regardless of backend.
 
 ## Image assembly
 
@@ -396,7 +395,8 @@ A few things are non-obvious and worth knowing if you go to change a unit:
 - **No `CROSS_COMPILE` prefix in the A53 builds.** Inside the `target`
   container, plain `gcc`/`ld`/`ar` already target aarch64 (whether that's the
   musl or glibc toolchain), so there is no triplet-prefixed binary to name. The
-  R5 SPL is the exception because it needs `arm-none-eabi-` to emit armv7-R code.
+  R5 SPL is the exception because it needs `arm-none-eabi-` to emit armv7-R
+  code.
 - **TF-A overrides every per-tool variable.** TF-A's toolchain-detection
   searches for `aarch64-none-elf-gcc` / `aarch64-linux-gnu-gcc` by default. The
   `tfa-k3` unit passes `CC=gcc LD=gcc AS=gcc AR=gcc-ar OC=objcopy OD=objdump` on
@@ -412,17 +412,18 @@ A few things are non-obvious and worth knowing if you go to change a unit:
 - **U-Boot's host tools want a sysroot.** `mkeficapsule` (and other
   signing/binman helpers) link against gnutls/openssl. yoe's env doesn't reach
   U-Boot's `HOSTCC`/`HOSTLD` path, so both U-Boot units pass
-  `HOSTCFLAGS="$CPPFLAGS"` and `HOSTLDFLAGS="$LDFLAGS"` on the make command
-  line — yoe's own flags, which already point at the sysroot include and lib
-  dirs (including the apt distros' multiarch `/usr/lib/<triplet>/` paths).
-  They also export `SWIG_LIB` to redirect swig at the merged sysroot for
-  pylibfdt generation.
+  `HOSTCFLAGS="$CPPFLAGS"` and `HOSTLDFLAGS="$LDFLAGS"` on the make command line
+  — yoe's own flags, which already point at the sysroot include and lib dirs
+  (including the apt distros' multiarch `/usr/lib/<triplet>/` paths). They also
+  export `SWIG_LIB` to redirect swig at the merged sysroot for pylibfdt
+  generation.
 - **The kernel's host tools need a sysroot too.** `certs/extract-cert` links
   libcrypto, so `linux-beagleplay` depends on the OpenSSL headers (Alpine
-  `openssl-dev`, apt `libssl-dev`) and passes `HOSTCFLAGS="$CPPFLAGS"
-  HOSTLDFLAGS="$LDFLAGS"` on the make line — the apt `libcrypto.pc` reports
-  `prefix=/usr`, so pkg-config alone misses the sysroot. The kheaders archive
-  (`CONFIG_IKHEADERS`) also needs `cpio`, which the unit pulls in as a dep.
+  `openssl-dev`, apt `libssl-dev`) and passes
+  `HOSTCFLAGS="$CPPFLAGS" HOSTLDFLAGS="$LDFLAGS"` on the make line — the apt
+  `libcrypto.pc` reports `prefix=/usr`, so pkg-config alone misses the sysroot.
+  The kheaders archive (`CONFIG_IKHEADERS`) also needs `cpio`, which the unit
+  pulls in as a dep.
 
 ## When something fails
 
