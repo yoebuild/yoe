@@ -417,6 +417,12 @@ A few things are non-obvious and worth knowing if you go to change a unit:
   dirs (including the apt distros' multiarch `/usr/lib/<triplet>/` paths).
   They also export `SWIG_LIB` to redirect swig at the merged sysroot for
   pylibfdt generation.
+- **The kernel's host tools need a sysroot too.** `certs/extract-cert` links
+  libcrypto, so `linux-beagleplay` depends on the OpenSSL headers (Alpine
+  `openssl-dev`, apt `libssl-dev`) and passes `HOSTCFLAGS="$CPPFLAGS"
+  HOSTLDFLAGS="$LDFLAGS"` on the make line — the apt `libcrypto.pc` reports
+  `prefix=/usr`, so pkg-config alone misses the sysroot. The kheaders archive
+  (`CONFIG_IKHEADERS`) also needs `cpio`, which the unit pulls in as a dep.
 
 ## When something fails
 

@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **The BeaglePlay kernel builds on Debian and Ubuntu.** Like the bootloader and
+  firmware, the kernel now builds against the target distro — its host tools get
+  the OpenSSL headers and `cpio` they need from that distro's packages.
+- **Builds find architecture-specific headers from apt `-dev` packages.** Debian
+  and Ubuntu split some headers (such as OpenSSL's `opensslconf.h`) into a
+  per-architecture directory; the build environment now searches it, so units
+  that compile against those packages no longer fail with a missing header.
 - **BeaglePlay firmware now builds on Debian and Ubuntu, not just Alpine.** The
   board's bootloader and firmware (U-Boot, OP-TEE, TF-A, TI firmware) build
   natively against whichever distro an image targets, using that distro's own
