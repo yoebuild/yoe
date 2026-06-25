@@ -1369,10 +1369,8 @@ Builds are cached at multiple levels:
 4. **Remote cache** _(planned — optional)_ — push/pull packages to an
    S3-compatible store so CI and team members share build results. Not yet
    implemented: there is no remote cache backend, no S3 integration, and no
-   cache signing today. See the
-   [Caching Architecture](build-environment.md#caching-architecture) section for
-   the planned S3 configuration, cache signing, and the multi-level fallback
-   chain.
+   cache signing today. See [Caching](caching.md) for the object store, the
+   planned S3 configuration, cache signing, and the multi-level fallback chain.
 
 Cache invalidation is hash-based, not timestamp-based. Changing a unit, updating
 a source, or rebuilding a dependency all produce a new hash and trigger a

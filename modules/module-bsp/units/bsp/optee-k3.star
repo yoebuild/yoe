@@ -8,14 +8,18 @@ unit(
     license = "BSD-2-Clause",
     description = "OP-TEE OS BL32 for TI K3 AM62x — input to U-Boot A53 SPL",
     deps = [
-        "toolchain-musl",
+        "toolchain",
         "python3",
-        "py3-cryptography",
-        "py3-cffi",
         "libffi",
-        "py3-elftools",
     ],
-    container = "toolchain-musl",
+    # Build-time Python tooling: same role across backends, distro-specific
+    # package names. Alpine uses py3-*; the apt distros use python3-*.
+    distro_deps = {
+        "alpine": ["py3-cryptography", "py3-cffi", "py3-elftools"],
+        "debian": ["python3-cryptography", "python3-cffi", "python3-pyelftools"],
+        "ubuntu": ["python3-cryptography", "python3-cffi", "python3-pyelftools"],
+    },
+    container = "toolchain",
     container_arch = "target",
     tasks = [
         task("build", steps=[

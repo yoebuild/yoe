@@ -10,8 +10,17 @@ unit(
     branch = "v6.12.43-ti-arm64-r54",
     license = "GPL-2.0",
     description = "BeaglePlay kernel (TI AM625, BeagleBoard.org fork)",
-    deps = ["toolchain-musl"],
-    container = "toolchain-musl",
+    # cpio: kheaders (CONFIG_IKHEADERS) archives the kernel headers with it.
+    deps = ["toolchain", "cpio"],
+    # The kernel's certs/extract-cert host tool needs OpenSSL/libcrypto
+    # headers. Package name differs by backend: Alpine bundles them in
+    # openssl-dev, the apt distros split them into libssl-dev.
+    distro_deps = {
+        "alpine": ["openssl-dev"],
+        "debian": ["libssl-dev"],
+        "ubuntu": ["libssl-dev"],
+    },
+    container = "toolchain",
     container_arch = "target",
     tasks = [
         task("build", steps=[
@@ -27,7 +36,12 @@ make ARCH=arm64 bb.org_defconfig
 scripts/kconfig/merge_config.sh -m -O . .config .yoe-container.cfg
 make ARCH=arm64 olddefconfig
 """,
-            "make ARCH=arm64 -j$NPROC Image modules dtbs",
+            # HOSTCFLAGS/HOSTLDFLAGS point the kernel's host tools
+            # (certs/extract-cert links libcrypto) at the yoe sysroot.
+            # The apt libcrypto.pc reports prefix=/usr, so pkg-config alone
+            # misses the sysroot; yoe's $CPPFLAGS/$LDFLAGS carry the right
+            # include and (multiarch) lib search paths for every backend.
+            'make ARCH=arm64 HOSTCFLAGS="$CPPFLAGS" HOSTLDFLAGS="$LDFLAGS" -j$NPROC Image modules dtbs',
             # U-Boot's distro_bootcmd loads `Image` by default.
             "install -D arch/arm64/boot/Image $DESTDIR/boot/Image",
             # AM625 device trees live under arch/arm64/boot/dts/ti/.

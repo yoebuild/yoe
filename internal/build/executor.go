@@ -685,8 +685,12 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		// pkg-config / ld / rtld during builds. Alpine ignores the
 		// multiarch paths since they don't exist in its sysroot.
 		"PKG_CONFIG_PATH": fmt.Sprintf("/build/sysroot/usr/lib/pkgconfig:/build/sysroot/usr/lib/%s/pkgconfig:/usr/lib/pkgconfig:/usr/lib/%s/pkgconfig", multiarchTuple(opts.Arch), multiarchTuple(opts.Arch)),
-		"CFLAGS":          "-I/build/sysroot/usr/include",
-		"CPPFLAGS":        "-I/build/sysroot/usr/include",
+		// Debian/Ubuntu put arch-specific headers (e.g. openssl's
+		// opensslconf.h) under /usr/include/<tuple>/, the include-side
+		// analog of the multiarch lib dirs below. Add it so dep -dev
+		// headers resolve; alpine ignores the path (it doesn't exist).
+		"CFLAGS":          fmt.Sprintf("-I/build/sysroot/usr/include -I/build/sysroot/usr/include/%s", multiarchTuple(opts.Arch)),
+		"CPPFLAGS":        fmt.Sprintf("-I/build/sysroot/usr/include -I/build/sysroot/usr/include/%s", multiarchTuple(opts.Arch)),
 		"LDFLAGS":         fmt.Sprintf("-L/build/sysroot/usr/lib -L/build/sysroot/usr/lib/%s -L/build/sysroot/lib/%s", multiarchTuple(opts.Arch), multiarchTuple(opts.Arch)),
 		"LD_LIBRARY_PATH": fmt.Sprintf("/build/sysroot/usr/lib:/build/sysroot/usr/lib/%s:/build/sysroot/lib/%s", multiarchTuple(opts.Arch), multiarchTuple(opts.Arch)),
 		"PYTHONPATH":      "/build/sysroot/usr/lib/python3.12/site-packages",

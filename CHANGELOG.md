@@ -8,6 +8,32 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **The BeaglePlay kernel builds on Debian and Ubuntu.** Like the bootloader and
+  firmware, the kernel now builds against the target distro — its host tools get
+  the OpenSSL headers and `cpio` they need from that distro's packages.
+- **Builds find architecture-specific headers from apt `-dev` packages.** Debian
+  and Ubuntu split some headers (such as OpenSSL's `opensslconf.h`) into a
+  per-architecture directory; the build environment now searches it, so units
+  that compile against those packages no longer fail with a missing header.
+- **BeaglePlay firmware now builds on Debian and Ubuntu, not just Alpine.** The
+  board's bootloader and firmware (U-Boot, OP-TEE, TF-A, TI firmware) build
+  natively against whichever distro an image targets, using that distro's own
+  toolchain and packages. Building a Debian or Ubuntu image no longer pulls in
+  the Alpine toolchain.
+- **Build dependencies on apt metapackages now stage their full contents.** A
+  unit that build-depends on a package like `python3` or `python3-dev` on a
+  Debian/Ubuntu image now gets the real interpreter, libraries, and headers
+  staged into its build sysroot, instead of only the (often empty) metapackage.
+- **libffi now builds on Ubuntu images.** The Ubuntu toolchain ships a newer
+  libtool that dropped a macro libffi's build configuration still referenced, so
+  its build failed during autoreconf; libffi no longer relies on that macro and
+  builds on Ubuntu as it already did on Alpine.
+- **Image builds now fail loudly if the boot files don't fit the boot
+  partition.** Previously a `/boot` that overflowed the FAT boot partition was
+  silently ignored, producing an image whose boot partition was missing
+  `config.txt` or the kernel — so the board showed nothing on serial with no
+  hint why. The build now stops with the copy error instead.
+
 ## [0.12.8] - 2026-06-22
 
 - **Debian and Ubuntu images now boot on real boards.** Board firmware and boot

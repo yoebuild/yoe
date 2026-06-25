@@ -1,0 +1,36 @@
+From cc01fc4cb14e2c0e1352329183661bb7239ecf2d Mon Sep 17 00:00:00 2001
+From: yoe build <yoe@build>
+Date: Wed, 24 Jun 2026 15:40:00 -0400
+Subject: [PATCH] Drop dead LT_SYS_SYMBOL_USCORE probe (removed in libtool
+ 2.5.x)
+
+libffi 3.4.6's configure.ac calls LT_SYS_SYMBOL_USCORE, which libtool
+2.5.x removed, so "autoreconf -fi" fails with "possibly undefined
+macro: LT_SYS_SYMBOL_USCORE" on newer host toolchains such as Ubuntu
+26.04. The probe only defines SYMBOL_UNDERSCORE, which libffi never
+references, so it is dead code. Remove it: all yoe targets are ELF with
+no leading underscore on symbols, and no built artifact changes.
+---
+ configure.ac | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index 816bfd6..dec8185 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -216,10 +216,11 @@ AC_ARG_ENABLE(pax_emutramp,
+       [Define this if you want to enable pax emulated trampolines (experimental)])
+   fi)
+ 
+-LT_SYS_SYMBOL_USCORE
+-if test "x$sys_symbol_underscore" = xyes; then
+-    AC_DEFINE(SYMBOL_UNDERSCORE, 1, [Define if symbols are underscored.])
+-fi
++dnl The LT_SYS_SYMBOL_USCORE probe only ever defines SYMBOL_UNDERSCORE,
++dnl which is referenced nowhere else in libffi, so the result is dead. The
++dnl macro was also removed in libtool 2.5.x, breaking autoreconf on newer
++dnl toolchains (e.g. Ubuntu 26.04). Drop the dead probe: yoe targets are
++dnl all ELF (no leading underscore) and no built output changes.
+ 
+ FFI_EXEC_TRAMPOLINE_TABLE=0
+ case "$target" in
