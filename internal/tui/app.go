@@ -1275,9 +1275,13 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if u := m.proj.LookupUnit(m.distro, name); u != nil && u.Class == "image" {
 				// Catch "a guest is already running" before launching, so
 				// the reason shows in the TUI rather than scrolling past
-				// as an opaque subprocess exit code.
+				// as an opaque subprocess exit code. Layer in the local.star
+				// qemu_ports overrides so the check tests the same effective
+				// forwards `yoe run` binds — otherwise a forward the user
+				// remapped off a busy host port (Setup → QEMU settings) would
+				// still be reported as colliding on its original machine port.
 				if mc, ok := m.proj.Machines[m.proj.Defaults.Machine]; ok {
-					if err := device.CheckQEMUPortsAvailable(mc, nil); err != nil {
+					if err := device.CheckQEMUPortsAvailable(mc, m.qemuPorts); err != nil {
 						m.message = err.Error()
 						return m, nil
 					}
