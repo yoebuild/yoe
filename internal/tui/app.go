@@ -491,10 +491,11 @@ type model struct {
 
 	// QEMU settings sub-screen
 	qemuDisplay    string   // local.star qemu_display ("on" / "off" / "" = run-time default)
-	qemuPorts      []string // local.star qemu_ports (extras layered on top of the machine's declared forwards)
+	qemuPorts      []string // local.star qemu_ports — overrides layered on the machine's declared forwards (replace-by-guest-port; see device.MergeQEMUPorts)
 	qemuCursor     int      // cursor within the qemu-settings rows
-	qemuEditing    bool     // true while typing a new port mapping in the add field
+	qemuEditing    bool     // true while typing a port mapping in the inline edit field
 	qemuEditBuffer string   // in-progress "host:guest" text
+	qemuEditIndex  int      // effective-port row being edited, or -1 when adding a new forward
 
 	// Flash view
 	flashUnit       string
@@ -667,6 +668,7 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 		qemuMemory:      ov.QEMUMemory,
 		qemuDisplay:     ov.QEMUDisplay,
 		qemuPorts:       append([]string(nil), ov.QEMUPorts...),
+		qemuEditIndex:   -1,
 		loadOpts:        cfg.LoadOpts,
 		globalFlagArgs:  cfg.GlobalFlagArgs,
 	}
@@ -1943,21 +1945,39 @@ const (
 	numFixedQEMURows
 )
 
+// machinePorts returns the forwards the project's default machine declares,
+// or nil when no default machine is set.
+func (m model) machinePorts() []string {
+	if mc, ok := m.proj.Machines[m.proj.Defaults.Machine]; ok {
+		return mc.QEMUPorts()
+	}
+	return nil
+}
+
+// effectivePorts is the merged forward list `yoe run` would actually bind:
+// the machine's declared forwards with the local.star overrides layered on
+// top (replace-by-guest-port). The Ports section edits this list directly so
+// a machine-declared forward like 8080 can be moved off a busy host port, not
+// just supplemented.
+func (m model) effectivePorts() []string {
+	return device.MergeQEMUPorts(m.machinePorts(), m.qemuPorts)
+}
+
 // qemuRowCount returns the total row count of the QEMU settings sub-screen
-// — two fixed rows plus one per local port plus the "[+] add port" prompt.
+// — two fixed rows plus one per effective port plus the "[+] add port" prompt.
 func (m model) qemuRowCount() int {
-	return numFixedQEMURows + len(m.qemuPorts) + 1
+	return numFixedQEMURows + len(m.effectivePorts()) + 1
 }
 
 // qemuPortRowIndex translates a row index in the qemu-settings sub-screen
-// into a port-list index. Returns -1 for non-port rows (Memory / Display /
-// the trailing add-port prompt).
+// into an effective-port index. Returns -1 for non-port rows (Memory /
+// Display / the trailing add-port prompt).
 func (m model) qemuPortRowIndex(row int) int {
 	if row < numFixedQEMURows {
 		return -1
 	}
 	idx := row - numFixedQEMURows
-	if idx >= len(m.qemuPorts) {
+	if idx >= len(m.effectivePorts()) {
 		return -1
 	}
 	return idx
@@ -1966,7 +1986,7 @@ func (m model) qemuPortRowIndex(row int) int {
 // qemuIsAddRow reports whether the given row is the "[+] add port" prompt
 // at the bottom of the sub-screen.
 func (m model) qemuIsAddRow(row int) bool {
-	return row == numFixedQEMURows+len(m.qemuPorts)
+	return row == numFixedQEMURows+len(m.effectivePorts())
 }
 
 // qemuDisplayLadder steps "" (run-time default) → "off" → "on" → "off" → ...
@@ -2105,6 +2125,7 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.qemuCursor = qemuRowMemory
 			m.qemuEditing = false
 			m.qemuEditBuffer = ""
+			m.qemuEditIndex = -1
 		}
 		return m, nil
 	}
@@ -2172,9 +2193,17 @@ func (m model) updateSetupQEMU(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "enter":
-		// Enter on the trailing "[+] add port" row opens the input field.
-		if m.qemuIsAddRow(m.qemuCursor) {
+		// Enter on a port row edits that forward in place (pre-filling the
+		// current host:guest); Enter on the trailing "[+] add port" row opens
+		// an empty input for a brand-new forward.
+		if idx := m.qemuPortRowIndex(m.qemuCursor); idx >= 0 {
 			m.qemuEditing = true
+			m.qemuEditIndex = idx
+			m.qemuEditBuffer = m.effectivePorts()[idx]
+			m.message = ""
+		} else if m.qemuIsAddRow(m.qemuCursor) {
+			m.qemuEditing = true
+			m.qemuEditIndex = -1
 			m.qemuEditBuffer = ""
 			m.message = ""
 		}
@@ -2182,20 +2211,19 @@ func (m model) updateSetupQEMU(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "a", "+":
 		// Shortcut: jump straight to the add field from any row.
-		m.qemuCursor = numFixedQEMURows + len(m.qemuPorts) // the add row
+		m.qemuCursor = numFixedQEMURows + len(m.effectivePorts()) // the add row
 		m.qemuEditing = true
+		m.qemuEditIndex = -1
 		m.qemuEditBuffer = ""
 		m.message = ""
 		return m, nil
 
 	case "d", "-", "delete", "backspace":
 		if idx := m.qemuPortRowIndex(m.qemuCursor); idx >= 0 {
-			removed := m.qemuPorts[idx]
-			m.qemuPorts = append(m.qemuPorts[:idx], m.qemuPorts[idx+1:]...)
+			m.deleteEffectivePort(idx)
 			if m.qemuCursor >= m.qemuRowCount() {
 				m.qemuCursor = m.qemuRowCount() - 1
 			}
-			m.saveQEMUSettings(fmt.Sprintf("removed port %s", removed))
 		}
 		return m, nil
 	}
@@ -2209,23 +2237,44 @@ func (m model) updateSetupQEMUPortInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.qemuEditing = false
 		m.qemuEditBuffer = ""
+		m.qemuEditIndex = -1
 		m.message = ""
 		return m, nil
 	case "enter":
 		entry := strings.TrimSpace(m.qemuEditBuffer)
 		if entry == "" {
 			m.qemuEditing = false
+			m.qemuEditIndex = -1
 			return m, nil
 		}
 		if err := validatePortMapping(entry); err != nil {
 			m.message = fmt.Sprintf("invalid port mapping: %v", err)
 			return m, nil
 		}
-		m.qemuPorts = append(m.qemuPorts, entry)
+		verb := "added port"
+		if editIdx := m.qemuEditIndex; editIdx >= 0 {
+			// Editing an existing forward: if its guest port changed, drop the
+			// override keyed to the old guest so no stale forward lingers.
+			if eff := m.effectivePorts(); editIdx < len(eff) {
+				if oldGuest := portGuest(eff[editIdx]); oldGuest != portGuest(entry) {
+					m.dropOverrideByGuest(oldGuest)
+				}
+			}
+			verb = "set port"
+		}
+		m.setEffectivePort(entry)
 		m.qemuEditing = false
 		m.qemuEditBuffer = ""
-		m.qemuCursor = numFixedQEMURows + len(m.qemuPorts) // back to the add row
-		m.saveQEMUSettings(fmt.Sprintf("added port %s", entry))
+		m.qemuEditIndex = -1
+		// Land the cursor on the row that now carries this guest port.
+		g := portGuest(entry)
+		for i, p := range m.effectivePorts() {
+			if portGuest(p) == g {
+				m.qemuCursor = numFixedQEMURows + i
+				break
+			}
+		}
+		m.saveQEMUSettings(fmt.Sprintf("%s %s", verb, entry))
 		return m, nil
 	case "backspace", "ctrl+h":
 		if n := len(m.qemuEditBuffer); n > 0 {
@@ -2259,6 +2308,81 @@ func validatePortMapping(s string) error {
 		}
 	}
 	return nil
+}
+
+// portGuest returns the guest side of a "host:guest" mapping, or "" when the
+// string has no colon.
+func portGuest(s string) string {
+	_, g, _ := strings.Cut(s, ":")
+	return g
+}
+
+// dropOverrideByGuest removes any local override targeting the given guest
+// port. A fresh slice is allocated so the bubbletea value-copies of the model
+// that share the old backing array are left untouched.
+func (m *model) dropOverrideByGuest(guest string) {
+	var out []string
+	for _, p := range m.qemuPorts {
+		if portGuest(p) != guest {
+			out = append(out, p)
+		}
+	}
+	m.qemuPorts = out
+}
+
+// setEffectivePort makes mapping the effective forward for its guest port. It
+// drops any prior override for that guest, then records a local override —
+// unless mapping already equals the machine's declared forward, in which case
+// the machine default already produces it and no override is stored. This is
+// what lets the Setup screen edit a machine-declared forward: writing an
+// override with the same guest port replaces the machine entry at merge time.
+func (m *model) setEffectivePort(mapping string) {
+	g := portGuest(mapping)
+	m.dropOverrideByGuest(g)
+	for _, mp := range m.machinePorts() {
+		if mp == mapping {
+			return
+		}
+	}
+	m.qemuPorts = append(append([]string(nil), m.qemuPorts...), mapping)
+}
+
+// deleteEffectivePort handles the `d` key on the effective-port row at idx. A
+// forward carried by a local override is removed — reverting to the machine
+// default when the machine declares that guest, else dropping the forward
+// entirely. A machine-declared forward with no override can't be deleted
+// through local.star; it is changed by editing its host port instead.
+func (m *model) deleteEffectivePort(idx int) {
+	eff := m.effectivePorts()
+	if idx < 0 || idx >= len(eff) {
+		return
+	}
+	g := portGuest(eff[idx])
+	overridden := false
+	for _, p := range m.qemuPorts {
+		if portGuest(p) == g {
+			overridden = true
+			break
+		}
+	}
+	if !overridden {
+		m.message = "machine-declared forward — press Enter to change its host port (it can't be removed)"
+		return
+	}
+	removed := eff[idx]
+	m.dropOverrideByGuest(g)
+	machineHas := false
+	for _, mp := range m.machinePorts() {
+		if portGuest(mp) == g {
+			machineHas = true
+			break
+		}
+	}
+	if machineHas {
+		m.saveQEMUSettings(fmt.Sprintf("reverted port %s to machine default", g))
+	} else {
+		m.saveQEMUSettings(fmt.Sprintf("removed port %s", removed))
+	}
 }
 
 // saveQEMUSettings persists the current qemuMemory / qemuDisplay / qemuPorts
@@ -3257,8 +3381,9 @@ func (m model) helpSections() (string, []helpSection) {
 			{title: "In QEMU settings", entries: []helpEntry{
 				{"↑  ·  ↓", "move between Memory / Display / ports"},
 				{"←/→", "adjust Memory or Display"},
-				{"Enter  ·  a  ·  +", "add a host:guest port forward"},
-				{"d  ·  -", "remove the highlighted local port"},
+				{"Enter", "edit the highlighted forward's host:guest (machine or local)"},
+				{"a  ·  +", "add a new host:guest port forward"},
+				{"d  ·  -", "revert/remove the highlighted forward"},
 				{"Esc", "back to the Setup menu"},
 			}},
 			helpGeneral(false),
@@ -3904,12 +4029,7 @@ func (m model) qemuSettingsSummary() string {
 		}
 	}
 	disp := qemuDisplayLabel(m.qemuDisplay)
-	machinePorts := 0
-	if mc, ok := m.proj.Machines[m.proj.Defaults.Machine]; ok {
-		machinePorts = len(mc.QEMUPorts())
-	}
-	portTotal := machinePorts + len(m.qemuPorts)
-	return fmt.Sprintf("memory %s · display %s · %d port(s)", mem, disp, portTotal)
+	return fmt.Sprintf("memory %s · display %s · %d port(s)", mem, disp, len(m.effectivePorts()))
 }
 
 // viewSetupQEMU renders the QEMU settings sub-screen: Memory / Display rows
@@ -3952,43 +4072,53 @@ func (m model) viewSetupQEMU() string {
 	b.WriteString(headerStyle.Render("  Ports"))
 	b.WriteString("\n")
 
-	// Machine-declared ports — informational, not editable.
-	machinePorts := []string{}
-	if mc, ok := m.proj.Machines[m.proj.Defaults.Machine]; ok {
-		machinePorts = mc.QEMUPorts()
-	}
-	if len(machinePorts) == 0 {
-		b.WriteString("    " + dimStyle.Render("(machine declares no forwards)") + "\n")
-	} else {
-		for _, p := range machinePorts {
-			b.WriteString("    " + dimStyle.Render(fmt.Sprintf("%-16s machine", p)) + "\n")
+	// Renders the inline "host:guest" text field with a blinking caret. Shared
+	// by the row being edited and the add-port prompt while editing.
+	editField := func() string {
+		caret := "_"
+		if m.tick {
+			caret = " "
 		}
+		return fmt.Sprintf("→ %s %s%s\n",
+			selectedStyle.Render("host:guest"),
+			headerStyle.Render(m.qemuEditBuffer),
+			caret)
 	}
 
-	// Local override ports — editable rows, cursor lands here.
-	for i, p := range m.qemuPorts {
+	// Effective forwards — the merged machine + local-override list that
+	// `yoe run` binds. Each row is editable: pressing Enter opens the field
+	// pre-filled with the current mapping, so a machine-declared forward can
+	// be moved off a busy host port, not just supplemented. The origin tag
+	// shows whether a row comes straight from the machine or has been
+	// overridden in local.star.
+	eff := m.effectivePorts()
+	overrideGuest := map[string]bool{}
+	for _, p := range m.qemuPorts {
+		overrideGuest[portGuest(p)] = true
+	}
+	if len(eff) == 0 {
+		b.WriteString("    " + dimStyle.Render("(machine declares no forwards)") + "\n")
+	}
+	for i, p := range eff {
 		row := numFixedQEMURows + i
+		if m.qemuEditing && m.qemuEditIndex == i {
+			b.WriteString(editField())
+			continue
+		}
 		cursor, style := rowPrefix(row)
-		label := fmt.Sprintf("%-16s local", p)
-		b.WriteString(fmt.Sprintf("%s%s\n", cursor, style.Render(label)))
+		origin := "machine"
+		if overrideGuest[portGuest(p)] {
+			origin = "local"
+		}
+		b.WriteString(fmt.Sprintf("%s%s\n", cursor, style.Render(fmt.Sprintf("%-16s %s", p, origin))))
 	}
 
-	// Trailing "[+] add port" prompt — Enter (or `a`) opens the input field.
+	// Trailing "[+] add port" prompt — Enter (or `a`) opens an empty field.
 	{
-		row := numFixedQEMURows + len(m.qemuPorts)
+		row := numFixedQEMURows + len(eff)
 		cursor, style := rowPrefix(row)
-		if m.qemuEditing {
-			cursor = "→ "
-			style = selectedStyle
-			caret := "_"
-			if m.tick {
-				caret = " "
-			}
-			b.WriteString(fmt.Sprintf("%s%s %s%s\n",
-				cursor,
-				style.Render("host:guest"),
-				headerStyle.Render(m.qemuEditBuffer),
-				caret))
+		if m.qemuEditing && m.qemuEditIndex < 0 {
+			b.WriteString(editField())
 		} else {
 			b.WriteString(fmt.Sprintf("%s%s\n", cursor, style.Render("[+] add port")))
 		}

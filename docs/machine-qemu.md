@@ -190,10 +190,18 @@ editing checked-in `.star` files:
 
 All three live in `local.star` and apply the next time you run the same image.
 The TUI editor is on **Setup → QEMU settings** (press `s`, move down to **QEMU
-settings**, press Enter). Local-override forwards layer over the machine's
-defaults with the same replace-on-guest-port rule that `--port` uses; the order
-at run time is machine ← `local.star` ← CLI, so a one-off `--port` still beats a
-saved entry for the same guest port.
+settings**, press Enter). The Ports section lists the effective forwards
+`yoe run` would bind — the machine's declarations with any `local.star`
+overrides already merged in — and every row is editable: highlight a forward,
+press Enter, and change its host port (e.g. move a colliding `8080:8080` to
+`18080:8080`). Because the override replaces by guest port, editing a
+machine-declared forward writes a `local.star` entry for that guest port that
+supersedes the machine default; pressing `d` on an overridden forward reverts it
+to the machine default, while `a`/`+` adds a brand-new forward. A
+machine-declared forward with no override can't be deleted (there is nothing in
+`local.star` to remove) — change its host port instead. The order at run time is
+machine ← `local.star` ← CLI, so a one-off `--port` still beats a saved entry
+for the same guest port.
 
 ## How `yoe qemu` runs
 
