@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.12.9] - 2026-06-25
+
 - **The BeaglePlay kernel builds on Debian and Ubuntu.** Like the bootloader and
   firmware, the kernel now builds against the target distro — its host tools get
   the OpenSSL headers and `cpio` they need from that distro's packages.
