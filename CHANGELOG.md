@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Image builds now fail loudly if the boot files don't fit the boot
+  partition.** Previously a `/boot` that overflowed the FAT boot partition was
+  silently ignored, producing an image whose boot partition was missing
+  `config.txt` or the kernel — so the board showed nothing on serial with no
+  hint why. The build now stops with the copy error instead.
+
 ## [0.12.8] - 2026-06-22
 
 - **Debian and Ubuntu images now boot on real boards.** Board firmware and boot

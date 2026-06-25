@@ -481,7 +481,17 @@ def _create_disk_image_debian(name, partitions):
 
         if p.type == "vfat":
             run("mkfs.vfat -n %s %s" % (p.label.upper(), part_img))
-            run("mcopy -sQi %s $DESTDIR/rootfs/boot/* ::/ 2>/dev/null || true" % part_img, privileged = True)
+            # Copy /boot into the FAT partition. The `ls` guard skips the
+            # copy cleanly when /boot is empty (a rootfs-only image with no
+            # kernel) — the only case the old `|| true` legitimately
+            # covered. When files *are* present, mcopy runs with no error
+            # suppression, so a real failure — above all /boot overflowing
+            # the partition — fails the build loudly instead of silently
+            # producing an image whose boot partition is missing config.txt
+            # or the kernel.
+            run("if ls $DESTDIR/rootfs/boot/* >/dev/null 2>&1; then" +
+                " mcopy -sQi %s $DESTDIR/rootfs/boot/* ::/; fi" % part_img,
+                privileged = True)
         elif p.type == "ext4":
             headroom_mb = 25
             if rootfs_mb + headroom_mb > size_mb:
@@ -621,8 +631,16 @@ def _create_disk_image(name, partitions):
 
         if p.type == "vfat":
             run("mkfs.vfat -n %s %s" % (p.label.upper(), part_img))
-            # Copy boot files from rootfs (root-owned; mcopy needs read access).
-            run("mcopy -sQi %s $DESTDIR/rootfs/boot/* ::/ 2>/dev/null || true" % part_img, privileged = True)
+            # Copy boot files from rootfs (root-owned; mcopy needs read
+            # access). The `ls` guard skips the copy cleanly when /boot is
+            # empty (rootfs-only image, no kernel) — the only case the old
+            # `|| true` legitimately covered. With files present, mcopy
+            # runs without error suppression so a real failure — above all
+            # /boot overflowing the partition — fails the build loudly
+            # instead of silently producing an unbootable image.
+            run("if ls $DESTDIR/rootfs/boot/* >/dev/null 2>&1; then" +
+                " mcopy -sQi %s $DESTDIR/rootfs/boot/* ::/; fi" % part_img,
+                privileged = True)
         elif p.type == "ext4":
             # Preflight: fail with a clear message when the rootfs won't
             # fit in the partition with enough headroom for ext4 metadata.
