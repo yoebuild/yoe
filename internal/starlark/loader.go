@@ -687,8 +687,19 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	for {
 		added := 0
 		for d := range distroSet {
-			for name, unit := range eng.Units() {
-				if !visibleToDistro(unit, d) {
+			for name := range eng.Units() {
+				// Resolve the variant of `name` that this distro actually
+				// sees, not whichever cross-distro variant happens to
+				// occupy the flat per-name map. A name like "python3" can
+				// have a real module-alpine unit AND a synthetic apt unit;
+				// eng.Units()[name] holds only one (e.g. the alpine one),
+				// so using it directly would skip the debian variant's
+				// runtime closure entirely (python3 → python3.13 →
+				// python3-minimal never materialize, leaving an interpreter-
+				// less sysroot). findVisibleByName returns the per-distro
+				// variant from the module catalog.
+				unit := eng.findVisibleByName(name, d)
+				if unit == nil {
 					continue
 				}
 				// Walk both Deps (build-time) and RuntimeDeps for

@@ -8,6 +8,19 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **BeaglePlay firmware now builds on Debian and Ubuntu, not just Alpine.** The
+  board's bootloader and firmware (U-Boot, OP-TEE, TF-A, TI firmware) build
+  natively against whichever distro an image targets, using that distro's own
+  toolchain and packages. Building a Debian or Ubuntu image no longer pulls in
+  the Alpine toolchain.
+- **Build dependencies on apt metapackages now stage their full contents.** A
+  unit that build-depends on a package like `python3` or `python3-dev` on a
+  Debian/Ubuntu image now gets the real interpreter, libraries, and headers
+  staged into its build sysroot, instead of only the (often empty) metapackage.
+- **libffi now builds on Ubuntu images.** The Ubuntu toolchain ships a newer
+  libtool that dropped a macro libffi's build configuration still referenced,
+  so its build failed during autoreconf; libffi no longer relies on that macro
+  and builds on Ubuntu as it already did on Alpine.
 - **Image builds now fail loudly if the boot files don't fit the boot
   partition.** Previously a `/boot` that overflowed the FAT boot partition was
   silently ignored, producing an image whose boot partition was missing

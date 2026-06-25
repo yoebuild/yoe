@@ -10,25 +10,42 @@ unit(
     # under /build/sysroot/lib/firmware/ where the make invocation below
     # picks them up.
     deps = [
-        "toolchain-musl",
+        "toolchain",
         "ti-linux-firmware",
         "tfa-k3",
         "optee-k3",
+        # Common-named build tools (same package name on every backend).
+        # python3-dev pulls its full closure per distro — Alpine's
+        # self-contained headers, or the apt python3.<minor>-dev /
+        # libpython3.<minor>-dev that the metapackage depends on (the
+        # build resolver materializes the whole dependency closure).
         "python3",
-        "py3-setuptools",
-        "py3-elftools",
-        "swig",
         "python3-dev",
-        "gnutls-dev",
-        "gnutls",
-        # libgnutls.so transitive deps (gnutls.pc "Requires.private")
-        "nettle",
-        "libtasn1",
-        "libidn2",
-        "p11-kit",
+        "swig",
         "openssl",
+        "p11-kit",
     ],
-    container = "toolchain-musl",
+    # Same build-time roles, distro-specific package names. Alpine bundles
+    # headers+lib and uses py3-*; the apt distros split out -dev and use
+    # python3-*. libgnutls28-dev pulls gnutls' runtime closure (nettle,
+    # libtasn1, libidn2, …) automatically.
+    distro_deps = {
+        "alpine": [
+            "py3-setuptools", "py3-elftools",
+            "gnutls", "gnutls-dev",
+            # libgnutls.so transitive deps (gnutls.pc "Requires.private")
+            "nettle", "libtasn1", "libidn2",
+        ],
+        "debian": [
+            "python3-setuptools", "python3-pyelftools",
+            "libgnutls28-dev", "nettle-dev", "libtasn1-6-dev", "libidn2-dev",
+        ],
+        "ubuntu": [
+            "python3-setuptools", "python3-pyelftools",
+            "libgnutls28-dev", "nettle-dev", "libtasn1-6-dev", "libidn2-dev",
+        ],
+    },
+    container = "toolchain",
     container_arch = "target",
     tasks = [
         task("build", steps=[
@@ -48,14 +65,17 @@ unit(
             # unit deps like gnutls. The .pc files report prefix=/usr,
             # which pkg-config returns verbatim, missing the yoe sysroot
             # entirely. U-Boot's Makefile merges $(HOSTCFLAGS) into
-            # KBUILD_HOSTCFLAGS (and same for HOSTLDFLAGS), so adding the
-            # sysroot search paths here makes the host compile/link find
-            # gnutls and any other dep-provided host-side headers/libs.
+            # KBUILD_HOSTCFLAGS (and same for HOSTLDFLAGS), so passing yoe's
+            # own $CPPFLAGS/$LDFLAGS makes the host compile/link find gnutls
+            # and other dep-provided host-side headers/libs. We use the env
+            # vars (not a hardcoded -L/build/sysroot/usr/lib) because the apt
+            # distros install libs under the multiarch dir
+            # /usr/lib/<triplet>/, which $LDFLAGS already covers.
             """
 export SWIG_LIB=$(echo /build/sysroot/usr/share/swig/*) && \\
 make ARCH=arm \\
-     HOSTCFLAGS=-I/build/sysroot/usr/include \\
-     HOSTLDFLAGS=-L/build/sysroot/usr/lib \\
+     HOSTCFLAGS="$CPPFLAGS" \\
+     HOSTLDFLAGS="$LDFLAGS" \\
      BL31=/build/sysroot/lib/firmware/bl31.bin \\
      TEE=/build/sysroot/lib/firmware/bl32.bin \\
      TI_DM=/build/sysroot/lib/firmware/ti-dm/am62xx/ipc_echo_testb_mcu1_0_release_strip.xer5f \\

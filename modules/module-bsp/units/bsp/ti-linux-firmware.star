@@ -5,8 +5,8 @@ unit(
     branch = "ti-linux-firmware",
     license = "TI-TFL",
     description = "TI K3 SYSFW (TIFS) + DM firmware blobs for AM62x and friends",
-    deps = ["toolchain-musl"],
-    container = "toolchain-musl",
+    deps = ["toolchain"],
+    container = "toolchain",
     container_arch = "target",
     tasks = [
         task("build", steps=[

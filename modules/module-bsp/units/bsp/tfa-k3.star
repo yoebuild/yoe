@@ -8,8 +8,8 @@ unit(
     branch = "master",
     license = "BSD-3-Clause",
     description = "TF-A BL31 (secure monitor) for TI K3 AM62x — input to U-Boot A53 SPL",
-    deps = ["toolchain-musl"],
-    container = "toolchain-musl",
+    deps = ["toolchain"],
+    container = "toolchain",
     container_arch = "target",
     tasks = [
         task("build", steps=[

@@ -4,8 +4,8 @@ unit(
     scope = "machine",
     license = "MIT",
     description = "BeaglePlay U-Boot environment (uEnv.txt) — bootargs + load/booti for Image + DTB",
-    deps = ["toolchain-musl"],
-    container = "toolchain-musl",
+    deps = ["toolchain"],
+    container = "toolchain",
     container_arch = "target",
     tasks = [
         task("build", steps=[

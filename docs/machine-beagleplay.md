@@ -219,12 +219,20 @@ Sources and pinning:
   beagle ships.
 - **`beagleplay-config`** — local Starlark, generates `uEnv.txt` only.
 
-All units build in the `toolchain-musl` container with
-`container_arch = "target"`, i.e. the aarch64 Alpine container under QEMU
+All units build in the generic `toolchain` container with
+`container_arch = "target"` — the resolver dispatches that to the toolchain
+matching the image's distro (Alpine's musl toolchain for an Alpine image, the
+glibc toolchain for Debian/Ubuntu), all running aarch64-native under QEMU
 user-mode. There is no cross-compilation in the conventional sense — the build
-sees the target ISA as native. The R5 SPL is the one exception (Cortex-R5F is
-armv7-R, an ISA the aarch64 toolchain can't emit) and pulls Alpine's
-`gcc-arm-none-eabi` cross toolchain via `module-alpine`.
+sees the target ISA as native. The firmware these units emit is freestanding,
+so it is identical regardless of which distro's toolchain compiled it; the
+board boots the same image on any backend. Build-time tools whose package
+names differ across backends (Alpine's `py3-*` vs the apt distros'
+`python3-*`, bundled `-dev` headers vs split `lib*-dev`) are expressed with
+`distro_deps` so each backend pulls its own names. The R5 SPL is the one
+exception to "native": Cortex-R5F is armv7-R, an ISA the aarch64 toolchain
+can't emit, so it pulls a bare-metal `gcc-arm-none-eabi` cross toolchain from
+the build distro's own feed.
 
 ## Stage-by-stage walkthrough
 
@@ -316,13 +324,16 @@ deps so their `/lib/firmware/...` outputs are visible in its sysroot at build
 time. The R5 SPL declares only `ti-linux-firmware` (it doesn't embed BL31 or
 BL32).
 
-Both U-Boot units also pull a substantial Python/host-tools chain through
-`module-alpine` — binman is a Python program with optional dependencies on
+Both U-Boot units also pull a substantial Python/host-tools chain from the
+build distro's feed — binman is a Python program with optional dependencies on
 `pyelftools`, `pyyaml`, `jsonschema`, `yamllint`, and friends. Which ones get
 exercised depends on the defconfig: the A53 build uses a smaller subset, the R5
 build's binman config invokes the `ti-board-config` entry type which drags in
 the full schema-validation stack. The dep lists in the two `.star` files reflect
-that — they intentionally differ.
+that — they intentionally differ. The distro-specific package names live in
+`distro_deps`; depending on a metapackage like `python3-dev` pulls its whole
+dependency closure (interpreter, libraries, headers) into the build sysroot,
+so the build sees a complete Python regardless of backend.
 
 ## Image assembly
 
@@ -382,14 +393,14 @@ A few things are non-obvious and worth knowing if you go to change a unit:
   `CFG_ARM64_core=y`, not via the directory layout. yoe exports `ARCH=arm64` as
   the target arch in the build env, so each unit's make line overrides it
   explicitly.
-- **No `CROSS_COMPILE` prefix in the A53 builds.** Inside the `target` Alpine
-  container, plain `gcc`/`ld`/`ar` already target aarch64; there is no
-  `aarch64-linux-musl-` triplet binary. The R5 SPL is the exception because it
-  needs `arm-none-eabi-` to emit armv7-R code.
+- **No `CROSS_COMPILE` prefix in the A53 builds.** Inside the `target`
+  container, plain `gcc`/`ld`/`ar` already target aarch64 (whether that's the
+  musl or glibc toolchain), so there is no triplet-prefixed binary to name. The
+  R5 SPL is the exception because it needs `arm-none-eabi-` to emit armv7-R code.
 - **TF-A overrides every per-tool variable.** TF-A's toolchain-detection
   searches for `aarch64-none-elf-gcc` / `aarch64-linux-gnu-gcc` by default. The
   `tfa-k3` unit passes `CC=gcc LD=gcc AS=gcc AR=gcc-ar OC=objcopy OD=objdump` on
-  the make line so detection finds the Alpine native tools. It also passes
+  the make line so detection finds the container's native tools. It also passes
   `CFLAGS= CPPFLAGS=` empty, because TF-A's `cflags.mk` merges the env values
   into its compile line and yoe's `-I/build/sysroot/usr/include` would trip
   `-Werror=missing-include-dirs`.
@@ -401,9 +412,10 @@ A few things are non-obvious and worth knowing if you go to change a unit:
 - **U-Boot's host tools want a sysroot.** `mkeficapsule` (and other
   signing/binman helpers) link against gnutls/openssl. yoe's env doesn't reach
   U-Boot's `HOSTCC`/`HOSTLD` path, so both U-Boot units pass
-  `HOSTCFLAGS=-I/build/sysroot/usr/include` and
-  `HOSTLDFLAGS=-L/build/sysroot/usr/lib` on the make command line. They also
-  export `SWIG_LIB` to redirect Alpine's swig binary at the merged sysroot for
+  `HOSTCFLAGS="$CPPFLAGS"` and `HOSTLDFLAGS="$LDFLAGS"` on the make command
+  line — yoe's own flags, which already point at the sysroot include and lib
+  dirs (including the apt distros' multiarch `/usr/lib/<triplet>/` paths).
+  They also export `SWIG_LIB` to redirect swig at the merged sysroot for
   pylibfdt generation.
 
 ## When something fails
