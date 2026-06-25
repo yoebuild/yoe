@@ -13,6 +13,7 @@
 
 ## Next Features
 
+- Tools to automatically boot-test real hardware, similar to who we do QEMU.
 - Can we watch the unit state files and automatically update the TUI if
   something changes? The idea is you could be building in two different TUIs and
   both TUIs would show current status of the other.

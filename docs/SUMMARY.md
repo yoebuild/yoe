@@ -43,6 +43,7 @@
 # Build System
 
 - [Build Dependencies and Caching](build-dependencies-and-caching.md)
+- [Caching](caching.md)
 - [Build Environment](build-environment.md)
 - [Development Environments](dev-env.md)
 - [Testing](testing.md)
