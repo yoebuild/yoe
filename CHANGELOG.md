@@ -8,6 +8,17 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Grab a package straight from the upstream distro on a dev device.** Dev
+  images now ship a `yoe-enable-upstream-feeds` command; run it on the booted
+  device to pull experimentation packages (`htop`, `strace`, …) directly from
+  the upstream Alpine or Debian/Ubuntu mirror with `apk add <pkg>@upstream` /
+  `apt install -t <suite> <pkg>`. The feed is held back so it never replaces
+  your source-built base, and it stays absent from images that don't ship the
+  enabler.
+- **Debian/Ubuntu devices no longer error on `apt update`.** The device's
+  `/etc/apt/sources.list` is no longer left pointing at a build-time mirror path
+  that doesn't exist on the device, so a routine `apt update` runs clean.
+
 ## [0.12.10] - 2026-06-26
 
 - **Go and other builds no longer fail with "exec format error".** The build

@@ -48,6 +48,11 @@ image(
     artifacts = [
         "linux", "bash",
         "ca-certificates", "curl", "less", "file", "htop", "strace", "iproute2",
+        # Dormant on-device upstream-feed enabler (run
+        # yoe-enable-upstream-feeds to opt in). Distro-neutral: each distro
+        # module ships its own "upstream-feeds" companion, so the resolver
+        # picks the right one per image. See docs/on-device-upstream-feeds.md.
+        "upstream-feeds",
     ],
     distro_artifacts = {
         "alpine": [
