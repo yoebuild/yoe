@@ -503,5 +503,16 @@ Performance is ~5-20x slower than native, which is fine for iterating on
 individual packages. For full system rebuilds, use native hardware or cloud CI
 with architecture-matched runners.
 
+Every build container is launched with an explicit `--platform linux/<arch>`,
+even when the target architecture matches the host. Docker keeps only one image
+per tag, so a shared external base image like `golang:1.26` can hold a
+foreign-arch copy left behind by an earlier cross build. Pinning the platform on
+every run forces Docker to use (and, for a multi-arch tag, fetch) the variant
+that matches the build, rather than silently reusing a mismatched cached image
+that would otherwise fail with `exec format error`. A go build whose class sets
+`container_arch="host"` runs the toolchain container at the host architecture
+and cross-compiles with `GOARCH`, so it stays native even when the target arch
+differs.
+
 Build output is stored under `build/<arch>/<unit>/` so multiple architectures
 can coexist in the same project tree.
