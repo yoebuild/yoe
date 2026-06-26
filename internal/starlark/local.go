@@ -32,9 +32,11 @@ type LocalOverrides struct {
 	// "on" forces -display ... + virtio-vga, "off" forces -nographic, "" leaves
 	// the run-time CLI flag (--display) in charge (default: off).
 	QEMUDisplay string
-	// QEMUPorts is an extra set of host:guest forward mappings appended to
-	// the machine's declared forwards. A matching guest port replaces the
-	// machine entry; otherwise the entry is appended. Empty means "no extras".
+	// QEMUPorts is a set of host:guest forward mappings layered over the
+	// machine's declared forwards. A matching guest port replaces the machine
+	// entry (this is how the Setup screen moves a machine forward like 8080
+	// off a busy host port); a new guest port is appended. Empty means "use
+	// the machine's forwards unchanged".
 	QEMUPorts []string
 	// ParallelBuilds caps how many units `yoe build` builds concurrently.
 	// Zero means "not set" — the build picks its own default.

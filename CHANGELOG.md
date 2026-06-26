@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Change a machine's QEMU port forwards from the TUI.** The Setup → QEMU
+  settings Ports list is now fully editable: highlight any forward — including a
+  machine-declared one like `8080:8080` — press Enter, and move it to a free
+  host port when the default collides. Previously the machine's forwards were
+  read-only and you could only add extras, so a busy host port blocked `yoe run`
+  with no way to fix it in the UI.
+
 ## [0.12.9] - 2026-06-25
 
 - **The BeaglePlay kernel builds on Debian and Ubuntu.** Like the bootloader and

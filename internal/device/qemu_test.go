@@ -1,10 +1,12 @@
 package device
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -66,9 +68,9 @@ func TestMergeQEMUPorts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := mergeQEMUPorts(tt.machine, tt.cli)
+			got := MergeQEMUPorts(tt.machine, tt.cli)
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("mergeQEMUPorts(%v, %v) = %v, want %v", tt.machine, tt.cli, got, tt.want)
+				t.Errorf("MergeQEMUPorts(%v, %v) = %v, want %v", tt.machine, tt.cli, got, tt.want)
 			}
 		})
 	}
@@ -78,9 +80,47 @@ func TestMergeQEMUPorts(t *testing.T) {
 // and writing through the machine's declared slice.
 func TestMergeQEMUPortsDoesNotMutateMachine(t *testing.T) {
 	machine := []string{"2222:22", "8118:8118"}
-	_ = mergeQEMUPorts(machine, []string{"18118:8118"})
+	_ = MergeQEMUPorts(machine, []string{"18118:8118"})
 	if machine[1] != "8118:8118" {
 		t.Errorf("machine slice was mutated: %v", machine)
+	}
+}
+
+// TestCheckQEMUPortsAvailable_OverrideRetargetsBusyPort reproduces the Setup
+// → QEMU settings fix end-to-end at the preflight layer: a machine forward on
+// a host port that's already bound is moved off it by a local override, and
+// the availability check must honor the override (test the remapped port)
+// rather than the original machine port. Passing nil overrides — the old TUI
+// behavior — must still flag the collision.
+func TestCheckQEMUPortsAvailable_OverrideRetargetsBusyPort(t *testing.T) {
+	// Bind a port to stand in for "8080 is already taken".
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("bind busy port: %v", err)
+	}
+	defer busy.Close()
+	busyPort := strconv.Itoa(busy.Addr().(*net.TCPAddr).Port)
+
+	// Grab a second ephemeral port, then release it so it's free to remap onto.
+	freeLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("bind free port: %v", err)
+	}
+	freePort := strconv.Itoa(freeLn.Addr().(*net.TCPAddr).Port)
+	freeLn.Close()
+
+	machine := &yoestar.Machine{
+		QEMU: &yoestar.QEMUConfig{Ports: []string{busyPort + ":8080"}},
+	}
+
+	// No override: the machine forward still points at the busy port → error.
+	if err := CheckQEMUPortsAvailable(machine, nil); err == nil {
+		t.Fatalf("expected a collision on busy port %s with no override", busyPort)
+	}
+
+	// Override remaps guest 8080 onto the free host port → must pass.
+	if err := CheckQEMUPortsAvailable(machine, []string{freePort + ":8080"}); err != nil {
+		t.Fatalf("override %s:8080 should clear the collision, got: %v", freePort, err)
 	}
 }
 
