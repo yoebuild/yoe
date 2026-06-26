@@ -749,11 +749,13 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	// Unit identity fields + auto-populated machine/arch/console/project,
 	// with unit.Extra kwargs overriding on collision.
 	projectName, projectVersion := "", ""
+	baseVersion := ""
 	if proj != nil {
 		projectName = proj.Name
 		projectVersion = proj.Version
+		baseVersion = proj.BaseVersionForDistro(opts.EffectiveDistro)
 	}
-	tctxData := BuildTemplateContext(unit, opts.Arch, opts.Machine, console, projectName, projectVersion)
+	tctxData := BuildTemplateContext(unit, opts.Arch, opts.Machine, console, projectName, projectVersion, opts.EffectiveDistro, baseVersion)
 
 	// Debian image assembly reads the project repo's Packages index as
 	// mmdebstrap's copy: source. Regenerate it from the current pool

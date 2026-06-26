@@ -145,8 +145,10 @@ func buildSyntheticModule(eng *yoestar.Engine, composedName, parent, indexRoot s
 	registerFeedState(eng, s)
 
 	return &yoestar.SyntheticModule{
-		Name:   composedName,
-		Parent: parent,
+		Name:    composedName,
+		Parent:  parent,
+		Distro:  "alpine",
+		Release: args.branch,
 		Lookup: func(name string) (*yoestar.Unit, error) {
 			return s.lookup(composedName, name)
 		},

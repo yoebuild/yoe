@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`/etc/os-release` now records the base distribution and version.** Alongside
+  yoe's own identity, images stamp `ID_LIKE` plus `YOE_BASE_ID` /
+  `YOE_BASE_VERSION_ID` with the upstream backend the image was built on (e.g.
+  `debian`/`trixie`, `ubuntu`/`resolute`, `alpine`/`v3.21`), so a booted system
+  reports what it's based on. Templates can use the new `base_distro` and
+  `base_version` variables.
 - **The BeaglePlay kernel builds on Debian and Ubuntu.** Like the bootloader and
   firmware, the kernel now builds against the target distro — its host tools get
   the OpenSSL headers and `cpio` they need from that distro's packages.
