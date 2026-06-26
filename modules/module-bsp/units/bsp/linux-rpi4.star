@@ -7,6 +7,14 @@ unit(
     license = "GPL-2.0",
     description = "Raspberry Pi 4 kernel (BCM2711)",
     deps = ["toolchain"],
+    # The kernel's certs/extract-cert host tool needs OpenSSL/libcrypto
+    # headers. Package name differs by backend: Alpine bundles them in
+    # openssl-dev, the apt distros split them into libssl-dev.
+    distro_deps = {
+        "alpine": ["openssl-dev"],
+        "debian": ["libssl-dev"],
+        "ubuntu": ["libssl-dev"],
+    },
     container = "toolchain",
     container_arch = "target",
     tasks = [
@@ -20,7 +28,10 @@ make ARCH=arm64 bcm2711_defconfig
 scripts/kconfig/merge_config.sh -m -O . .config .yoe-container.cfg
 make ARCH=arm64 olddefconfig
 """,
-            "make ARCH=arm64 -j$NPROC Image modules dtbs",
+            # HOSTCFLAGS/HOSTLDFLAGS carry the sysroot include/lib paths to the
+            # kernel's host tools (e.g. certs/extract-cert, which #includes
+            # <openssl/bio.h>). Host tools do not inherit CFLAGS/CPPFLAGS.
+            "make ARCH=arm64 HOSTCFLAGS=\"$CPPFLAGS\" HOSTLDFLAGS=\"$LDFLAGS\" -j$NPROC Image modules dtbs",
             # Install kernel as kernel8.img (RPi4 64-bit naming convention)
             "install -D arch/arm64/boot/Image $DESTDIR/boot/kernel8.img",
             # Install device trees
