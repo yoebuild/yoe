@@ -11,15 +11,17 @@ import (
 )
 
 // BuildTemplateContext builds the context map passed to Go templates, merging
-// auto-populated fields (arch, machine, console, project, project_version)
-// and unit identity fields (name, version, release) with the unit's Extra
-// kwargs. Extra wins on key collision so explicit unit fields always override
-// defaults.
+// auto-populated fields (arch, machine, console, project, project_version,
+// base_distro, base_version) and unit identity fields (name, version, release)
+// with the unit's Extra kwargs. Extra wins on key collision so explicit unit
+// fields always override defaults.
 //
 // `version` is the unit's own version (e.g. base-files-1.0.0); use
 // `project_version` for the project-wide value declared in PROJECT.star,
-// which os-release.tmpl etc. surface to the booted system.
-func BuildTemplateContext(u *yoestar.Unit, arch, machine, console, project, projectVersion string) map[string]any {
+// which os-release.tmpl etc. surface to the booted system. `base_distro` /
+// `base_version` are the upstream backend the image is built on (e.g.
+// "debian"/"trixie", "alpine"/"v3.21"), surfaced into /etc/os-release.
+func BuildTemplateContext(u *yoestar.Unit, arch, machine, console, project, projectVersion, baseDistro, baseVersion string) map[string]any {
 	m := map[string]any{
 		"name":            u.Name,
 		"version":         u.Version,
@@ -29,6 +31,8 @@ func BuildTemplateContext(u *yoestar.Unit, arch, machine, console, project, proj
 		"console":         console,
 		"project":         project,
 		"project_version": projectVersion,
+		"base_distro":     baseDistro,
+		"base_version":    baseVersion,
 	}
 	for k, v := range u.Extra {
 		m[k] = v

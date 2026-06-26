@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.12.11] - 2026-06-26
+
 - **Grab a package straight from the upstream distro on a dev device.** Dev
   images now ship a `yoe-enable-upstream-feeds` command; run it on the booted
   device to pull experimentation packages (`htop`, `strace`, …) directly from
@@ -18,6 +20,12 @@ and this project adheres to
 - **Debian/Ubuntu devices no longer error on `apt update`.** The device's
   `/etc/apt/sources.list` is no longer left pointing at a build-time mirror path
   that doesn't exist on the device, so a routine `apt update` runs clean.
+- **`/etc/os-release` now records the base distribution and version.** Alongside
+  yoe's own identity, images stamp `ID_LIKE` plus `YOE_BASE_ID` /
+  `YOE_BASE_VERSION_ID` with the upstream backend the image was built on (e.g.
+  `debian`/`trixie`, `ubuntu`/`resolute`, `alpine`/`v3.21`), so a booted system
+  reports what it's based on. Templates can use the new `base_distro` and
+  `base_version` variables.
 
 ## [0.12.10] - 2026-06-26
 

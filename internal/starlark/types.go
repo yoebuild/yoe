@@ -514,6 +514,30 @@ func (p *Project) SuiteForDistro(distro string) (string, error) {
 	return suite, nil
 }
 
+// BaseVersionForDistro returns the upstream release identifier the given
+// distro's feed declares — the apt suite codename (e.g. "trixie",
+// "resolute") or, for Alpine, the feed branch (e.g. "v3.21"). Unlike
+// SuiteForDistro this spans every backend and never errors: it returns ""
+// when no feed for the distro declares a version, so callers (os-release
+// stamping) can degrade gracefully rather than fail the build.
+func (p *Project) BaseVersionForDistro(distro string) string {
+	if p == nil {
+		return ""
+	}
+	for _, sm := range p.SyntheticModules {
+		if sm == nil || sm.Distro != distro {
+			continue
+		}
+		if sm.Suite != "" {
+			return sm.Suite
+		}
+		if sm.Release != "" {
+			return sm.Release
+		}
+	}
+	return ""
+}
+
 // QEMUPorts returns the port mappings from the machine's QEMU config, or nil.
 func (m *Machine) QEMUPorts() []string {
 	if m.QEMU == nil {
