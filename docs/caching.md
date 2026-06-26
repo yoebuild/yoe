@@ -185,12 +185,15 @@ $YOE_CACHE/
 │   │   ├── ab/cd1234...5678.tar.gz     # tarball, keyed by content SHA256
 │   │   ├── ef/01abcd...9012.tar.xz     # another tarball
 │   │   └── 34/567890...abcd.git/       # bare git repo, keyed by url#ref hash
-│   └── packages/
-│       ├── x86_64/
-│       │   ├── a1/b2c3d4...e5f6.apk    # built package, keyed by unit input hash
-│       │   └── 78/90abcd...1234.deb
-│       └── aarch64/
-│           └── ...
+│   ├── packages/
+│   │   ├── x86_64/
+│   │   │   ├── a1/b2c3d4...e5f6.apk    # built package, keyed by unit input hash
+│   │   │   └── 78/90abcd...1234.deb
+│   │   └── aarch64/
+│   │       └── ...
+│   └── staged/                          # (planned) extracted sysroot trees,
+│       └── aarch64/                     # keyed by package hash — see design below
+│           └── a1/b2c3d4...e5f6/        # package extracted once, hardlink source
 ├── index/
 │   ├── sources.json                     # URL → content hash mapping
 │   └── packages.json                    # unit name+version → input hash mapping
@@ -359,6 +362,28 @@ The signing key is configured in `PROJECT.star` (`cache(signing=...)`). For CI,
 the private key is provided via environment variable; workstations can use a
 read-only public key for verification only.
 
+### Sysroots are assembled, not cached
+
+A unit builds against a **per-unit sysroot** — the staged headers and libraries
+of its transitive dependencies. yoe builds this in two steps
+(`internal/build/sandbox.go`):
+
+- **`StageSysroot`** — after a unit builds, its destdir (the full install
+  output) is hardlinked into `build/<unit>/sysroot-stage/`.
+- **`AssembleSysroot`** — before a downstream unit builds, the `sysroot-stage/`
+  of every transitive dependency is hardlink-merged (`cp -al`) into a private
+  `build/<unit>/sysroot/`.
+
+Assembly is therefore already cheap — a hardlink farm, not a re-extraction — but
+**the staged tree is a side effect of a local build that lives in `build/`, not
+an object in the cache.** The object store holds the _packaged_ artifact (`.apk`
+/ `.deb`); the staged sysroot form is not stored. So on a **package cache hit**
+— where the build is skipped and the package is pulled from the store — there is
+no destdir, and `sysroot-stage/` must be **re-derived by extracting the cached
+package** on every consumer machine. We cache the install output, not the staged
+tree it becomes. Closing that is the
+[sysroot / staging caching](#sysroot--staging-caching) design item below.
+
 ### Current limitation
 
 The limitation the survey isolates: keying is purely input-addressed, so any
@@ -424,6 +449,61 @@ This is the one real capability gap. Three options, in increasing cost:
 Recommendation to explore first: **option 2**, scoped as an optional layer over
 the existing input-hash store so the simple path still "just works."
 
+### Sysroot / staging caching
+
+Today yoe caches the _packaged_ artifact but reconstructs the _staged sysroot
+tree_ from a local build's destdir (see
+[Sysroots are assembled, not cached](#sysroots-are-assembled-not-cached)). The
+consequence: a package cache hit skips the build but must re-extract the package
+into `sysroot-stage/` on every consumer machine before downstream units can
+assemble against it. The staging work is invisible to the cache.
+
+The fix is the same one Nix and Yocto already use — treat the **staged tree as a
+distinct cache layer**, addressed by the package that produced it:
+
+| Option                              | What it caches                                   | Hit rate            | Verdict                |
+| ----------------------------------- | ------------------------------------------------ | ------------------- | ---------------------- |
+| 1. Status quo                       | Nothing extra; extract package → stage on hit    | n/a                 | Re-extract per machine |
+| 2. **Per-package staged tree**      | `staged/<arch>/<pkghash>/`, content-addressed    | High (per package)  | **Recommended**        |
+| 3. Whole per-unit assembled sysroot | The merged `sysroot/`, keyed by dep-closure hash | Low (unit-specific) | Skip                   |
+
+- **Option 2 is the Yocto `sysroot-components` model.** Extract each package
+  once (anywhere), store the extracted tree as a cache object keyed by the
+  package's input hash. A package cache hit then yields a ready staged tree with
+  no re-extraction; `AssembleSysroot` keeps doing the cheap hardlink merge it
+  does today. Storing the extracted form is redundant _data_ (it is derivable
+  from the `.apk`/`.deb`), so it can stay a **local** cache layer — there is
+  little reason to push extracted trees to S3 when the package is already there
+  and extraction is the only cost being saved.
+- **Option 3 rarely pays.** A per-unit sysroot is the union of one unit's
+  transitive deps, so two units almost never share an identical closure — the
+  hit rate is poor, and assembly from option 2's staged trees is already a
+  hardlink farm. Not worth a cache entry.
+- **Nix's alternative — no sysroot at all.** Nix points the compiler directly at
+  store paths (`NIX_CFLAGS_COMPILE`, `-L<store-path>`) instead of merging a
+  sysroot. yoe deliberately assembles a single `--sysroot` directory because
+  vanilla autotools/cmake builds expect one; the staged-tree cache keeps that
+  ergonomics while recovering Nix's "extract each input once" efficiency.
+- **The real change is "derive the stage from the package, not destdir."** This
+  is what makes the staging cache possible at all: on a package cache hit there
+  is no destdir, only the pulled `.apk`/`.deb`, so the staged tree must be
+  `extract(package)`. As a bonus it makes the sysroot identical on a hit and a
+  miss — destdir and the packaged output can differ (packaging strips binaries,
+  drops `.la` files, excludes paths). This canonicalization is independent of
+  split packages.
+- **Split packages are orthogonal, not a prerequisite.** Per-package staging
+  caching works today against monolithic packages: extract the one package a
+  unit produces, key the tree on that package's hash. Today a unit's package
+  _is_ its whole destdir — `CreateAPK` tars destDir with no dev-file filtering —
+  so it already carries the headers, `.a`, `.so` symlinks, and `.pc` files the
+  build sysroot needs; extracting that single package yields a complete staged
+  tree. Splitting into `-dev` / `-libs` later is a separate refinement for
+  _image leanness_ (the runtime image would install only `main` instead of
+  shipping dev files to the device, while the build sysroot assembles `main` +
+  `-dev`), not a caching requirement. When split lands, the staging layer simply
+  keys on the subpackage artifacts — a one-time cache re-key, not a code
+  migration. No need to couple the two or wait for one.
+
 ### Fetch / build split and determinism
 
 yoe already separates source fetching (content-addressed `sources/`) from
@@ -481,11 +561,16 @@ once, signs them, and every downstream small team pulls them. Tiering:
 - Cache key stability across yoe versions — when `internal/resolve/hash.go`
   changes shape, every key moves. Do we version the key scheme to avoid mass
   invalidation on a yoe upgrade?
+- Sysroot staging: is the per-package staged-tree cache worth keeping
+  local-only, or does a slow extraction step (large `-dev` closures) eventually
+  justify pushing extracted trees remotely too? Measure extraction cost on a
+  cache hit before deciding.
 
 ## References
 
 - [build-environment.md](build-environment.md) — build containers, sandboxing,
-  and multi-target builds (the caching architecture now lives here).
+  sysroot assembly, and multi-target builds (the caching architecture moved into
+  this chapter).
 - [build-dependencies-and-caching.md](build-dependencies-and-caching.md) — the
   three kinds of build dependency and why caching is symmetric at the unit
   level.

@@ -36,9 +36,12 @@ func checkQEMUPortsFree(ports []string) error {
 	return nil
 }
 
-// mergeQEMUPorts combines a machine's declared forwards with CLI `--port`
-// entries. A CLI entry whose guest port matches a machine entry replaces
-// that machine entry; a CLI entry with a new guest port is appended.
+// MergeQEMUPorts combines a machine's declared forwards with override
+// entries (CLI `--port` flags or local.star `qemu_ports`). An override
+// entry whose guest port matches a machine entry replaces that machine
+// entry; an override entry with a new guest port is appended. Exported so
+// the TUI's Setup screen can show — and let the user edit — the same
+// effective forward list that `yoe run` ultimately binds.
 //
 // Replacing (rather than appending) is what makes `--port` usable for
 // qemu-in-qemu: when `yoe run` executes inside a QEMU guest, the outer
@@ -46,7 +49,7 @@ func checkQEMUPortsFree(ports []string) error {
 // 8118). `--port 18118:8118` then moves the host side of the 8118 forward
 // off the taken port instead of declaring a second, still-colliding
 // forward for the same guest port.
-func mergeQEMUPorts(machinePorts, cliPorts []string) []string {
+func MergeQEMUPorts(machinePorts, cliPorts []string) []string {
 	guestPort := func(p string) (string, bool) {
 		_, guest, ok := strings.Cut(p, ":")
 		return guest, ok && guest != ""
@@ -78,7 +81,7 @@ func mergeQEMUPorts(machinePorts, cliPorts []string) []string {
 // before launching so a guest that is already running is reported
 // clearly instead of as an opaque QEMU exit code.
 func CheckQEMUPortsAvailable(machine *yoestar.Machine, extraPorts []string) error {
-	return checkQEMUPortsFree(mergeQEMUPorts(machine.QEMUPorts(), extraPorts))
+	return checkQEMUPortsFree(MergeQEMUPorts(machine.QEMUPorts(), extraPorts))
 }
 
 // qemuStderrTail returns the last non-empty line of captured QEMU stderr,
@@ -154,7 +157,7 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 
 	// Fail fast (before the disk grow) if a guest is already holding the
 	// host forward ports — the common "an image is already running" case.
-	if err := checkQEMUPortsFree(mergeQEMUPorts(machine.QEMUPorts(), opts.Ports)); err != nil {
+	if err := checkQEMUPortsFree(MergeQEMUPorts(machine.QEMUPorts(), opts.Ports)); err != nil {
 		return err
 	}
 
@@ -498,7 +501,7 @@ func BuildQEMUArgs(machine *yoestar.Machine, opts QEMUOptions, imgPath, kernelPa
 
 	// Merge machine-defined ports with extra ports. An extra entry whose
 	// guest port matches a machine forward replaces it (qemu-in-qemu).
-	ports := mergeQEMUPorts(machine.QEMUPorts(), opts.Ports)
+	ports := MergeQEMUPorts(machine.QEMUPorts(), opts.Ports)
 	netdev := "user,id=net0"
 	for _, port := range ports {
 		// port format is "host:guest", QEMU wants "hostfwd=tcp::host-:guest"

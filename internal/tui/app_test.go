@@ -1313,3 +1313,267 @@ func TestWrapShellCommandText(t *testing.T) {
 		t.Fatalf("netdev arg unexpectedly quoted: %q", got)
 	}
 }
+
+// qemuTestModel builds a model whose default machine declares the given
+// forwards and whose local.star overrides start as localPorts. The QEMU
+// settings sub-screen is active so the port-edit handlers can be driven
+// directly.
+func qemuTestModel(t *testing.T, machinePorts, localPorts []string) model {
+	t.Helper()
+	return model{
+		projectDir:    t.TempDir(),
+		qemuPorts:     append([]string(nil), localPorts...),
+		qemuEditIndex: -1,
+		proj: &yoestar.Project{
+			Defaults: yoestar.Defaults{Machine: "qemu-x86"},
+			Machines: map[string]*yoestar.Machine{
+				"qemu-x86": {Name: "qemu-x86", QEMU: &yoestar.QEMUConfig{Ports: machinePorts}},
+			},
+		},
+	}
+}
+
+func qemuKey(t *testing.T, m model, s string) model {
+	t.Helper()
+	var msg tea.KeyMsg
+	switch s {
+	case "enter":
+		msg = tea.KeyMsg{Type: tea.KeyEnter}
+	case "esc":
+		msg = tea.KeyMsg{Type: tea.KeyEsc}
+	default:
+		msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+	}
+	updated, _ := m.updateSetupQEMU(msg)
+	return updated.(model)
+}
+
+// TestQEMUPortEdit_RetargetsMachineForward exercises the Setup-screen flow the
+// user hit: a machine-declared forward (8080) whose host port collides is
+// edited to a free host port. The edit must land as a local override that
+// replaces the machine entry, so the effective list — and local.star — carry
+// the new host port.
+func TestQEMUPortEdit_RetargetsMachineForward(t *testing.T) {
+	m := qemuTestModel(t, []string{"2222:22", "8080:8080"}, nil)
+	// Cursor onto the second port row (8080:8080).
+	m.qemuCursor = numFixedQEMURows + 1
+	m = qemuKey(t, m, "enter") // open the edit field, pre-filled
+	if !m.qemuEditing || m.qemuEditIndex != 1 {
+		t.Fatalf("expected editing row 1, got editing=%v index=%d", m.qemuEditing, m.qemuEditIndex)
+	}
+	if m.qemuEditBuffer != "8080:8080" {
+		t.Fatalf("edit field not pre-filled: %q", m.qemuEditBuffer)
+	}
+	// Replace the buffer with a free host port and commit.
+	m.qemuEditBuffer = "18080:8080"
+	updated, _ := m.updateSetupQEMUPortInput(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+
+	eff := m.effectivePorts()
+	want := []string{"2222:22", "18080:8080"}
+	if strings.Join(eff, ",") != strings.Join(want, ",") {
+		t.Fatalf("effective ports = %v, want %v", eff, want)
+	}
+	if strings.Join(m.qemuPorts, ",") != "18080:8080" {
+		t.Fatalf("local override = %v, want [18080:8080]", m.qemuPorts)
+	}
+	ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+	if strings.Join(ov.QEMUPorts, ",") != "18080:8080" {
+		t.Fatalf("saved local.star qemu_ports = %v, want [18080:8080]", ov.QEMUPorts)
+	}
+}
+
+// TestQEMUPortEdit_BackToMachineDefaultDropsOverride checks that editing a
+// forward back to exactly the machine default removes the override rather than
+// leaving a redundant local entry.
+func TestQEMUPortEdit_BackToMachineDefaultDropsOverride(t *testing.T) {
+	m := qemuTestModel(t, []string{"8080:8080"}, []string{"18080:8080"})
+	m.qemuCursor = numFixedQEMURows // the (overridden) 8080 row
+	m = qemuKey(t, m, "enter")
+	m.qemuEditBuffer = "8080:8080"
+	updated, _ := m.updateSetupQEMUPortInput(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if len(m.qemuPorts) != 0 {
+		t.Fatalf("override should be dropped, got %v", m.qemuPorts)
+	}
+	if eff := m.effectivePorts(); strings.Join(eff, ",") != "8080:8080" {
+		t.Fatalf("effective ports = %v, want [8080:8080]", eff)
+	}
+}
+
+// TestQEMUPortDelete_RevertsOverride deletes an overridden forward and expects
+// it to revert to the machine default, not vanish.
+func TestQEMUPortDelete_RevertsOverride(t *testing.T) {
+	m := qemuTestModel(t, []string{"8080:8080"}, []string{"18080:8080"})
+	m.qemuCursor = numFixedQEMURows
+	m = qemuKey(t, m, "d")
+	if len(m.qemuPorts) != 0 {
+		t.Fatalf("override not removed: %v", m.qemuPorts)
+	}
+	if eff := m.effectivePorts(); strings.Join(eff, ",") != "8080:8080" {
+		t.Fatalf("effective ports = %v, want machine default [8080:8080]", eff)
+	}
+}
+
+// TestQEMUPortDelete_MachineForwardRefused confirms a machine-declared forward
+// with no override can't be deleted — it must be edited instead.
+func TestQEMUPortDelete_MachineForwardRefused(t *testing.T) {
+	m := qemuTestModel(t, []string{"8080:8080"}, nil)
+	m.qemuCursor = numFixedQEMURows
+	m = qemuKey(t, m, "d")
+	if eff := m.effectivePorts(); strings.Join(eff, ",") != "8080:8080" {
+		t.Fatalf("machine forward should survive delete, got %v", eff)
+	}
+	if m.message == "" {
+		t.Fatalf("expected an explanatory message on refused delete")
+	}
+}
+
+// TestQEMUPortAdd_AppendsNewForward checks the add-row path still appends a
+// brand-new forward as a local override.
+func TestQEMUPortAdd_AppendsNewForward(t *testing.T) {
+	m := qemuTestModel(t, []string{"2222:22"}, nil)
+	m = qemuKey(t, m, "a") // jump to add row, open empty field
+	if !m.qemuEditing || m.qemuEditIndex != -1 {
+		t.Fatalf("expected add mode, got editing=%v index=%d", m.qemuEditing, m.qemuEditIndex)
+	}
+	m.qemuEditBuffer = "9000:9000"
+	updated, _ := m.updateSetupQEMUPortInput(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if eff := m.effectivePorts(); strings.Join(eff, ",") != "2222:22,9000:9000" {
+		t.Fatalf("effective ports = %v, want [2222:22 9000:9000]", eff)
+	}
+}
+
+// TestQEMUPortEdit_ChangesGuestDropsStaleOverride covers the subtle edit path
+// where both the host AND guest port change: editing an overridden forward
+// (18080:8080) to a different guest (19090:9090) must drop the old override
+// keyed to guest 8080, so no stale 8080 forward lingers behind the new one.
+func TestQEMUPortEdit_ChangesGuestDropsStaleOverride(t *testing.T) {
+	m := qemuTestModel(t, []string{"2222:22"}, []string{"18080:8080"})
+	// Effective is [2222:22, 18080:8080]; edit the 8080 row (index 1).
+	m.qemuCursor = numFixedQEMURows + 1
+	m = qemuKey(t, m, "enter")
+	if m.qemuEditBuffer != "18080:8080" {
+		t.Fatalf("edit field not pre-filled: %q", m.qemuEditBuffer)
+	}
+	m.qemuEditBuffer = "19090:9090"
+	updated, _ := m.updateSetupQEMUPortInput(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+
+	if strings.Join(m.qemuPorts, ",") != "19090:9090" {
+		t.Fatalf("override = %v, want [19090:9090] with no stale 8080 entry", m.qemuPorts)
+	}
+	if eff := m.effectivePorts(); strings.Join(eff, ",") != "2222:22,19090:9090" {
+		t.Fatalf("effective ports = %v, want [2222:22 19090:9090]", eff)
+	}
+	ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+	if strings.Join(ov.QEMUPorts, ",") != "19090:9090" {
+		t.Fatalf("saved local.star qemu_ports = %v, want [19090:9090]", ov.QEMUPorts)
+	}
+}
+
+// TestQEMUPortInput_InvalidRejected confirms a malformed mapping is refused:
+// the editor stays open, an explanatory message is set, and no port changes.
+func TestQEMUPortInput_InvalidRejected(t *testing.T) {
+	m := qemuTestModel(t, []string{"2222:22"}, nil)
+	m = qemuKey(t, m, "a") // open empty add field
+	m.qemuEditBuffer = "notaport"
+	updated, _ := m.updateSetupQEMUPortInput(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if !m.qemuEditing {
+		t.Fatalf("editor should stay open on invalid input")
+	}
+	if !strings.Contains(m.message, "invalid port mapping") {
+		t.Fatalf("expected an invalid-mapping message, got %q", m.message)
+	}
+	if len(m.qemuPorts) != 0 {
+		t.Fatalf("no override should be recorded, got %v", m.qemuPorts)
+	}
+}
+
+// TestQEMUPortInput_EmptyCancels confirms committing an empty buffer just
+// closes the editor without recording a forward.
+func TestQEMUPortInput_EmptyCancels(t *testing.T) {
+	m := qemuTestModel(t, []string{"2222:22"}, nil)
+	m = qemuKey(t, m, "a")
+	m.qemuEditBuffer = "   "
+	updated, _ := m.updateSetupQEMUPortInput(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if m.qemuEditing || m.qemuEditIndex != -1 {
+		t.Fatalf("editor should be closed and reset, got editing=%v index=%d", m.qemuEditing, m.qemuEditIndex)
+	}
+	if len(m.qemuPorts) != 0 {
+		t.Fatalf("no override should be recorded, got %v", m.qemuPorts)
+	}
+}
+
+// TestQEMUPortInput_EscCancels confirms Esc abandons an in-progress edit,
+// resets the edit index, and leaves the forwards untouched.
+func TestQEMUPortInput_EscCancels(t *testing.T) {
+	m := qemuTestModel(t, []string{"8080:8080"}, nil)
+	m.qemuCursor = numFixedQEMURows // the 8080 row
+	m = qemuKey(t, m, "enter")
+	if !m.qemuEditing {
+		t.Fatalf("expected to be editing the 8080 row")
+	}
+	m.qemuEditBuffer = "18080:8080"
+	updated, _ := m.updateSetupQEMUPortInput(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	if m.qemuEditing || m.qemuEditIndex != -1 {
+		t.Fatalf("editor should be closed and reset, got editing=%v index=%d", m.qemuEditing, m.qemuEditIndex)
+	}
+	if len(m.qemuPorts) != 0 {
+		t.Fatalf("Esc must not record an override, got %v", m.qemuPorts)
+	}
+	if eff := m.effectivePorts(); strings.Join(eff, ",") != "8080:8080" {
+		t.Fatalf("effective ports = %v, want unchanged [8080:8080]", eff)
+	}
+}
+
+// TestQEMUPortDelete_RemovesPurelyLocalForward deletes a local-only forward
+// (one the machine never declared); it must vanish entirely rather than
+// reverting to a non-existent machine default.
+func TestQEMUPortDelete_RemovesPurelyLocalForward(t *testing.T) {
+	m := qemuTestModel(t, []string{"2222:22"}, []string{"9000:9000"})
+	m.qemuCursor = numFixedQEMURows + 1 // the local 9000 row
+	m = qemuKey(t, m, "d")
+	if len(m.qemuPorts) != 0 {
+		t.Fatalf("local forward not removed: %v", m.qemuPorts)
+	}
+	if eff := m.effectivePorts(); strings.Join(eff, ",") != "2222:22" {
+		t.Fatalf("effective ports = %v, want [2222:22]", eff)
+	}
+}
+
+// TestQEMUPortAdd_ViaEnterOnAddRow covers adding a forward by landing the
+// cursor on the trailing "[+] add port" row and pressing Enter (the path that
+// exercises qemuIsAddRow), as opposed to the `a` shortcut.
+func TestQEMUPortAdd_ViaEnterOnAddRow(t *testing.T) {
+	m := qemuTestModel(t, []string{"2222:22"}, nil)
+	m.qemuCursor = numFixedQEMURows + len(m.effectivePorts()) // the add row
+	if !m.qemuIsAddRow(m.qemuCursor) {
+		t.Fatalf("cursor %d is not the add row", m.qemuCursor)
+	}
+	m = qemuKey(t, m, "enter")
+	if !m.qemuEditing || m.qemuEditIndex != -1 {
+		t.Fatalf("expected add mode, got editing=%v index=%d", m.qemuEditing, m.qemuEditIndex)
+	}
+	m.qemuEditBuffer = "9000:9000"
+	updated, _ := m.updateSetupQEMUPortInput(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if eff := m.effectivePorts(); strings.Join(eff, ",") != "2222:22,9000:9000" {
+		t.Fatalf("effective ports = %v, want [2222:22 9000:9000]", eff)
+	}
+}
+
+// TestQEMUSettingsSummary_CountsEffectiveNotDoubled guards the port-count
+// regression this feature fixed: when a local override replaces a machine
+// forward (same guest port), the summary must count one effective forward,
+// not double-count machine + override.
+func TestQEMUSettingsSummary_CountsEffectiveNotDoubled(t *testing.T) {
+	m := qemuTestModel(t, []string{"8080:8080"}, []string{"18080:8080"})
+	if got := m.qemuSettingsSummary(); !strings.Contains(got, "1 port(s)") {
+		t.Fatalf("summary = %q, want it to report 1 port(s)", got)
+	}
+}

@@ -14,6 +14,23 @@ and this project adheres to
   `debian`/`trixie`, `ubuntu`/`resolute`, `alpine`/`v3.21`), so a booted system
   reports what it's based on. Templates can use the new `base_distro` and
   `base_version` variables.
+
+## [0.12.10] - 2026-06-26
+
+- **Go and other builds no longer fail with "exec format error".** The build
+  container's architecture is now pinned explicitly on every run, so a build
+  always uses a matching-arch image even when a different-architecture copy of a
+  shared base image (such as `golang`) is already cached locally. Previously a
+  same-arch build could silently pick up the wrong image and fail.
+- **Change a machine's QEMU port forwards from the TUI.** The Setup → QEMU
+  settings Ports list is now fully editable: highlight any forward — including a
+  machine-declared one like `8080:8080` — press Enter, and move it to a free
+  host port when the default collides. Previously the machine's forwards were
+  read-only and you could only add extras, so a busy host port blocked `yoe run`
+  with no way to fix it in the UI.
+
+## [0.12.9] - 2026-06-25
+
 - **The BeaglePlay kernel builds on Debian and Ubuntu.** Like the bootloader and
   firmware, the kernel now builds against the target distro — its host tools get
   the OpenSSL headers and `cpio` they need from that distro's packages.
@@ -31,9 +48,9 @@ and this project adheres to
   Debian/Ubuntu image now gets the real interpreter, libraries, and headers
   staged into its build sysroot, instead of only the (often empty) metapackage.
 - **libffi now builds on Ubuntu images.** The Ubuntu toolchain ships a newer
-  libtool that dropped a macro libffi's build configuration still referenced,
-  so its build failed during autoreconf; libffi no longer relies on that macro
-  and builds on Ubuntu as it already did on Alpine.
+  libtool that dropped a macro libffi's build configuration still referenced, so
+  its build failed during autoreconf; libffi no longer relies on that macro and
+  builds on Ubuntu as it already did on Alpine.
 - **Image builds now fail loudly if the boot files don't fit the boot
   partition.** Previously a `/boot` that overflowed the FAT boot partition was
   silently ignored, producing an image whose boot partition was missing

@@ -396,10 +396,15 @@ press Enter. The sub-screen lays out three sections:
 - **Memory** — ←/→ steps a preset ladder (machine default, then 128M doubling up
   to 16G).
 - **Display** — ←/→ cycles `default (off)` / `off` / `on`.
-- **Ports** — read-only rows show the machine's declared forwards; below them,
-  each row is a local override. Press Enter (or `a` / `+`) on the trailing
-  `[+] add port` row to type a new `host:guest` mapping; press `d` (or `-`) on a
-  local row to remove it. Every change writes through to `local.star`.
+- **Ports** — each row is an effective forward (the machine's declarations with
+  any `local.star` overrides already merged in), tagged `machine` or `local`.
+  Press Enter on a row to edit its `host:guest` mapping — including a
+  machine-declared forward like `8080:8080`, which the edit moves off a busy
+  host port by writing a `local.star` override for that guest port. Press `a` /
+  `+` to add a brand-new forward, and `d` (or `-`) to revert an overridden
+  forward to its machine default (or remove a purely local one). A machine
+  forward with no override can't be removed — edit its host port instead. Every
+  change writes through to `local.star`.
 
 ### `yoe serve`
 
@@ -1369,9 +1374,8 @@ Builds are cached at multiple levels:
 4. **Remote cache** _(planned — optional)_ — push/pull packages to an
    S3-compatible store so CI and team members share build results. Not yet
    implemented: there is no remote cache backend, no S3 integration, and no
-   cache signing today. See [Caching](caching.md) for the
-   object store, the planned S3 configuration, cache signing, and the
-   multi-level fallback chain.
+   cache signing today. See [Caching](caching.md) for the object store, the
+   planned S3 configuration, cache signing, and the multi-level fallback chain.
 
 Cache invalidation is hash-based, not timestamp-based. Changing a unit, updating
 a source, or rebuilding a dependency all produce a new hash and trigger a

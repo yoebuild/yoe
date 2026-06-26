@@ -33,7 +33,7 @@ const bootLoginMarker = "login:"
 // uses. The boot test SSHes to 127.0.0.1 on this port. It errors when no
 // forward targets guest :22, since then there is no way to reach sshd.
 func sshHostPort(machine *yoestar.Machine, opts QEMUOptions) (int, error) {
-	for _, p := range mergeQEMUPorts(machine.QEMUPorts(), opts.Ports) {
+	for _, p := range MergeQEMUPorts(machine.QEMUPorts(), opts.Ports) {
 		host, guest, ok := strings.Cut(p, ":")
 		if !ok || guest != "22" {
 			continue

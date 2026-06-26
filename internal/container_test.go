@@ -141,6 +141,31 @@ func TestContainerRunArgs_PullPolicy(t *testing.T) {
 	assertNotContains(t, external, "--pull=never")
 }
 
+// The container platform is pinned explicitly on every run, even when the
+// target arch equals the host. Docker keeps one image per tag, so a shared
+// external tag (e.g. golang:1.26) can hold a foreign-arch image left by an
+// earlier cross build; without --platform docker silently runs it and fails
+// as "exec format error".
+func TestContainerRunArgs_PlatformAlwaysSet(t *testing.T) {
+	host, err := containerRunArgs(ContainerRunConfig{
+		Command: "true", Image: "golang:1.26", ProjectDir: "/p", Arch: hostArch(),
+	})
+	if err != nil {
+		t.Fatalf("containerRunArgs (host arch): %v", err)
+	}
+	assertContains(t, host, "--platform")
+	assertContains(t, host, "linux/"+hostArch())
+
+	cross, err := containerRunArgs(ContainerRunConfig{
+		Command: "true", Image: "yoe/toolchain-musl:15-arm64", ProjectDir: "/p", Arch: "arm64",
+	})
+	if err != nil {
+		t.Fatalf("containerRunArgs (cross arch): %v", err)
+	}
+	assertContains(t, cross, "--platform")
+	assertContains(t, cross, "linux/arm64")
+}
+
 func assertContains(t *testing.T, args []string, want string) {
 	t.Helper()
 	for _, a := range args {
