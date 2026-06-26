@@ -780,6 +780,18 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		}
 	}
 
+	// Architecture the build container runs as. A unit with
+	// container_arch="host" (e.g. go_binary, which cross-compiles via GOARCH
+	// inside a host-native toolchain) always runs the container at the host
+	// arch regardless of the target arch; container_arch="target" runs a
+	// foreign-arch container under QEMU. This must match the arch baked into
+	// the resolved image name for yoe-local containers (resolveContainerImage)
+	// and decides the explicit --platform passed to docker.
+	sandboxArch := opts.Arch
+	if unit.ContainerArch == "host" {
+		sandboxArch = Arch()
+	}
+
 	// Execute tasks
 	for ti, t := range unit.Tasks {
 		// Lead with the unit name (same column as the [building]/[done]
@@ -825,7 +837,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 				fmt.Fprintf(logW, "    [%d/%d] %s\n", i+1, len(t.Steps), step.Command)
 				cfg := &SandboxConfig{
 					Ctx:        ctx,
-					Arch:       opts.Arch,
+					Arch:       sandboxArch,
 					Container:  taskContainer,
 					Sandbox:    unit.Sandbox,
 					Shell:      unit.Shell,
@@ -847,7 +859,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 				fmt.Fprintf(logW, "    [%d/%d] fn: %s\n", i+1, len(t.Steps), step.Fn.Name())
 				cfg := &SandboxConfig{
 					Ctx:        ctx,
-					Arch:       opts.Arch,
+					Arch:       sandboxArch,
 					Container:  taskContainer,
 					Sandbox:    unit.Sandbox,
 					Shell:      unit.Shell,

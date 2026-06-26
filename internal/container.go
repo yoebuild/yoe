@@ -202,10 +202,14 @@ func containerRunArgs(cfg ContainerRunConfig) ([]string, error) {
 		args = append(args, "--pull=never")
 	}
 
-	// Add platform for cross-arch containers
-	if arch != hostArch() {
-		args = append(args, "--platform", "linux/"+arch)
-	}
+	// Always pin the container platform explicitly. Docker stores only one
+	// image per tag, so a shared external tag (e.g. golang:1.26) can hold a
+	// foreign-arch image left behind by an earlier cross build. Omitting
+	// --platform when arch == host lets docker silently run that wrong-arch
+	// image, which fails opaquely as "exec format error". Passing --platform
+	// unconditionally makes container selection explicit and forces docker to
+	// fetch the matching variant of a multi-arch tag.
+	args = append(args, "--platform", "linux/"+arch)
 
 	if !cfg.NoUser {
 		u, err := user.Current()

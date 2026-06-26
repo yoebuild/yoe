@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Go and other builds no longer fail with "exec format error".** The build
+  container's architecture is now pinned explicitly on every run, so a build
+  always uses a matching-arch image even when a different-architecture copy of a
+  shared base image (such as `golang`) is already cached locally. Previously a
+  same-arch build could silently pick up the wrong image and fail.
 - **Change a machine's QEMU port forwards from the TUI.** The Setup → QEMU
   settings Ports list is now fully editable: highlight any forward — including a
   machine-declared one like `8080:8080` — press Enter, and move it to a free
