@@ -386,6 +386,28 @@ if [ -n "$broken" ]; then
     exit 1
 fi
 
+# Replace mmdebstrap's leftover sources.list. mmdebstrap bakes the
+# build-time `deb [trusted=yes] copy:$REPO $SUITE main` line into the
+# target's /etc/apt/sources.list, but $REPO is a build-host path that does
+# not exist on the booted device, so every on-device `apt update` errors on
+# it (copy-stat: No such file or directory). The local repo is an input to
+# assembly, not a device feed — the apk path never persists it either
+# (`apk add -X $REPO`). Overwrite with a commented template, the apt analog
+# of base-files' /etc/apk/repositories.
+cat > $DESTDIR/rootfs/etc/apt/sources.list <<'YOE_SOURCES_EOF'
+# /etc/apt/sources.list — apt sources, one per line.
+#
+# Intentionally empty. yoe assembles the rootfs from a local build-time
+# mirror that does not exist on the booted device, so no source is baked in.
+#
+# Add your project's signed feed on-device with:
+#   yoe device repo add <host>   # writes /etc/apt/sources.list.d/yoe-dev.list
+#
+# To pull packages straight from the upstream distro mirror for
+# experimentation (dev images only), run:
+#   yoe-enable-upstream-feeds
+YOE_SOURCES_EOF
+
 # Generate the modules.dep index for every installed kernel. yoe's BSP
 # kernels run `make modules_install DEPMOD=true`, which ships the .ko tree
 # without a modules.dep index (the toolchain container has no depmod), so

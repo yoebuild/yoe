@@ -57,6 +57,12 @@ For development, run `yoe serve` on your build host and configure the device
 with `yoe device repo add <host>`. See [feed-server.md](feed-server.md) for the
 full dev-loop walkthrough.
 
+### Pulling a package from the upstream distro
+
+To grab a package the project never built — straight from the upstream Alpine or
+Debian/Ubuntu mirror, for experimentation on a dev image — see
+[on-device-upstream-feeds.md](on-device-upstream-feeds.md).
+
 ## Installing and upgrading
 
 Once a repository is wired up:

@@ -40,12 +40,18 @@ type SyntheticModule struct {
 	// resolves the right suite per distro.
 	Suite string
 
-	// Distro is the apt-family distro this feed targets (apt_feed's
-	// `distro` kwarg, e.g. "debian", "ubuntu"). Empty for non-apt feeds.
-	// Matches the Distro tag stamped on the feed's materialized units;
-	// SuiteForDistro uses it to pick this feed's suite for a given
-	// distro's build.
+	// Distro is the distro this feed targets — apt_feed's `distro` kwarg
+	// ("debian", "ubuntu"), or "alpine" for alpine_feed. Matches the
+	// Distro tag stamped on the feed's materialized units; SuiteForDistro
+	// uses it to pick this feed's suite for a given distro's build.
 	Distro string
+
+	// Release is the upstream release identifier when the feed declares
+	// one as something other than an apt suite — alpine_feed's `branch`
+	// (e.g. "v3.21"). apt feeds leave it empty and use Suite instead.
+	// Project.BaseVersionForDistro surfaces Suite-or-Release as the base
+	// version stamped into /etc/os-release.
+	Release string
 
 	// Priority is the resolver-priority index of this synthetic module.
 	// Synthetic modules rank below every non-feed module per R5; the

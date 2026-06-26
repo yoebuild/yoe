@@ -67,15 +67,18 @@ Templates access all fields: `{{.port}}`, `{{.log_level}}`, `{{.name}}`.
 
 **Auto-populated fields** (injected by the executor, not declared in the unit):
 
-| Key       | Source                             | Example         |
-| --------- | ---------------------------------- | --------------- |
-| `name`    | unit name                          | `"base-files"`  |
-| `version` | unit version                       | `"1.0.0"`       |
-| `release` | unit release                       | `0`             |
-| `arch`    | target architecture                | `"x86_64"`      |
-| `machine` | active machine name                | `"qemu-x86_64"` |
-| `console` | serial console from kernel cmdline | `"ttyS0"`       |
-| `project` | project name                       | `"my-project"`  |
+| Key               | Source                                       | Example         |
+| ----------------- | -------------------------------------------- | --------------- |
+| `name`            | unit name                                    | `"base-files"`  |
+| `version`         | unit version                                 | `"1.0.0"`       |
+| `release`         | unit release                                 | `0`             |
+| `arch`            | target architecture                          | `"x86_64"`      |
+| `machine`         | active machine name                          | `"qemu-x86_64"` |
+| `console`         | serial console from kernel cmdline           | `"ttyS0"`       |
+| `project`         | project name                                 | `"my-project"`  |
+| `project_version` | project version from PROJECT.star            | `"0.1.0"`       |
+| `base_distro`     | upstream backend the image builds on         | `"debian"`      |
+| `base_version`    | upstream release (apt suite / Alpine branch) | `"trixie"`      |
 
 Unit kwargs override auto-populated fields if there's a name collision (explicit
 wins).
@@ -112,7 +115,10 @@ Go `text/template` with the unit context map:
 # os-release.tmpl
 NAME=Yoe
 ID=yoe
-PRETTY_NAME="Yoe Linux ({{.machine}})"
+ID_LIKE={{.base_distro}}
+PRETTY_NAME="Yoe Linux {{.project_version}} ({{.machine}})"
+YOE_BASE_ID={{.base_distro}}
+YOE_BASE_VERSION_ID={{.base_version}}
 HOME_URL=https://github.com/yoebuild/yoe
 ```
 
