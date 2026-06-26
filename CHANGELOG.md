@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.12.10] - 2026-06-26
+
 - **Go and other builds no longer fail with "exec format error".** The build
   container's architecture is now pinned explicitly on every run, so a build
   always uses a matching-arch image even when a different-architecture copy of a
