@@ -38,7 +38,7 @@ shared class, no executor or image-assembly changes:
   `resolveTemplatePath` rejects `..`) forbids a module-core file from shipping a
   distro module's keys — so a class couldn't own the unit anyway. The apt script
   duplicates across the two apt modules; acceptable, with feed-emission as the
-  later dedup path if it bites.
+  later dedup path if it becomes a problem.
 
 Separately, a **pre-existing bug** the work surfaced: the device's
 `/etc/apt/sources.list` carries a build-machine `copy:$REPO` line that is

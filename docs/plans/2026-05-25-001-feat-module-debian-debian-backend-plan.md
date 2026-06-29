@@ -879,7 +879,7 @@ anything).
 cache, TUI filter-first behavior, format-agnostic `Module`/`Unit` types) is
 sufficient for `debian_feed`'s needs before building U6 on top of it. This is
 not new code — it's a fixture-driven smoke test against the existing
-feeds-as-modules API that catches API gaps before they bite during U6.
+feeds-as-modules API that catches API gaps before they surface during U6.
 
 **Requirements:** R3, R5 (origin spec). Note: R3 is delivered by
 feeds-as-modules upstream; this unit verifies the integration.

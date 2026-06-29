@@ -112,7 +112,7 @@ Embedded devices are usually headless, so common customizations are:
   Updates are transactional with automatic rollback; you control cadence with
   `refresh.timer` / `refresh.hold` and channel pinning in the model.
 
-## What bites on cost-sensitive hardware
+## Constraints on cost-sensitive hardware
 
 Two properties matter most when weighing Ubuntu Core for low-end embedded:
 
