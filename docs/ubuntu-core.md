@@ -119,12 +119,48 @@ Two properties matter most when weighing Ubuntu Core for low-end embedded:
 1. **The store gate.** Serious fleet management — private snaps, controlled
    rollout, device assertions at scale — effectively wants a dedicated or brand
    store, which is a commercial relationship with Canonical.
-2. **The size floor.** Snap-per-component plus
-   [revision retention](https://documentation.ubuntu.com/core/how-to-guides/image-creation/calculate-partition-sizes/)
-   (the last few revisions of each snap are kept for rollback, each a full
-   squashfs image) puts the practical minimum around 2.5 GiB before any
-   application code. That rules out the small-flash, 128–512 MiB class of
+2. **The size floor.** A minimum Ubuntu Core install lands around 2.5 GiB
+   before any application code — see [below](#why-the-base-image-is-so-large)
+   for the breakdown. That rules out the small-flash, 128–512 MiB class of
    device.
+
+### Why the base image is so large
+
+No single component is large. Ubuntu Core multiplies copies of the
+boot-critical components to guarantee transactional rollback and factory
+recovery, and four factors compound:
+
+1. **Sealed snaps, no cross-snap sharing.** The base ships as four squashfs
+   snaps — `core24` (~70 MB), the kernel snap (~100+ MB: kernel image, all
+   modules, firmware, and the initramfs in one), `snapd` (~40 MB), and the
+   gadget (a few MB). Each is self-contained, so a library shared between them
+   is not deduplicated the way it would be in a shared FHS root.
+2. **Revision retention, full copies not deltas.** snapd keeps
+   `refresh.retain + 1` revisions of every snap (default `retain = 2`, so three
+   copies) plus a temporary fourth during a refresh — roughly **4× per snap**.
+   Each revision is a complete squashfs; there is no on-disk delta. The ~100 MB
+   kernel snap is therefore budgeted at ~400 MB.
+3. **A recovery seed that duplicates the boot snaps.** The `system-seed`
+   partition holds a second complete copy of the kernel, base, snapd, and
+   gadget snaps plus their assertions, so the device can reinstall or
+   factory-reset — another full set of the core snaps.
+4. **Several partitions, each with reserve.** The layout is four partitions,
+   each carrying filesystem overhead and headroom snapd reserves for the next
+   refresh's temporary copy. From Canonical's
+   [partition-sizing guidance](https://documentation.ubuntu.com/core/how-to-guides/image-creation/calculate-partition-sizes/):
+
+   | Partition     | Minimum  | Holds                                            |
+   | ------------- | -------- | ------------------------------------------------ |
+   | `system-seed` | ~457 MiB | recovery bootloader, recovery snap copies, assertions |
+   | `system-boot` | ~160 MiB | kernel EFI image(s), boot state                  |
+   | `system-save` | ~32 MiB  | device identity and recovery data                |
+   | `system-data` | variable | run-mode snaps, retained revisions, writable data |
+
+The structural reason is the architecture itself: everything is a read-only
+snap that is never modified in place, so atomic update, rollback, and factory
+recovery all require keeping _whole alternate copies_ — current, next, a few
+old, and a recovery duplicate — rather than mutating files or storing deltas.
+The size buys those guarantees.
 
 These two points are exactly where `[yoe]` makes different choices — `.apk` /
 `.deb` packages into a shared FHS root, self-hosted signed repositories, and
@@ -140,8 +176,8 @@ when your team already operates a Canonical stack (Landscape for fleet
 management, a brand store for distribution), or when the device has ample
 storage and the size floor is an acceptable trade for signed transactional
 updates with rollback out of the box. If your target instead has tight flash, a
-custom SoC, and a single-purpose image, a from-source build system such as
-`[yoe]` or Yocto is usually the better match.
+custom SoC, and a single-purpose image, a build system such as `[yoe]` or Yocto
+is usually the better match.
 
 ## How `[yoe]` could assemble Ubuntu Core images
 
@@ -183,14 +219,14 @@ to `mmdebstrap`, `mksquashfs`, and `apk-tools` rather than linking them, and a
 from-source `.snap` emitter stays clean the same way (`mksquashfs` as a
 subprocess plus a `meta/snap.yaml` it writes directly).
 
-This is also `[yoe]`'s strongest piece of prior art for the idea.
-`ubuntu-image` demonstrates the seam end to end: a single binary builds both
-snap-based (Ubuntu Core) and classic deb-based images, and the two builders
-**share one disk-assembly path** — load `gadget.yaml`, size the rootfs, populate
-the boot filesystem, write the partitions — branching only on how the rootfs is
-filled (seed snaps vs. a chroot of packages). That is exactly the
-`rootfs_fn`-varies / disk-assembly-is-common split `[yoe]` already uses, which
-is why the UC path is additive rather than a rewrite.
+This is also `[yoe]`'s strongest piece of prior art for the idea. `ubuntu-image`
+demonstrates the seam end to end: a single binary builds both snap-based (Ubuntu
+Core) and classic deb-based images, and the two builders **share one
+disk-assembly path** — load `gadget.yaml`, size the rootfs, populate the boot
+filesystem, write the partitions — branching only on how the rootfs is filled
+(seed snaps vs. a chroot of packages). That is exactly the `rootfs_fn`-varies /
+disk-assembly-is-common split `[yoe]` already uses, which is why the UC path is
+additive rather than a rewrite.
 
 ### The new pieces
 
@@ -220,9 +256,9 @@ and apt paths. An image declared `distro = "ubuntu-core"` would resolve its
    and write the seed and its assertion chain — the `ubuntu-seed` /
    `ubuntu-boot` / `ubuntu-save` / `ubuntu-data` content and the managed
    bootloader.
-3. Emit the disk image through `[yoe]`'s existing partition/image plumbing —
-   the same step the apk and apt paths already use, since `ubuntu-image` shows
-   the disk-assembly stage is independent of the packaging model.
+3. Emit the disk image through `[yoe]`'s existing partition/image plumbing — the
+   same step the apk and apt paths already use, since `ubuntu-image` shows the
+   disk-assembly stage is independent of the packaging model.
 
 The result slots into `[yoe]`'s model the way the Debian backend slots in beside
 Alpine: a new distro family with its own assembler, sharing the unit graph,
