@@ -725,11 +725,11 @@ targets production IoT, edge, and appliance devices.
 signing your own set of snaps rather than by editing a rootfs. A signed **model
 assertion** names the components — architecture, base, kernel, gadget, and app
 snaps — and `ubuntu-image` builds the bootable image from it. Board-level
-customization lives in the **gadget snap** (partition layout, bootloader,
-kernel command line, first-boot defaults), hardware bring-up lives in the
-**kernel snap** (config, patches, DTBs, modules), and your software ships as
-strictly confined **app snaps** that reach hardware through declared interfaces.
-For the full customization workflow — including headless provisioning and the
+customization lives in the **gadget snap** (partition layout, bootloader, kernel
+command line, first-boot defaults), hardware bring-up lives in the **kernel
+snap** (config, patches, DTBs, modules), and your software ships as strictly
+confined **app snaps** that reach hardware through declared interfaces. For the
+full customization workflow — including headless provisioning and the
 development-versus-production signing path — see
 [Ubuntu Core for Embedded Devices](ubuntu-core.md).
 

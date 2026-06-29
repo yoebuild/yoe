@@ -119,16 +119,15 @@ Two properties matter most when weighing Ubuntu Core for low-end embedded:
 1. **The store gate.** Serious fleet management — private snaps, controlled
    rollout, device assertions at scale — effectively wants a dedicated or brand
    store, which is a commercial relationship with Canonical.
-2. **The size floor.** A minimum Ubuntu Core install lands around 2.5 GiB
-   before any application code — see [below](#why-the-base-image-is-so-large)
-   for the breakdown. That rules out the small-flash, 128–512 MiB class of
-   device.
+2. **The size floor.** A minimum Ubuntu Core install lands around 2.5 GiB before
+   any application code — see [below](#why-the-base-image-is-so-large) for the
+   breakdown. That rules out the small-flash, 128–512 MiB class of device.
 
 ### Why the base image is so large
 
-No single component is large. Ubuntu Core multiplies copies of the
-boot-critical components to guarantee transactional rollback and factory
-recovery, and four factors compound:
+No single component is large. Ubuntu Core multiplies copies of the boot-critical
+components to guarantee transactional rollback and factory recovery, and four
+factors compound:
 
 1. **Sealed snaps, no cross-snap sharing.** The base ships as four squashfs
    snaps — `core24` (~70 MB), the kernel snap (~100+ MB: kernel image, all
@@ -141,23 +140,23 @@ recovery, and four factors compound:
    Each revision is a complete squashfs; there is no on-disk delta. The ~100 MB
    kernel snap is therefore budgeted at ~400 MB.
 3. **A recovery seed that duplicates the boot snaps.** The `system-seed`
-   partition holds a second complete copy of the kernel, base, snapd, and
-   gadget snaps plus their assertions, so the device can reinstall or
-   factory-reset — another full set of the core snaps.
+   partition holds a second complete copy of the kernel, base, snapd, and gadget
+   snaps plus their assertions, so the device can reinstall or factory-reset —
+   another full set of the core snaps.
 4. **Several partitions, each with reserve.** The layout is four partitions,
    each carrying filesystem overhead and headroom snapd reserves for the next
    refresh's temporary copy. From Canonical's
    [partition-sizing guidance](https://documentation.ubuntu.com/core/how-to-guides/image-creation/calculate-partition-sizes/):
 
-   | Partition     | Minimum  | Holds                                            |
-   | ------------- | -------- | ------------------------------------------------ |
+   | Partition     | Minimum  | Holds                                                 |
+   | ------------- | -------- | ----------------------------------------------------- |
    | `system-seed` | ~457 MiB | recovery bootloader, recovery snap copies, assertions |
-   | `system-boot` | ~160 MiB | kernel EFI image(s), boot state                  |
-   | `system-save` | ~32 MiB  | device identity and recovery data                |
-   | `system-data` | variable | run-mode snaps, retained revisions, writable data |
+   | `system-boot` | ~160 MiB | kernel EFI image(s), boot state                       |
+   | `system-save` | ~32 MiB  | device identity and recovery data                     |
+   | `system-data` | variable | run-mode snaps, retained revisions, writable data     |
 
-The structural reason is the architecture itself: everything is a read-only
-snap that is never modified in place, so atomic update, rollback, and factory
+The structural reason is the architecture itself: everything is a read-only snap
+that is never modified in place, so atomic update, rollback, and factory
 recovery all require keeping _whole alternate copies_ — current, next, a few
 old, and a recovery duplicate — rather than mutating files or storing deltas.
 The size buys those guarantees.
