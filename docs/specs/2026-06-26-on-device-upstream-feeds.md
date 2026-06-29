@@ -320,7 +320,8 @@ Out of scope:
   in `module-debian` and `module-ubuntu` (no shared parent). Acceptable as two
   thin calls to the shared class now; a later option is to have `apt_feed(...)`
   / `alpine_feed(...)` emit the companion unit (the feed already holds url +
-  keys), deduping it at the cost of more Go. Defer unless the duplication becomes a problem.
+  keys), deduping it at the cost of more Go. Defer unless the duplication
+  becomes a problem.
 - **Enable surface.** The on-image script is the offline-capable primitive. Is a
   `yoe device feed enable-upstream` verb (extending `yoe device repo …`,
   push+run over the deploy channel) worth adding on top, or is the on-image
