@@ -71,7 +71,7 @@ feeds (`alpine_feed(...)` for apks, `apt_feed(...)` for `.deb`s — see
 [module-alpine](module-alpine.md) and [module-debian](module-debian.md)), so add
 a `nix_feed` that pulls prebuilt artifacts from a Nix binary cache.
 
-This is where the store-path mismatch bites hardest. The existing feeds work
+This is where the store-path mismatch hurts most. The existing feeds work
 _because_ Alpine and Debian packages install into FHS — fetch the artifact,
 re-sign, extract into the destination root. Nix closures are
 `/nix/store`-anchored and do not. A `nix_feed` could not be the drop-in the

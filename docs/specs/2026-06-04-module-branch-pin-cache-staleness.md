@@ -63,7 +63,7 @@ than a tag is to track that branch).
 string — it does not record whether the ref is a branch or a tag — so the build
 cannot tell the two apart from the project model alone.
 
-### Why it bites beyond CI
+### Why it matters beyond CI
 
 This is not a CI-only artifact. Any developer with a warm `cache/modules/` who
 pins a module to a branch gets the frozen checkout: they will keep building

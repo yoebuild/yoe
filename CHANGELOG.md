@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Debian/Ubuntu dev images keep correct time and announce themselves on the
+  LAN.** `dev-image` now includes `systemd-timesyncd` (NTP) and `avahi-daemon`
+  (mDNS) on the apt distros, both enabled at boot — so the clock syncs once the
+  network is up (no more "Release file is not valid yet" errors from a stale
+  clock) and the device is reachable as `<hostname>.local`. This brings the apt
+  images to parity with the Alpine image's NTP + mDNS.
+
 ## [0.12.11] - 2026-06-26
 
 - **Grab a package straight from the upstream distro on a dev device.** Dev

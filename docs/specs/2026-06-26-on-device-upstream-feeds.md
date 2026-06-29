@@ -65,7 +65,7 @@ serves. This is the pattern the distro modules already use for their
 distinct scripts, and yoe's install-step resolution forbids a module-core file
 from shipping a distro module's keys anyway — so a class couldn't even own the
 unit cleanly. If the apt script's duplication across the two apt modules ever
-bites, a feed-emitted companion is the dedup path — see
+becomes a problem, a feed-emitted companion is the dedup path — see
 [Open questions](#open-questions).)
 
 Each unit ships two things into the rootfs, both **dormant**:
@@ -186,7 +186,7 @@ the anchor exists only while a developer has explicitly opted in.
 
 Tags/priority govern _selection_, not _conflict resolution_. The sharp edge
 documented in [apk-passthrough.md](../apk-passthrough.md) (the docker-openrc /
-util-linux worked example) still bites: yoe builds a monolithic `util-linux`
+util-linux worked example) still applies: yoe builds a monolithic `util-linux`
 shipping `libmount.so.1`/`libblkid.so.1`, while Alpine splits those into
 separate apks. If `foo@upstream` transitively needs Alpine's split `libmount`,
 the install fails on a file-path collision with yoe's util-linux. `-dev`
@@ -320,7 +320,7 @@ Out of scope:
   in `module-debian` and `module-ubuntu` (no shared parent). Acceptable as two
   thin calls to the shared class now; a later option is to have `apt_feed(...)`
   / `alpine_feed(...)` emit the companion unit (the feed already holds url +
-  keys), deduping it at the cost of more Go. Defer unless the duplication bites.
+  keys), deduping it at the cost of more Go. Defer unless the duplication becomes a problem.
 - **Enable surface.** The on-image script is the offline-capable primitive. Is a
   `yoe device feed enable-upstream` verb (extending `yoe device repo …`,
   push+run over the deploy channel) worth adding on top, or is the on-image

@@ -13,6 +13,14 @@
 
 ## Next Features
 
+- Distributed cache with different permissions, etc.
+- Enable scratchpad overlay for upstream packages, so you can throw it away when
+  done.
+- Research how does Nix hydra work.
+- Serial terminal and SSH terminals running through TUI so you can look at it
+  after the fact or in real-time.
+- Install Claude on target to watch what you do, and translate that into yoe
+  units/.etc. Quick way to capture what anyone does on the target.
 - Tools to automatically boot-test real hardware, similar to who we do QEMU.
 - Can we watch the unit state files and automatically update the TUI if
   something changes? The idea is you could be building in two different TUIs and

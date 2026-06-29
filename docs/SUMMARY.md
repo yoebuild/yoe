@@ -58,6 +58,7 @@
 # Project
 
 - [Comparisons](comparisons.md)
+- [Ubuntu Core for Embedded Devices](ubuntu-core.md)
 - [yoe and Nix](nix.md)
 - [Roadmap](roadmap.md)
 - [Changelog](CHANGELOG.md)

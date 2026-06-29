@@ -21,6 +21,17 @@ _APT_BASE = [
     "apt",
     "openssh-server",
     "network-manager",
+    # Time + mDNS, the apt parity for Alpine's ntp-client + mdnsd. Both
+    # enable themselves at boot via their maintainer scripts during
+    # assembly (systemd-timesyncd by systemd's preset, avahi-daemon by its
+    # deb-systemd-helper postinst) — the same postinst-driven path that
+    # enables network-manager, so no services= companion is needed.
+    # systemd only *Recommends* timesyncd, and yoe builds with Recommends
+    # off, so it must be named explicitly or no NTP client lands at all.
+    # avahi-daemon advertises <hostname>.local; resolving other .local
+    # names additionally needs libnss-mdns (a Recommends, omitted here).
+    "systemd-timesyncd",
+    "avahi-daemon",
 ]
 
 # apt-specific dev tools — the apt names for roles whose package differs from

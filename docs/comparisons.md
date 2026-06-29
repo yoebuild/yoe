@@ -721,6 +721,18 @@ read-only via squashfs-over-loopback, and updated transactionally with rollback.
 Ubuntu Core 24 (the current LTS) carries a 12-year support commitment and
 targets production IoT, edge, and appliance devices.
 
+**How it's customized for a board.** Ubuntu Core is customized by assembling and
+signing your own set of snaps rather than by editing a rootfs. A signed **model
+assertion** names the components — architecture, base, kernel, gadget, and app
+snaps — and `ubuntu-image` builds the bootable image from it. Board-level
+customization lives in the **gadget snap** (partition layout, bootloader, kernel
+command line, first-boot defaults), hardware bring-up lives in the **kernel
+snap** (config, patches, DTBs, modules), and your software ships as strictly
+confined **app snaps** that reach hardware through declared interfaces. For the
+full customization workflow — including headless provisioning and the
+development-versus-production signing path — see
+[Ubuntu Core for Embedded Devices](ubuntu-core.md).
+
 **What `[yoe]` adopts from Ubuntu Core:**
 
 - **Gadget-snap-style board config** — Ubuntu Core's

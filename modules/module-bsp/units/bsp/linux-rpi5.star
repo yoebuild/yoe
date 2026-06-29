@@ -7,6 +7,14 @@ unit(
     license = "GPL-2.0",
     description = "Raspberry Pi 5 kernel (BCM2712)",
     deps = ["toolchain"],
+    # The kernel's certs/extract-cert host tool needs OpenSSL/libcrypto
+    # headers. Package name differs by backend: Alpine bundles them in
+    # openssl-dev, the apt distros split them into libssl-dev.
+    distro_deps = {
+        "alpine": ["openssl-dev"],
+        "debian": ["libssl-dev"],
+        "ubuntu": ["libssl-dev"],
+    },
     container = "toolchain",
     container_arch = "target",
     tasks = [
@@ -40,7 +48,10 @@ if [ -n "$missing" ]; then
 fi
 echo "container-config check passed"
 """,
-            "make ARCH=arm64 -j$NPROC Image modules dtbs",
+            # HOSTCFLAGS/HOSTLDFLAGS carry the sysroot include/lib paths to the
+            # kernel's host tools (e.g. certs/extract-cert, which #includes
+            # <openssl/bio.h>). Host tools do not inherit CFLAGS/CPPFLAGS.
+            "make ARCH=arm64 HOSTCFLAGS=\"$CPPFLAGS\" HOSTLDFLAGS=\"$LDFLAGS\" -j$NPROC Image modules dtbs",
             # Install kernel as kernel_2712.img (RPi5 naming convention)
             "install -D arch/arm64/boot/Image $DESTDIR/boot/kernel_2712.img",
             # Install device trees
