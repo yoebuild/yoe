@@ -40,6 +40,38 @@ content-addressed engine instead of running two_. The interesting question is
 whether Nix's package breadth and binary cache are worth running yoe's
 orchestration on top of, given what that costs.
 
+## The same mechanism, different reuse model
+
+The shared foundation hides where the two systems actually diverge — and it is
+not "Nix compiles, yoe downloads." In practice neither compiles much: a Nix user
+pulls prebuilt closures from `cache.nixos.org`, and a yoe user pulls prebuilt
+`.apk` / `.deb`s from a distribution's mirrors. Both reuse binaries someone else
+already built and cached. The divergence is _whose_ binaries, and _in what
+model_.
+
+Nix reuses **nixpkgs** — one large, self-contained package universe, built
+inside Nix's own model and delivered as `/nix/store/<hash>-name` paths. nixpkgs
+is effectively a distribution, so Nix does reuse a distribution's work; it
+reuses exactly one, expressed end to end in the Nix store model.
+
+yoe reuses **mainstream distributions in their native form** — Alpine, Debian,
+Ubuntu — through its feeds (`alpine_feed`, `apt_feed`). Each is an independent
+project with its own maintainers, security response, release cadence, and FHS
+layout, and yoe consumes their packages as shipped rather than re-expressing
+them. It builds from source only the units a project needs to own.
+
+So the split is not source-versus-binary; it is **one self-contained universe
+versus several mainstream distributions consumed in their own packaging.** Nix's
+payoff is control: everything lives in one model, pinned and reproducible to the
+last path. yoe's payoff is leverage: a small team borrows the packaging,
+security response, and release engineering of established distributions — and
+can mix more than one in a single image — instead of adopting one universe
+wholesale. This is the distinction that matters when weighing the integration
+shapes below: building _with_ Nix means adopting nixpkgs and its store model,
+not consuming mainstream distributions in FHS, so it is a model switch and not
+only a tooling one. The `/nix/store`-versus-FHS mismatch in the next section is
+the runtime symptom of that split.
+
 ## The load-bearing mismatch: `/nix/store` vs. FHS
 
 Everything downstream hinges on one fact: **a Nix-built binary is not
