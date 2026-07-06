@@ -70,11 +70,21 @@ func BuildInClosure(proj *yoestar.Project, root string) map[string]bool {
 	}
 	walk(root)
 
-	// Union runtime-dep closure rooted at the same unit. RuntimeClosure
-	// already routes through proj.Provides. Empty distro short-circuits
-	// (the walker would panic on it).
+	// Union the runtime-dep closure rooted at every unit walked so far,
+	// not just `root`. An image's own RuntimeDeps are empty — its package
+	// set lives in Artifacts — so rooting only at `root` would expand
+	// nothing. Rooting at the whole walked set pulls in each member's
+	// transitive runtime deps (e.g. python3 → libexpat), so the closure
+	// is correct even when an artifact's runtime deps weren't already
+	// flattened into image.Artifacts. RuntimeClosure routes through
+	// proj.Provides and tolerates missing names. Empty distro
+	// short-circuits (the walker would panic on it).
 	if distro != "" {
-		for _, name := range resolve.RuntimeClosure(proj, []string{root}, distro) {
+		roots := make([]string, 0, len(seen))
+		for name := range seen {
+			roots = append(roots, name)
+		}
+		for _, name := range resolve.RuntimeClosure(proj, roots, distro) {
 			seen[name] = true
 		}
 	}

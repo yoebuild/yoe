@@ -8,6 +8,14 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-06
+
+- **The TUI now shows every package an image pulls in, including deep transitive
+  dependencies.** Library packages reached only through another package's
+  runtime dependencies (for example `libexpat` via `python3`) were sometimes
+  missing from the `in:<image>` view and from a unit's "pulls in" tree, even
+  though the image installs them. The unit list and dependency trees now reflect
+  the full closure.
 - **Debian/Ubuntu dev images keep correct time and announce themselves on the
   LAN.** `dev-image` now includes `systemd-timesyncd` (NTP) and `avahi-daemon`
   (mDNS) on the apt distros, both enabled at boot — so the clock syncs once the
