@@ -8,7 +8,7 @@ and this project adheres to
 
 ## [Unreleased]
 
-## [0.12.12] - 2026-07-06
+## [0.13.0] - 2026-07-06
 
 - **The TUI now shows every package an image pulls in, including deep transitive
   dependencies.** Library packages reached only through another package's
