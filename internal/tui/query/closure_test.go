@@ -139,3 +139,42 @@ func TestClosure_VirtualResolutionIsDistroAware(t *testing.T) {
 		t.Fatalf("debian closure should NOT include toolchain-musl (it's alpine-tagged); got %v", got)
 	}
 }
+
+// Reproduces the field report where an image's package list showed
+// python3 but not python3's transitive runtime dep libexpat.
+//
+// Two conditions combine: (1) image.Artifacts holds python3 but not its
+// flattened runtime closure, and (2) libexpat is in the catalog
+// (UnitsByModule) but absent from the frozen DistroViews[alpine] because
+// it materialized after buildDistroViews ran. Before the fix, the walk
+// only followed Artifacts + build deps and rooted RuntimeClosure at the
+// image (empty RuntimeDeps), so libexpat never entered the closure; and
+// even if reached, LookupUnit(alpine, libexpat) returned nil on the view
+// miss. After the fix the closure expands python3's runtime deps and
+// LookupUnit self-heals from the catalog.
+func TestClosure_ImageArtifactRuntimeDeps_ViewMiss(t *testing.T) {
+	libexpat := &yoestar.Unit{Name: "libexpat", Class: "unit", Distro: "alpine", Module: "alpine.main"}
+	python3 := &yoestar.Unit{Name: "python3", Class: "unit", Distro: "alpine", Module: "alpine.main", RuntimeDeps: []string{"libexpat"}}
+	baseImage := &yoestar.Unit{Name: "base-image", Class: "image", Distro: "alpine", Module: "core",
+		// python3 present, but its runtime closure was NOT flattened in.
+		Artifacts: []string{"python3"}}
+	proj := &yoestar.Project{
+		DefaultDistro: "alpine",
+		UnitsByModule: map[string]map[string]*yoestar.Unit{
+			"alpine.main": {"python3": python3, "libexpat": libexpat},
+			"core":        {"base-image": baseImage},
+		},
+		DistroViews: map[string]map[string]*yoestar.Unit{
+			// Frozen view built before libexpat materialized.
+			"alpine": {"python3": python3, "base-image": baseImage},
+		},
+		Provides: map[string]string{},
+	}
+
+	got := BuildInClosure(proj, "base-image")
+	for _, want := range []string{"base-image", "python3", "libexpat"} {
+		if !got[want] {
+			t.Fatalf("base-image closure missing %q in %v", want, got)
+		}
+	}
+}

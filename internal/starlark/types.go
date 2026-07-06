@@ -336,6 +336,18 @@ func (p *Project) SetFlatUnits(units map[string]*Unit) {
 // without per-test view wiring. Once a project has ANY DistroViews
 // entry the fallback turns off, so "unknown distro" returns nil
 // rather than silently matching some other distro's variant.
+//
+// DistroViews is a cache of resolveForDistro over UnitsByModule, so a
+// miss on a KNOWN distro must consult the catalog rather than return
+// nil: UnitsByModule shares the engine's live map, and any unit
+// materialized after buildDistroViews ran (lazy feed units pulled in
+// by a late closure walk) lands in the catalog but not the frozen
+// view. Returning nil there silently drops a legitimate unit from the
+// DAG, closure filters, and dependency trees. resolveForDistro applies
+// the same prefer_modules pin + module-priority + R21a visibility rules
+// buildDistroViews uses, so the fallthrough yields exactly what the
+// view would have held — self-healing without matching a wrong-distro
+// variant.
 func (p *Project) LookupUnit(distro, name string) *Unit {
 	if p == nil {
 		return nil
@@ -344,7 +356,7 @@ func (p *Project) LookupUnit(distro, name string) *Unit {
 		if u, ok := view[name]; ok {
 			return u
 		}
-		return nil
+		return resolveForDistro(p, distro, name)
 	}
 	if len(p.DistroViews) > 0 {
 		return nil
