@@ -19,6 +19,7 @@
 - [QEMU (arm64, x86_64)](machine-qemu.md)
 - [Raspberry Pi (RPi4, RPi5)](machine-rpi.md)
 - [BeaglePlay (AM625)](machine-beagleplay.md)
+- [Arduino UNO Q (QRB2210)](machine-uno-q.md)
 
 # Distro
 
