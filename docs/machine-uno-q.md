@@ -86,6 +86,13 @@ Source:
 [UNO Q datasheet](https://docs.arduino.cc/resources/datasheets/ABX00162-ABX00173-datasheet.pdf),
 §9.5.
 
+![Arduino UNO Q pinout, with the JCTL header and console pins at upper right](assets/uno-q-pinout.png)
+
+_The full UNO Q pinout. The JCTL header is at the upper right; the
+"Default Debugging Shell Serial" callout marks `SOC_SE4_RX` / `SOC_SE4_TX`, and
+the whole header is flagged **1.8 V Logic**. Image:
+[Arduino](https://docs.arduino.cc/hardware/uno-q/)._
+
 > **The signals are 1.8 V, not 3.3 V.** A standard 3.3 V USB-TTL adapter — the
 > kind that works on a BeaglePlay or a Raspberry Pi — can damage the SoC here.
 > Use a 1.8 V-capable adapter, or one with a selectable `VCCIO` reference you
