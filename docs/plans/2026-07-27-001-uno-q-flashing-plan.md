@@ -16,11 +16,14 @@ The Arduino UNO Q breaks it in three independent ways:
 
 1. **There is no removable medium.** The eMMC is soldered and is the only boot
    storage. There is no `/dev/sdX` to hand to `yoe flash`.
-2. **yoe does not own the partition table.** The factory GPT has 69 entries; 66
-   are signed Qualcomm firmware partitions (`xbl`, `tz`, `rpm`, `hyp`, `uefi`,
-   `abl`, `devcfg`, `modemst`, `persist`, …) that a Linux image must not touch.
-   yoe owns exactly two: `efi` (p67) and `rootfs` (p68). `userdata` (p69) is
-   provisioned once and preserved across reflashes.
+2. **yoe does not own the partition table.** The factory GPT has 69 entries and
+   a Linux image must not touch 66 of them: 38 are signed firmware in 19 A/B
+   pairs (`xbl`, `tz`, `rpm`, `hyp`, `uefi`, `abl`, `devcfg`, `qupfw`, `ddr`,
+   …), and 28 are single-copy per-device state (`modemst1`, `modemst2`,
+   `persist`, `uefivarstore`, `frp`, `misc`, …) whose loss would cost the board
+   its modem calibration or thermal limits. yoe owns exactly two: `efi` (p67)
+   and `rootfs` (p68). `userdata` (p69) is provisioned once and preserved across
+   reflashes.
 3. **The install path is a ROM-level USB protocol.** Provisioning goes through
    EDL (Emergency Download Mode) and the `qdl` tool, against a signed firehose
    programmer supplied by the vendor.

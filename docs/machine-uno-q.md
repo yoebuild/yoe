@@ -178,24 +178,89 @@ Three consequences matter when building images for this board:
   `devicetree` line in the entry. U-Boot loads
   `/boot/efi/dtb/qcom/qrb2210-arduino-imola.dtb` off the ESP, which is what
   makes the carrier-board overlay mechanism below work.
-- **The GPT is large and mostly firmware.** The table has 69 entries; the first
-  66 are signed Qualcomm blobs (`xbl`, `tz`, `rpm`, `hyp`, `uefi`, `abl`,
-  `devcfg`, `modemst`, `persist`, `splash`, …). Partition 67 is the EFI system
-  partition mounted at `/boot/efi`, 68 is the rootfs, and 69 is `userdata`,
-  mounted at `/home/arduino`. A Linux image replaces the tail of the table, not
-  the whole thing.
+- **The GPT is large and mostly firmware.** The table has 69 entries, of which a
+  Linux image owns three. Partition 67 is the EFI system partition mounted at
+  `/boot/efi`, 68 is the rootfs, and 69 is `userdata`, mounted at
+  `/home/arduino`. An image replaces the tail of the table, not the whole thing.
+  The [partition table](#the-partition-table-why-69) section below accounts for
+  the other 66.
 
 Because the rootfs partition sits mid-table with a populated `userdata`
 partition behind it, ordinary first-boot resize tooling tends to misbehave — it
 expects free space after the filesystem it is growing. Expect to need a resize
 step that understands this layout, or to size the rootfs correctly up front.
 
+### The partition table: why 69?
+
+The layout is not Arduino's. It is Qualcomm's stock reference table for this SoC
+family, inherited from the Android device model; Arduino swapped only the tail,
+where an Android device carries `system` / `vendor` / `product`. Everything
+ahead of partition 67 is as Qualcomm ships it, which is why the board looks
+nothing like a two-partition SD-card target.
+
+The count breaks down as **19 A/B pairs (38 partitions) plus 31 single-copy
+partitions**.
+
+**Why so many firmware partitions.** The QRB2210 does not have "a bootloader."
+It has a chain of independently signed images, several of which run on different
+processors — the RPM is its own Cortex-M, TrustZone runs at EL3, and the modem
+and ADSP are separate DSPs. Each image is separately authenticated and
+separately updatable, so each gets a partition:
+
+`xbl`, `xbl_config`, `tz`, `rpm`, `hyp`, `abl`, `uefi`, `uefi_dtb`, `devcfg`,
+`qupfw`, `ddr`, `imagefv`, `featenabler`, `keymaster`, `uefisecapp`, `mdtp`,
+`mdtpsecapp`, `multiimgoem`, `boot`
+
+A few are less self-explanatory than the rest: `ddr` holds DDR training
+parameters, `qupfw` the QUP serial-engine firmware, `keymaster` and `uefisecapp`
+are TrustZone trusted applications, and `devcfg` is per-device hardware
+configuration consumed very early in the chain. Each of these 19 is then doubled
+`_a`/`_b` for seamless update and rollback — the mechanism behind the
+[A/B slot blessing](#ab-slots-a-boot-is-provisional-until-userspace-says-otherwise)
+requirement below.
+
+**Why the 31 singletons are not duplicated.** They hold per-device state that
+must survive a reflash:
+
+| Group                     | Partitions                                                                                             |
+| ------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Modem NV and calibration  | `modemst1`, `modemst2`, `fsg`, `fsc`, `persist`                                                        |
+| Device identity, security | `devinfo`, `secdata`, `storsec`, `keystore`, `frp`, `ssd`, `dip`, `apdp`                               |
+| Boot control and recovery | `misc`, `misc_boot`, `recoveryinfo`, `cateloader`, `catefv`, `catecontentfv`, `toolsfv`, `multiimgqti` |
+| Diagnostics               | `rawdump`, `logfs`, `logdump`, `limits` (thermal)                                                      |
+| Firmware-owned state      | `uefivarstore`, `spunvm`, `splash`                                                                     |
+| The OS                    | `efi`, `rootfs`, `userdata`                                                                            |
+
+`misc` is the bootloader control block — the conventional way a running system
+asks the firmware to boot into fastboot on the next reset.
+
+**There are more than 69.** Those are the GPT on the eMMC's user area. The eMMC
+also exposes two hardware boot areas with their own tables, carrying five
+further labelled regions: `bdaddr`, `wlanaddr`, and a second `persist` on
+`boot0`, plus `CDT` and `last_grow` on `boot1`. The Bluetooth and WLAN MAC
+addresses live there, along with the Configuration Data Table that XBL reads
+before DDR is trained. They sit in write-protectable areas precisely because
+they are per-unit identity rather than software.
+
+**Why this shapes everything else.** yoe cannot own this table. 38 partitions
+hold signed blobs it does not build, and 28 more hold state whose loss would
+cost the board its MAC addresses, modem calibration, or thermal limits. Writing
+`efi` and `rootfs` and leaving the rest untouched is the only sane posture —
+which is what the machine descriptor's two-partition model and the
+`--allow-missing` flash invocation encode.
+
 ### A/B slots: a boot is provisional until userspace says otherwise
 
-Every vendor partition on this board is paired (`xbl_a`/`xbl_b`,
-`abl_a`/`abl_b`, …), and the Qualcomm boot firmware treats each boot as
+Every partition in the boot chain is paired (`xbl_a`/`xbl_b`, `abl_a`/`abl_b`, …
+— the 19 bases listed above), and the Qualcomm boot firmware treats each boot as
 provisional. Userspace has to mark the slot good, or the firmware exhausts its
 retry count, switches to the other slot, and the board stops booting.
+
+On a stock board `qbootctl` reports slot `_a` as
+`Active 1 / Successful 1 / Bootable 1` and `_b` as `Successful 0`; that
+`Successful` flag is what the marking sets. It also notes that the cmdline
+carries no `androidboot.slot_suffix`, so it reads the active slot from the
+control block instead — a custom cmdline does not need to supply one.
 
 `qbootctl` does that marking. Its service runs `qbootctl -m` after
 `boot-complete.target`; Debian ships the package in `trixie/main` and its
