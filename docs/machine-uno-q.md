@@ -1,12 +1,4 @@
-# Arduino UNO Q (QRB2210) (planned)
-
-> **Status (planned):** yoe has no `uno-q` machine descriptor or BSP units yet.
-> Nothing under `modules/module-bsp/machines/` targets this board, so
-> `yoe build --machine uno-q …` does not work today. What follows is a working
-> reference for the hardware — how to reach a terminal, how to flash it, and how
-> its boot chain is arranged — together with a sketch of the shape a yoe BSP
-> would take. The hardware sections are accurate and usable now with the stock
-> Arduino image; the yoe-specific sections describe future work.
+# Arduino UNO Q (QRB2210)
 
 The Arduino UNO Q is a dual-processor board in the UNO form factor. Arduino
 calls the two processors "brains":
@@ -88,9 +80,9 @@ Source:
 
 ![Arduino UNO Q pinout, with the JCTL header and console pins at upper right](assets/uno-q-pinout.png)
 
-_The full UNO Q pinout. The JCTL header is at the upper right; the
-"Default Debugging Shell Serial" callout marks `SOC_SE4_RX` / `SOC_SE4_TX`, and
-the whole header is flagged **1.8 V Logic**. Image:
+_The full UNO Q pinout. The JCTL header is at the upper right; the "Default
+Debugging Shell Serial" callout marks `SOC_SE4_RX` / `SOC_SE4_TX`, and the whole
+header is flagged **1.8 V Logic**. Image:
 [Arduino](https://docs.arduino.cc/hardware/uno-q/)._
 
 > **The signals are 1.8 V, not 3.3 V.** A standard 3.3 V USB-TTL adapter — the
@@ -148,33 +140,78 @@ If nothing appears after power-on:
 ## Boot chain
 
 The QRB2210 boots through Qualcomm's standard multi-stage chain, with U-Boot
-chainloaded at the end so that a conventional Linux image can be booted:
+taking the place of Qualcomm's Android bootloader as the final firmware stage.
+U-Boot presents itself as UEFI firmware rather than using its own boot commands,
+so the tail of the chain is a conventional UEFI Linux boot:
 
 ```
 PBL (masked ROM)
-  └── XBL                       ← Qualcomm firmware, signed
-        └── TrustZone / Hypervisor
-              └── ABL           ← Qualcomm Android bootloader
-                    └── U-Boot  ← chainloaded, provides extlinux/sysboot
-                          └── Image + DTB
-                                └── init
+  └── XBL                             ← Qualcomm firmware, signed
+        └── TrustZone / RPM / Hypervisor
+              └── U-Boot              ← in the abl slot; presents UEFI 2.11
+                    └── systemd-boot  ← ESP:/EFI/BOOT/BOOTAA64.EFI
+                          └── Boot Loader Specification type#1 entry
+                                └── vmlinuz + initrd
+                                      └── init
 ```
 
-Two consequences matter when building images for this board:
+On a stock board this reports itself as `Das U-Boot 8230.256` providing
+`UEFI 2.110`, chainloading `systemd-boot 257.8`.
 
-- **ABL rewrites U-Boot's load addresses.** It overwrites `kernel_addr_r`,
-  `fdt_addr_r`, and `ramdisk_addr_r` at runtime, so a boot script has to set
-  those explicitly — into the 0xC0000000 RAM bank — before loading anything.
-  Relying on U-Boot's compiled-in defaults will not work here.
-- **The GPT is large and mostly firmware.** The Qualcomm layout carries roughly
-  67 firmware partitions ahead of anything you care about. In the layouts in use
-  today, partition 67 is the EFI system partition holding the boot script, and
-  partition 68 is the rootfs. Those firmware partitions are signed Qualcomm
-  blobs; a Linux image replaces the tail of the table, not the whole thing.
+Three consequences matter when building images for this board:
 
-Because the rootfs partition sits at the end of a fixed table with an empty
-`userdata` partition behind it, ordinary first-boot resize tooling tends to
-misbehave. Expect to need a resize step that understands this layout.
+- **The kernel is selected by a BLS entry, not a boot script.** Entries live in
+  `loader/entries/<machine-id>-<version>.conf` on the ESP, with the kernel and
+  initrd under `<machine-id>/<version>/`. Debian's stock `kernel-install` hooks
+  generate all of this on a running system. Multiple kernel generations coexist,
+  each with its own entry, which gives rollback for free.
+- **The device tree comes from U-Boot, not from the BLS entry.** There is no
+  `devicetree` line in the entry. U-Boot loads
+  `/boot/efi/dtb/qcom/qrb2210-arduino-imola.dtb` off the ESP, which is what
+  makes the carrier-board overlay mechanism below work.
+- **The GPT is large and mostly firmware.** The table has 69 entries; the first
+  66 are signed Qualcomm blobs (`xbl`, `tz`, `rpm`, `hyp`, `uefi`, `abl`,
+  `devcfg`, `modemst`, `persist`, `splash`, …). Partition 67 is the EFI system
+  partition mounted at `/boot/efi`, 68 is the rootfs, and 69 is `userdata`,
+  mounted at `/home/arduino`. A Linux image replaces the tail of the table, not
+  the whole thing.
+
+Because the rootfs partition sits mid-table with a populated `userdata`
+partition behind it, ordinary first-boot resize tooling tends to misbehave — it
+expects free space after the filesystem it is growing. Expect to need a resize
+step that understands this layout, or to size the rootfs correctly up front.
+
+### A/B slots: a boot is provisional until userspace says otherwise
+
+Every vendor partition on this board is paired (`xbl_a`/`xbl_b`,
+`abl_a`/`abl_b`, …), and the Qualcomm boot firmware treats each boot as
+provisional. Userspace has to mark the slot good, or the firmware exhausts its
+retry count, switches to the other slot, and the board stops booting.
+
+`qbootctl` does that marking. Its service runs `qbootctl -m` after
+`boot-complete.target`; Debian ships the package in `trixie/main` and its
+postinst enables the service. The `arduino-uno-q` machine therefore carries
+`qbootctl` as a board-essential package, alongside the firmware.
+
+This failure mode is worth internalizing before building a custom image: it does
+not appear on the boot that caused it. An image missing `qbootctl` comes up
+fine, works normally, and then stops booting several reboots later — which
+presents as a hardware brick rather than a packaging mistake. Recovery is EDL,
+so it is recoverable, but the diagnosis is not obvious.
+
+### Carrier boards and device-tree overlays
+
+The board composes its device tree at runtime rather than shipping one DTB per
+hardware combination. `arduino-linux-config carrier enable …` merges the
+selected `.dtbo` overlays onto `qrb2210-arduino-imola-base.dtb` with
+`fdtoverlay` and writes the result to `qrb2210-arduino-imola.dtb`, taking effect
+on the next boot. Overlays exist for the media carrier, IMX219 cameras on either
+CSI port at two or four lanes, and 5/8/10-inch DSI touch panels.
+
+Pending state is kept in `/var/lib/arduino-linux-config/status`, which is why
+`carrier show` reports `[current: …]` and `[next: …]` separately. One image
+therefore serves every carrier, camera, and panel combination — the variation is
+resolved at runtime, with no per-carrier build fork.
 
 ## Flashing a Linux image
 
@@ -202,6 +239,25 @@ not making contact or the board was not fully powered down.
 
 ### Host setup
 
+`yoe flash` supplies its own `qdl` — a version-pinned unit that runs inside a
+container, so nothing needs installing on the host beyond the container runtime
+yoe already requires. What follows applies when driving `qdl` by hand; the udev
+rule and the ModemManager note apply either way.
+
+Install `qdl` from your distribution — Debian and Ubuntu package the upstream
+[linux-msm/qdl](https://github.com/linux-msm/qdl) as `qdl`:
+
+```
+sudo apt install qdl
+```
+
+**Stop ModemManager before flashing.** It claims the `05c6:9008` device and
+makes the flash fail in ways that look nothing like the cause:
+
+```
+sudo systemctl stop ModemManager
+```
+
 `qdl` needs raw USB access. Without a udev rule you will see
 `qdl: unable to open USB device`. Create
 `/etc/udev/rules.d/51-arduino-uno-q.rules`:
@@ -216,7 +272,7 @@ Then reload:
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
-### Writing the image
+### Writing a stock Arduino image
 
 Arduino's `arduino-flasher-cli` wraps the whole flow, including fetching the
 image:
@@ -237,6 +293,35 @@ qdl --allow-missing --storage emmc prog_firehose_ddr.elf rawprogram0.xml patch0.
 images that fill it. `--allow-missing` lets a partial image set flash without
 every firmware partition present.
 
+### Writing a yoe image
+
+`yoe flash` drives `qdl` for this machine rather than writing to a block device.
+The board must already be in EDL:
+
+```
+yoe flash dev-image --programmer /path/to/prog_firehose_ddr.elf
+```
+
+yoe writes only the two partitions it owns — `efi` and `rootfs`. Vendor firmware
+and `userdata` are left untouched, so a reflash preserves `/home/arduino`. The
+confirmation prompt names the partitions before anything is written; `--yes`
+skips it and `--dry-run` reports what would happen.
+
+The programmer is a signed vendor blob and is not redistributed with yoe. Point
+at a copy from Arduino's image bundle.
+
+### Updating a running board without reflashing
+
+Reflashing is for when the rootfs changes shape. For package-level change,
+`yoe deploy` installs a unit onto a running board over SSH:
+
+```
+yoe deploy my-unit bec-uno-q.local
+```
+
+That is a seconds-long loop against a multi-gigabyte rootfs rewrite, and it does
+not need EDL, a jumper, or a power cycle.
+
 ### Afterwards
 
 Remove the JCTL jumper and power-cycle the board. Leaving the jumper in place
@@ -247,38 +332,58 @@ Keep a known-good stock image on hand. Because EDL lives in masked ROM, a bad
 Linux image is always recoverable — but only if you have something to flash
 back.
 
-## A yoe BSP for this board (planned)
+## The yoe BSP for this board
 
-> **Status (planned):** none of the units below exist. This section records the
-> shape the work would take, so the design is visible before anyone starts.
+Board support lives in **`module-qcom`**, which is named for the SoC vendor
+rather than the board — Qualcomm's own RB1/RB2 and Arduino's sibling Ventun Q
+would reuse most of it.
 
-Mapping the board onto yoe's machine model:
+The board runs stock Debian trixie. Everything board-specific comes from one
+small vendor apt repo, `apt-repo.arduino.cc`, wrapped as a single feed:
 
-| Piece                | Where it would come from                                      |
-| -------------------- | ------------------------------------------------------------- |
-| Qualcomm firmware    | Prebuilt signed blobs, mirrored by a unit that only installs  |
-| U-Boot               | Chainloaded build with the extlinux/sysboot patches           |
-| Kernel               | Arduino's `qcom-v6.19.0-unoq` branch, or mainline as it lands |
-| Device tree          | `qrb2210-rb1.dtb` on mainline; a board-specific DTB otherwise |
-| Boot script          | Sets the 0xC0000000 load addresses, then `booti`              |
-| GPU / DSP / Wi-Fi FW | Qualcomm firmware blobs installed into the rootfs             |
+| Piece                | Where it comes from                                                                       |
+| -------------------- | ----------------------------------------------------------------------------------------- |
+| Rootfs               | Debian trixie, via `@module-debian`'s feeds                                               |
+| Kernel + device tree | `linux-image-7.0.0-g122c2c22d838` from the vendor feed, carrying `qrb2210-arduino-imola*` |
+| Qualcomm firmware    | `firmware-qcom-soc` (Debian non-free-firmware) — adsp, modem, wlanmdsp, GPU zap           |
+| Wi-Fi / BT firmware  | `firmware-atheros`, plus `arduino-unoq-radio-firmware` for per-PCB board data             |
+| Carrier overlays     | `arduino-linux-config`                                                                    |
+| Audio                | `alsa-ucm-conf`, vendor-patched for the QRB2210 audio path                                |
+| A/B slot blessing    | `qbootctl` (Debian main) — see above; omitting it eventually stops the board booting      |
+| Boot firmware        | Factory-provisioned; yoe does not build or write it                                       |
 
-Two things make this board different from the boards yoe supports today, and
-both need design decisions rather than a straight port of an existing BSP:
+The machine descriptor is `machines/arduino-uno-q.star`. It models the two
+partitions yoe owns — `efi` (vfat, 512M) and `rootfs` (ext4, 10G) — at the
+factory GPT's sizes, so each partition image can be written straight into its
+slot. `userdata` is deliberately absent: it holds user data and is meant to
+survive a reflash, so it is provisioned once and never image content.
 
-- **`yoe flash` writes disk images to removable block devices.** That model does
-  not fit a board whose only install path is a ROM-level protocol against a
-  fixed 69-entry partition table. Supporting the UNO Q means either invoking
-  `qdl` from the flash path or producing a rootfs artifact that is installed by
-  other means.
-- **Image assembly assumes yoe owns the partition table.** Here it owns two
-  entries near the end of a table Qualcomm defines. The machine descriptor would
-  need to express "populate these partitions," not "lay out this disk."
+Two kernel command-line arguments are mandatory rather than tuning:
+`clk_ignore_unused` and `pd_ignore_unused`. TrustZone and the always-on firmware
+hold clocks and power domains the kernel cannot refcount, and gating them at
+`late_initcall` hangs the board.
+
+The machine pins the kernel package by its exact versioned name, because the
+vendor feed publishes no `linux-image-arm64`-style metapackage to track instead.
+A kernel bump changes that name, so `yoe update-feeds` in `module-qcom` and the
+machine descriptor move together.
+
+### Known limitation: all-apt projects only
+
+The kernel and every board package come from a Debian-format feed, so this
+machine can only build Debian images. yoe resolves a machine's kernel eagerly,
+for every image in every loaded module, as soon as the machine is selected — so
+a project that selects `arduino-uno-q` while also loading a module that defines
+Alpine images fails during evaluation, before any build starts. Keep UNO Q work
+in a project whose images are all apt-based.
+
+### Mainline
 
 Mainline Linux support for the QRB2210 is progressing — the SoC boots to a login
 shell on recent mainline kernels using the `qrb2210-rb1` device tree, with GPU
 and Bluetooth held back pending firmware packaging. Tracking mainline rather
-than a vendor branch is the preferable target once the gaps close.
+than a vendor branch is the preferable target once the gaps close, and it would
+remove the versioned-kernel-package pin above.
 
 ## The real-time brain
 
