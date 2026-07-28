@@ -1,7 +1,9 @@
 # Machine/distro compatibility — Implementation Plan
 
-> **Status:** Not started. Blocks the first build for any single-distro machine,
-> including `arduino-uno-q` from
+> **Status:** Implemented. All five phases landed; `testdata/e2e-project` now
+> evaluates with `arduino-uno-q` selected and `@module-alpine` loaded, and
+> `base-image` resolves the Arduino feed's kernel and board packages under
+> `--distro debian`. Unblocks
 > [uno-q-flashing](2026-07-27-001-uno-q-flashing-plan.md).
 
 ## Problem

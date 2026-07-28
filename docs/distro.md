@@ -210,6 +210,54 @@ keeps the flat single-`unit` form
 image, for instance, carries the same custom `linux-rpi5` on Alpine and Debian
 alike. Setting both `unit` and `distro_unit` on one kernel is an error.
 
+### A machine supports exactly the distros its kernel names
+
+The `distro_unit` keys are also the machine's declaration of _which distros the
+board can boot_. Some boards support only one: the Arduino UNO Q's kernel and
+board packages ship from a Debian-format vendor feed, so its `distro_unit`
+carries a `debian` key and nothing else.
+
+Every image in every loaded module is evaluated against the one selected
+machine, so a project targeting such a board still holds images for other
+distros — `module-alpine` ships its own, and a shared `dev-image` may be built
+on Alpine by someone else on the team. Those images are **not buildable on this
+machine**, and that is a normal outcome rather than an error: their kernel is
+never resolved, their machine packages are never merged, their closure is never
+walked, and they register as inert units with no artifacts, no dependencies, and
+no build tasks. Selecting a single-distro machine never breaks evaluation for
+images it cannot boot.
+
+Asking for one of those images is where it gets loud:
+
+```sh
+$ yoe build --machine arduino-uno-q bun-image
+Error: image "bun-image" (distro "alpine") is not buildable on machine
+"arduino-uno-q", whose kernel supports: debian
+```
+
+A build that names no target (`yoe build` with no image) sweeps every unit in
+the selected distro's graph, so a hard error there would make full builds
+impossible in any mixed-distro project. Those images are skipped with a notice
+instead, and the rest of the build proceeds:
+
+```sh
+$ yoe build --machine arduino-uno-q --distro alpine
+note: skipping image "bun-image" (distro "alpine") — not buildable on machine
+"arduino-uno-q", whose kernel supports: debian
+```
+
+`yoe desc` says the same thing on such an image, and qualifies its input hash —
+nothing was resolved, so the hash is not a build key and must not be compared
+against a real one. The TUI marks these images in the unit list rather than
+hiding them: a project should not appear to hold fewer images depending on which
+machine happens to be selected.
+
+The flat single-`unit` form makes the opposite claim. A machine writing
+`kernel(unit = "linux-rpi5", ...)` asserts that this kernel works on every
+distro, so no image is ever skipped for it. When that assertion is false — the
+named unit exists in only one distro's feed — the closure walk fails loudly on
+the unresolved kernel name and points at `distro_unit` as the fix.
+
 ## Choosing a distro
 
 The picks are bounded today:

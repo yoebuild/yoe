@@ -92,7 +92,8 @@ func (e *Engine) closure(roots []string, effectiveDistro string) ([]string, erro
 			return nil, err
 		}
 		if u == nil {
-			return nil, fmt.Errorf("unresolved name %q (not in any module, no provider, or filtered by distro=%q)", name, effectiveDistro)
+			return nil, fmt.Errorf("unresolved name %q (not in any module, no provider, or filtered by distro=%q)%s",
+				name, effectiveDistro, e.flatKernelHint(name, effectiveDistro))
 		}
 		seen[u.Name] = true
 		for _, dep := range u.RuntimeDepsForDistro(effectiveDistro) {
@@ -145,6 +146,32 @@ func (e *Engine) closure(roots []string, effectiveDistro string) ([]string, erro
 		}
 	}
 	return ordered, nil
+}
+
+// flatKernelHint returns a suffix pointing the machine author at
+// distro_unit when the unresolved name is the selected machine's flat
+// kernel unit. A machine writing kernel(unit = ...) asserts that one
+// kernel works on every distro; when the kernel really is distro-
+// specific the assertion breaks here, with a name the reader has no
+// reason to connect to their machine definition. Naming the fix is the
+// difference between an opaque miss and an actionable one.
+//
+// Returns "" for every other unresolved name, so the common case reads
+// exactly as before.
+func (e *Engine) flatKernelHint(name, effectiveDistro string) string {
+	if e.project == nil {
+		return ""
+	}
+	m, ok := e.machines[e.project.Defaults.Machine]
+	if !ok || m.Kernel.Unit != name {
+		return ""
+	}
+	return fmt.Sprintf("\n  %q is machine %q's kernel, declared as kernel(unit = %q), which claims the same kernel"+
+		"\n  works on every distro. If it exists only for some, declare it per distro instead:"+
+		"\n      kernel(distro_unit = {%q: %q, ...}, provides = ...)"+
+		"\n  Images for the distros it does not list are then marked not-buildable on this machine"+
+		"\n  rather than failing here.",
+		name, m.Name, name, effectiveDistro, name)
 }
 
 // lookupOrMaterialize returns the *Unit registered under name. It first

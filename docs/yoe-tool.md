@@ -729,6 +729,16 @@ yoe desc openssh --config
 yoe desc openssh --inputs
 ```
 
+For an image the selected machine's kernel cannot boot, `desc` says so and
+qualifies the hash — nothing was resolved, so the value is not a build key and
+must not be compared against a real one:
+
+```sh
+#   Buildable:    no — machine "arduino-uno-q", whose kernel supports: debian
+#   Input hash:   4c1e90... (not a build key — nothing was resolved)
+#   Artifacts:    (not resolved for machine "arduino-uno-q")
+```
+
 ### `yoe refs`
 
 Shows reverse dependencies — what units or images depend on a given unit.
@@ -798,17 +808,26 @@ units with their build status. The home screen has three tabs (`tab` /
 
 #### Status indicators
 
-| Indicator      | Color          | Meaning                     |
-| -------------- | -------------- | --------------------------- |
-| (none)         | —              | Never built                 |
-| `● cached`     | dim/gray       | Built and cached            |
-| `● waiting`    | yellow         | Queued, deps building first |
-| `▌building...` | flashing green | Actively compiling          |
-| `● failed`     | red            | Last build failed           |
+| Indicator      | Color          | Meaning                                        |
+| -------------- | -------------- | ---------------------------------------------- |
+| (none)         | —              | Never built                                    |
+| `● cached`     | dim/gray       | Built and cached                               |
+| `● waiting`    | yellow         | Queued, deps building first                    |
+| `▌building...` | flashing green | Actively compiling                             |
+| `● failed`     | red            | Last build failed                              |
+| `⊘ n/a`        | gray           | Image the selected machine's kernel can't boot |
 
 When you build a unit, its dependencies appear as "waiting" (yellow), then
 transition to "building" (flashing green) as the executor reaches them. Multiple
 deps can flash green simultaneously.
+
+`⊘ n/a` marks an image whose distro the selected machine cannot boot — the
+machine's kernel names a different set of distros, so the image was never
+resolved and has no build status to report. Its detail view opens with a NOT
+BUILDABLE block naming the machine and the distros it does support. Such images
+are marked rather than hidden, so the unit list doesn't appear to shrink when a
+single-distro machine is selected. See
+[distro.md](distro.md#a-machine-supports-exactly-the-distros-its-kernel-names).
 
 #### Source state (SRC column)
 

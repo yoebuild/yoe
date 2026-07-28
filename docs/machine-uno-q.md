@@ -442,14 +442,27 @@ vendor feed publishes no `linux-image-arm64`-style metapackage to track instead.
 A kernel bump changes that name, so `yoe update-feeds` in `module-qcom` and the
 machine descriptor move together.
 
-### Known limitation: all-apt projects only
+### Debian images only
 
 The kernel and every board package come from a Debian-format feed, so this
-machine can only build Debian images. yoe resolves a machine's kernel eagerly,
-for every image in every loaded module, as soon as the machine is selected — so
-a project that selects `arduino-uno-q` while also loading a module that defines
-Alpine images fails during evaluation, before any build starts. Keep UNO Q work
-in a project whose images are all apt-based.
+machine boots Debian and nothing else. Its `kernel(distro_unit = {"debian": …})`
+says so, and that declaration is what the rest of yoe reads: images targeting
+any other distro are marked not buildable on this machine rather than resolved.
+
+A project selecting `arduino-uno-q` may therefore still load `@module-alpine`
+and any other module that defines images for other distros — those images
+register inert and evaluation succeeds. Building one by name is refused with the
+reason; a build that names no target skips them with a notice and builds the
+rest. See
+[distro.md](distro.md#a-machine-supports-exactly-the-distros-its-kernel-names).
+
+One consequence worth knowing: a project whose `defaults.distro` is not `debian`
+needs `--distro debian` (or a `local.star` override) when building for this
+board, or its images evaluate for the wrong distro and get marked:
+
+```sh
+yoe build --machine arduino-uno-q --distro debian base-image
+```
 
 ### Mainline
 

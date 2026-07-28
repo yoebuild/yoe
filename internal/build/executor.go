@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -179,6 +180,21 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		return err
 	}
 
+	// Machine/distro compatibility. An image whose distro the selected
+	// machine's kernel can't boot was registered inert during evaluation
+	// (see image() in module-core), and must never reach a build.
+	//
+	// Two entry paths, two behaviors. A named target is a hard error —
+	// the user asked for this image, so the answer is "not on this
+	// machine," loudly, with the reason. That check is here, before any
+	// hashing, so it fails fast. The sweep case is handled after the
+	// build order is filtered, below.
+	for _, n := range names {
+		if u := proj.LookupUnit(effectiveDistro, n); u.NotBuildable() {
+			return errors.New(u.UnbuildableReason())
+		}
+	}
+
 	// Compute hashes for cache. Pin units pass empty (cache-neutral);
 	// dev units fold in HEAD sha and, when the work tree is dirty,
 	// the dirty diff sha so an in-place edit invalidates the cache.
@@ -210,6 +226,15 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 			return err
 		}
 	}
+
+	// Any image left in the build order that the machine can't boot got
+	// here by being swept into an unnamed full build (a named one already
+	// errored above). Erroring here too would make full builds impossible
+	// in any mixed-distro project — the evaluation-time failure, one
+	// level up — so skip it and say so. A silent skip would be exactly
+	// the silent failure we forbid. Runs after the filter so the notice
+	// only fires for images this invocation would actually have built.
+	order = skipUnbuildable(w, proj, effectiveDistro, order)
 
 	if opts.DryRun {
 		return dryRun(w, proj, order, hashes, opts, requested)
@@ -1100,6 +1125,21 @@ func filterBuildOrder(dag *resolve.DAG, fullOrder []string, names []string) ([]s
 		}
 	}
 	return filtered, nil
+}
+
+// skipUnbuildable drops images the selected machine cannot boot from the
+// build order, printing one notice per skipped image.
+func skipUnbuildable(w io.Writer, proj *yoestar.Project, effectiveDistro string, order []string) []string {
+	kept := make([]string, 0, len(order))
+	for _, name := range order {
+		if u := proj.LookupUnit(effectiveDistro, name); u.NotBuildable() {
+			fmt.Fprintf(w, "note: skipping image %q (distro %q) — not buildable on %s\n",
+				u.Name, u.Distro, u.UnbuildableMachineClause())
+			continue
+		}
+		kept = append(kept, name)
+	}
+	return kept
 }
 
 // blockedUnits returns units remaining in the build order that transitively

@@ -3,6 +3,7 @@ package starlark
 import (
 	"fmt"
 	"iter"
+	"strings"
 
 	"go.starlark.net/starlark"
 )
@@ -647,6 +648,27 @@ type Unit struct {
 	Locale            string
 	Partitions        []Partition
 
+	// UnbuildableMachine names the selected machine when this image was
+	// registered WITHOUT being resolved, because the machine's kernel has
+	// no entry for the image's distro. Empty on every buildable unit.
+	//
+	// A machine's kernel `distro_unit` keys declare which distros the board
+	// can boot; an image targeting any other distro is registered inert —
+	// no artifacts, no deps, no tasks — so selecting a single-distro
+	// machine doesn't break evaluation for unrelated images. The marker is
+	// what distinguishes "not buildable here" from "genuinely empty": a
+	// rootfs-only image with no packages is legal and must not be confused
+	// with this. Never infer the state from an empty artifact list.
+	//
+	// Deliberately absent from UnitHash: a marked image's hash never keys a
+	// build, so hashing the field buys nothing and cache neutrality holds
+	// by omission.
+	UnbuildableMachine string
+	// MachineKernelDistros is the sorted distro set that machine's kernel
+	// does support, carried so the refusal at the point of use can name it
+	// instead of saying only "no".
+	MachineKernelDistros []string
+
 	// Arbitrary kwargs passed to unit() that don't map to a typed field.
 	// Used for template context rendering and will be included in the unit
 	// hash (see docs/superpowers/plans/2026-04-23-file-templates.md Task 6).
@@ -713,6 +735,45 @@ var validArchitectures = map[string]bool{
 	"arm64":   true,
 	"riscv64": true,
 	"x86_64":  true,
+}
+
+// NotBuildable reports whether this unit was registered inert because
+// the selected machine cannot boot its distro. Callers that gate on the
+// state (build refusal, `yoe desc`, TUI status) must use this rather
+// than checking for an empty artifact list — a rootfs-only image with no
+// packages is a legitimate, buildable unit.
+func (u *Unit) NotBuildable() bool {
+	return u != nil && u.UnbuildableMachine != ""
+}
+
+// UnbuildableMachineClause names the machine and the distro set its
+// kernel does support:
+//
+//	machine "arduino-uno-q", whose kernel supports: debian
+//
+// It carries no verb, so callers phrase their own ("not buildable on …",
+// "Buildable: no — …"). Empty on a buildable unit.
+func (u *Unit) UnbuildableMachineClause() string {
+	if !u.NotBuildable() {
+		return ""
+	}
+	supported := strings.Join(u.MachineKernelDistros, ", ")
+	if supported == "" {
+		supported = "(none)"
+	}
+	return fmt.Sprintf("machine %q, whose kernel supports: %s", u.UnbuildableMachine, supported)
+}
+
+// UnbuildableReason renders the whole sentence — image, distro, machine,
+// supported set — for surfaces that refuse outright. This message carries
+// the diagnostic burden that the evaluation-time crash used to, so it
+// names every part of the mismatch. Empty on a buildable unit.
+func (u *Unit) UnbuildableReason() string {
+	if !u.NotBuildable() {
+		return ""
+	}
+	return fmt.Sprintf("image %q (distro %q) is not buildable on %s",
+		u.Name, u.Distro, u.UnbuildableMachineClause())
 }
 
 // DepsForDistro returns the build-time deps that apply to a closure
