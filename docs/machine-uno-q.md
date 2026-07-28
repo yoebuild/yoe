@@ -121,12 +121,21 @@ and vice versa. Leave the adapter's supply lead disconnected — the board has i
 own power. Pin 9 is an output, so use it only as a `VCCIO` reference for a
 level-shifting adapter, never as a supply to drive the board.
 
+![SH-U09C2 USB-to-TTL adapter connected to the UNO Q JCTL header with three jumper wires](assets/uno-q-serial-console-setup.jpg)
+
+_A jumper-wired console on the UNO Q. The SH-U09C2 adapter is at the top left,
+with its level-select jumper on the board next to the USB connector — set that
+to 1.8 V before making any connection. Only the `GND`, `RX`, and `TX` leads
+reach the JCTL header just above the QRB2210; the remaining leads are tied back
+and left unconnected. The board takes its own power from the USB-C port on the
+left, so the adapter's supply lead stays out of the circuit._
+
 Once wired, the adapter enumerates on the host as `/dev/ttyUSB0` (FTDI, CP210x,
 CH340) or `/dev/ttyACM0` (CDC ACM). Open it with
-[tio](https://github.com/tio/tio):
+[tio](https://github.com/tio/tio), which defaults to 115200 8N1:
 
 ```
-tio -b 115200 /dev/ttyUSB0
+tio /dev/ttyUSB0
 ```
 
 If nothing appears after power-on:

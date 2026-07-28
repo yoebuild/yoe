@@ -115,11 +115,11 @@ Wiring is "cross-over": the cable's **TX goes to the board's RX** (pin 10), and
 the cable's **RX goes to the board's TX** (pin 8). `GND` to `GND` (pin 6).
 
 Once wired, plug the USB end into the host; it enumerates as `/dev/ttyUSB0`
-(FTDI / CH340 / CP210x) or `/dev/ttyACM0` (some CDC ACM adapters). Open it at
-115200 with [tio](https://github.com/tio/tio):
+(FTDI / CH340 / CP210x) or `/dev/ttyACM0` (some CDC ACM adapters). Open it with
+[tio](https://github.com/tio/tio), which defaults to 115200 8N1:
 
 ```
-tio -b 115200 /dev/ttyUSB0
+tio /dev/ttyUSB0
 ```
 
 If nothing appears after power-on:
