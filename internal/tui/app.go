@@ -51,6 +51,10 @@ var (
 	// the eye can scan keys at a glance.
 	helpKeyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#e8863a")).Bold(true)
 	waitingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // yellow
+	// Images the selected machine cannot boot. Grayed rather than hidden:
+	// a project should not appear to hold fewer images depending on which
+	// machine is selected.
+	unbuildableStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 
 	// Home-header field block: labels render plain white (the look of the
 	// existing "Machine:" label), values in a bright accent so the eye
@@ -4250,6 +4254,16 @@ func wrapShellCommandText(bin string, args []string, width int, indent string) s
 func (m model) detailAllLines() []string {
 	var allLines []string
 
+	// Lead with the machine mismatch when there is one — the empty
+	// artifact list and empty trees below are consequences of it, and
+	// without this line they read as a broken image rather than one this
+	// machine simply can't boot.
+	if u := m.proj.LookupUnit(m.distro, m.detailUnit); u.NotBuildable() {
+		allLines = append(allLines, headerStyle.Render("  NOT BUILDABLE"))
+		allLines = append(allLines, m.wrapLine("  on "+u.UnbuildableMachineClause())...)
+		allLines = append(allLines, "")
+	}
+
 	// Dependency context for the unit, above the build output: whether
 	// the current default image pulls it in (upstream) and what this
 	// unit transitively pulls in itself (downstream).
@@ -4764,6 +4778,12 @@ func (m model) viewDetailFilesBody() string {
 }
 
 func (m model) renderStatus(name string) string {
+	// An image the selected machine's kernel can't boot never builds, so
+	// it has no build status to report — say why instead of leaving the
+	// column blank. Checked first: the unit can't be in any other state.
+	if u := m.proj.LookupUnit(m.distro, name); u.NotBuildable() {
+		return unbuildableStyle.Render("⊘ n/a")
+	}
 	switch m.statuses[name] {
 	case statusCached:
 		return cachedStyle.Render("● cached")

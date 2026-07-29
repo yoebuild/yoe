@@ -51,12 +51,23 @@ func Describe(w io.Writer, proj *yoestar.Project, name string, arch string) erro
 		fmt.Fprintf(w, "Runtime deps: %s\n", strings.Join(unit.RuntimeDeps, ", "))
 	}
 
-	fmt.Fprintf(w, "Input hash:   %s\n", hashes[name])
+	// A unit the selected machine cannot boot was never resolved, so its
+	// hash is computed over an empty artifact list. Print it qualified
+	// rather than bare — an unqualified hash invites comparison against a
+	// real one, and it never keys a build for this machine.
+	if unit.NotBuildable() {
+		fmt.Fprintf(w, "Buildable:    no — %s\n", unit.UnbuildableMachineClause())
+		fmt.Fprintf(w, "Input hash:   %s (not a build key — nothing was resolved)\n", hashes[name])
+	} else {
+		fmt.Fprintf(w, "Input hash:   %s\n", hashes[name])
+	}
 	fmt.Fprintf(w, "Architecture: %s\n", arch)
 
 	if unit.Class == "image" {
-		if len(unit.Artifacts) > 0 {
-			fmt.Fprintf(w, "Artifacts:     %s\n", strings.Join(unit.Artifacts, ", "))
+		if unit.NotBuildable() {
+			fmt.Fprintf(w, "Artifacts:    (not resolved for machine %q)\n", unit.UnbuildableMachine)
+		} else if len(unit.Artifacts) > 0 {
+			fmt.Fprintf(w, "Artifacts:    %s\n", strings.Join(unit.Artifacts, ", "))
 		}
 		if unit.Hostname != "" {
 			fmt.Fprintf(w, "Hostname:     %s\n", unit.Hostname)

@@ -15,6 +15,13 @@ and this project adheres to
   declare the release their packages are built for separately from the archive
   path they are fetched from, so vendor repos and the base distro compose in one
   image.
+- **Selecting a board that only runs one distro no longer breaks the rest of
+  your project.** Picking a machine whose kernel exists for a single distro (the
+  Arduino UNO Q is Debian-only) used to fail the whole project the moment any
+  other module defined an image for a different distro. Those images are now
+  marked not buildable on that machine — naming one in a build tells you why, a
+  full build skips it with a notice, and everything the board can boot builds
+  normally.
 
 ## [0.13.0] - 2026-07-06
 

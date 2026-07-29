@@ -18,12 +18,14 @@ import (
 // below will fail until you either reference unit.<Field> in UnitHash or
 // add the field name here with a one-line justification.
 var hashSkipFields = map[string]string{
-	"Module":            "registration provenance — same unit from different modules must hash identically",
-	"ModuleIndex":       "registration order — informational, no output impact",
-	"CacheDirs":         "host-side mount points; doesn't affect built artifact contents",
-	"ArtifactsExplicit": "UX-only metadata; the resolved Artifacts list (which IS hashed) drives the actual rootfs",
-	"Distro":            "visibility-only tag; the consuming image's effective_distro IS hashed (separately) — the per-unit tag has no output impact",
-	"PassthroughDeb":    "transport metadata for mirror-verbatim deb publish; the bytes themselves are hashed via SHA256 (which IS in the hash), so this filename doesn't add information",
+	"Module":               "registration provenance — same unit from different modules must hash identically",
+	"ModuleIndex":          "registration order — informational, no output impact",
+	"CacheDirs":            "host-side mount points; doesn't affect built artifact contents",
+	"ArtifactsExplicit":    "UX-only metadata; the resolved Artifacts list (which IS hashed) drives the actual rootfs",
+	"Distro":               "visibility-only tag; the consuming image's effective_distro IS hashed (separately) — the per-unit tag has no output impact",
+	"PassthroughDeb":       "transport metadata for mirror-verbatim deb publish; the bytes themselves are hashed via SHA256 (which IS in the hash), so this filename doesn't add information",
+	"UnbuildableMachine":   "marks an image the selected machine can't boot; such a unit never builds, so its hash never keys anything — hashing it would only churn cache for no output difference",
+	"MachineKernelDistros": "diagnostic payload for the UnbuildableMachine message; same reasoning — never reaches a build",
 }
 
 // TestUnitHash_CoversAllFields fails when a new field is added to Unit
@@ -61,7 +63,7 @@ func TestUnitHash_Deterministic(t *testing.T) {
 		Source:  "https://example.com/openssh.tar.gz",
 		SHA256:  "abc123",
 		Deps:    []string{"zlib"},
-		Tasks: []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "make"}}}},
+		Tasks:   []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "make"}}}},
 	}
 
 	h1 := UnitHash(unit, "arm64", map[string]string{"zlib": "deadbeef"}, "", "")
@@ -82,7 +84,7 @@ func TestUnitHash_ChangesOnInput(t *testing.T) {
 		Class:   "package",
 		Source:  "https://example.com/openssh.tar.gz",
 		Deps:    []string{"zlib"},
-		Tasks: []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "make"}}}},
+		Tasks:   []yoestar.Task{{Name: "build", Steps: []yoestar.Step{{Command: "make"}}}},
 	}
 
 	h1 := UnitHash(unit, "arm64", map[string]string{"zlib": "aaa"}, "", "")
