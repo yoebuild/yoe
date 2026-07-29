@@ -69,16 +69,29 @@ minutes of compute.
 
 ### CI
 
-Two workflows run under `.github/workflows/`:
+Three workflows run under `.github/workflows/`:
 
 - `ci.yaml` — on every push to `main` and every pull request: `go test ./...`, a
   `yoe` binary build, and `prettier --check` on `**/*.md`.
-- `e2e-build.yaml` — a full from-source build of `base-image` (bootstrap
-  toolchain, musl, busybox, the kernel, image assembly), verifying the resulting
-  `base-image.img`. Because it is expensive (Docker, tens of minutes), it runs
-  on pushes to `main`, on a nightly schedule, and via manual dispatch — not on
-  every pull request. Successive runs reuse the content-addressed cache via
-  `actions/cache`, so an unchanged graph rebuilds incrementally.
+- `e2e-build.yaml` — a full from-source build of `dev-image` (bootstrap
+  toolchain, libc, busybox, the kernel, image assembly) for every distro on both
+  host architectures, followed by a QEMU boot test that waits for the login
+  prompt, SSHes in, and runs a health command. Because it is expensive (Docker,
+  tens of minutes per cell), it runs on a nightly schedule and via manual
+  dispatch — not on pull requests.
+- `machine-build.yaml` — the same from-source build of `dev-image` for each
+  supported hardware machine (Raspberry Pi 4 and 5, BeaglePlay), covering the
+  board's kernel, bootloader, and partition layout. Runs nightly and on manual
+  dispatch. Distro is Alpine unless a board constrains it — a board whose kernel
+  and packages come from a vendor apt feed can only build the distro that feed
+  is ABI-coupled to. There is no boot test: these images target physical boards,
+  so each cell verifies the image artifact and reports its partition table. Each
+  image is uploaded zstd-compressed and kept for seven days, so a nightly build
+  can be downloaded from the run's Artifacts section and flashed to hardware
+  (`unzstd` it first; `yoe flash` takes the decompressed `.img`).
+
+Both nightly workflows reuse the content-addressed cache via `actions/cache`, so
+an unchanged graph rebuilds incrementally.
 
 ## Build-time Package QA (planned)
 
@@ -238,12 +251,19 @@ Three CI tiers, in order of cost:
    `internal/build/e2e_test.go` loads `testdata/e2e-project/` and resolves the
    unit graph without building, catching Starlark-level and graph breakage.
    _Implemented._
-2. **Full image build** — `yoe build base-image` from source on pushes to
-   `main`, nightly, and on demand (`e2e-build.yaml`). Expensive (Docker, tens of
-   minutes) but catches actual build regressions. _Implemented._
-3. **Image smoke tests** — boot the built image and assert over SSH (the
+2. **Full image build** — `yoe build dev-image` from source, nightly and on
+   demand, across every distro and host arch (`e2e-build.yaml`) and across every
+   hardware machine (`machine-build.yaml`). Expensive (Docker, tens of minutes
+   per cell) but catches actual build regressions, including board-specific
+   kernel, bootloader, and partition breakage. _Implemented._
+3. **Image boot test** — `yoe run --boot-test` waits for the login prompt, SSHes
+   in, runs a health command, and powers off. Runs after each `e2e-build.yaml`
+   build. Hardware machines have no boot tier: QEMU cannot stand in for the
+   board, so `machine-build.yaml` stops at verifying the image artifact.
+   _Implemented._
+4. **Image smoke tests** — richer per-image assertions over SSH (the
    `yoe test <image>` driver below). _Planned;_ once it lands, `e2e-build.yaml`
-   gains a `yoe test base-image` step after the build.
+   gains a `yoe test dev-image` step after the boot test.
 
 ## Build History / Regression Tracking (planned)
 

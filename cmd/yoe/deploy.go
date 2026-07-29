@@ -73,24 +73,24 @@ func cmdDeploy(args []string) {
 		fmt.Fprintf(os.Stderr, "Error: resolve effective distro: %v\n", err)
 		os.Exit(1)
 	}
-	// The suite is only meaningful for apt-family targets (it stamps the
-	// apt sources.list line); alpine deploys ignore it. Read it from the
-	// project's apt_feed only when deploying an apt distro, so an
+	// The codename is only meaningful for apt-family targets (it stamps
+	// the apt sources.list line); alpine deploys ignore it. Read it from
+	// the project's apt_feed only when deploying an apt distro, so an
 	// alpine-only project — which has no apt_feed — doesn't error.
-	suite := ""
+	codename := ""
 	if yoestar.IsAptFamily(deployDistro) {
-		if suite, err = proj.SuiteForDistro(deployDistro); err != nil {
+		if codename, err = proj.CodenameForDistro(deployDistro); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 	}
 	err = device.Deploy(context.Background(), device.DeployInput{
-		Target:  target,
-		Unit:    unitName,
-		Distro:  deployDistro,
-		Suite:   suite,
-		FeedURL: feedURL,
-		Out:     os.Stdout,
+		Target:   target,
+		Unit:     unitName,
+		Distro:   deployDistro,
+		Codename: codename,
+		FeedURL:  feedURL,
+		Out:      os.Stdout,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

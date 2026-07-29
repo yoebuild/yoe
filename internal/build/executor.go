@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -179,6 +180,21 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		return err
 	}
 
+	// Machine/distro compatibility. An image whose distro the selected
+	// machine's kernel can't boot was registered inert during evaluation
+	// (see image() in module-core), and must never reach a build.
+	//
+	// Two entry paths, two behaviors. A named target is a hard error —
+	// the user asked for this image, so the answer is "not on this
+	// machine," loudly, with the reason. That check is here, before any
+	// hashing, so it fails fast. The sweep case is handled after the
+	// build order is filtered, below.
+	for _, n := range names {
+		if u := proj.LookupUnit(effectiveDistro, n); u.NotBuildable() {
+			return errors.New(u.UnbuildableReason())
+		}
+	}
+
 	// Compute hashes for cache. Pin units pass empty (cache-neutral);
 	// dev units fold in HEAD sha and, when the work tree is dirty,
 	// the dirty diff sha so an in-place edit invalidates the cache.
@@ -210,6 +226,15 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 			return err
 		}
 	}
+
+	// Any image left in the build order that the machine can't boot got
+	// here by being swept into an unnamed full build (a named one already
+	// errored above). Erroring here too would make full builds impossible
+	// in any mixed-distro project — the evaluation-time failure, one
+	// level up — so skip it and say so. A silent skip would be exactly
+	// the silent failure we forbid. Runs after the filter so the notice
+	// only fires for images this invocation would actually have built.
+	order = skipUnbuildable(w, proj, effectiveDistro, order)
 
 	if opts.DryRun {
 		return dryRun(w, proj, order, hashes, opts, requested)
@@ -427,13 +452,13 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 	// step). Regenerate it once from the pool — O(pool), paid a single
 	// time, versus the former per-publish regen that was O(units²).
 	if publishedDeb && !imageRefreshed {
-		suite, err := proj.SuiteForDistro(effectiveDistro)
+		codename, err := proj.CodenameForDistro(effectiveDistro)
 		if err != nil {
 			return fmt.Errorf("refresh %s index: %w", effectiveDistro, err)
 		}
 		if err := repo.GenerateDebianIndex(repo.DebRepoOptions{
 			RepoDir:    repo.RepoDistroDir(proj, opts.ProjectDir, effectiveDistro),
-			Suite:      suite,
+			Codename:   codename,
 			Components: []string{"main"},
 			Arches:     []string{"amd64", "arm64"},
 		}); err != nil {
@@ -697,18 +722,18 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		"REPO":            filepath.Join("/project", repoRelPath(proj, opts.ProjectDir), opts.EffectiveDistro),
 	}
 
-	// Expose the release codename to the build as $SUITE so the image
-	// class's mmdebstrap invocation targets the same suite the repo
+	// Expose the release codename to the build as $CODENAME so the image
+	// class's mmdebstrap invocation targets the same release the repo
 	// emitter stamps, both sourced from the project's apt_feed. Only
 	// meaningful for apt-family distros (Debian, Ubuntu); an alpine build
 	// has no apt_feed and skips it. Errors loudly if an apt build can't
-	// resolve a suite — the rootfs assembly can't proceed without one.
+	// resolve a codename — the rootfs assembly can't proceed without one.
 	if yoestar.IsAptFamily(opts.EffectiveDistro) {
-		suite, serr := proj.SuiteForDistro(opts.EffectiveDistro)
+		codename, serr := proj.CodenameForDistro(opts.EffectiveDistro)
 		if serr != nil {
-			return fmt.Errorf("resolving %s suite: %w", opts.EffectiveDistro, serr)
+			return fmt.Errorf("resolving %s release: %w", opts.EffectiveDistro, serr)
 		}
-		env["SUITE"] = suite
+		env["CODENAME"] = codename
 	}
 
 	// Expose the project's signing key info so units that need to ship the
@@ -768,13 +793,13 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	// file or directory"). GenerateDebianIndex scans the pool, so a
 	// refresh here always matches what is actually on disk.
 	if unit.Class == "image" && yoestar.IsAptFamily(opts.EffectiveDistro) {
-		suite, serr := proj.SuiteForDistro(opts.EffectiveDistro)
+		codename, serr := proj.CodenameForDistro(opts.EffectiveDistro)
 		if serr != nil {
 			return fmt.Errorf("refresh %s index: %w", opts.EffectiveDistro, serr)
 		}
 		if err := repo.GenerateDebianIndex(repo.DebRepoOptions{
 			RepoDir:    repo.RepoDistroDir(proj, opts.ProjectDir, opts.EffectiveDistro),
-			Suite:      suite,
+			Codename:   codename,
 			Components: []string{"main"},
 			Arches:     []string{"amd64", "arm64"},
 		}); err != nil {
@@ -1005,14 +1030,14 @@ func packageDeb(unit *yoestar.Unit, destDir, srcDir, buildDir string, opts Optio
 
 	// Publish into the project pool and regenerate the per-arch
 	// Packages + Release + InRelease at repo/<project>/<distro>/.
-	suite, err := proj.SuiteForDistro(opts.EffectiveDistro)
+	codename, err := proj.CodenameForDistro(opts.EffectiveDistro)
 	if err != nil {
 		return fmt.Errorf("packaging deb: %w", err)
 	}
 	repoDir := repo.RepoDistroDir(proj, opts.ProjectDir, opts.EffectiveDistro)
 	publishOpts := repo.DebRepoOptions{
 		RepoDir:    repoDir,
-		Suite:      suite,
+		Codename:   codename,
 		Components: []string{"main"},
 		Arches:     []string{"amd64", "arm64"},
 	}
@@ -1100,6 +1125,21 @@ func filterBuildOrder(dag *resolve.DAG, fullOrder []string, names []string) ([]s
 		}
 	}
 	return filtered, nil
+}
+
+// skipUnbuildable drops images the selected machine cannot boot from the
+// build order, printing one notice per skipped image.
+func skipUnbuildable(w io.Writer, proj *yoestar.Project, effectiveDistro string, order []string) []string {
+	kept := make([]string, 0, len(order))
+	for _, name := range order {
+		if u := proj.LookupUnit(effectiveDistro, name); u.NotBuildable() {
+			fmt.Fprintf(w, "note: skipping image %q (distro %q) — not buildable on %s\n",
+				u.Name, u.Distro, u.UnbuildableMachineClause())
+			continue
+		}
+		kept = append(kept, name)
+	}
+	return kept
 }
 
 // blockedUnits returns units remaining in the build order that transitively

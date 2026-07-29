@@ -3,6 +3,7 @@ package starlark
 import (
 	"fmt"
 	"iter"
+	"strings"
 
 	"go.starlark.net/starlark"
 )
@@ -496,52 +497,70 @@ func IsAptFamily(distro string) bool {
 	return AptFamilyDistros[distro]
 }
 
-// SuiteForDistro returns the release codename a given apt-family distro
-// targets, read from the matching apt_feed(...) declaration — the source
-// of the codename that the project repo emitter (dists/<suite>/), image
-// assembly (the mmdebstrap target), and the on-device apt sources.list
-// all stamp. Every feed for a distro must agree on the suite (the
+// CodenameForDistro returns the upstream release codename a given
+// apt-family distro targets, read from the `codename` kwarg of the
+// matching apt_feed(...) declarations — the source of the codename that
+// the project repo emitter (dists/<codename>/), image assembly (the
+// mmdebstrap target), and the on-device apt sources.list all stamp.
+//
+// Every apt feed in one distro's closure must agree on the codename: the
 // toolchain container pins one release, and libc from a different release
-// can't safely mix), so this also enforces one-suite-per-distro. Errors
-// when no feed for distro declares a suite: an apt-family image build
-// needs one to source the codename.
-func (p *Project) SuiteForDistro(distro string) (string, error) {
+// can't safely mix. This enforces that, and reports which feeds disagree.
+//
+// The guard deliberately keys on `codename`, not `suite`. A feed's suite
+// is only an archive path segment: Debian serves one release at both
+// dists/trixie and dists/stable, its security and updates pockets live at
+// dists/trixie-security and dists/trixie-updates, and a vendor overlay
+// repo may name its channel anything at all (Arduino's is "stable"). Only
+// the codename identifies the release whose ABI the packages are built
+// against, so only the codename can express this invariant.
+//
+// Errors when no feed for distro declares a codename: an apt-family image
+// build needs one to bootstrap against.
+func (p *Project) CodenameForDistro(distro string) (string, error) {
 	if p == nil {
-		return "", fmt.Errorf("SuiteForDistro: nil project")
+		return "", fmt.Errorf("CodenameForDistro: nil project")
 	}
-	suite := ""
+	codename, from := "", ""
 	for _, sm := range p.SyntheticModules {
-		if sm == nil || sm.Suite == "" || sm.Distro != distro {
+		if sm == nil || sm.Codename == "" || sm.Distro != distro {
 			continue // not an apt feed for this distro
 		}
-		if suite == "" {
-			suite = sm.Suite
-		} else if sm.Suite != suite {
-			return "", fmt.Errorf("project declares multiple %s suites (%q and %q); one suite per distro", distro, suite, sm.Suite)
+		if codename == "" {
+			codename, from = sm.Codename, sm.Name
+		} else if sm.Codename != codename {
+			return "", fmt.Errorf("project mixes %s releases: feed %q targets codename %q but feed %q targets %q; "+
+				"every apt feed for one distro must target the same release (a feed for a different archive suite of the same "+
+				"release, or a vendor overlay repo, still declares the release its packages are built for)",
+				distro, from, codename, sm.Name, sm.Codename)
 		}
 	}
-	if suite == "" {
-		return "", fmt.Errorf("no apt_feed declares a suite for distro %q; an %s image build needs an apt_feed(distro=%q, ...) in a module", distro, distro, distro)
+	if codename == "" {
+		return "", fmt.Errorf("no apt_feed declares a codename for distro %q; an %s image build needs an apt_feed(distro=%q, codename=..., ...) in a module", distro, distro, distro)
 	}
-	return suite, nil
+	return codename, nil
 }
 
 // BaseVersionForDistro returns the upstream release identifier the given
-// distro's feed declares — the apt suite codename (e.g. "trixie",
+// distro's feed declares — the apt release codename (e.g. "trixie",
 // "resolute") or, for Alpine, the feed branch (e.g. "v3.21"). Unlike
-// SuiteForDistro this spans every backend and never errors: it returns ""
-// when no feed for the distro declares a version, so callers (os-release
-// stamping) can degrade gracefully rather than fail the build.
+// CodenameForDistro this spans every backend and never errors: it returns
+// "" when no feed for the distro declares a version, so callers
+// (os-release stamping) can degrade gracefully rather than fail the build.
 func (p *Project) BaseVersionForDistro(distro string) string {
 	if p == nil {
 		return ""
 	}
+	// Apt feeds agree on one codename per distro (CodenameForDistro
+	// enforces it and fails the build first), so take the agreed value
+	// rather than whichever feed happens to be first in registration
+	// order — an overlay feed must not decide what lands in os-release.
+	if codename, err := p.CodenameForDistro(distro); err == nil {
+		return codename
+	}
 	for _, sm := range p.SyntheticModules {
 		if sm == nil || sm.Distro != distro {
 			continue
-		}
-		if sm.Suite != "" {
-			return sm.Suite
 		}
 		if sm.Release != "" {
 			return sm.Release
@@ -647,6 +666,27 @@ type Unit struct {
 	Locale            string
 	Partitions        []Partition
 
+	// UnbuildableMachine names the selected machine when this image was
+	// registered WITHOUT being resolved, because the machine's kernel has
+	// no entry for the image's distro. Empty on every buildable unit.
+	//
+	// A machine's kernel `distro_unit` keys declare which distros the board
+	// can boot; an image targeting any other distro is registered inert —
+	// no artifacts, no deps, no tasks — so selecting a single-distro
+	// machine doesn't break evaluation for unrelated images. The marker is
+	// what distinguishes "not buildable here" from "genuinely empty": a
+	// rootfs-only image with no packages is legal and must not be confused
+	// with this. Never infer the state from an empty artifact list.
+	//
+	// Deliberately absent from UnitHash: a marked image's hash never keys a
+	// build, so hashing the field buys nothing and cache neutrality holds
+	// by omission.
+	UnbuildableMachine string
+	// MachineKernelDistros is the sorted distro set that machine's kernel
+	// does support, carried so the refusal at the point of use can name it
+	// instead of saying only "no".
+	MachineKernelDistros []string
+
 	// Arbitrary kwargs passed to unit() that don't map to a typed field.
 	// Used for template context rendering and will be included in the unit
 	// hash (see docs/superpowers/plans/2026-04-23-file-templates.md Task 6).
@@ -713,6 +753,45 @@ var validArchitectures = map[string]bool{
 	"arm64":   true,
 	"riscv64": true,
 	"x86_64":  true,
+}
+
+// NotBuildable reports whether this unit was registered inert because
+// the selected machine cannot boot its distro. Callers that gate on the
+// state (build refusal, `yoe desc`, TUI status) must use this rather
+// than checking for an empty artifact list — a rootfs-only image with no
+// packages is a legitimate, buildable unit.
+func (u *Unit) NotBuildable() bool {
+	return u != nil && u.UnbuildableMachine != ""
+}
+
+// UnbuildableMachineClause names the machine and the distro set its
+// kernel does support:
+//
+//	machine "arduino-uno-q", whose kernel supports: debian
+//
+// It carries no verb, so callers phrase their own ("not buildable on …",
+// "Buildable: no — …"). Empty on a buildable unit.
+func (u *Unit) UnbuildableMachineClause() string {
+	if !u.NotBuildable() {
+		return ""
+	}
+	supported := strings.Join(u.MachineKernelDistros, ", ")
+	if supported == "" {
+		supported = "(none)"
+	}
+	return fmt.Sprintf("machine %q, whose kernel supports: %s", u.UnbuildableMachine, supported)
+}
+
+// UnbuildableReason renders the whole sentence — image, distro, machine,
+// supported set — for surfaces that refuse outright. This message carries
+// the diagnostic burden that the evaluation-time crash used to, so it
+// names every part of the mismatch. Empty on a buildable unit.
+func (u *Unit) UnbuildableReason() string {
+	if !u.NotBuildable() {
+		return ""
+	}
+	return fmt.Sprintf("image %q (distro %q) is not buildable on %s",
+		u.Name, u.Distro, u.UnbuildableMachineClause())
 }
 
 // DepsForDistro returns the build-time deps that apply to a closure

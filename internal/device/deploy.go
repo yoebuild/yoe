@@ -24,10 +24,11 @@ type DeployInput struct {
 	// target runs.
 	Distro string
 
-	// Suite is the Debian codename (e.g. "bookworm") written into the
-	// apt sources.list line. Required when Distro=="debian"; ignored
-	// for alpine.
-	Suite string
+	// Codename is the upstream release the project repo is published
+	// under (e.g. "trixie") — the token written into the apt
+	// sources.list line, matching the emitter's dists/<codename>/.
+	// Required when Distro is apt-family; ignored for alpine.
+	Codename string
 
 	// FeedURL is the project feed root, e.g. http://host:8765/<project>.
 	// Deploy appends the distro segment itself, since the served repo
@@ -64,7 +65,7 @@ func Deploy(ctx context.Context, in DeployInput) error {
 
 	// The served repo nests one level per distro: <project>/<distro>/...
 	// apk wants a URL whose <arch>/APKINDEX.tar.gz sits directly under
-	// it; apt wants the same base with dists/<suite>/ under it.
+	// it; apt wants the same base with dists/<codename>/ under it.
 	repoBase := strings.TrimRight(in.FeedURL, "/") + "/" + in.Distro
 
 	var script string
@@ -74,15 +75,15 @@ func Deploy(ctx context.Context, in DeployInput) error {
 	case "debian", "ubuntu":
 		// Ubuntu rides Debian's apt machinery; the on-device install
 		// path (apt sources.list + apt-get install) is identical, only
-		// the suite and served pool differ.
-		if in.Suite == "" {
-			return fmt.Errorf("suite is required for %s deploy", in.Distro)
+		// the release and served pool differ.
+		if in.Codename == "" {
+			return fmt.Errorf("codename is required for %s deploy", in.Distro)
 		}
 		host, err := feedHost(repoBase)
 		if err != nil {
 			return err
 		}
-		script = debianDeployScript(repoBase, in.Suite, host, in.Unit)
+		script = debianDeployScript(repoBase, in.Codename, host, in.Unit)
 	default:
 		return fmt.Errorf("unsupported distro %q (want alpine, debian, or ubuntu)", in.Distro)
 	}
@@ -137,7 +138,7 @@ apk add %s
 // debianDeployScript writes the dev feed into apt's sources.list.d (plus
 // a high-priority pin) and reinstalls unit via apt-get. host is the feed
 // hostname, used as the pin origin.
-func debianDeployScript(repoBase, suite, host, unit string) string {
+func debianDeployScript(repoBase, codename, host, unit string) string {
 	return fmt.Sprintf(`set -e
 export DEBIAN_FRONTEND=noninteractive
 install -d -m 0755 /etc/apt/sources.list.d /etc/apt/preferences.d
@@ -165,5 +166,5 @@ apt-get update \
 # rollback to an older pin. The user is expected to restart the service
 # to pick up the new binary; apt does not restart services on its own.
 apt-get install -y --reinstall --allow-downgrades %s
-`, repoBase, suite, host, unit)
+`, repoBase, codename, host, unit)
 }

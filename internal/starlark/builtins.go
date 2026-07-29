@@ -276,6 +276,7 @@ var reservedUnitKwargs = map[string]bool{
 	"cache_dirs": true, "artifacts": true, "exclude": true,
 	"hostname": true, "timezone": true, "locale": true,
 	"partitions": true, "unit_class": true,
+	"unbuildable_machine": true, "machine_kernel_distros": true,
 }
 
 // starlarkToGo converts a Starlark value into a Go value suitable for JSON
@@ -745,6 +746,11 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 		Hostname:          kwString(kwargs, "hostname"),
 		Timezone:          kwString(kwargs, "timezone"),
 		Locale:            kwString(kwargs, "locale"),
+		// Set by image() only on the skip path — the selected machine's
+		// kernel has no entry for this image's distro, so the image is
+		// registered inert instead of resolved. See Unit.NotBuildable.
+		UnbuildableMachine:   kwString(kwargs, "unbuildable_machine"),
+		MachineKernelDistros: kwStringList(kwargs, "machine_kernel_distros"),
 	}
 
 	// Parse tasks

@@ -107,6 +107,67 @@ def image(name, artifacts=[], distro_artifacts={}, hostname=None, timezone="", l
     if not effective_distro:
         fail("image %s: no distro set and project has no defaults.distro" % name)
 
+    # Machine/distro compatibility, checked before any work. A machine's
+    # kernel distro_unit keys are its declaration of which distros the
+    # board can boot — the Arduino UNO Q's kernel ships only from a
+    # Debian-format vendor feed, so its map has a "debian" key and
+    # nothing else. Every image in every loaded module is evaluated
+    # against the one selected machine, so an Alpine image nobody asked
+    # to build for that board still lands here; failing on it would break
+    # project evaluation before any build starts.
+    #
+    # Instead, register the image inert and let the build refuse it by
+    # name. This is a declarative pre-check rather than a swallowed
+    # error: the kernel resolution, the machine-package merge, and the
+    # closure walk are never attempted, so there is nothing to swallow.
+    #
+    # A machine using the flat kernel(unit = ...) form claims its kernel
+    # works on every distro and is left alone — if that claim is false
+    # the closure walk fails loudly, which is correct.
+    #
+    # The kernel is read once, here, for both the compatibility check and
+    # the per-distro kernel pick below. ctx.provides is built once from
+    # the project default machine and is distro-blind, so a per-distro
+    # kernel can only be resolved at image-evaluation time, where the
+    # effective distro is known. Single-unit machines register
+    # provides["linux"] globally and need no override; per-distro machines
+    # carry no global entry, so image() substitutes the unit itself.
+    kernel_provides = None
+    kernel_unit = None
+    machine_kernel_distros = None
+    mc = getattr(ctx, "machine_config", None)
+    if mc != None:
+        k = getattr(mc, "kernel", None)
+        if k != None:
+            kernel_provides = getattr(k, "provides", None)
+            du = getattr(k, "distro_unit", None)
+            if du:
+                machine_kernel_distros = sorted(du.keys())
+                if effective_distro in du:
+                    kernel_unit = du[effective_distro]
+
+    # The registered unit must be genuinely inert: no container (the DAG
+    # turns unit.Container into a build edge), no deps, no tasks, no
+    # artifacts. Anything else hands the graph an edge from an image that
+    # can never build.
+    if machine_kernel_distros != None and effective_distro not in machine_kernel_distros:
+        unit(
+            name = name,
+            version = version,
+            scope = scope,
+            unit_class = "image",
+            distro = effective_distro,
+            artifacts = [],
+            artifacts_explicit = [],
+            partitions = [],
+            deps = [],
+            tasks = [],
+            unbuildable_machine = ctx.machine,
+            machine_kernel_distros = machine_kernel_distros,
+            **kwargs
+        )
+        return
+
     # Merge machine packages. The machine config's `packages` list is the
     # board's distro-neutral boot requirements — GPU firmware and config.txt
     # on the Pi (rpi-firmware, rpi5-config), the U-Boot/TIFS stages on
@@ -130,26 +191,9 @@ def image(name, artifacts=[], distro_artifacts={}, hostname=None, timezone="", l
     if _is_apt_distro(effective_distro):
         all_artifacts = all_artifacts + _DEBIAN_ESSENTIAL
 
-    # Resolve the machine kernel for this image's distro. ctx.provides is built
-    # once from the project default machine and is distro-blind, so a per-distro
-    # kernel (machine_config.kernel.distro_unit) can only be picked here, where
-    # the effective distro is known. Single-unit machines register
-    # provides["linux"] globally and need no override; per-distro machines carry
-    # no global entry, so image() substitutes the unit for effective_distro.
-    kernel_provides = None
-    kernel_unit = None
-    mc = getattr(ctx, "machine_config", None)
-    if mc != None:
-        k = getattr(mc, "kernel", None)
-        if k != None:
-            kernel_provides = getattr(k, "provides", None)
-            du = getattr(k, "distro_unit", None)
-            if du:
-                if effective_distro not in du:
-                    fail("image %s: machine kernel has no entry for distro %r" % (name, effective_distro))
-                kernel_unit = du[effective_distro]
-
-    # Resolve provides (e.g., "linux" → "linux-rpi4")
+    # Resolve provides (e.g., "linux" → "linux-rpi4"). kernel_unit was
+    # settled above from distro_unit[effective_distro] when the machine
+    # declares a per-distro kernel.
     explicit = []
     for a in all_artifacts:
         if kernel_unit != None and a == kernel_provides:
@@ -326,10 +370,10 @@ def _assemble_debian_rootfs(packages, hostname, timezone, locale):
 
     Runs privileged (root in a --privileged container) so mmdebstrap's
     root mode can chroot and mount /proc, /sys, /dev/pts in the target
-    while configuring. The suite comes from $SUITE, which the build sets
-    from the project's debian_feed — the same source the repo emitter
-    stamps into the index, so the mmdebstrap target and the index it
-    reads can never drift.
+    while configuring. The release comes from $CODENAME, which the build
+    sets from the codename the project's apt feeds agree on — the same
+    source the repo emitter stamps into the index, so the mmdebstrap
+    target and the index it reads can never drift.
     """
     pkg_list = ",".join(packages)
 
@@ -371,7 +415,7 @@ mkdir -p $DESTDIR/rootfs
 # present) but before configure, pointing /usr/bin/awk at mawk through
 # the standard /etc/alternatives link; mawk's own update-alternatives
 # call then adopts the identical link idempotently.
-mmdebstrap --mode=root --variant=custom --setup-hook='for d in bin sbin lib lib64; do mkdir -p "$1/usr/$d"; ln -sf "usr/$d" "$1/$d"; done' --extract-hook='mkdir -p "$1/etc/alternatives"; ln -sf /usr/bin/mawk "$1/etc/alternatives/awk"; ln -sf /etc/alternatives/awk "$1/usr/bin/awk"' --architectures="$debarch" --include="%s" --aptopt='APT::Get::Install-Recommends "false"' --aptopt='Acquire::Check-Valid-Until "false"' "$SUITE" "$DESTDIR/rootfs" "deb [trusted=yes] copy:$REPO $SUITE main"
+mmdebstrap --mode=root --variant=custom --setup-hook='for d in bin sbin lib lib64; do mkdir -p "$1/usr/$d"; ln -sf "usr/$d" "$1/$d"; done' --extract-hook='mkdir -p "$1/etc/alternatives"; ln -sf /usr/bin/mawk "$1/etc/alternatives/awk"; ln -sf /etc/alternatives/awk "$1/usr/bin/awk"' --architectures="$debarch" --include="%s" --aptopt='APT::Get::Install-Recommends "false"' --aptopt='Acquire::Check-Valid-Until "false"' "$CODENAME" "$DESTDIR/rootfs" "deb [trusted=yes] copy:$REPO $CODENAME main"
 
 # Fail loudly on a half-configured rootfs. mmdebstrap runs dpkg with
 # --force-depends during the essential bootstrap, so a broken dependency
@@ -387,7 +431,7 @@ if [ -n "$broken" ]; then
 fi
 
 # Replace mmdebstrap's leftover sources.list. mmdebstrap bakes the
-# build-time `deb [trusted=yes] copy:$REPO $SUITE main` line into the
+# build-time `deb [trusted=yes] copy:$REPO $CODENAME main` line into the
 # target's /etc/apt/sources.list, but $REPO is a build-host path that does
 # not exist on the booted device, so every on-device `apt update` errors on
 # it (copy-stat: No such file or directory). The local repo is an input to

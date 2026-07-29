@@ -125,11 +125,11 @@ versa. `GND` to `GND`. Check the silkscreen on the BeaglePlay header for `RX` /
 `TX` markings — those refer to the board's signals.
 
 Once wired, plug the USB end into the host; it enumerates as `/dev/ttyUSB0`
-(FTDI / CH340 / CP210x) or `/dev/ttyACM0` (some CDC ACM adapters). Open it at
-115200 with [tio](https://github.com/tio/tio):
+(FTDI / CH340 / CP210x) or `/dev/ttyACM0` (some CDC ACM adapters). Open it with
+[tio](https://github.com/tio/tio), which defaults to 115200 8N1:
 
 ```
-tio -b 115200 /dev/ttyUSB0
+tio /dev/ttyUSB0
 ```
 
 If nothing appears after power-on:

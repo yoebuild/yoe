@@ -51,6 +51,8 @@ func RunInit(projectDir string, machine string) error {
               ref = "26.04"),
         module("https://github.com/yoebuild/module-jetson.git",
               ref = "main"),
+        module("https://github.com/yoebuild/module-qcom.git",
+              ref = "main"),
         module("https://github.com/yoebuild/yoe.git",
               ref = "main",
               path = "modules/module-bsp"),

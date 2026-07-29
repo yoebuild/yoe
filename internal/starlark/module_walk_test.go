@@ -175,6 +175,7 @@ apt_feed(
     name = "main",
     url = "https://deb.debian.org/debian",
     suite = "bookworm",
+    codename = "bookworm",
     component = "main",
     arches = ["amd64"],
     index = "feeds/main",

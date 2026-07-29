@@ -45,13 +45,13 @@ func TestDeployAlpineScriptInstallsUnit(t *testing.T) {
 func TestDeployDebianScriptInstallsUnit(t *testing.T) {
 	sshRecs, ssh := newSSHRecorder("", nil)
 	err := Deploy(context.Background(), DeployInput{
-		Target:  SSHTarget{Host: "dev-pi", User: "root"},
-		Unit:    "myapp",
-		Distro:  "debian",
-		Suite:   "bookworm",
-		FeedURL: "http://laptop.local:8765/myproj",
-		Out:     &bytes.Buffer{},
-		SSH:     ssh,
+		Target:   SSHTarget{Host: "dev-pi", User: "root"},
+		Unit:     "myapp",
+		Distro:   "debian",
+		Codename: "bookworm",
+		FeedURL:  "http://laptop.local:8765/myproj",
+		Out:      &bytes.Buffer{},
+		SSH:      ssh,
 	})
 	if err != nil {
 		t.Fatalf("Deploy: %v", err)

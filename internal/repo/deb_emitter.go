@@ -33,13 +33,16 @@ type DebRepoOptions struct {
 	// files land relative to this directory.
 	RepoDir string
 
-	// Suite is the Debian codename emitted into Release / InRelease
-	// (e.g. "bookworm"). The deb sources.list on-device references
-	// this suite.
-	Suite string
+	// Codename is the upstream release this repo's packages are built
+	// for (e.g. "trixie"), sourced from the project's apt feeds. The
+	// project repo publishes exactly one suite and names it after that
+	// release, so this single value becomes the dists/<codename>/
+	// directory and is emitted as both Suite and Codename in
+	// Release / InRelease. The on-device sources.list references it.
+	Codename string
 
 	// Components is the list of archive components (typically just
-	// ["main"]); each becomes a dists/<suite>/<component>/ subtree.
+	// ["main"]); each becomes a dists/<codename>/<component>/ subtree.
 	Components []string
 
 	// Arches is the list of Debian arch tokens (e.g. ["amd64", "arm64"]).
@@ -65,10 +68,10 @@ type DebRepoOptions struct {
 // Layout:
 //
 //	<RepoDir>/pool/<component>/<initial>/<src>/<pkg>_<ver>_<arch>.deb
-//	<RepoDir>/dists/<suite>/<component>/binary-<arch>/Packages
-//	<RepoDir>/dists/<suite>/<component>/binary-<arch>/Packages.gz
-//	<RepoDir>/dists/<suite>/Release
-//	<RepoDir>/dists/<suite>/InRelease       (signed; only when GPG configured)
+//	<RepoDir>/dists/<codename>/<component>/binary-<arch>/Packages
+//	<RepoDir>/dists/<codename>/<component>/binary-<arch>/Packages.gz
+//	<RepoDir>/dists/<codename>/Release
+//	<RepoDir>/dists/<codename>/InRelease    (signed; only when GPG configured)
 //
 // The function is idempotent: re-running after a new .deb lands in
 // pool/ regenerates the indices and re-signs.
@@ -76,8 +79,8 @@ func GenerateDebianIndex(opts DebRepoOptions) error {
 	if opts.RepoDir == "" {
 		return fmt.Errorf("deb_emitter: RepoDir is required")
 	}
-	if opts.Suite == "" {
-		return fmt.Errorf("deb_emitter: Suite is required")
+	if opts.Codename == "" {
+		return fmt.Errorf("deb_emitter: Codename is required")
 	}
 	if len(opts.Components) == 0 {
 		opts.Components = []string{"main"}
@@ -89,7 +92,7 @@ func GenerateDebianIndex(opts DebRepoOptions) error {
 		opts.ValidUntilDays = 30
 	}
 
-	distsDir := filepath.Join(opts.RepoDir, "dists", opts.Suite)
+	distsDir := filepath.Join(opts.RepoDir, "dists", opts.Codename)
 	var indices []packagesIndex
 
 	for _, comp := range opts.Components {
@@ -238,10 +241,10 @@ func buildRelease(opts DebRepoOptions, indices []packagesIndex) []byte {
 	validUntil := now.Add(time.Duration(opts.ValidUntilDays) * 24 * time.Hour)
 
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "Origin: %s\n", opts.Suite)
-	fmt.Fprintf(&b, "Label: %s\n", opts.Suite)
-	fmt.Fprintf(&b, "Suite: %s\n", opts.Suite)
-	fmt.Fprintf(&b, "Codename: %s\n", opts.Suite)
+	fmt.Fprintf(&b, "Origin: %s\n", opts.Codename)
+	fmt.Fprintf(&b, "Label: %s\n", opts.Codename)
+	fmt.Fprintf(&b, "Suite: %s\n", opts.Codename)
+	fmt.Fprintf(&b, "Codename: %s\n", opts.Codename)
 	fmt.Fprintf(&b, "Date: %s\n", now.Format(time.RFC1123))
 	fmt.Fprintf(&b, "Valid-Until: %s\n", validUntil.Format(time.RFC1123))
 	fmt.Fprintf(&b, "Components: %s\n", strings.Join(opts.Components, " "))

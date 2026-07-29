@@ -55,7 +55,7 @@ func TestGenerateDebianIndex_OneDeb(t *testing.T) {
 
 	opts := DebRepoOptions{
 		RepoDir:        repoDir,
-		Suite:          "bookworm",
+		Codename:       "bookworm",
 		Components:     []string{"main"},
 		Arches:         []string{"amd64", "arm64"},
 		ValidUntilDays: 30,
