@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-07-29
+
 - **Debian and Ubuntu projects can now pull in a vendor package repository
   alongside the base distro feeds.** A board support repo publishes under its
   own channel name, which is unrelated to the Debian release it targets, and yoe
