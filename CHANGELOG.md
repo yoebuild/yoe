@@ -22,6 +22,11 @@ and this project adheres to
   marked not buildable on that machine — naming one in a build tells you why, a
   full build skips it with a notice, and everything the board can boot builds
   normally.
+- **CI builds every supported board nightly.** Raspberry Pi 4 and 5 and
+  BeaglePlay get a full from-source build, so a change that breaks a board's
+  kernel, bootloader, or partition layout surfaces the next morning rather than
+  the next time someone flashes hardware. Each night's images stay downloadable
+  for a week, so you can flash a recent build without building locally.
 
 ## [0.13.0] - 2026-07-06
 
