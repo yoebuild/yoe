@@ -15,10 +15,12 @@ name: Machine Build
 # build path. Each cell surfaces as its own CI check, e.g.
 # "Machine Build (beagleplay / alpine)".
 #
-# Distro is alpine unless the board itself constrains it. arduino-uno-q is
-# debian because its kernel and board packages come from the qcom.arduino
-# vendor feed, which is Debian-format and ABI-coupled to trixie; the machine
-# declares no other distro, so there is no Alpine path for that board.
+# Distro is alpine unless the board itself constrains it, which none of the
+# boards below do today. Each cell still carries its own distro key rather
+# than sharing one default, because that constraint is a board property: a
+# machine whose kernel and board packages come from a vendor apt feed (the
+# Arduino UNO Q's, for example) can only build the distro that feed is
+# ABI-coupled to, and it should say so next to the board it applies to.
 #
 # There is no boot test: these images target physical boards, and QEMU
 # cannot stand in for them. Each cell verifies the image artifact exists,
