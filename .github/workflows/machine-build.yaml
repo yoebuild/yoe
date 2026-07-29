@@ -21,8 +21,9 @@ name: Machine Build
 # declares no other distro, so there is no Alpine path for that board.
 #
 # There is no boot test: these images target physical boards, and QEMU
-# cannot stand in for them. Each cell verifies the image artifact exists and
-# reports its partition table.
+# cannot stand in for them. Each cell verifies the image artifact exists,
+# reports its partition table, and uploads the image (zstd-compressed) so a
+# nightly build can be downloaded and flashed to real hardware.
 on:
   schedule:
     # Offset from E2E Build (06:00 UTC) so the two nightlies don't contend
@@ -132,3 +133,31 @@ jobs:
           # boot and root partitions landed where the machine descriptor says,
           # and this is the closest check available without the hardware.
           sfdisk --list "$img" || true
+
+      - name: Compress image
+        working-directory: testdata/e2e-project
+        run: |
+          # A dev-image is a couple of GB of mostly-empty filesystem, which
+          # zstd reduces by roughly 9x in a second or two -- worth doing before
+          # it crosses the network. Decompress with `unzstd` (or `zstd -d`)
+          # before flashing; `yoe flash` takes the decompressed .img.
+          # zstd ships on the runner images, but do not let a two-hour build
+          # go red at the last step if that ever changes.
+          command -v zstd >/dev/null || sudo apt-get install -y --no-install-recommends zstd
+          img=build/${{ matrix.distro }}/dev-image.${{ matrix.machine }}/destdir/dev-image.img
+          out=dev-image-${{ matrix.machine }}-${{ matrix.distro }}.img.zst
+          zstd -3 -T0 -f -o "$out" "$img"
+          ls -lh "$out"
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-image-${{ matrix.machine }}-${{ matrix.distro }}
+          path: testdata/e2e-project/dev-image-${{ matrix.machine }}-${{ matrix.distro }}.img.zst
+          # Already zstd-compressed, so skip the action's own zip pass.
+          compression-level: 0
+          # These are nightly regression builds, not releases. A week is long
+          # enough to grab one and flash a board; keeping every night's five
+          # boards indefinitely would grow without bound.
+          retention-days: 7
+          if-no-files-found: error

@@ -86,7 +86,10 @@ Three workflows run under `.github/workflows/`:
   it: UNO Q builds Debian because its kernel and board packages come from the
   Debian-format `qcom.arduino` vendor feed. There is no boot test — these images
   target physical boards, so each cell verifies the image artifact and reports
-  its partition table.
+  its partition table. Each image is uploaded zstd-compressed and kept for seven
+  days, so a nightly build can be downloaded from the run's Artifacts section
+  and flashed to hardware (`unzstd` it first; `yoe flash` takes the decompressed
+  `.img`).
 
 Both nightly workflows reuse the content-addressed cache via `actions/cache`, so
 an unchanged graph rebuilds incrementally.
