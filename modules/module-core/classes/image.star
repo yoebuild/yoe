@@ -326,10 +326,10 @@ def _assemble_debian_rootfs(packages, hostname, timezone, locale):
 
     Runs privileged (root in a --privileged container) so mmdebstrap's
     root mode can chroot and mount /proc, /sys, /dev/pts in the target
-    while configuring. The suite comes from $SUITE, which the build sets
-    from the project's debian_feed — the same source the repo emitter
-    stamps into the index, so the mmdebstrap target and the index it
-    reads can never drift.
+    while configuring. The release comes from $CODENAME, which the build
+    sets from the codename the project's apt feeds agree on — the same
+    source the repo emitter stamps into the index, so the mmdebstrap
+    target and the index it reads can never drift.
     """
     pkg_list = ",".join(packages)
 
@@ -371,7 +371,7 @@ mkdir -p $DESTDIR/rootfs
 # present) but before configure, pointing /usr/bin/awk at mawk through
 # the standard /etc/alternatives link; mawk's own update-alternatives
 # call then adopts the identical link idempotently.
-mmdebstrap --mode=root --variant=custom --setup-hook='for d in bin sbin lib lib64; do mkdir -p "$1/usr/$d"; ln -sf "usr/$d" "$1/$d"; done' --extract-hook='mkdir -p "$1/etc/alternatives"; ln -sf /usr/bin/mawk "$1/etc/alternatives/awk"; ln -sf /etc/alternatives/awk "$1/usr/bin/awk"' --architectures="$debarch" --include="%s" --aptopt='APT::Get::Install-Recommends "false"' --aptopt='Acquire::Check-Valid-Until "false"' "$SUITE" "$DESTDIR/rootfs" "deb [trusted=yes] copy:$REPO $SUITE main"
+mmdebstrap --mode=root --variant=custom --setup-hook='for d in bin sbin lib lib64; do mkdir -p "$1/usr/$d"; ln -sf "usr/$d" "$1/$d"; done' --extract-hook='mkdir -p "$1/etc/alternatives"; ln -sf /usr/bin/mawk "$1/etc/alternatives/awk"; ln -sf /etc/alternatives/awk "$1/usr/bin/awk"' --architectures="$debarch" --include="%s" --aptopt='APT::Get::Install-Recommends "false"' --aptopt='Acquire::Check-Valid-Until "false"' "$CODENAME" "$DESTDIR/rootfs" "deb [trusted=yes] copy:$REPO $CODENAME main"
 
 # Fail loudly on a half-configured rootfs. mmdebstrap runs dpkg with
 # --force-depends during the essential bootstrap, so a broken dependency
@@ -387,7 +387,7 @@ if [ -n "$broken" ]; then
 fi
 
 # Replace mmdebstrap's leftover sources.list. mmdebstrap bakes the
-# build-time `deb [trusted=yes] copy:$REPO $SUITE main` line into the
+# build-time `deb [trusted=yes] copy:$REPO $CODENAME main` line into the
 # target's /etc/apt/sources.list, but $REPO is a build-host path that does
 # not exist on the booted device, so every on-device `apt update` errors on
 # it (copy-stat: No such file or directory). The local repo is an input to

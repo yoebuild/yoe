@@ -31,26 +31,43 @@ type SyntheticModule struct {
 	// view (R17) to group feeds under their parent.
 	Parent string
 
-	// Suite is the release codename this feed declares (apt_feed's
-	// `suite` kwarg, e.g. "bookworm", "resolute"). Empty for non-apt
-	// feeds — alpine_feed leaves it unset. Project.SuiteForDistro reads
-	// it as the source of the codename the repo emitter, image assembly,
-	// and the on-device apt sources.list all stamp, matched to the
-	// feed's Distro so a project with both a Debian and an Ubuntu feed
-	// resolves the right suite per distro.
+	// Suite is the archive path segment this feed fetches from
+	// (apt_feed's `suite` kwarg): the `<suite>` in
+	// `dists/<suite>/<component>/binary-<arch>/Packages`. It names a
+	// role, not a release — Debian serves the same tree at
+	// `dists/trixie` and `dists/stable`, and a third-party repo is free
+	// to call its channel "stable" with no relation to a Debian
+	// release. Nothing about release identity may be inferred from it;
+	// use Codename for that. Empty for non-apt feeds — alpine_feed
+	// leaves it unset.
 	Suite string
+
+	// Codename is the upstream release this feed's packages are built
+	// for (apt_feed's `codename` kwarg, e.g. "trixie", "resolute") —
+	// the release identity behind the archive path, and the value
+	// Debian's own InRelease reports as `Codename:`. It is what pins
+	// the glibc ABI, so every apt feed in one distro's closure must
+	// agree on it; Project.CodenameForDistro enforces that and returns
+	// it as the codename the repo emitter, image assembly, and the
+	// on-device apt sources.list all stamp. A feed whose upstream
+	// publishes no meaningful codename of its own (a vendor overlay
+	// repo) declares the release its packages are ABI-coupled to.
+	// Empty for non-apt feeds.
+	Codename string
 
 	// Distro is the distro this feed targets — apt_feed's `distro` kwarg
 	// ("debian", "ubuntu"), or "alpine" for alpine_feed. Matches the
-	// Distro tag stamped on the feed's materialized units; SuiteForDistro
-	// uses it to pick this feed's suite for a given distro's build.
+	// Distro tag stamped on the feed's materialized units;
+	// CodenameForDistro uses it to pick this feed's codename for a
+	// given distro's build.
 	Distro string
 
 	// Release is the upstream release identifier when the feed declares
-	// one as something other than an apt suite — alpine_feed's `branch`
-	// (e.g. "v3.21"). apt feeds leave it empty and use Suite instead.
-	// Project.BaseVersionForDistro surfaces Suite-or-Release as the base
-	// version stamped into /etc/os-release.
+	// one as something other than an apt codename — alpine_feed's
+	// `branch` (e.g. "v3.21"). apt feeds leave it empty and use
+	// Codename instead. Project.BaseVersionForDistro surfaces
+	// Codename-or-Release as the base version stamped into
+	// /etc/os-release.
 	Release string
 
 	// Priority is the resolver-priority index of this synthetic module.

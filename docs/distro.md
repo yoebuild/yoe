@@ -263,7 +263,7 @@ Cross-distro coexistence is handled in three parallel layers that all keep
 distros separated:
 
 - **On-disk repos** are per-distro. `repo/<project>/alpine/<arch>/` holds apks;
-  `repo/<project>/debian/dists/<suite>/` holds debs. Each on-target package
+  `repo/<project>/debian/dists/<codename>/` holds debs. Each on-target package
   manager sees only its own subtree.
 - **On-disk build directories** are per-distro:
   `build/<distro>/<unit>.<scope>/destdir/`. A source-built unit consumed by both
@@ -399,7 +399,7 @@ existing distros are the reference templates:
 
 Ubuntu was the cheapest next distro and is already shipped — it's `.deb`-format
 with different upstream keys and URLs, so `module-ubuntu` mostly shims over
-`apt_feed()` with a different keyring, suite, and split archive/ports mirrors
+`apt_feed()` with a different keyring, release, and split archive/ports mirrors
 (see [module-ubuntu.md](module-ubuntu.md)). Fedora / RHEL would need a new
 format parser (`.rpm`, `repodata`), a new materializer, and a new
 image-assembler branch (`dnf --installroot` instead of `mmdebstrap`); the

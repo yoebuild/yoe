@@ -488,7 +488,8 @@ apt_feed(
     distro    = "ubuntu",                # stamped on every materialized unit
     url       = "http://archive.ubuntu.com/ubuntu",
     arch_urls = {"arm64": "http://ports.ubuntu.com/ubuntu-ports"},
-    suite     = "resolute",
+    suite     = "resolute",              # dists/<suite> path segment
+    codename  = "resolute",              # release the packages target
     component = "main",
     arches    = ["amd64", "arm64"],
     index     = "feeds/main",            # dir holding <arch>/Packages
@@ -688,7 +689,7 @@ Build output is scoped per project and per distro, e.g.:
 
 ```
 repo/<project>/alpine/<arch>/APKINDEX.tar.gz     # apk repo
-repo/<project>/debian/dists/<suite>/             # debian-format repo
+repo/<project>/debian/dists/<codename>/          # debian-format repo
 ```
 
 Each project gets a clean repo containing only packages from its resolved module

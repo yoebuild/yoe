@@ -17,7 +17,8 @@ type FeedDecl struct {
 	Distro    string            // apt-family distro tag, e.g. debian / ubuntu
 	URL       string            // mirror root URL, e.g. https://deb.debian.org/debian
 	ArchURLs  map[string]string // optional per-arch mirror overrides (yoe arch → base URL); for Ubuntu's split archive/ports mirrors
-	Suite     string            // release codename, e.g. bookworm / resolute
+	Suite     string            // dists/<suite> path segment, e.g. trixie / stable / trixie-security
+	Codename  string            // upstream release the packages target, e.g. trixie / resolute
 	Component string            // archive component, e.g. main / contrib / universe
 	Arches    []string          // arch tokens present in the index
 	Index     string            // in-module directory holding <arch>/Packages
@@ -81,6 +82,10 @@ func PeekFeedDecls(modulePath string) ([]FeedDecl, error) {
 				case "suite":
 					if v, ok := kv[1].(starlark.String); ok {
 						d.Suite = string(v)
+					}
+				case "codename":
+					if v, ok := kv[1].(starlark.String); ok {
+						d.Codename = string(v)
 					}
 				case "component":
 					if v, ok := kv[1].(starlark.String); ok {

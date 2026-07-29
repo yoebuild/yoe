@@ -149,3 +149,48 @@ func TestE2E_DistroArtifactsConsolidatedImage(t *testing.T) {
 		t.Skipf("unhandled effective distro %q", effective)
 	}
 }
+
+// TestE2E_CodenameResolvesWithVendorFeed guards the composition that broke the
+// Debian CI matrix: the e2e project declares module-debian's four base feeds
+// (fetched from dists/trixie) alongside module-qcom's Arduino BSP feed (fetched
+// from dists/stable, a vendor channel name). Both target the trixie release, so
+// the build must resolve a codename rather than reject the project as a mix of
+// two releases.
+func TestE2E_CodenameResolvesWithVendorFeed(t *testing.T) {
+	projectDir := filepath.Join("..", "..", "testdata", "e2e-project")
+	if _, err := os.Stat(filepath.Join(projectDir, "PROJECT.star")); os.IsNotExist(err) {
+		t.Skip("e2e test project not found")
+	}
+	abs, _ := filepath.Abs(projectDir)
+	t.Setenv("YOE_CACHE", filepath.Join(abs, "cache"))
+
+	proj, err := yoestar.LoadProject(projectDir,
+		yoestar.WithModuleSync(module.SyncIfNeeded),
+		yoestar.WithAllowDuplicateProvides(true),
+		yoestar.WithBuiltin("alpine_feed", alpine.Builtin),
+		yoestar.WithBuiltin("apt_feed", apt.Builtin),
+	)
+	if err != nil {
+		t.Fatalf("LoadProject: %v", err)
+	}
+
+	// Sanity: the project really does carry feeds for the debian distro
+	// under more than one suite, or this test proves nothing.
+	suites := map[string]bool{}
+	for _, sm := range proj.SyntheticModules {
+		if sm != nil && sm.Distro == "debian" && sm.Suite != "" {
+			suites[sm.Suite] = true
+		}
+	}
+	if len(suites) < 2 {
+		t.Skipf("e2e project declares %d debian suite(s); vendor-overlay case not exercised", len(suites))
+	}
+
+	codename, err := proj.CodenameForDistro("debian")
+	if err != nil {
+		t.Fatalf("CodenameForDistro(debian): %v", err)
+	}
+	if codename == "" {
+		t.Fatal("CodenameForDistro(debian) returned empty codename")
+	}
+}

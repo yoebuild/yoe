@@ -8,6 +8,14 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Debian and Ubuntu projects can now pull in a vendor package repository
+  alongside the base distro feeds.** A board support repo publishes under its
+  own channel name, which is unrelated to the Debian release it targets, and yoe
+  previously rejected the combination as a mix of two releases. Feeds now
+  declare the release their packages are built for separately from the archive
+  path they are fetched from, so vendor repos and the base distro compose in one
+  image.
+
 ## [0.13.0] - 2026-07-06
 
 - **The TUI now shows every package an image pulls in, including deep transitive

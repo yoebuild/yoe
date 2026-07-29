@@ -5,9 +5,20 @@
 // lazily-materialized SyntheticModule that yoe's resolver consults
 // alongside real modules. One call registers one synthetic module per
 // component, named "<parent>.<component>" — e.g. "debian.main",
-// "ubuntu.main". The suite kwarg picks which on-disk Packages file is
-// parsed but does not appear in the module's identity (one suite per
-// distro per project, enforced at evaluation).
+// "ubuntu.main".
+//
+// A feed declares two release-related values, and they are not the same
+// thing. `suite` is the archive path segment — the "<suite>" in
+// dists/<suite>/<component>/binary-<arch>/Packages. `codename` is the
+// upstream release the packages are built for. Debian publishes one
+// release under several suites (dists/trixie and dists/stable are the
+// same bytes; dists/trixie-security is the same release's security
+// pocket), and a vendor overlay repo picks its own channel name with no
+// Debian meaning at all — Arduino's is literally "stable". Only the
+// codename identifies the ABI, so it is the codename that must be
+// unique per distro (enforced by Project.CodenameForDistro), while
+// suites may differ freely between feeds. Neither appears in the
+// module's identity.
 //
 // The same builtin serves every apt-based distro; the required `distro`
 // kwarg ("debian", "ubuntu", …) is stamped onto each materialized
@@ -77,7 +88,8 @@ func Builtin(eng *yoestar.Engine) *starlark.Builtin {
 //	    distro    = "debian",                       # apt-family distro tag stamped on units
 //	    url       = "https://deb.debian.org/debian",
 //	    arch_urls = {"arm64": "http://ports..."},   # optional per-arch mirror override
-//	    suite     = "bookworm",                     # release codename
+//	    suite     = "trixie",                       # dists/<suite> path segment
+//	    codename  = "trixie",                       # release the packages target
 //	    component = "main",                         # main / contrib / non-free / universe
 //	    arches    = ["amd64", "arm64"],             # arches present in the index
 //	    index     = "feeds/main",                   # in-tree dir holding <arch>/Packages
@@ -133,10 +145,11 @@ func buildSyntheticModule(eng *yoestar.Engine, composedName, parent, indexRoot s
 	registerFeedState(eng, s)
 
 	return &yoestar.SyntheticModule{
-		Name:   composedName,
-		Parent: parent,
-		Suite:  args.suite,
-		Distro: args.distro,
+		Name:     composedName,
+		Parent:   parent,
+		Suite:    args.suite,
+		Codename: args.codename,
+		Distro:   args.distro,
 		Lookup: func(name string) (*yoestar.Unit, error) {
 			return s.lookup(composedName, name)
 		},
@@ -321,6 +334,7 @@ type aptFeedArgs struct {
 	url       string
 	archURLs  map[string]string
 	suite     string
+	codename  string
 	component string
 	arches    []string
 	index     string
@@ -369,6 +383,10 @@ func parseKwargs(kwargs []starlark.Tuple) (aptFeedArgs, error) {
 			if v, ok := kv[1].(starlark.String); ok {
 				a.suite = string(v)
 			}
+		case "codename":
+			if v, ok := kv[1].(starlark.String); ok {
+				a.codename = string(v)
+			}
 		case "component":
 			if v, ok := kv[1].(starlark.String); ok {
 				a.component = string(v)
@@ -397,7 +415,11 @@ func parseKwargs(kwargs []starlark.Tuple) (aptFeedArgs, error) {
 		return a, fmt.Errorf("url is required")
 	}
 	if a.suite == "" {
-		return a, fmt.Errorf("suite is required")
+		return a, fmt.Errorf("suite is required (the dists/<suite> path segment this feed fetches from)")
+	}
+	if a.codename == "" {
+		return a, fmt.Errorf("codename is required (the upstream release these packages are built for, e.g. \"trixie\"); "+
+			"it is separate from suite because an archive path segment does not identify a release — set codename=%q if this feed serves the base release itself", a.suite)
 	}
 	if a.component == "" {
 		return a, fmt.Errorf("component is required")

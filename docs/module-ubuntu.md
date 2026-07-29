@@ -35,21 +35,23 @@ regardless of which apt distro the image targets.
 first-class distro in yoe's resolver — an Ubuntu image's closure sees only
 Ubuntu-tagged units, so a single project can declare both `module-debian` and
 `module-ubuntu` and the two never collide. Under the hood Ubuntu rides the
-shared apt/dpkg/glibc backend; only the feed identity, suite, and mirror differ.
+shared apt/dpkg/glibc backend; only the feed identity, release, and mirror
+differ.
 
 ## Ubuntu release coupling
 
-The suite pinned in `MODULE.star` (`_UBUNTU_SUITE`, tracking **Resolute Raccoon
-/ 26.04 LTS** at the time of writing) **must** match the `FROM ubuntu:<release>`
-line in `containers/toolchain-ubuntu-26.04/Dockerfile`. The same three couplings
-Debian documents apply: the glibc ABI between toolchain headers and target
-runtime libs, the per-release archive signing key in
-`keys/ubuntu-archive-keyring.gpg`, and the full cache invalidation that a suite
-bump rolls through every source-unit hash. Plan a suite bump for a rebuild
-cycle.
+The release pinned in `MODULE.star` (`_UBUNTU_CODENAME`, tracking **Resolute
+Raccoon / 26.04 LTS** at the time of writing) **must** match the
+`FROM ubuntu:<release>` line in `containers/toolchain-ubuntu-26.04/Dockerfile`.
+The same three couplings Debian documents apply: the glibc ABI between toolchain
+headers and target runtime libs, the per-release archive signing key in
+`keys/ubuntu-archive-keyring.gpg`, and the full cache invalidation that a
+release bump rolls through every source-unit hash. Plan a release bump for a
+rebuild cycle. As on the Debian side, a feed's `suite` is only the
+`dists/<suite>` path it fetches from; `codename` is what pins the release.
 
 The Ubuntu and Debian glibc toolchains are **not** interchangeable. apt is not
-forward-compatible across suites, so Debian-trixie's apt crashes when it reads
+forward-compatible across releases, so Debian-trixie's apt crashes when it reads
 Ubuntu-resolute's repository metadata — an Ubuntu rootfs must be assembled by
 the Ubuntu toolchain, and vice versa. Because the container image tag is
 `yoe/<unit-name>:<version>-<arch>`, each toolchain carries its release in its

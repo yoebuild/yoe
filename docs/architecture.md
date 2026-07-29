@@ -248,7 +248,7 @@ format is two:
   `/etc/apk/repositories` entry; `apk add` / `apk upgrade` then work on-device
   against the project's own feed.
 - **Debian images** consume a Debian-format repo at
-  `repo/<project>/debian/dists/<suite>/`. The project's GPG key signs the
+  `repo/<project>/debian/dists/<codename>/`. The project's GPG key signs the
   `InRelease`; image assembly stages `/etc/apt/sources.list.d/<project>.sources`
   (deb822 format) referencing the keyring via `Signed-By:`. `apt update` and
   `apt install` on the device verify against the project key only, so other apt

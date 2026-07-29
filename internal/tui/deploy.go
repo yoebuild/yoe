@@ -118,24 +118,24 @@ func (m model) startDeployCmd() tea.Cmd {
 		}
 
 		installVerb := "apk del + apk add"
-		suite := ""
+		codename := ""
 		if yoestar.IsAptFamily(distro) {
 			installVerb = "apt-get install --reinstall"
-			// Suite stamps the apt sources.list line; read it from the
-			// project's apt_feed for this distro. Only for apt-family
+			// The codename stamps the apt sources.list line; read it from
+			// the project's apt_feed for this distro. Only for apt-family
 			// distros — an alpine project has no apt_feed and ignores it.
-			if suite, err = proj.SuiteForDistro(distro); err != nil {
+			if codename, err = proj.CodenameForDistro(distro); err != nil {
 				return deployDoneMsg{err: err}
 			}
 		}
 		emit(fmt.Sprintf("→ ssh %s — %s %s", target.Host, installVerb, unitName))
 		err = device.Deploy(ctx, device.DeployInput{
-			Target:  target,
-			Unit:    unitName,
-			Distro:  distro,
-			Suite:   suite,
-			FeedURL: feedURL,
-			Out:     lineWriter{emit: emit},
+			Target:   target,
+			Unit:     unitName,
+			Distro:   distro,
+			Codename: codename,
+			FeedURL:  feedURL,
+			Out:      lineWriter{emit: emit},
 		})
 		return deployDoneMsg{err: err}
 	}

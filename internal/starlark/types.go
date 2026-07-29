@@ -496,52 +496,70 @@ func IsAptFamily(distro string) bool {
 	return AptFamilyDistros[distro]
 }
 
-// SuiteForDistro returns the release codename a given apt-family distro
-// targets, read from the matching apt_feed(...) declaration — the source
-// of the codename that the project repo emitter (dists/<suite>/), image
-// assembly (the mmdebstrap target), and the on-device apt sources.list
-// all stamp. Every feed for a distro must agree on the suite (the
+// CodenameForDistro returns the upstream release codename a given
+// apt-family distro targets, read from the `codename` kwarg of the
+// matching apt_feed(...) declarations — the source of the codename that
+// the project repo emitter (dists/<codename>/), image assembly (the
+// mmdebstrap target), and the on-device apt sources.list all stamp.
+//
+// Every apt feed in one distro's closure must agree on the codename: the
 // toolchain container pins one release, and libc from a different release
-// can't safely mix), so this also enforces one-suite-per-distro. Errors
-// when no feed for distro declares a suite: an apt-family image build
-// needs one to source the codename.
-func (p *Project) SuiteForDistro(distro string) (string, error) {
+// can't safely mix. This enforces that, and reports which feeds disagree.
+//
+// The guard deliberately keys on `codename`, not `suite`. A feed's suite
+// is only an archive path segment: Debian serves one release at both
+// dists/trixie and dists/stable, its security and updates pockets live at
+// dists/trixie-security and dists/trixie-updates, and a vendor overlay
+// repo may name its channel anything at all (Arduino's is "stable"). Only
+// the codename identifies the release whose ABI the packages are built
+// against, so only the codename can express this invariant.
+//
+// Errors when no feed for distro declares a codename: an apt-family image
+// build needs one to bootstrap against.
+func (p *Project) CodenameForDistro(distro string) (string, error) {
 	if p == nil {
-		return "", fmt.Errorf("SuiteForDistro: nil project")
+		return "", fmt.Errorf("CodenameForDistro: nil project")
 	}
-	suite := ""
+	codename, from := "", ""
 	for _, sm := range p.SyntheticModules {
-		if sm == nil || sm.Suite == "" || sm.Distro != distro {
+		if sm == nil || sm.Codename == "" || sm.Distro != distro {
 			continue // not an apt feed for this distro
 		}
-		if suite == "" {
-			suite = sm.Suite
-		} else if sm.Suite != suite {
-			return "", fmt.Errorf("project declares multiple %s suites (%q and %q); one suite per distro", distro, suite, sm.Suite)
+		if codename == "" {
+			codename, from = sm.Codename, sm.Name
+		} else if sm.Codename != codename {
+			return "", fmt.Errorf("project mixes %s releases: feed %q targets codename %q but feed %q targets %q; "+
+				"every apt feed for one distro must target the same release (a feed for a different archive suite of the same "+
+				"release, or a vendor overlay repo, still declares the release its packages are built for)",
+				distro, from, codename, sm.Name, sm.Codename)
 		}
 	}
-	if suite == "" {
-		return "", fmt.Errorf("no apt_feed declares a suite for distro %q; an %s image build needs an apt_feed(distro=%q, ...) in a module", distro, distro, distro)
+	if codename == "" {
+		return "", fmt.Errorf("no apt_feed declares a codename for distro %q; an %s image build needs an apt_feed(distro=%q, codename=..., ...) in a module", distro, distro, distro)
 	}
-	return suite, nil
+	return codename, nil
 }
 
 // BaseVersionForDistro returns the upstream release identifier the given
-// distro's feed declares — the apt suite codename (e.g. "trixie",
+// distro's feed declares — the apt release codename (e.g. "trixie",
 // "resolute") or, for Alpine, the feed branch (e.g. "v3.21"). Unlike
-// SuiteForDistro this spans every backend and never errors: it returns ""
-// when no feed for the distro declares a version, so callers (os-release
-// stamping) can degrade gracefully rather than fail the build.
+// CodenameForDistro this spans every backend and never errors: it returns
+// "" when no feed for the distro declares a version, so callers
+// (os-release stamping) can degrade gracefully rather than fail the build.
 func (p *Project) BaseVersionForDistro(distro string) string {
 	if p == nil {
 		return ""
 	}
+	// Apt feeds agree on one codename per distro (CodenameForDistro
+	// enforces it and fails the build first), so take the agreed value
+	// rather than whichever feed happens to be first in registration
+	// order — an overlay feed must not decide what lands in os-release.
+	if codename, err := p.CodenameForDistro(distro); err == nil {
+		return codename
+	}
 	for _, sm := range p.SyntheticModules {
 		if sm == nil || sm.Distro != distro {
 			continue
-		}
-		if sm.Suite != "" {
-			return sm.Suite
 		}
 		if sm.Release != "" {
 			return sm.Release

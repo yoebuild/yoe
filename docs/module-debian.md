@@ -39,10 +39,9 @@ hard-to-build complexity — is identical.
 
 ## Debian release coupling
 
-The Debian suite pinned in `MODULE.star` (`_DEBIAN_SUITE = "bookworm"` at the
-time of writing) **must** match the `FROM debian:<release>` line in
-`@module-debian//containers/toolchain-debian-13/Dockerfile`. Both currently
-point at `bookworm`.
+The Debian release pinned in `MODULE.star` (`_DEBIAN_CODENAME`, feeding every
+feed's `codename` kwarg) **must** match the `FROM debian:<release>` line in
+`@module-debian//containers/toolchain-debian-13/Dockerfile`.
 
 The coupling matters for three reasons:
 
@@ -52,8 +51,8 @@ The coupling matters for three reasons:
   mismatch.
 - **Signing keys.** Each Debian release has its own archive signing key, and the
   in-tree `keys/debian-archive-keyring.gpg` is what `yoe update-feeds` verifies
-  against. Bumping the suite without rotating the bootstrap keyring produces an
-  `untrusted key` error at first `update-feeds` after the bump.
+  against. Bumping the release without rotating the bootstrap keyring produces
+  an `untrusted key` error at first `update-feeds` after the bump.
 - **Cache invalidation.** Source units cache by hash; switching the toolchain
   container's `FROM` tag rolls every hash through it. Plan the bump for a full
   rebuild cycle.
@@ -118,7 +117,8 @@ In `MODULE.star`:
 apt_feed(
     name = "main",
     url = "https://deb.debian.org/debian",
-    suite = "bookworm",
+    suite = "trixie",       # the dists/<suite> path this feed fetches from
+    codename = "trixie",    # the release these packages are built for
     component = "main",
     arches = ["amd64", "arm64"],
     index = "feeds/main",
@@ -126,11 +126,46 @@ apt_feed(
 )
 ```
 
+### `suite` and `codename` are different values
+
+A feed declares both, and they answer different questions. `suite` is a path
+segment: the `<suite>` in `dists/<suite>/<component>/binary-<arch>/Packages`.
+`codename` is release identity: which upstream release the packages are built
+against, and therefore which glibc ABI they carry.
+
+They coincide for a base feed like the one above, but they are not
+interchangeable. Debian publishes one release under several suites — its own
+`InRelease` for `dists/trixie` reports `Suite: stable` and `Codename: trixie`,
+`dists/stable` serves the identical tree, and `dists/trixie-security` is the
+same release's security pocket. A third-party repository is under no obligation
+to use Debian's vocabulary at all: the Arduino BSP repo publishes one channel at
+`dists/stable` whose `InRelease` reports `Origin: Arduino`, `Codename: stable`,
+with no claim about any Debian release.
+
+So a vendor overlay feed declares the release its packages are ABI-coupled to,
+which the repository metadata cannot tell yoe:
+
+```python
+apt_feed(
+    name = "arduino",
+    distro = "debian",
+    url = "https://apt-repo.arduino.cc",
+    suite = "stable",       # the vendor's own channel name
+    codename = "trixie",    # what those packages are actually built against
+    component = "main",
+    ...
+)
+```
+
+Because a symbolic suite name moves — `dists/stable` becomes the next release
+the day it ships — a base feed should always name a codename in its `suite`
+rather than an alias. Only `codename` is load-bearing for release identity.
+
 Each call registers a `SyntheticModule` named `<parent>.<component>` (e.g.
 `debian.main`, `debian.contrib`, `debian.non-free`) — matching alpine's
-`alpine.main` / `alpine.community` shape. The `suite` kwarg configures which
-on-disk `Packages` file is parsed but does not appear in the module name; one
-Debian suite per project, enforced at evaluation, so the suite has no
+`alpine.main` / `alpine.community` shape. Neither `suite` nor `codename` appears
+in the module name: the suite selects which on-disk `Packages` file is parsed,
+the codename is checked for agreement across feeds, and neither has a
 disambiguating role at the module level. Units materialize lazily as the runtime
 closure references them, so a project pulling in `openssh-server` parses about a
 thousand entries on the way to its closure — not the full 60k-entry catalog. See
@@ -139,10 +174,10 @@ synthetic modules differ from real modules, lazy-Lookup contract, and the
 working-set sizes the resolver operates at).
 
 Multiple feeds compose: declaring `debian.main` plus security and updates
-overlays (each with its own `apt_feed(...)` call, same suite, different
-component or apt-overlay URL) gives apt-equivalent priority resolution on the
-project side. The closure walker consults each in declaration order; first match
-wins.
+overlays, or a vendor BSP repo (each with its own `apt_feed(...)` call, same
+codename, differing freely in suite, component, and mirror) gives apt-equivalent
+priority resolution on the project side. The closure walker consults each in
+declaration order; first match wins.
 
 ## Verifying a Debian image
 
@@ -258,13 +293,16 @@ substantial follow-up rather than routine work.
   functionality is needed, or carry the package and provide the configuration it
   would have fetched via the project rootfs overlay.
 
-- **One Debian suite per project, enforced at evaluation.** Every
-  `apt_feed(...)` call in a project must agree on its `suite` kwarg; the
+- **One Debian release per project, enforced at evaluation.** Every
+  `apt_feed(...)` call for a distro must agree on its `codename` kwarg; the
   resolver errors at load time if it sees `bookworm` and `trixie` declared in
-  the same project. The constraint exists because the toolchain container
+  the same project, naming the two feeds that disagree. The constraint exists
+  because the toolchain container
   (`@module-debian//containers/toolchain-debian-13`) pins one Debian release,
   and source units built against that toolchain's headers/libs can't safely mix
-  with prebuilt packages from a different release's libc. Multi-suite support
-  would require a suite axis in the toolchain cache key and parallel toolchain
-  containers per suite — feasible but out of scope today. For most projects this
-  is the correct constraint: a fleet runs one Debian release at a time.
+  with prebuilt packages from a different release's libc. Feeds may still differ
+  in `suite`, so pockets and vendor repos compose freely; it is only the release
+  that is pinned. Multi-release support would require a release axis in the
+  toolchain cache key and parallel toolchain containers — feasible but out of
+  scope today. For most projects this is the correct constraint: a fleet runs
+  one Debian release at a time.

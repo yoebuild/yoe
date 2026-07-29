@@ -84,7 +84,10 @@ func UpdateFeeds(opts UpdateOptions) error {
 	totalWritten := 0
 	totalBytes := int64(0)
 	for _, d := range decls {
-		fmt.Fprintf(opts.Out, "→ %s (%s, %s)\n", d.Name, d.Suite, d.URL)
+		// Show both: the suite is what gets fetched, the codename is the
+		// release the packages are declared to target. They differ for
+		// pockets and for vendor overlay repos.
+		fmt.Fprintf(opts.Out, "→ %s (dists/%s → %s, %s)\n", d.Name, d.Suite, d.Codename, d.URL)
 		arches := pickArches(opts, d)
 		if len(arches) == 0 {
 			return fmt.Errorf("update-feeds: %s: no arches to fetch (set --arch or pre-create feed dirs)", d.Name)
