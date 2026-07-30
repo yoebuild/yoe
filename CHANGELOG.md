@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **BeaglePlay images build again.** The readline library was built without its
+  terminal-handling support, so any program that loaded it — including the
+  Python that BeaglePlay's secure-world firmware build runs — failed to start on
+  Alpine images.
+
 ## [0.13.1] - 2026-07-29
 
 - **Debian and Ubuntu projects can now pull in a vendor package repository
