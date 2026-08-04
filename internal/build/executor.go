@@ -1200,16 +1200,6 @@ func dryRun(w io.Writer, proj *yoestar.Project, order []string, hashes map[strin
 	return nil
 }
 
-// hasTask returns true if the unit has a task with the given name.
-func hasTask(unit *yoestar.Unit, name string) bool {
-	for _, t := range unit.Tasks {
-		if t.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
 // resolveContainerImage returns the Docker image tag for a unit's container.
 // For container units (referenced by name), the tag is yoe/<name>:<version>-<arch>.
 // For external images (containing ":" or "/"), the value is used directly.
@@ -1388,11 +1378,6 @@ func CacheValid(proj *yoestar.Project, projectDir string, unit *yoestar.Unit, sc
 		return true
 	}
 	return false
-}
-
-func HasBuildLog(projectDir, arch, name, distro string) bool {
-	_, err := os.Stat(filepath.Join(UnitBuildDir(projectDir, arch, name, distro), "build.log"))
-	return err == nil
 }
 
 // ErrBuildInProgress reports that another yoe process holds the build lock for

@@ -1,7 +1,6 @@
 package alpine
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"io"
 	"net/http"
@@ -314,6 +313,3 @@ func humanBytes(n int64) string {
 		return fmt.Sprintf("%.2f GiB", float64(n)/GiB)
 	}
 }
-
-// _ = sha256.Size keeps the import alive for future SHA256SUMS work.
-var _ = sha256.Size

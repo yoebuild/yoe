@@ -15,13 +15,10 @@ func (e *Engine) builtins() starlark.StringDict {
 		"project":          starlark.NewBuiltin("project", e.fnProject),
 		"defaults":         starlark.NewBuiltin("defaults", fnDefaults),
 		"cache":            starlark.NewBuiltin("cache", fnCache),
-		"s3_cache":         starlark.NewBuiltin("s3_cache", fnS3Cache),
-		"sources":          starlark.NewBuiltin("sources", fnSources),
 		"module":           starlark.NewBuiltin("module", fnModule),
 		"module_info":      starlark.NewBuiltin("module_info", e.fnModuleInfo),
 		"machine":          starlark.NewBuiltin("machine", e.fnMachine),
 		"kernel":           starlark.NewBuiltin("kernel", fnKernel),
-		"uboot":            starlark.NewBuiltin("uboot", fnUboot),
 		"qemu_config":      starlark.NewBuiltin("qemu_config", fnQEMUConfig),
 		"unit":             starlark.NewBuiltin("unit", e.fnUnit),
 		"image":            starlark.NewBuiltin("image", e.fnImage),
@@ -422,14 +419,6 @@ func fnCache(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs [
 	return makeStruct("cache", kwargs), nil
 }
 
-func fnS3Cache(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	return makeStruct("s3_cache", kwargs), nil
-}
-
-func fnSources(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	return makeStruct("sources", kwargs), nil
-}
-
 func fnModule(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	if len(args) < 1 {
 		return nil, fmt.Errorf("module() requires a URL argument")
@@ -449,10 +438,6 @@ func fnKernel(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs 
 	return makeStruct("kernel", kwargs), nil
 }
 
-func fnUboot(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	return makeStruct("uboot", kwargs), nil
-}
-
 func fnQEMUConfig(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	return makeStruct("qemu_config", kwargs), nil
 }
@@ -464,8 +449,6 @@ func fnPartition(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwar
 // --- Built-in functions that register module info ---
 
 func (e *Engine) fnModuleInfo(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
 
 	name := kwString(kwargs, "name")
 	if name == "" {
@@ -503,8 +486,6 @@ func (e *Engine) fnModuleInfo(_ *starlark.Thread, _ *starlark.Builtin, _ starlar
 // --- Built-in functions that register targets (side-effecting) ---
 
 func (e *Engine) fnProject(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
 
 	if e.project != nil {
 		return nil, fmt.Errorf("project() called more than once")
@@ -603,19 +584,14 @@ func (e *Engine) fnMachine(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.T
 	kernelS := kwStruct(kwargs, "kernel")
 
 	kc := KernelConfig{
-		Repo:        structString(kernelS, "repo"),
-		Branch:      structString(kernelS, "branch"),
-		Tag:         structString(kernelS, "tag"),
-		Defconfig:   structString(kernelS, "defconfig"),
-		DeviceTrees: structStringList(kernelS, "device_trees"),
-		Unit:        structString(kernelS, "unit"),
-		Cmdline:     structString(kernelS, "cmdline"),
-		Provides:    structString(kernelS, "provides"),
-		DistroUnit:  structStringMap(kernelS, "distro_unit"),
+		Defconfig:  structString(kernelS, "defconfig"),
+		Unit:       structString(kernelS, "unit"),
+		Cmdline:    structString(kernelS, "cmdline"),
+		Provides:   structString(kernelS, "provides"),
+		DistroUnit: structStringMap(kernelS, "distro_unit"),
 	}
 	// `unit` and `distro_unit` are two spellings of "which unit provides this
-	// kernel" — one flat, one per-distro. Setting both is ambiguous. (A
-	// repo/branch source kernel sets neither, which is fine.)
+	// kernel" — one flat, one per-distro. Setting both is ambiguous.
 	if kc.Unit != "" && len(kc.DistroUnit) > 0 {
 		return nil, fmt.Errorf("machine %q: kernel sets both unit and distro_unit (use one)", name)
 	}
@@ -636,26 +612,12 @@ func (e *Engine) fnMachine(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.T
 	for _, kv := range kwargs {
 		key := string(kv[0].(starlark.String))
 		switch key {
-		case "bootloader", "uboot", "qemu":
+		case "qemu":
 			s, ok := kv[1].(*starlarkstruct.Struct)
 			if !ok {
 				continue
 			}
 			switch key {
-			case "bootloader":
-				m.Bootloader = BootloaderConfig{
-					Type:      structString(s, "type"),
-					Repo:      structString(s, "repo"),
-					Branch:    structString(s, "branch"),
-					Defconfig: structString(s, "defconfig"),
-				}
-			case "uboot":
-				m.Bootloader = BootloaderConfig{
-					Type:      "u-boot",
-					Repo:      structString(s, "repo"),
-					Branch:    structString(s, "branch"),
-					Defconfig: structString(s, "defconfig"),
-				}
 			case "qemu":
 				m.QEMU = &QEMUConfig{
 					Machine:  structString(s, "machine"),
@@ -691,9 +653,7 @@ func (e *Engine) fnMachine(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.T
 		}
 	}
 
-	e.mu.Lock()
 	e.machines[name] = m
-	e.mu.Unlock()
 
 	return starlark.None, nil
 }
@@ -708,6 +668,14 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 	cls := kwString(kwargs, "unit_class")
 	if cls == "" {
 		cls = class
+	}
+
+	// Scope decides which build subtree the unit lands in and which repo
+	// arch dir its package publishes to. A typo silently falls through to
+	// arch scoping, which builds and publishes to the wrong place — so
+	// reject unknown values the way an invalid machine arch is rejected.
+	if scope := kwString(kwargs, "scope"); !validScopes[scope] {
+		return nil, fmt.Errorf("unit %q: invalid scope %q (valid: arch, machine, noarch; unset means arch)", name, scope)
 	}
 
 	r := &Unit{
@@ -818,14 +786,12 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 	// shadow the priority choice at lookup time for the matching
 	// distro only — alpine pins don't interfere with debian closures
 	// and vice versa.
-	e.mu.Lock()
 	if existing, ok := e.units[name]; ok {
 		// Same priority (same module, or both project root) → hard error.
 		// Cross-priority collisions are shadows: highest priority wins, with
 		// a stderr notice. Project priority is set strictly above any module
 		// in loader.go, so project units always win.
 		if r.ModuleIndex == existing.ModuleIndex {
-			e.mu.Unlock()
 			return nil, fmt.Errorf("unit %q already defined (first defined in %s)",
 				name, moduleSource(existing.Module))
 		}
@@ -837,7 +803,6 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 				LoserModule:  r.Module,
 				LoserDir:     r.DefinedIn,
 			})
-			e.mu.Unlock()
 			if e.showShadows {
 				fmt.Fprintf(os.Stderr,
 					"notice: unit %q from %s is shadowed by %s\n",
@@ -865,7 +830,6 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 	// shadow debian.main's); the closure walker picks per consuming
 	// distro at lookup time.
 	e.storeByModule(r)
-	e.mu.Unlock()
 
 	return r, nil
 }
@@ -969,9 +933,7 @@ func (e *Engine) fnCommand(thread *starlark.Thread, _ *starlark.Builtin, _ starl
 		}
 	}
 
-	e.mu.Lock()
 	e.commands[name] = cmd
-	e.mu.Unlock()
 
 	return starlark.None, nil
 }

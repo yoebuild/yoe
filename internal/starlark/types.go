@@ -14,7 +14,6 @@ type Project struct {
 	Version  string
 	Defaults Defaults
 	Cache    CacheConfig
-	Sources  SourcesConfig
 	Modules  []ModuleRef
 	Machines map[string]*Machine
 
@@ -159,25 +158,7 @@ type Defaults struct {
 }
 
 type CacheConfig struct {
-	Path      string
-	Remote    []CacheRemote
-	Retention int // days
-	Signing   string
-}
-
-type CacheRemote struct {
-	Name     string
-	Bucket   string
-	Endpoint string
-	Region   string
-	Prefix   string
-}
-
-type SourcesConfig struct {
-	GoProxy       string
-	CargoRegistry string
-	NpmRegistry   string
-	PypiMirror    string
+	Path string
 }
 
 type ModuleRef struct {
@@ -200,7 +181,6 @@ type Machine struct {
 	Arch        string
 	Description string
 	Kernel      KernelConfig
-	Bootloader  BootloaderConfig
 	QEMU        *QEMUConfig // nil if not a QEMU machine
 	Packages    []string    // distro-neutral board packages merged into every image for this machine
 	// DistroPackages adds per-distro board packages on top of Packages, e.g.
@@ -214,14 +194,10 @@ type Machine struct {
 }
 
 type KernelConfig struct {
-	Repo        string
-	Branch      string
-	Tag         string
-	Defconfig   string
-	DeviceTrees []string
-	Unit        string
-	Cmdline     string
-	Provides    string // virtual package name (e.g., "linux")
+	Defconfig string
+	Unit      string
+	Cmdline   string
+	Provides  string // virtual package name (e.g., "linux")
 	// DistroUnit selects the kernel unit per distro, e.g.
 	// {"alpine": "linux-qemu", "debian": "linux-image-amd64"}. Empty for
 	// single-form machines (which set Unit). image() resolves the entry
@@ -236,13 +212,6 @@ type KernelConfig struct {
 // this rather than `Unit != ""`, which is empty for distro_unit machines.
 func (k KernelConfig) HasKernel() bool {
 	return k.Unit != "" || len(k.DistroUnit) > 0
-}
-
-type BootloaderConfig struct {
-	Type      string
-	Repo      string
-	Branch    string
-	Defconfig string
 }
 
 type QEMUConfig struct {
@@ -753,6 +722,18 @@ var validArchitectures = map[string]bool{
 	"arm64":   true,
 	"riscv64": true,
 	"x86_64":  true,
+}
+
+// validScopes enumerates the accepted values of a unit's `scope` kwarg.
+// Both "" and "arch" mean per-architecture scoping — the default — so a
+// unit can either leave scope out or spell the default it wants. Anything
+// else is a typo, and a typo that silently fell through to arch scoping
+// would build and publish to the wrong place.
+var validScopes = map[string]bool{
+	"":        true,
+	"arch":    true,
+	"machine": true,
+	"noarch":  true,
 }
 
 // NotBuildable reports whether this unit was registered inert because

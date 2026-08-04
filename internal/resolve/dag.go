@@ -15,9 +15,9 @@ type DAG struct {
 
 // Node represents a unit in the dependency graph.
 type Node struct {
-	Unit *yoestar.Unit
-	Deps   []string // build-time dependency names
-	Rdeps  []string // reverse dependencies (computed)
+	Unit  *yoestar.Unit
+	Deps  []string // build-time dependency names
+	Rdeps []string // reverse dependencies (computed)
 }
 
 // BuildDAG constructs a dependency graph from a loaded project. When
@@ -264,20 +264,9 @@ func appendContainerDeps(deps []string, proj *yoestar.Project, units map[string]
 // TopologicalSort returns units in build order (dependencies before dependents).
 // Returns an error if the graph contains a cycle.
 func (d *DAG) TopologicalSort() ([]string, error) {
-	// Kahn's algorithm
-	inDegree := make(map[string]int)
-	for name := range d.Nodes {
-		inDegree[name] = 0
-	}
-	for _, node := range d.Nodes {
-		for _, dep := range node.Deps {
-			inDegree[dep]++ // note: reversed — dep must come first
-		}
-	}
-
-	// Actually we want: inDegree[x] = number of deps x has (not rdeps)
-	// Kahn's: start with nodes that have no dependencies
-	inDegree = make(map[string]int)
+	// Kahn's algorithm. inDegree[x] is how many deps x is waiting on, so a
+	// unit becomes schedulable when it reaches zero.
+	inDegree := make(map[string]int, len(d.Nodes))
 	for name, node := range d.Nodes {
 		inDegree[name] = len(node.Deps)
 	}

@@ -3,8 +3,8 @@ package starlark
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
-	"strings"
 )
 
 // RewriteUnitField rewrites the `field = "value"` line for the unit
@@ -157,7 +157,7 @@ func rewriteFieldInBlock(block, field, value string) (string, error) {
 // rename. Avoids partially-written .star files on power loss or
 // interrupted writes.
 func atomicWrite(path, data string) error {
-	dir := pathDir(path)
+	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".yoe-edit-*")
 	if err != nil {
 		return err
@@ -181,14 +181,4 @@ func atomicWrite(path, data string) error {
 	}
 	cleaned = true
 	return nil
-}
-
-// pathDir is filepath.Dir without the import — keeps this file's
-// surface area small and avoids pulling path/filepath into a tiny
-// helper file.
-func pathDir(p string) string {
-	if i := strings.LastIndexByte(p, '/'); i >= 0 {
-		return p[:i]
-	}
-	return "."
 }

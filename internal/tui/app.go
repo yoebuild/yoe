@@ -425,9 +425,9 @@ type deployDoneMsg struct {
 
 // model is the Bubble Tea model for the yoe TUI.
 type model struct {
-	proj              *yoestar.Project
-	projectDir        string
-	arch              string
+	proj       *yoestar.Project
+	projectDir string
+	arch       string
 	// distro is the project's effective distro at TUI startup. Drives
 	// every UnitBuildDir / IsBuildCached lookup so the TUI inspects
 	// the right per-distro subtree under build/<distro>/.
@@ -507,7 +507,6 @@ type model struct {
 	flashCursor     int
 	flashStage      flashStage
 	flashImagePath  string
-	flashImageSize  int64
 	flashWritten    int64
 	flashTotal      int64
 	flashErr        error
@@ -1297,8 +1296,8 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "f":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
-			u := m.proj.LookupUnit(m.distro, name); ok := u != nil
-			if !ok || u.Class != "image" {
+			u := m.proj.LookupUnit(m.distro, name)
+			if u == nil || u.Class != "image" {
 				m.message = fmt.Sprintf("%s is not an image unit", name)
 				return m, nil
 			}
@@ -1337,8 +1336,8 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "D":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
-			u := m.proj.LookupUnit(m.distro, name); ok := u != nil
-			if !ok || u.Class == "image" {
+			u := m.proj.LookupUnit(m.distro, name)
+			if u == nil || u.Class == "image" {
 				m.message = fmt.Sprintf("%s is an image unit; use `f` to flash, not deploy", name)
 				return m, nil
 			}
@@ -2768,8 +2767,8 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		})
 
 	case "D":
-		u := m.proj.LookupUnit(m.distro, m.detailUnit); ok := u != nil
-		if !ok || u.Class == "image" {
+		u := m.proj.LookupUnit(m.distro, m.detailUnit)
+		if u == nil || u.Class == "image" {
 			m.message = fmt.Sprintf("%s is an image unit; use `f` to flash, not deploy", m.detailUnit)
 			return m, nil
 		}
@@ -4338,8 +4337,8 @@ func (m model) upstreamLines() []string {
 	if imgName == "" {
 		return []string{dimStyle.Render("    (no default image set)")}
 	}
-	img := m.proj.LookupUnit(m.distro, imgName); ok := img != nil
-	if !ok || img.Class != "image" {
+	img := m.proj.LookupUnit(m.distro, imgName)
+	if img == nil || img.Class != "image" {
 		return []string{dimStyle.Render("    (default image " + imgName + " not found)")}
 	}
 	if len(img.ArtifactsExplicit) == 0 {
@@ -4405,8 +4404,8 @@ func (m model) findRuntimePath(from, to string) []string {
 	for len(queue) > 0 {
 		cur := queue[0]
 		queue = queue[1:]
-		u := m.proj.LookupUnit(m.distro, cur.name); ok := u != nil
-		if !ok {
+		u := m.proj.LookupUnit(m.distro, cur.name)
+		if u == nil {
 			continue
 		}
 		for _, dep := range u.RuntimeDeps {
@@ -4435,8 +4434,8 @@ func (m model) findRuntimePath(from, to string) []string {
 // matches what the user actually wrote in image() rather than the
 // fully flattened runtime closure.
 func (m model) downstreamChildren(name string) []string {
-	u := m.proj.LookupUnit(m.distro, name); ok := u != nil
-	if !ok {
+	u := m.proj.LookupUnit(m.distro, name)
+	if u == nil {
 		return nil
 	}
 	deps := u.RuntimeDeps
@@ -4554,7 +4553,6 @@ func (m model) viewDetail() string {
 		buildDir := build.UnitBuildDir(m.projectDir, sd, m.detailUnit, m.distro)
 		currentHash := m.hashes[m.detailUnit]
 		if meta := build.ReadMeta(buildDir); meta != nil && meta.Hash == currentHash {
-			dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 			info := fmt.Sprintf("  %s", meta.Status)
 			if meta.Duration > 0 {
 				if meta.Duration < 60 {
@@ -5511,8 +5509,8 @@ func (m *model) recomputeMetrics() {
 // final recomputeMetrics. Skips the runtime-closure walk because deps
 // don't change just because the unit got built.
 func (m *model) refreshUnitSize(name string) {
-	u := m.proj.LookupUnit(m.distro, name); ok := u != nil
-	if !ok {
+	u := m.proj.LookupUnit(m.distro, name)
+	if u == nil {
 		return
 	}
 	sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
@@ -5552,8 +5550,8 @@ func clipFixed(s string, w int) string {
 // "v3.4.1-3-gabc1234-dirty"). Returns "" when the unit has no source
 // dir (image/container) so the caller can skip the line entirely.
 func (m model) detailSourceLine() string {
-	u := m.proj.LookupUnit(m.distro, m.detailUnit); ok := u != nil
-	if !ok || u.Class == "image" || u.Class == "container" {
+	u := m.proj.LookupUnit(m.distro, m.detailUnit)
+	if u == nil || u.Class == "image" || u.Class == "container" {
 		return ""
 	}
 	state := m.unitSourceState(m.detailUnit)
@@ -5688,8 +5686,8 @@ func srcStateStyle(s source.State) lipgloss.Style {
 // is assumed pin (it has never been toggled to dev).
 func (m model) renderSrcCell(name string) string {
 	const w = 9
-	u := m.proj.LookupUnit(m.distro, name); ok := u != nil
-	if !ok || u.Class == "image" || u.Class == "container" {
+	u := m.proj.LookupUnit(m.distro, name)
+	if u == nil || u.Class == "image" || u.Class == "container" {
 		return clipFixed("", w)
 	}
 	state := m.unitSourceState(name)
@@ -5932,8 +5930,8 @@ func (m model) unitFromFeed(name string) bool {
 	if m.proj == nil {
 		return false
 	}
-	u := m.proj.LookupUnit(m.distro, name); ok := u != nil
-	if !ok || u == nil || u.Module == "" {
+	u := m.proj.LookupUnit(m.distro, name)
+	if u == nil || u.Module == "" {
 		return false
 	}
 	for _, sm := range m.proj.SyntheticModules {
@@ -6184,7 +6182,6 @@ func (m model) updateFlash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				_ = yoestar.WriteLocalOverrides(m.projectDir, ov)
 			}
 			m.flashImagePath = imgPath
-			m.flashImageSize = imgSize
 			m.flashTotal = imgSize
 			m.flashWritten = 0
 			m.flashStage = flashWriting

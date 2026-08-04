@@ -44,6 +44,16 @@ and this project adheres to
 - **Removed the unimplemented `yoe bootstrap` subcommand.** It could not run;
   building yoe on a yoe-built device is unaffected and continues to work through
   the normal build path.
+- **A unit with a misspelled `scope` is now rejected instead of silently built
+  for the wrong target.** An unrecognized value fell through to per-architecture
+  scoping, so the package was built and published somewhere nobody expected.
+  Valid values are `arch`, `machine`, and `noarch`; leaving it out still means
+  `arch`.
+- **Removed `sources(...)`, `s3_cache(...)`, and `uboot(...)`, along with the
+  `kernel(...)` source fields.** All of them accepted their arguments and
+  discarded them, so a project configuring a Go proxy, a shared cache, or a
+  bootloader through them got no effect and no warning. Machines name a kernel
+  and bootloader unit instead, which is how every in-tree machine already works.
 - Image units get a one-time rebuild: a display-only field was being folded into
   their cache key.
 

@@ -256,4 +256,3 @@ func TestGeneratePKGINFO(t *testing.T) {
 		t.Errorf("missing commit: %s", info)
 	}
 }
-

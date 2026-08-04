@@ -38,9 +38,9 @@ func (s *InstallStepValue) String() string {
 	return fmt.Sprintf("%s(%q, %q, mode=0o%o)", fn, s.Src, s.Dest, s.Mode)
 }
 
-func (*InstallStepValue) Type() string           { return "InstallStep" }
-func (*InstallStepValue) Freeze()                {}
-func (*InstallStepValue) Truth() starlark.Bool   { return starlark.True }
+func (*InstallStepValue) Type() string         { return "InstallStep" }
+func (*InstallStepValue) Freeze()              {}
+func (*InstallStepValue) Truth() starlark.Bool { return starlark.True }
 
 func (s *InstallStepValue) Hash() (uint32, error) {
 	h := fnv.New32a()

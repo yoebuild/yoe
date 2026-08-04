@@ -180,8 +180,8 @@ func TestAlpineFeed_Names(t *testing.T) {
 func TestAlpineFeed_MissingArgs(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{
-		"PROJECT.star":               `project(name = "p", version = "0.1.0", defaults = defaults(machine = "qemu"), modules = [module("https://example.com/alpine.git", local = "modules/alpine")])`,
-		"machines/qemu.star":         `machine(name = "qemu", arch = "x86_64")`,
+		"PROJECT.star":       `project(name = "p", version = "0.1.0", defaults = defaults(machine = "qemu"), modules = [module("https://example.com/alpine.git", local = "modules/alpine")])`,
+		"machines/qemu.star": `machine(name = "qemu", arch = "x86_64")`,
 		"modules/alpine/MODULE.star": `module_info(name = "alpine")
 alpine_feed(name = "main")  # missing url, branch, section, index`,
 	}
@@ -198,4 +198,3 @@ alpine_feed(name = "main")  # missing url, branch, section, index`,
 		t.Errorf("err: %v, want alpine_feed in message", err)
 	}
 }
-

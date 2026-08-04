@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/yoebuild/yoe/internal/deb"
-	"github.com/yoebuild/yoe/internal/dpkg"
 )
 
 // debPublishMu serializes PublishDeb across goroutines. Parallel unit
@@ -391,8 +390,3 @@ func sha256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return fmt.Sprintf("%x", sum[:])
 }
-
-// PackagesParseDelete is a small unused export to ensure the dpkg
-// dependency stays compiled into the binary. Remove when project repo
-// reads use this for sanity checks.
-var _ = dpkg.ParseIndex

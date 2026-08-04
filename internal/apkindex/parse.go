@@ -26,18 +26,18 @@ import (
 // single-letter keys (P, V, T, ...) by intent — see the K-to-field map
 // in parseEntry — so a reader can cross-reference upstream docs.
 type Entry struct {
-	Name          string   // P
-	Version       string   // V
-	Description   string   // T (title)
-	URL           string   // U
-	License       string   // L
-	Arch          string   // A
-	Size          int64    // S — apk file size in bytes
-	InstalledSize int64    // I — installed footprint
-	Origin        string   // o — source-package origin
-	Maintainer    string   // m
-	BuildTime     int64    // t — unix timestamp
-	Commit        string   // c — aports commit sha
+	Name          string // P
+	Version       string // V
+	Description   string // T (title)
+	URL           string // U
+	License       string // L
+	Arch          string // A
+	Size          int64  // S — apk file size in bytes
+	InstalledSize int64  // I — installed footprint
+	Origin        string // o — source-package origin
+	Maintainer    string // m
+	BuildTime     int64  // t — unix timestamp
+	Commit        string // c — aports commit sha
 
 	// Checksum is the raw SHA1 bytes decoded from the APKINDEX `C:`
 	// field. The on-disk format is "Q1<base64-sha1>="; we keep both the
@@ -253,4 +253,3 @@ func decodeChecksum(s string) ([]byte, error) {
 	}
 	return raw, nil
 }
-

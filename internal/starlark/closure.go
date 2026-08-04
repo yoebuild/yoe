@@ -252,7 +252,6 @@ func (e *Engine) lookupOrMaterialize(rawName, effectiveDistro string) (*Unit, er
 		if !visibleToDistro(u, effectiveDistro) {
 			continue
 		}
-		e.mu.Lock()
 		u.ModuleIndex = sm.Priority
 		// Register under the bare name only if not already taken,
 		// so the first-evaluated image's resolution stays visible
@@ -267,11 +266,10 @@ func (e *Engine) lookupOrMaterialize(rawName, effectiveDistro string) (*Unit, er
 		// materialization keyed by its source module.
 		u.Module = sm.Name
 		e.storeByModule(u)
-		existing := e.units[name]
-		e.mu.Unlock()
-		if visibleToDistro(existing, effectiveDistro) && existing.Distro == effectiveDistro {
-			return existing, nil
-		}
+		// u is what this name resolves to for this distro. Re-reading
+		// e.units[name] here would add nothing: either it was unset and
+		// now holds u, or it holds a variant the checks above already
+		// established is not visible to effectiveDistro.
 		return u, nil
 	}
 	return nil, nil
@@ -280,10 +278,8 @@ func (e *Engine) lookupOrMaterialize(rawName, effectiveDistro string) (*Unit, er
 // findVisibleByName scans the per-module catalog for any unit named
 // `name` that's visible to effectiveDistro. Returns the highest-
 // priority (highest ModuleIndex; later-declared modules win, and
-// real modules always outrank synthetics) match, or nil. Holds e.mu.
+// real modules always outrank synthetics) match, or nil.
 func (e *Engine) findVisibleByName(name, effectiveDistro string) *Unit {
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	var best *Unit
 	for _, byName := range e.unitsByModule {
 		u, ok := byName[name]
@@ -326,9 +322,7 @@ func (e *Engine) lookupInModule(name, moduleName, effectiveDistro string) (*Unit
 		// Cache the materialization in the per-module catalog so the
 		// next walk for any distro finds it without re-running
 		// sm.Lookup.
-		e.mu.Lock()
 		e.storeByModule(u)
-		e.mu.Unlock()
 		return u, nil
 	}
 	// Real module path — the unit must already be registered under
@@ -342,10 +336,8 @@ func (e *Engine) lookupInModule(name, moduleName, effectiveDistro string) (*Unit
 }
 
 // findInModuleByName returns the unit named `name` from `moduleName`
-// via the per-module catalog. Holds e.mu briefly.
+// via the per-module catalog.
 func (e *Engine) findInModuleByName(name, moduleName string) *Unit {
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	if byName, ok := e.unitsByModule[moduleName]; ok {
 		return byName[name]
 	}

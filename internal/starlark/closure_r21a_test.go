@@ -131,7 +131,7 @@ func TestClosure_R6b_CrossDistroSyntheticCollision(t *testing.T) {
 	debianLibssl := &Unit{Name: "libssl3", Class: "unit", Distro: "debian", Module: "debian.main"}
 
 	alpineSM := &SyntheticModule{
-		Name:   "alpine.main",
+		Name: "alpine.main",
 		Lookup: func(n string) (*Unit, error) {
 			if n == "libssl3" {
 				return alpineLibssl, nil
@@ -141,7 +141,7 @@ func TestClosure_R6b_CrossDistroSyntheticCollision(t *testing.T) {
 		Names: func() []string { return []string{"libssl3"} },
 	}
 	debianSM := &SyntheticModule{
-		Name:   "debian.main",
+		Name: "debian.main",
 		Lookup: func(n string) (*Unit, error) {
 			if n == "libssl3" {
 				return debianLibssl, nil

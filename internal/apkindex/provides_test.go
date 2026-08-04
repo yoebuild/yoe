@@ -16,7 +16,7 @@ func TestBuildProvidesTable_Basic(t *testing.T) {
 	cases := []struct {
 		lookup, wantName string
 	}{
-		{"openssl-libs", "openssl-libs"},   // bare name self-provides
+		{"openssl-libs", "openssl-libs"}, // bare name self-provides
 		{"so:libcrypto.so.3", "openssl-libs"},
 		{"so:libssl.so.3", "openssl-libs"},
 		{"cmd:sshd", "openssh-server"},

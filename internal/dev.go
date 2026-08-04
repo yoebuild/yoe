@@ -199,12 +199,6 @@ func DevStatus(projectDir string, w io.Writer) error {
 	return nil
 }
 
-// unitSrcDir is kept as a small helper for callers that already know
-// the unit's distro and scope.
-func unitSrcDir(projectDir, scopeDir, unitName, distro string) string {
-	return filepath.Join(projectDir, "build", distro, unitName+"."+scopeDir, "src")
-}
-
 // findUnitSrcDir locates a unit's src/ directory under build/<distro>/
 // without requiring the caller to know which distro or scope the unit
 // landed under. If the unit has built under multiple distros, it

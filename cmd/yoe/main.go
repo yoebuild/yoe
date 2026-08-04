@@ -32,11 +32,6 @@ var version = "dev"
 var (
 	globalProjectFile string
 	globalShowShadows bool
-	// Default true while units-alpine's linux-firmware-* fan-out (~100
-	// packages all providing `linux-firmware-any`) keeps tripping the
-	// strict intra-module collision check. Flip back once that's fixed
-	// upstream.
-	globalAllowDuplicateProvides = true
 )
 
 // stringSlice implements flag.Value for repeatable string flags.
@@ -58,9 +53,6 @@ func main() {
 			args = append(args[:i], args[i+2:]...)
 		case args[i] == "--show-shadows":
 			globalShowShadows = true
-			args = append(args[:i], args[i+1:]...)
-		case args[i] == "--allow-duplicate-provides":
-			globalAllowDuplicateProvides = true
 			args = append(args[:i], args[i+1:]...)
 		default:
 			i++
@@ -143,8 +135,6 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  --project <file>            Use an alternative project file instead of PROJECT.star\n")
 	fmt.Fprintf(os.Stderr, "  --show-shadows              Print stderr notices about cross-module unit shadowing\n")
 	fmt.Fprintf(os.Stderr, "                              and intra-module provides overrides\n")
-	fmt.Fprintf(os.Stderr, "  --allow-duplicate-provides  Allow multiple units in the same module to declare\n")
-	fmt.Fprintf(os.Stderr, "                              the same virtual provide (first registered wins)\n")
 	fmt.Fprintf(os.Stderr, "\n")
 	fmt.Fprintf(os.Stderr, "Commands:\n")
 	fmt.Fprintf(os.Stderr, "  (no args)               Launch the interactive TUI\n")
@@ -161,7 +151,6 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  update-feeds            Refresh APKINDEX files for the alpine_feed declarations\n")
 	fmt.Fprintf(os.Stderr, "                          in the current module (run inside a module repo)\n")
 	fmt.Fprintf(os.Stderr, "  repo                    Manage the local apk package repository\n")
-	fmt.Fprintf(os.Stderr, "  cache                   Manage the build cache (local and remote)\n")
 	fmt.Fprintf(os.Stderr, "  source                  Download and manage source archives/repos\n")
 	fmt.Fprintf(os.Stderr, "  config                  View and edit project configuration\n")
 	fmt.Fprintf(os.Stderr, "  desc <unit>           Describe a unit or target\n")
@@ -271,7 +260,7 @@ func cmdUpdateFeeds(args []string) {
 
 func cmdModule(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s module <sync|list|info> [...]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s module <sync|list> [...]\n", os.Args[0])
 		os.Exit(1)
 	}
 
@@ -298,12 +287,6 @@ func cmdModule(args []string) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-	case "info":
-		fmt.Fprintf(os.Stderr, "module info: not yet implemented\n")
-		os.Exit(1)
-	case "check-updates":
-		fmt.Fprintf(os.Stderr, "module check-updates: not yet implemented\n")
-		os.Exit(1)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown module subcommand: %s\n", args[0])
 		os.Exit(1)
@@ -335,13 +318,13 @@ func cmdBuild(args []string) {
 	verbose := fs.Bool("verbose", false, "verbose output")
 	machineName := fs.String("machine", "", "target machine")
 	distroName := fs.String("distro", "", "target distro for this build (overrides local.star/defaults; useful when an image name exists in multiple distros)")
-	all := fs.Bool("all", false, "build all units")
 	jobs := fs.Int("jobs", 0, "max units to build in parallel (saved to local.star; default 5)")
 	fs.BoolVar(verbose, "v", false, "verbose output (shorthand)")
 	fs.IntVar(jobs, "j", 0, "max units to build in parallel (shorthand)")
 	fs.Parse(args)
 
-	_ = all // build all when no positional args — handled by empty units slice
+	// No positional args means "build everything" — an empty units slice
+	// is what BuildUnits reads as the whole project.
 	units := fs.Args()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -655,14 +638,19 @@ func loadProject() *yoestar.Project {
 // tryLoadProject returns nil if no project is loadable from the cwd
 // (rather than os.Exit'ing like loadProject). Useful for commands that
 // can run inside or outside a project, like `yoe device repo list`.
-// projectLoadOpts returns the LoadOptions derived from global CLI flags. The
-// TUI also needs these so reloads (after editing .star files or switching
-// machines) honor flags like --allow-duplicate-provides.
+// projectLoadOpts returns the LoadOptions every project load uses: the
+// module-sync callback, the feed builtins, and whatever the global CLI flags
+// say. The TUI needs these too, so reloads (after editing .star files or
+// switching machines) behave the same as the initial load.
 func projectLoadOpts() []yoestar.LoadOption {
 	opts := []yoestar.LoadOption{
 		yoestar.WithModuleSync(module.SyncIfNeeded),
 		yoestar.WithShowShadows(globalShowShadows),
-		yoestar.WithAllowDuplicateProvides(globalAllowDuplicateProvides),
+		// Relaxed while units-alpine's linux-firmware-* fan-out (~100
+		// packages all providing `linux-firmware-any`) keeps tripping
+		// the strict intra-module collision check. Tighten once that's
+		// fixed upstream.
+		yoestar.WithAllowDuplicateProvides(true),
 		yoestar.WithBuiltin("alpine_feed", alpine.Builtin),
 		yoestar.WithBuiltin("apt_feed", apt.Builtin),
 	}
@@ -682,9 +670,6 @@ func globalFlagArgs() []string {
 	}
 	if globalShowShadows {
 		args = append(args, "--show-shadows")
-	}
-	if globalAllowDuplicateProvides {
-		args = append(args, "--allow-duplicate-provides")
 	}
 	return args
 }
