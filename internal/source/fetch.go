@@ -159,7 +159,7 @@ func Fetch(unit *yoestar.Unit, w io.Writer) (string, error) {
 		return "", fmt.Errorf("unit %q has no source", unit.Name)
 	}
 
-	if isGitURL(unit.Source) {
+	if IsGitURL(unit.Source) {
 		return fetchGit(cacheDir, unit, w)
 	}
 	return fetchHTTP(cacheDir, unit, w)
@@ -301,7 +301,7 @@ func Verify(unit *yoestar.Unit) error {
 	if unit.SHA256 == "" {
 		return nil // no hash to verify
 	}
-	if isGitURL(unit.Source) {
+	if IsGitURL(unit.Source) {
 		return nil // git sources verified by commit hash
 	}
 
@@ -334,10 +334,19 @@ func Verify(unit *yoestar.Unit) error {
 	return nil
 }
 
-func isGitURL(url string) bool {
+// IsGitURL reports whether a unit's source URL is fetched as a git clone
+// rather than downloaded as an archive. This is the single definition:
+// anything deciding "is this unit git-backed" (the fetcher choosing a
+// strategy, `yoe dev` deciding whether a unit can enter dev mode) must
+// agree, or a unit fetched as git gets rejected as a non-git source.
+//
+// A bare github.com/... path counts: those are repo URLs unless they point
+// at a generated archive or a release asset, which are plain downloads.
+func IsGitURL(url string) bool {
 	return strings.HasSuffix(url, ".git") ||
 		strings.HasPrefix(url, "git://") ||
 		strings.HasPrefix(url, "git@") ||
+		strings.HasPrefix(url, "ssh://") ||
 		(strings.Contains(url, "github.com/") && !strings.Contains(url, "/archive/") && !strings.Contains(url, "/releases/"))
 }
 

@@ -20,17 +20,16 @@ type SandboxConfig struct {
 	Container  string // Docker image tag (e.g., "yoe/toolchain-musl:15")
 	Sandbox    bool   // use bwrap sandbox inside container
 	Shell      string // shell for build commands: "sh" (default) or "bash"
-	BuildRoot  string
 	SrcDir     string
 	DestDir    string
 	Sysroot    string
 	Env        map[string]string
 	ProjectDir string
-	NoUser     bool      // run as root (for losetup/mount)
-	HostDir    string    // working directory for run(host=True) commands
+	NoUser     bool              // run as root (for losetup/mount)
+	HostDir    string            // working directory for run(host=True) commands
 	CacheDirs  map[string]string // host:container cache mount mappings
-	Stdout     io.Writer // build output (nil = os.Stdout)
-	Stderr     io.Writer // build errors (nil = os.Stderr)
+	Stdout     io.Writer         // build output (nil = os.Stdout)
+	Stderr     io.Writer         // build errors (nil = os.Stderr)
 }
 
 // resolveShell returns the shell to use for build commands.
@@ -114,11 +113,7 @@ func bwrapCommand(cfg *SandboxConfig, command string) string {
 	var parts []string
 	parts = append(parts, "bwrap", "--die-with-parent")
 
-	if cfg.BuildRoot != "" {
-		parts = append(parts, "--bind", cfg.BuildRoot, "/")
-	} else {
-		parts = append(parts, "--bind", "/", "/")
-	}
+	parts = append(parts, "--bind", "/", "/")
 
 	if cfg.Sysroot != "" {
 		parts = append(parts, "--ro-bind", "/build/sysroot", "/build/sysroot")
@@ -155,11 +150,7 @@ func BwrapShellCommand(cfg *SandboxConfig) string {
 	var parts []string
 	parts = append(parts, "bwrap", "--die-with-parent")
 
-	if cfg.BuildRoot != "" {
-		parts = append(parts, "--bind", cfg.BuildRoot, "/")
-	} else {
-		parts = append(parts, "--bind", "/", "/")
-	}
+	parts = append(parts, "--bind", "/", "/")
 
 	if cfg.Sysroot != "" {
 		parts = append(parts, "--ro-bind", "/build/sysroot", "/build/sysroot")

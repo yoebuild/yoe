@@ -273,7 +273,7 @@ var reservedUnitKwargs = map[string]bool{
 	"sandbox": true, "shell": true, "tasks": true, "provides": true,
 	"replaces": true,
 	"services": true, "conffiles": true, "environment": true,
-	"cache_dirs": true, "artifacts": true, "exclude": true,
+	"cache_dirs": true, "artifacts": true, "artifacts_explicit": true, "exclude": true,
 	"hostname": true, "timezone": true, "locale": true,
 	"partitions": true, "unit_class": true,
 	"unbuildable_machine": true, "machine_kernel_distros": true,

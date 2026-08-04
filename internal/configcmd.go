@@ -7,12 +7,7 @@ import (
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
-func ShowConfig(dir string, w io.Writer) error {
-	proj, err := yoestar.LoadProject(dir)
-	if err != nil {
-		return err
-	}
-
+func ShowConfig(proj *yoestar.Project, dir string, w io.Writer) error {
 	fmt.Fprintf(w, "Project:    %s %s\n", proj.Name, proj.Version)
 	fmt.Fprintf(w, "Machine:    %s (default)\n", proj.Defaults.Machine)
 	fmt.Fprintf(w, "Image:      %s (default)\n", proj.Defaults.Image)

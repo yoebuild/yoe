@@ -20,12 +20,7 @@ import (
 // files and updates the unit's patches list. Patches land in <unitDir>/<unit>/
 // — alongside the unit's .star file — so the patch paths in `patches = [...]`
 // stay relative to the unit and ship with the module that defines it.
-func DevExtract(projectDir, arch, unitName string, w io.Writer) error {
-	proj, err := yoestar.LoadProject(projectDir)
-	if err != nil {
-		return err
-	}
-
+func DevExtract(proj *yoestar.Project, projectDir, unitName string, w io.Writer) error {
 	// DevExtract operates on the unit's source-control state, not
 	// its distro-specific build artifact, so AnyUnit is enough — the
 	// patch list and source URL it reads are distro-neutral fields.
@@ -41,7 +36,6 @@ func DevExtract(projectDir, arch, unitName string, w io.Writer) error {
 	if _, err := os.Stat(filepath.Join(srcDir, ".git")); os.IsNotExist(err) {
 		return fmt.Errorf("%s is not a git repo — build the recipe first with yoe build", srcDir)
 	}
-	_ = arch // legacy parameter; unitSrcDir now globs across the per-distro build subtree
 
 	// Check if there are commits beyond upstream
 	out, err := gitCmd(srcDir, "rev-list", source.PinTag+"..HEAD")
@@ -114,7 +108,7 @@ func DevExtract(projectDir, arch, unitName string, w io.Writer) error {
 }
 
 // DevDiff shows local commits beyond upstream in a unit's build directory.
-func DevDiff(projectDir, arch, unitName string, w io.Writer) error {
+func DevDiff(projectDir, unitName string, w io.Writer) error {
 	srcDir, err := findUnitSrcDir(projectDir, unitName)
 	if err != nil {
 		return err
@@ -122,7 +116,6 @@ func DevDiff(projectDir, arch, unitName string, w io.Writer) error {
 	if _, err := os.Stat(filepath.Join(srcDir, ".git")); os.IsNotExist(err) {
 		return fmt.Errorf("%s is not a git repo — build the recipe first", srcDir)
 	}
-	_ = arch
 
 	out, err := gitCmd(srcDir, "log", "--oneline", source.PinTag+"..HEAD")
 	if err != nil {
@@ -147,7 +140,7 @@ func DevDiff(projectDir, arch, unitName string, w io.Writer) error {
 //
 // Walks every build/<distro>/<name>.<scope>/src/ subtree so units that
 // only built under one consuming distro still surface.
-func DevStatus(projectDir, _ string, w io.Writer) error {
+func DevStatus(projectDir string, w io.Writer) error {
 	// glob: build/<distro>/<name>.<scope>/src/.git
 	matches, err := filepath.Glob(filepath.Join(projectDir, "build", "*", "*.*", "src", ".git"))
 	if err != nil {
@@ -293,7 +286,7 @@ func DevToUpstream(projectDir, scopeDir, distro string, unit *yoestar.Unit, opts
 	if _, err := os.Stat(filepath.Join(srcDir, ".git")); err != nil {
 		return fmt.Errorf("DevToUpstream: %s is not a git repo — build the unit first", srcDir)
 	}
-	if !devIsGitURL(unit.Source) {
+	if !source.IsGitURL(unit.Source) {
 		return fmt.Errorf("DevToUpstream: %s has a non-git source (%s); only git-based units support dev mode", unit.Name, unit.Source)
 	}
 	if unit.Branch != "" && unit.Tag == "" {

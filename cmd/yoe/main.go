@@ -14,7 +14,6 @@ import (
 
 	yoe "github.com/yoebuild/yoe/internal"
 	"github.com/yoebuild/yoe/internal/artifact"
-	"github.com/yoebuild/yoe/internal/bootstrap"
 	"github.com/yoebuild/yoe/internal/build"
 	"github.com/yoebuild/yoe/internal/device"
 	"github.com/yoebuild/yoe/internal/feeds/alpine"
@@ -94,8 +93,6 @@ func main() {
 		cmdUpdateFeeds(cmdArgs)
 	case "build":
 		cmdBuild(cmdArgs)
-	case "bootstrap":
-		cmdBootstrap(cmdArgs)
 	case "flash":
 		cmdFlash(cmdArgs)
 	case "run":
@@ -297,7 +294,7 @@ func cmdModule(args []string) {
 			os.Exit(1)
 		}
 	case "list":
-		if err := yoe.ListModules(dir, os.Stdout); err != nil {
+		if err := yoe.ListModules(loadProject(), os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -564,14 +561,11 @@ func cmdConfig(args []string) {
 		os.Exit(1)
 	}
 
-	dir := os.Getenv("YOE_PROJECT")
-	if dir == "" {
-		dir = "."
-	}
+	dir := projectDir()
 
 	switch args[0] {
 	case "show":
-		if err := yoe.ShowConfig(dir, os.Stdout); err != nil {
+		if err := yoe.ShowConfig(loadProject(), dir, os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -855,7 +849,19 @@ func cmdDesc(args []string) {
 	}
 	proj := loadProject()
 	arch := defaultArch(proj)
-	if err := resolve.Describe(os.Stdout, proj, args[0], arch); err != nil {
+	distro, err := proj.EffectiveDistro()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: resolving effective distro: %v\n", err)
+		os.Exit(1)
+	}
+	dir := projectDir()
+	machine := proj.Defaults.Machine
+	if err := resolve.Describe(os.Stdout, proj, args[0], resolve.DescribeOptions{
+		Arch:      arch,
+		Machine:   machine,
+		Distro:    distro,
+		SrcInputs: build.SrcInputsFn(dir, arch, machine, distro),
+	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
@@ -909,7 +915,7 @@ func cmdDev(args []string) {
 			fmt.Fprintf(os.Stderr, "Usage: %s dev extract <unit>\n", os.Args[0])
 			os.Exit(1)
 		}
-		if err := yoe.DevExtract(dir, build.Arch(), args[1], os.Stdout); err != nil {
+		if err := yoe.DevExtract(loadProject(), dir, args[1], os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -918,48 +924,17 @@ func cmdDev(args []string) {
 			fmt.Fprintf(os.Stderr, "Usage: %s dev diff <unit>\n", os.Args[0])
 			os.Exit(1)
 		}
-		if err := yoe.DevDiff(dir, build.Arch(), args[1], os.Stdout); err != nil {
+		if err := yoe.DevDiff(dir, args[1], os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 	case "status":
-		if err := yoe.DevStatus(dir, build.Arch(), os.Stdout); err != nil {
+		if err := yoe.DevStatus(dir, os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown dev subcommand: %s\n", args[0])
-		os.Exit(1)
-	}
-}
-
-func cmdBootstrap(args []string) {
-	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s bootstrap <stage0|stage1|status>\n", os.Args[0])
-		os.Exit(1)
-	}
-
-	proj := loadProject()
-	dir := projectDir()
-
-	switch args[0] {
-	case "stage0":
-		if err := bootstrap.Stage0(proj, dir, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-	case "stage1":
-		if err := bootstrap.Stage1(proj, dir, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-	case "status":
-		if err := bootstrap.Status(proj, dir, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-	default:
-		fmt.Fprintf(os.Stderr, "Unknown bootstrap subcommand: %s\n", args[0])
 		os.Exit(1)
 	}
 }
@@ -1398,24 +1373,19 @@ func cmdSource(args []string) {
 		os.Exit(1)
 	}
 
-	dir := os.Getenv("YOE_PROJECT")
-	if dir == "" {
-		dir = "."
-	}
-
 	switch args[0] {
 	case "fetch":
-		if err := source.FetchAll(dir, args[1:], os.Stdout); err != nil {
+		if err := source.FetchAll(loadProject(), args[1:], os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 	case "list":
-		if err := source.ListSources(dir, os.Stdout); err != nil {
+		if err := source.ListSources(loadProject(), os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 	case "verify":
-		if err := source.VerifyAll(dir, os.Stdout); err != nil {
+		if err := source.VerifyAll(loadProject(), os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}

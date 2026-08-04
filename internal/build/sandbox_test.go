@@ -7,10 +7,9 @@ import (
 
 func TestBwrapCommand(t *testing.T) {
 	cfg := &SandboxConfig{
-		BuildRoot: "",
-		SrcDir:    "/tmp/src",
-		DestDir:   "/tmp/dest",
-		Sysroot:   "/tmp/sysroot",
+		SrcDir:  "/tmp/src",
+		DestDir: "/tmp/dest",
+		Sysroot: "/tmp/sysroot",
 		Env: map[string]string{
 			"PREFIX": "/usr",
 			"NPROC":  "4",
@@ -78,21 +77,6 @@ func TestShellQuote(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("shellQuote(%q) = %q, want %q", tt.in, got, tt.want)
 		}
-	}
-}
-
-func TestBwrapCommand_WithBuildRoot(t *testing.T) {
-	cfg := &SandboxConfig{
-		BuildRoot: "/tmp/buildroot",
-		SrcDir:    "/tmp/src",
-		DestDir:   "/tmp/dest",
-		Env:       map[string]string{},
-	}
-
-	cmd := bwrapCommand(cfg, "gcc -o test test.c")
-
-	if !strings.Contains(cmd, "--bind /tmp/buildroot /") {
-		t.Errorf("should bind build root as /: %s", cmd)
 	}
 }
 

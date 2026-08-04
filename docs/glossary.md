@@ -149,7 +149,7 @@ participates in the cache hash) rather than mapping to a typed field.
 | Field         | Type           | Meaning                                                                                                                                                               |
 | ------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `services`    | list[str]      | Init services (OpenRC scripts, systemd units) the package enables at boot by baking the runlevel/target symlink into itself. The unit — not the image — decides this. |
-| `conffiles`   | list[str]      | Config-file paths preserved across package upgrades, recorded in package metadata.                                                                                    |
+| `conffiles`   | list[str]      | Config-file paths preserved across package upgrades. On Debian and Ubuntu these become the package's `conffiles` list; on Alpine, apk preserves modified files on its own, so the field has no effect. |
 | `environment` | dict[str, str] | Environment-variable definitions embedded in the unit's package metadata.                                                                                             |
 | `cache_dirs`  | dict[str, str] | Build-time cache mounts: container path → host cache subdirectory.                                                                                                    |
 

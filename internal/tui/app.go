@@ -623,21 +623,7 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	}
 
 	units := allUnits(proj)
-	statuses := make(map[string]unitStatus, len(units))
-	for _, name := range units {
-		hash := hashes[name]
-		sd := arch
-		if u := proj.LookupUnit(distro, name); u != nil {
-			sd = build.ScopeDir(u, arch, proj.Defaults.Machine)
-		}
-		if build.IsBuildCached(projectDir, sd, name, hash, distro) {
-			statuses[name] = statusCached
-		} else if build.IsBuildInProgress(projectDir, sd, name, distro) {
-			statuses[name] = statusBuilding
-		} else if meta := build.ReadMeta(build.UnitBuildDir(projectDir, sd, name, distro)); meta != nil && meta.Hash == hash && meta.Status == "failed" {
-			statuses[name] = statusFailed
-		}
-	}
+	statuses := scanStatuses(proj, projectDir, arch, proj.Defaults.Machine, distro, units, hashes)
 
 	machines := sortedKeys(proj.Machines)
 
@@ -787,7 +773,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// state; toggling pin↔dev (or P-pinning) invalidates that
 			// — clear the cached/built status so the row doesn't
 			// misleadingly show a green check for the old build.
-			delete(m.statuses, msg.name)
+			m.clearStatus(msg.name)
 		case targetModule:
 			m.invalidateModuleState(msg.name)
 		}
@@ -811,7 +797,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// folds HEAD sha + diff sha for dev-dirty), so the next
 			// build correctly cache-misses; this just makes the row
 			// reflect that immediately.
-			delete(m.statuses, msg.name)
+			m.clearStatus(msg.name)
 		case targetModule:
 			if m.moduleSrcStates != nil {
 				m.moduleSrcStates[msg.name] = msg.state
@@ -822,9 +808,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case buildEventMsg:
 		switch msg.status {
 		case "cached":
-			m.statuses[msg.unit] = statusCached
+			m.setStatus(msg.unit, statusCached)
 		case "done":
-			m.statuses[msg.unit] = statusCached
+			m.setStatus(msg.unit, statusCached)
 			// Build just finished writing this unit's build.json (or
 			// destdir/<name>.img for images), so refresh the SIZE column
 			// now instead of waiting for the parent build's final
@@ -839,10 +825,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := m.markBuildUnitFinished(msg.unit)
 			return m, cmd
 		case "waiting":
-			m.statuses[msg.unit] = statusWaiting
+			m.setStatus(msg.unit, statusWaiting)
 			m.markBuildUnitWaiting(msg.unit)
 		case "building":
-			m.statuses[msg.unit] = statusBuilding
+			m.setStatus(msg.unit, statusBuilding)
 			// When a build starts (often a transitive dep of the unit
 			// the user invoked), scroll its row into view so the user
 			// can see what's happening. Suppressed while the user is
@@ -852,7 +838,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.scrollUnitIntoView(msg.unit)
 			}
 		case "failed":
-			m.statuses[msg.unit] = statusFailed
+			m.setStatus(msg.unit, statusFailed)
 			cmd := m.markBuildUnitFinished(msg.unit)
 			return m, cmd
 		}
@@ -863,14 +849,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		delete(m.cancels, msg.unit)
 		if msg.err != nil {
 			if msg.err.Error() == "build cancelled" || strings.Contains(msg.err.Error(), "signal: killed") {
-				m.statuses[msg.unit] = statusNone
+				m.setStatus(msg.unit, statusNone)
 				m.message = fmt.Sprintf("Build cancelled: %s", msg.unit)
 			} else {
-				m.statuses[msg.unit] = statusFailed
+				m.setStatus(msg.unit, statusFailed)
 				m.message = fmt.Sprintf("Build failed: %s", msg.unit)
 			}
 		} else {
-			m.statuses[msg.unit] = statusCached
+			m.setStatus(msg.unit, statusCached)
 			m.message = fmt.Sprintf("Build complete: %s", msg.unit)
 			m.recomputeMetrics()
 			// Re-sort so newly-known size/deps land in the right place
@@ -1772,6 +1758,16 @@ func (m *model) reparse() {
 // the new visible set; otherwise it is left alone (so live filtering
 // while typing doesn't yank the cursor).
 func (m *model) applyQuery() {
+	m.refreshVisible()
+	m.listOffset = 0
+	m.adjustListOffset()
+}
+
+// refreshVisible recomputes m.inSet and m.visible from the current query,
+// statuses and sort order, keeping the cursor on a visible row. Unlike
+// applyQuery it leaves the scroll offset where the user put it, so it is
+// safe to call while a build is running.
+func (m *model) refreshVisible() {
 	m.inSet = nil
 	if root := m.query.InRoot(); root != "" {
 		m.inSet = query.BuildInClosure(m.proj, root)
@@ -1801,8 +1797,37 @@ func (m *model) applyQuery() {
 			m.cursor = m.visible[0]
 		}
 	}
-	m.listOffset = 0
-	m.adjustListOffset()
+}
+
+// setStatus records a unit's build status and keeps the filtered row set in
+// agreement with it. Every status write goes through here: a live build
+// mutates statuses continuously, and a query like `status:building` has to
+// track those mutations or it shows whatever matched when the query was
+// last typed. The filter is only re-applied when the query actually
+// constrains status, so the common unfiltered case stays O(1).
+func (m *model) setStatus(name string, st unitStatus) {
+	if m.statuses == nil {
+		m.statuses = map[string]unitStatus{}
+	}
+	if m.statuses[name] == st {
+		return
+	}
+	m.statuses[name] = st
+	if m.query.FiltersStatus() {
+		m.refreshVisible()
+	}
+}
+
+// clearStatus drops a unit's recorded build status, keeping the filtered
+// row set in agreement the same way setStatus does.
+func (m *model) clearStatus(name string) {
+	if _, ok := m.statuses[name]; !ok {
+		return
+	}
+	delete(m.statuses, name)
+	if m.query.FiltersStatus() {
+		m.refreshVisible()
+	}
 }
 
 // moduleNames returns the sorted set of module names in the project,
@@ -1910,7 +1935,7 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if err := yoe.RemoveDirAnyOwner(buildDir, m.projectDir); err != nil {
 				m.message = fmt.Sprintf("Clean failed: %v", err)
 			} else {
-				m.statuses[name] = statusNone
+				m.setStatus(name, statusNone)
 				// Drop the cached source state and disarm the watcher
 				// — BuildMeta.SourceState is gone, the next render
 				// shows the SRC column as blank (empty state).
@@ -1929,7 +1954,7 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.message = fmt.Sprintf("Clean failed: %v", err)
 			} else {
 				for _, name := range m.units {
-					m.statuses[name] = statusNone
+					m.setStatus(name, statusNone)
 					m.invalidateUnitState(name)
 				}
 				m.message = "Cleaned all build artifacts"
@@ -4902,7 +4927,7 @@ func (m *model) startBuild(name string) tea.Cmd {
 	if m.statuses[name] == statusBuilding || m.statuses[name] == statusWaiting {
 		return nil
 	}
-	m.statuses[name] = statusWaiting
+	m.setStatus(name, statusWaiting)
 	m.building[name] = true
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -4943,23 +4968,12 @@ func (m *model) startBuild(name string) tea.Cmd {
 			return buildDoneMsg{unit: unitName, err: fmt.Errorf("resolve effective distro: %w", derr)}
 		}
 
-		// Write executor output under the same per-distro build dir the
-		// executor will use, so the detail view's log tail and the
-		// build's own destdir/cache land next to each other.
-		sd := arch
-		if u := freshProj.LookupUnit(distro, unitName); u != nil {
-			sd = build.ScopeDir(u, arch, machine)
-		}
-		outputPath := filepath.Join(build.UnitBuildDir(projectDir, sd, unitName, distro), "executor.log")
-		if err := build.EnsureDir(filepath.Dir(outputPath)); err != nil {
-			return buildDoneMsg{unit: unitName, err: err}
-		}
-		f, err := os.Create(outputPath)
-		if err != nil {
-			return buildDoneMsg{unit: unitName, err: err}
-		}
-		defer f.Close()
-
+		// The executor writes each unit's own executor.log under that
+		// unit's build dir, which is what the detail view reads back —
+		// so this build's aggregate progress stream has no file of its
+		// own to write to. The TUI renders that same progress live in
+		// the units list from OnEvent, so it is discarded here rather
+		// than teed into some unit's log.
 		err = build.BuildUnits(freshProj, []string{unitName}, build.Options{
 			Ctx:             ctx,
 			Force:           true,
@@ -4975,7 +4989,7 @@ func (m *model) startBuild(name string) tea.Cmd {
 					})
 				}
 			},
-		}, f)
+		}, io.Discard)
 		return buildDoneMsg{unit: unitName, err: err}
 	}
 }
@@ -5799,24 +5813,12 @@ func (m *model) recomputeStatuses() {
 		return
 	}
 	m.hashes = hashes
+	fresh := scanStatuses(m.proj, m.projectDir, m.arch, m.proj.Defaults.Machine, m.distro, m.units, hashes)
 	for _, name := range m.units {
 		if m.building[name] {
 			continue // don't override in-progress builds
 		}
-		hash := hashes[name]
-		sd := m.arch
-		if u := m.proj.LookupUnit(m.distro, name); u != nil {
-			sd = build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
-		}
-		if build.IsBuildCached(m.projectDir, sd, name, hash, m.distro) {
-			m.statuses[name] = statusCached
-		} else if build.IsBuildInProgress(m.projectDir, sd, name, m.distro) {
-			m.statuses[name] = statusBuilding
-		} else if meta := build.ReadMeta(build.UnitBuildDir(m.projectDir, sd, name, m.distro)); meta != nil && meta.Hash == hash && meta.Status == "failed" {
-			m.statuses[name] = statusFailed
-		} else {
-			m.statuses[name] = statusNone
-		}
+		m.setStatus(name, fresh[name])
 	}
 	m.recomputeMetrics()
 	// Project actually reloaded — DAG, arch, machine may all be
@@ -6073,6 +6075,45 @@ func readFileAll(path string) []string {
 		lines = append(lines, scanner.Text())
 	}
 	return lines
+}
+
+// scanStatuses derives each unit's build status from what is on disk, given
+// the hashes the build path would compute. Both the initial model build and
+// every project reload go through here, so the two can't drift apart.
+//
+// The cached test is build.CacheValid rather than the cheaper marker-only
+// build.IsBuildCached: CacheValid is what the executor rebuilds on, and a
+// marker can outlive the package it stands for. Reporting "cached" for a
+// unit the next build rebuilds is the kind of disagreement that sends
+// people looking for a caching bug that isn't there.
+func scanStatuses(proj *yoestar.Project, projectDir, arch, machine, distro string, units []string, hashes map[string]string) map[string]unitStatus {
+	statuses := make(map[string]unitStatus, len(units))
+	for _, name := range units {
+		hash := hashes[name]
+		u := proj.LookupUnit(distro, name)
+		sd := arch
+		if u != nil {
+			sd = build.ScopeDir(u, arch, machine)
+		}
+		switch {
+		case u != nil && build.CacheValid(proj, projectDir, u, sd, arch, hash, distro):
+			statuses[name] = statusCached
+		case u == nil && build.IsBuildCached(projectDir, sd, name, hash, distro):
+			// No unit for this distro view — the marker is all there is
+			// to go on, and there's no artifact path to confirm against.
+			statuses[name] = statusCached
+		case build.IsBuildInProgress(projectDir, sd, name, distro):
+			statuses[name] = statusBuilding
+		default:
+			meta := build.ReadMeta(build.UnitBuildDir(projectDir, sd, name, distro))
+			if meta != nil && meta.Hash == hash && meta.Status == "failed" {
+				statuses[name] = statusFailed
+			} else {
+				statuses[name] = statusNone
+			}
+		}
+	}
+	return statuses
 }
 
 // allUnits returns sorted unit names from the project. Dedupes

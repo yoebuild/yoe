@@ -8,22 +8,48 @@ import (
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
+// DescribeOptions carries the inputs that decide a unit's content-addressed
+// hash. They must match what the build executor passes to ComputeAllHashes,
+// or the hash Describe prints keys nothing: distro, machine and the source
+// state each gate lines in the hash, so a distro-less DAG with an empty
+// machine and no source inputs produces a hash no build will ever write.
+type DescribeOptions struct {
+	// Arch is the target architecture the hash is computed for.
+	Arch string
+
+	// Machine is the machine the hash is computed for; it scopes
+	// machine-specific units and feeds the hash directly.
+	Machine string
+
+	// Distro is the effective distro whose view the DAG is built against.
+	// A distro-less DAG resolves each unit's deps by its own tag rather
+	// than the consuming image's, which yields different hashes.
+	Distro string
+
+	// SrcInputs reports a unit's current source state (dev-mode HEAD sha,
+	// working-tree diff sha). Supplied by the build package, which owns
+	// the on-disk layout; nil means "no source state", which is only
+	// correct when nothing has been built.
+	SrcInputs func(*yoestar.Unit) string
+}
+
 // Describe prints detailed information about a unit. AnyUnit
 // suffices — describe surfaces source/version metadata that's
 // stable across modules (the distro-specific build artifact, if
 // any, lives off-Project).
-func Describe(w io.Writer, proj *yoestar.Project, name string, arch string) error {
+func Describe(w io.Writer, proj *yoestar.Project, name string, opts DescribeOptions) error {
 	unit := proj.AnyUnit(name)
 	if unit == nil {
 		return fmt.Errorf("unit %q not found", name)
 	}
+	arch := opts.Arch
 
-	dag, err := BuildDAG(proj, "")
+	dag, err := BuildDAG(proj, opts.Distro)
 	if err != nil {
 		return err
 	}
 
-	hashes, err := ComputeAllHashes(dag, arch, "", nil, "")
+	hashes, err := ComputeAllHashes(dag, arch, opts.Machine, opts.SrcInputs, opts.Distro)
 	if err != nil {
 		return err
 	}

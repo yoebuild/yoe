@@ -253,7 +253,7 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		unit := proj.LookupUnit(effectiveDistro, name)
 		sd := ScopeDir(unit, opts.Arch, opts.Machine)
 		forceThis := (opts.Force || opts.Clean) && (len(requested) == 0 || requested[name])
-		if !forceThis && !opts.NoCache && cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hash, effectiveDistro) {
+		if !forceThis && !opts.NoCache && CacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hash, effectiveDistro) {
 			notify(name, "cached")
 		} else {
 			notify(name, "waiting")
@@ -302,12 +302,12 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		// workers, so guarded by mu.
 		rebuilt = map[string]bool{}
 		started = map[string]bool{}
-		// publishedDeb: an apt-family non-image unit published a .deb into
-		// the pool this run. imageRefreshed: an image unit ran its own
-		// pre-assembly index regen. Together they decide whether a single
-		// end-of-build index refresh is needed (deb published but no image
-		// rebuilt it). Guarded by mu.
-		publishedDeb   bool
+		// publishedPkg: a non-image unit published a package into the repo
+		// this run. imageRefreshed: an image unit ran its own pre-assembly
+		// index regen. Together they decide whether a single end-of-build
+		// index refresh is needed (package published but no image rebuilt
+		// it). Guarded by mu.
+		publishedPkg   bool
 		imageRefreshed bool
 		firstErr       error
 		stop           bool // set on first failure or ctx cancel; no new work scheduled
@@ -363,7 +363,7 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		built := false
 		n := progress.Add(1)
 		if !forceThis && !opts.NoCache && !depRebuilt &&
-			cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hash, effectiveDistro) {
+			CacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hash, effectiveDistro) {
 			fmt.Fprintf(sw, "%-20s ⚡ [cached %d/%d units] %s\n", name, n, total, hash[:12])
 		} else {
 			fmt.Fprintf(sw, "%-20s 🔨 [building %d/%d units]\n", name, n, total)
@@ -397,17 +397,15 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		mu.Lock()
 		if built {
 			rebuilt[name] = true
-			if yoestar.IsAptFamily(opts.EffectiveDistro) {
-				switch unit.Class {
-				case "image":
-					// buildOne regenerated the index from the pool before
-					// assembly, so the on-disk index is already current.
-					imageRefreshed = true
-				case "container":
-					// containers don't publish .debs
-				default:
-					publishedDeb = true
-				}
+			switch unit.Class {
+			case "image":
+				// buildOne regenerated the index from the pool before
+				// assembly, so the on-disk index is already current.
+				imageRefreshed = true
+			case "container":
+				// containers don't publish packages
+			default:
+				publishedPkg = true
 			}
 		}
 		for _, rd := range dag.Nodes[name].Rdeps {
@@ -446,24 +444,49 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 		return firstErr
 	}
 
-	// If .debs were published but no image rebuilt this run, the on-disk
-	// Packages/Release index would otherwise lag the pool (an image
-	// refreshes it before assembly; a direct deb-unit build has no such
-	// step). Regenerate it once from the pool — O(pool), paid a single
-	// time, versus the former per-publish regen that was O(units²).
-	if publishedDeb && !imageRefreshed {
-		codename, err := proj.CodenameForDistro(effectiveDistro)
+	// If packages were published but no image rebuilt this run, the on-disk
+	// index would otherwise lag the repo (an image refreshes it before
+	// assembly; a direct package build has no such step). Regenerate it once
+	// from what is on disk — O(repo), paid a single time, versus the former
+	// per-publish regen that was O(units²).
+	if publishedPkg && !imageRefreshed {
+		if err := refreshRepoIndex(proj, opts.ProjectDir, effectiveDistro, opts.Signer); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// debRepoArches lists the Debian arch tokens the project repo's index is
+// emitted for. Every dists/<codename>/main/binary-<arch>/ subtree named here
+// gets a Packages file, and Architecture: all packages are fanned out into
+// each of them.
+var debRepoArches = []string{"amd64", "arm64"}
+
+// refreshRepoIndex regenerates the project repo's package index for distro
+// from whatever is currently on disk. Both backends defer index generation
+// out of the publish path, so this is what makes a freshly published package
+// visible to apk/apt; it runs at the end of a build and again before image
+// assembly consumes the repo.
+func refreshRepoIndex(proj *yoestar.Project, projectDir, distro string, signer *artifact.Signer) error {
+	repoDir := repo.RepoDistroDir(proj, projectDir, distro)
+	if yoestar.IsAptFamily(distro) {
+		codename, err := proj.CodenameForDistro(distro)
 		if err != nil {
-			return fmt.Errorf("refresh %s index: %w", effectiveDistro, err)
+			return fmt.Errorf("refresh %s index: %w", distro, err)
 		}
 		if err := repo.GenerateDebianIndex(repo.DebRepoOptions{
-			RepoDir:    repo.RepoDistroDir(proj, opts.ProjectDir, effectiveDistro),
+			RepoDir:    repoDir,
 			Codename:   codename,
 			Components: []string{"main"},
-			Arches:     []string{"amd64", "arm64"},
+			Arches:     debRepoArches,
 		}); err != nil {
-			return fmt.Errorf("refresh %s index: %w", effectiveDistro, err)
+			return fmt.Errorf("refresh %s index: %w", distro, err)
 		}
+		return nil
+	}
+	if err := repo.GenerateAllIndexes(repoDir, signer); err != nil {
+		return fmt.Errorf("refresh %s index: %w", distro, err)
 	}
 	return nil
 }
@@ -516,10 +539,12 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	buildDir := UnitBuildDir(opts.ProjectDir, sd, unit.Name, distro)
 	EnsureDir(buildDir)
 
-	// Skip if another process is already building this unit.
+	// Another process is already building this unit. Report it as an error
+	// rather than a silent skip: skipping would leave no destdir, no staged
+	// sysroot and no published artifact, and the caller would go on to record
+	// the unit as successfully built.
 	if IsBuildInProgress(opts.ProjectDir, sd, unit.Name, distro) {
-		fmt.Fprintf(w, "  ⏭️  %s: build already in progress, skipping\n", unit.Name)
-		return nil
+		return fmt.Errorf("%w: %s", ErrBuildInProgress, unit.Name)
 	}
 
 	// Remove the cache marker before starting so a cancelled or failed
@@ -782,28 +807,19 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	}
 	tctxData := BuildTemplateContext(unit, opts.Arch, opts.Machine, console, projectName, projectVersion, opts.EffectiveDistro, baseVersion)
 
-	// Debian image assembly reads the project repo's Packages index as
-	// mmdebstrap's copy: source. Regenerate it from the current pool
-	// before assembling so the index can never lag the pool: the index
-	// is otherwise only rewritten when a unit publishes a .deb, so an
-	// image-only rebuild (nothing published) reuses whatever the last
-	// publish left. A stale stanza for a .deb that has since been
-	// removed makes apt resolve to a version whose file no longer
-	// exists and abort the whole rootfs ("Failed to stat ... No such
-	// file or directory"). GenerateDebianIndex scans the pool, so a
-	// refresh here always matches what is actually on disk.
-	if unit.Class == "image" && yoestar.IsAptFamily(opts.EffectiveDistro) {
-		codename, serr := proj.CodenameForDistro(opts.EffectiveDistro)
-		if serr != nil {
-			return fmt.Errorf("refresh %s index: %w", opts.EffectiveDistro, serr)
-		}
-		if err := repo.GenerateDebianIndex(repo.DebRepoOptions{
-			RepoDir:    repo.RepoDistroDir(proj, opts.ProjectDir, opts.EffectiveDistro),
-			Codename:   codename,
-			Components: []string{"main"},
-			Arches:     []string{"amd64", "arm64"},
-		}); err != nil {
-			return fmt.Errorf("refresh %s index: %w", opts.EffectiveDistro, err)
+	// Image assembly reads the project repo's package index (apt's
+	// Packages, apk's APKINDEX). Regenerate it from what is on disk
+	// before assembling so the index can never lag the repo: index
+	// generation is deferred out of the publish path, so an image-only
+	// rebuild (nothing published) would otherwise reuse whatever the last
+	// refresh left. A stale stanza for a package that has since been
+	// removed makes the solver resolve to a version whose file no longer
+	// exists and abort the whole rootfs ("Failed to stat ... No such file
+	// or directory"). Both generators scan the tree, so a refresh here
+	// always matches what is actually on disk.
+	if unit.Class == "image" {
+		if err := refreshRepoIndex(proj, opts.ProjectDir, opts.EffectiveDistro, opts.Signer); err != nil {
+			return err
 		}
 	}
 
@@ -1022,14 +1038,20 @@ func packageDeb(unit *yoestar.Unit, destDir, srcDir, buildDir string, opts Optio
 		if err := deb.MaterializeSystemdServiceSymlinks(destDir, "", unit.Services); err != nil {
 			return fmt.Errorf("service symlinks: %w", err)
 		}
+		// Record the unit's config files so dpkg preserves locally
+		// modified copies across upgrades.
+		if err := deb.WriteConffiles(destDir, unit.Conffiles); err != nil {
+			return err
+		}
 		if err := deb.BuildDeb(destDir, c, debPath, ""); err != nil {
 			return fmt.Errorf("BuildDeb: %w", err)
 		}
 	}
 	fmt.Fprintf(w, "  📦 %s\n", filepath.Base(debPath))
 
-	// Publish into the project pool and regenerate the per-arch
-	// Packages + Release + InRelease at repo/<project>/<distro>/.
+	// Publish into the project pool. The per-arch Packages + Release +
+	// InRelease are regenerated once the build finishes, or just before an
+	// image consumes the repo.
 	codename, err := proj.CodenameForDistro(opts.EffectiveDistro)
 	if err != nil {
 		return fmt.Errorf("packaging deb: %w", err)
@@ -1039,7 +1061,7 @@ func packageDeb(unit *yoestar.Unit, destDir, srcDir, buildDir string, opts Optio
 		RepoDir:    repoDir,
 		Codename:   codename,
 		Components: []string{"main"},
-		Arches:     []string{"amd64", "arm64"},
+		Arches:     debRepoArches,
 	}
 	if err := repo.PublishDeb(debPath, publishOpts, "main"); err != nil {
 		return fmt.Errorf("PublishDeb: %w", err)
@@ -1170,7 +1192,7 @@ func dryRun(w io.Writer, proj *yoestar.Project, order []string, hashes map[strin
 		sd := ScopeDir(unit, opts.Arch, opts.Machine)
 		cached := ""
 		forceThis := (opts.Force || opts.Clean) && (len(requested) == 0 || requested[name])
-		if !forceThis && cacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hashes[name], opts.EffectiveDistro) {
+		if !forceThis && CacheValid(proj, opts.ProjectDir, unit, sd, opts.Arch, hashes[name], opts.EffectiveDistro) {
 			cached = " [cached, skip]"
 		}
 		fmt.Fprintf(w, "  %-20s [%s] %s%s\n", name, unit.Class, hashes[name][:12], cached)
@@ -1312,16 +1334,20 @@ func IsBuildCached(projectDir, arch, name, hash, distro string) bool {
 	return string(data) == hash
 }
 
-// cacheValid reports whether a unit's cached build is still usable. The cache
+// CacheValid reports whether a unit's cached build is still usable. The cache
 // marker alone is not sufficient: for units that publish an .apk, the marker
 // can outlive the apk (deleted manually, or written racily by a parallel run
 // while the actual build was cancelled). When the apk is gone, the cache is
-// stale and the unit must be rebuilt.
-// cacheValid takes both scopeDir (build-tree subdir, may be a machine name)
+// stale and the unit must be rebuilt. This is what the executor decides
+// rebuilds on, so anything reporting a unit's status to the user (the TUI's
+// units list) must use it rather than IsBuildCached — otherwise it shows
+// "cached" for units the next build rebuilds.
+//
+// CacheValid takes both scopeDir (build-tree subdir, may be a machine name)
 // and arch (the actual target architecture) because they diverge for
 // machine-scoped units: the build cache lives under build/<machine>/, but
 // the apk lives under repo/.../<arch>/.
-func cacheValid(proj *yoestar.Project, projectDir string, unit *yoestar.Unit, scopeDir, arch, hash, distro string) bool {
+func CacheValid(proj *yoestar.Project, projectDir string, unit *yoestar.Unit, scopeDir, arch, hash, distro string) bool {
 	if !IsBuildCached(projectDir, scopeDir, unit.Name, hash, distro) {
 		return false
 	}
@@ -1368,6 +1394,10 @@ func HasBuildLog(projectDir, arch, name, distro string) bool {
 	_, err := os.Stat(filepath.Join(UnitBuildDir(projectDir, arch, name, distro), "build.log"))
 	return err == nil
 }
+
+// ErrBuildInProgress reports that another yoe process holds the build lock for
+// a unit, so this process cannot build it.
+var ErrBuildInProgress = errors.New("another yoe process is already building this unit")
 
 // BuildingLockPath returns the path of the lock file written during a build.
 func BuildingLockPath(projectDir, arch, name, distro string) string {

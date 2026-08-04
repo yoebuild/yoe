@@ -13,6 +13,17 @@ import (
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
+// mustLoadProject loads the project the caller set up, failing the test if
+// it can't be read — the Dev* entry points take an already-loaded project.
+func mustLoadProject(t *testing.T, dir string) *yoestar.Project {
+	t.Helper()
+	proj, err := yoestar.LoadProject(dir)
+	if err != nil {
+		t.Fatalf("LoadProject(%s): %v", dir, err)
+	}
+	return proj
+}
+
 func TestDevExtract(t *testing.T) {
 	// Create a temp project with a unit
 	dir := t.TempDir()
@@ -38,7 +49,7 @@ func TestDevExtract(t *testing.T) {
 
 	// Extract patches
 	var buf bytes.Buffer
-	if err := DevExtract(dir, "x86_64", "openssh", &buf); err != nil {
+	if err := DevExtract(mustLoadProject(t, dir), dir, "openssh", &buf); err != nil {
 		t.Fatalf("DevExtract: %v", err)
 	}
 
@@ -79,7 +90,7 @@ func TestDevExtract_NoCommits(t *testing.T) {
 	run(t, srcDir, "git", "tag", "yoe/pin")
 
 	var buf bytes.Buffer
-	if err := DevExtract(dir, "x86_64", "openssh", &buf); err != nil {
+	if err := DevExtract(mustLoadProject(t, dir), dir, "openssh", &buf); err != nil {
 		t.Fatalf("DevExtract: %v", err)
 	}
 
@@ -108,7 +119,7 @@ func TestDevDiff(t *testing.T) {
 	run(t, srcDir, "git", "commit", "-m", "my change")
 
 	var buf bytes.Buffer
-	if err := DevDiff(dir, "x86_64", "openssh", &buf); err != nil {
+	if err := DevDiff(dir, "openssh", &buf); err != nil {
 		t.Fatalf("DevDiff: %v", err)
 	}
 
@@ -136,7 +147,7 @@ func TestDevStatus(t *testing.T) {
 	run(t, srcDir, "git", "commit", "-m", "local fix")
 
 	var buf bytes.Buffer
-	if err := DevStatus(dir, "x86_64", &buf); err != nil {
+	if err := DevStatus(dir, &buf); err != nil {
 		t.Fatalf("DevStatus: %v", err)
 	}
 
@@ -186,7 +197,7 @@ func TestHTTPSToSSH(t *testing.T) {
 		{"https://gitlab.com/foo/bar.git", "git@gitlab.com:foo/bar.git", true, true},
 		{"https://example.com/path/to/repo.git", "git@example.com:path/to/repo.git", true, true},
 		{"https://foo.example.com/x.git", "git@foo.example.com:x.git", true, true},
-		{"git@github.com:foo/bar.git", "git@github.com:foo/bar.git", false, true},        // already SSH, no rewrite
+		{"git@github.com:foo/bar.git", "git@github.com:foo/bar.git", false, true},          // already SSH, no rewrite
 		{"git://git.kernel.org/linux.git", "git://git.kernel.org/linux.git", false, false}, // git:// not handled
 	}
 	for _, c := range cases {
