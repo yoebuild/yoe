@@ -108,6 +108,10 @@
 
 ## Bugs / Improvements
 
+- Retry source downloads, and allow a unit to list mirrors. A single transient
+  upstream error fails the entire build today: `fetchHTTP` makes one request with
+  no retry, and `source =` accepts exactly one URL, so a Savannah 502 on `attr`
+  took down three of the five nightly e2e jobs.
 - `apk help` — hard to use right now.
 - Helix prebuilt is glibc-only and won't run on yoe's musl rootfs. Needs a
   cargo-from-source build (or a third-party musl tarball) to actually work.
