@@ -11,28 +11,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	archpkg "github.com/yoebuild/yoe/internal/arch"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
-// hostArch returns the host machine architecture in Yoe format.
 // HostArch returns the host machine's architecture (e.g., "x86_64", "arm64").
-func HostArch() string {
-	return hostArch()
-}
-
-func hostArch() string {
-	out, err := exec.Command("uname", "-m").Output()
-	if err != nil {
-		return "x86_64"
-	}
-	arch := strings.TrimSpace(string(out))
-	switch arch {
-	case "aarch64":
-		return "arm64"
-	default:
-		return arch
-	}
-}
+func HostArch() string { return archpkg.Host() }
 
 // Mount describes a bind mount for the container.
 type Mount struct {
@@ -186,7 +170,7 @@ func RunInContainer(cfg ContainerRunConfig) error {
 func containerRunArgs(cfg ContainerRunConfig) ([]string, error) {
 	arch := cfg.Arch
 	if arch == "" {
-		arch = hostArch()
+		arch = archpkg.Host()
 	}
 
 	args := []string{"run", "--rm", "--privileged"}
@@ -254,14 +238,14 @@ func containerRunArgs(cfg ContainerRunConfig) ([]string, error) {
 // CheckBinfmt verifies that binfmt_misc is registered for the given
 // architecture. Returns nil if registered or if arch matches the host.
 func CheckBinfmt(arch string) error {
-	if arch == "" || arch == hostArch() {
+	if arch == "" || arch == archpkg.Host() {
 		return nil
 	}
 	return checkBinfmt(arch)
 }
 
 func checkBinfmt(arch string) error {
-	binfmtName := binfmtArchName(arch)
+	binfmtName := archpkg.Binfmt(arch)
 	path := filepath.Join("/proc/sys/fs/binfmt_misc", binfmtName)
 	if _, err := os.Stat(path); err == nil {
 		return nil
@@ -269,17 +253,6 @@ func checkBinfmt(arch string) error {
 	return fmt.Errorf(
 		"binfmt_misc not registered for %s.\nRun 'yoe container binfmt' to enable cross-architecture builds",
 		arch)
-}
-
-func binfmtArchName(arch string) string {
-	switch arch {
-	case "arm64":
-		return "qemu-aarch64"
-	case "riscv64":
-		return "qemu-riscv64"
-	default:
-		return "qemu-" + arch
-	}
 }
 
 // RegisterBinfmt registers QEMU user-mode emulation for foreign architectures

@@ -82,7 +82,7 @@ func ParseIndex(r io.Reader) ([]Entry, error) {
 			return fmt.Errorf("apkindex: line %d: block has no P: (package name)", blockLn)
 		}
 		if cur.ChecksumText != "" {
-			raw, err := decodeChecksum(cur.ChecksumText)
+			raw, err := DecodeChecksum(cur.ChecksumText)
 			if err != nil {
 				return fmt.Errorf("apkindex: line %d: %s: %w", blockLn, cur.Name, err)
 			}
@@ -235,11 +235,15 @@ func splitTokens(s string) []string {
 	return fs
 }
 
-// decodeChecksum parses Alpine's `C:` value. Format: "Q1<base64-sha1>="
-// — the "Q1" prefix tags hash type (Q1=sha1). Returns the raw 20 sha1
-// bytes. Mirrors the same parsing in internal/source/fetch.go so the
-// two stay byte-identical for cache-key purposes.
-func decodeChecksum(s string) ([]byte, error) {
+// DecodeChecksum parses Alpine's APKINDEX `C:` value and returns the raw
+// 20 sha1 bytes. Format: "Q1<base64-sha1>=" — the "Q1" prefix tags the
+// hash type (Q1 = sha1; Q2 = sha256 was reserved but never deployed at
+// scale). Returns an error for any other prefix or malformed input.
+//
+// This is the single definition. The value feeds cache keys, so a second
+// implementation that disagreed by even a byte would make the same
+// package hash differently depending on which code path read it.
+func DecodeChecksum(s string) ([]byte, error) {
 	if !strings.HasPrefix(s, "Q1") {
 		return nil, fmt.Errorf("apk_checksum: expected Q1 (sha1) prefix, got %q", s)
 	}

@@ -12,7 +12,9 @@ import (
 	"sort"
 	"strings"
 
+	archpkg "github.com/yoebuild/yoe/internal/arch"
 	"github.com/yoebuild/yoe/internal/dpkg"
+	"github.com/yoebuild/yoe/internal/fsutil"
 )
 
 // UpdateOptions tunes the `yoe update-feeds` behavior for Debian feeds.
@@ -120,10 +122,10 @@ func UpdateFeeds(opts UpdateOptions) error {
 		_ = body // R15 hash check happens at index emit time; here we just verify Valid-Until + signature
 
 		for _, yoeArch := range arches {
-			debArch, ok := archMap[yoeArch]
-			if !ok {
-				return fmt.Errorf("update-feeds: %s: unsupported arch %q", d.Name, yoeArch)
+			if err := archpkg.Validate(yoeArch); err != nil {
+				return fmt.Errorf("update-feeds: %s: %w", d.Name, err)
 			}
+			debArch := archpkg.Deb(yoeArch)
 			n, err := fetchPackages(opts, d, yoeArch, debArch)
 			if err != nil {
 				return fmt.Errorf("update-feeds: %s/%s: %w", d.Name, debArch, err)
@@ -150,8 +152,8 @@ func pickArches(opts UpdateOptions, d FeedDecl) []string {
 			if !e.IsDir() {
 				continue
 			}
-			for yoeArch, debArch := range archMap {
-				if e.Name() == debArch {
+			for _, yoeArch := range archpkg.Supported() {
+				if e.Name() == archpkg.Deb(yoeArch) {
 					existing = append(existing, yoeArch)
 					break
 				}
@@ -165,8 +167,8 @@ func pickArches(opts UpdateOptions, d FeedDecl) []string {
 	// Fall back to the FeedDecl's declared arches, mapped to yoe-canon.
 	var out []string
 	for _, declArch := range d.Arches {
-		for yoeArch, debArch := range archMap {
-			if debArch == declArch {
+		for _, yoeArch := range archpkg.Supported() {
+			if archpkg.Deb(yoeArch) == declArch {
 				out = append(out, yoeArch)
 				break
 			}
@@ -176,9 +178,7 @@ func pickArches(opts UpdateOptions, d FeedDecl) []string {
 		sort.Strings(out)
 		return out
 	}
-	all := supportedArches()
-	sort.Strings(all)
-	return all
+	return archpkg.Supported()
 }
 
 // fetchPackages downloads <url>/dists/<suite>/<component>/binary-<arch>/Packages.gz,
@@ -208,7 +208,7 @@ func fetchPackages(opts UpdateOptions, d FeedDecl, yoeArch, debArch string) (int
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return 0, fmt.Errorf("mkdir: %w", err)
 	}
-	if err := atomicWrite(dst, raw); err != nil {
+	if err := fsutil.WriteFileAtomic(dst, raw, 0o644); err != nil {
 		return 0, err
 	}
 	entryCount := countStanzas(raw)
@@ -299,31 +299,6 @@ func appendAllowedFingerprint(moduleDir, fpr string) error {
 	defer f.Close()
 	_, err = fmt.Fprintf(f, "\n# Added via --allow-key-update\n%s\n", fpr)
 	return err
-}
-
-func atomicWrite(path string, data []byte) error {
-	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-	if err != nil {
-		return fmt.Errorf("create tmpfile: %w", err)
-	}
-	defer func() {
-		if _, statErr := os.Stat(tmp); statErr == nil {
-			_ = os.Remove(tmp)
-		}
-	}()
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("write: %w", err)
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("fsync: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close: %w", err)
-	}
-	return os.Rename(tmp, path)
 }
 
 func countStanzas(data []byte) int {

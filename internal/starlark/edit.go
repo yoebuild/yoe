@@ -3,8 +3,9 @@ package starlark
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
+
+	"github.com/yoebuild/yoe/internal/fsutil"
 )
 
 // RewriteUnitField rewrites the `field = "value"` line for the unit
@@ -40,7 +41,7 @@ func RewriteUnitField(starPath, unitName, field, value string) error {
 		return fmt.Errorf("%s: rewriting %s field: %w", starPath, field, err)
 	}
 
-	return atomicWrite(starPath, content[:start]+updated+content[end:])
+	return fsutil.WriteFileAtomic(starPath, []byte(content[:start]+updated+content[end:]), 0o644)
 }
 
 // findUnitBlock returns the byte range of the call expression whose
@@ -151,34 +152,4 @@ func rewriteFieldInBlock(block, field, value string) (string, error) {
 	indent := block[loc[2]:loc[3]]
 	insertion := indent + field + ` = "` + value + `",` + "\n"
 	return block[:loc[1]] + insertion + block[loc[1]:], nil
-}
-
-// atomicWrite writes data to path via a tmp file in the same dir and
-// rename. Avoids partially-written .star files on power loss or
-// interrupted writes.
-func atomicWrite(path, data string) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".yoe-edit-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	cleaned := false
-	defer func() {
-		if !cleaned {
-			os.Remove(tmpPath)
-		}
-	}()
-	if _, err := tmp.WriteString(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return err
-	}
-	cleaned = true
-	return nil
 }

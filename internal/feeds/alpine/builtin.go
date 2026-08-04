@@ -26,6 +26,7 @@ import (
 	"go.starlark.net/starlark"
 
 	"github.com/yoebuild/yoe/internal/apkindex"
+	archpkg "github.com/yoebuild/yoe/internal/arch"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -53,15 +54,6 @@ func feedStatesFor(eng *yoestar.Engine) []*archState {
 	out := make([]*archState, len(src))
 	copy(out, src)
 	return out
-}
-
-// archMap mirrors module-alpine/classes/alpine_pkg.star's _ARCH_MAP:
-// yoe canonical arches → Alpine arch tokens used in repo URLs and as
-// directory names under feed indices.
-var archMap = map[string]string{
-	"x86_64":  "x86_64",
-	"arm64":   "aarch64",
-	"riscv64": "riscv64",
 }
 
 // Builtin is the BuiltinFactory passed to yoestar.WithBuiltin. The
@@ -179,11 +171,10 @@ func (s *archState) cacheFor(arch string) (*archCache, error) {
 	if c, ok := s.byArch[arch]; ok {
 		return c, nil
 	}
-	alpineArch, ok := archMap[arch]
-	if !ok {
-		return nil, fmt.Errorf("alpine_feed: unsupported arch %q (supported: %s)",
-			arch, strings.Join(supportedArches(), ", "))
+	if err := archpkg.Validate(arch); err != nil {
+		return nil, fmt.Errorf("alpine_feed: %w", err)
 	}
+	alpineArch := archpkg.Apk(arch)
 	indexPath := filepath.Join(s.indexRoot, alpineArch, "APKINDEX")
 	entries, err := apkindex.ParseIndexFile(indexPath)
 	if err != nil {
@@ -233,7 +224,7 @@ func (s *archState) lookup(moduleName, name string) (*yoestar.Unit, error) {
 // (internal/build/executor.go:709) handles synthetic units without
 // special-case branching.
 func (s *archState) populateBuildFields(u *yoestar.Unit, entry *apkindex.Entry, arch string) {
-	alpineArch := archMap[arch]
+	alpineArch := archpkg.Apk(arch)
 	// Asset filename uses upstream's combined pkgver (including -rN)
 	// so the URL matches what Alpine's mirror serves.
 	asset := fmt.Sprintf("%s-%s.apk", entry.Name, entry.Version)
@@ -417,14 +408,6 @@ func stringListFrom(list *starlark.List) []string {
 		if s, ok := v.(starlark.String); ok {
 			out = append(out, string(s))
 		}
-	}
-	return out
-}
-
-func supportedArches() []string {
-	out := make([]string, 0, len(archMap))
-	for a := range archMap {
-		out = append(out, a)
 	}
 	return out
 }

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yoebuild/yoe/internal/gzipframe"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -149,7 +150,7 @@ func RepackAPK(unit *yoestar.Unit, srcAPK, outputDir string, signer *Signer) (st
 		return "", fmt.Errorf("reading %s: %w", srcAPK, err)
 	}
 
-	streams, err := splitGzipStreams(raw)
+	streams, err := gzipframe.Streams(raw)
 	if err != nil {
 		return "", fmt.Errorf("splitting %s into gzip streams: %w", srcAPK, err)
 	}
@@ -190,35 +191,6 @@ func RepackAPK(unit *yoestar.Unit, srcAPK, outputDir string, signer *Signer) (st
 	return apkPath, nil
 }
 
-// splitGzipStreams walks the byte slice, decoding one gzip stream at a time
-// (Multistream(false) so we stop at each member boundary), and returns the
-// raw compressed bytes of each stream in order. The Go gzip reader exposes
-// the underlying bytes.Reader's position via its remaining length, which
-// gives us a clean stream-end offset without needing to parse gzip headers
-// by hand.
-func splitGzipStreams(raw []byte) ([][]byte, error) {
-	var out [][]byte
-	r := bytes.NewReader(raw)
-	for r.Len() > 0 {
-		start := int64(len(raw)) - int64(r.Len())
-		gr, err := gzip.NewReader(r)
-		if err != nil {
-			return nil, fmt.Errorf("gzip stream at offset %d: %w", start, err)
-		}
-		gr.Multistream(false)
-		if _, err := io.Copy(io.Discard, gr); err != nil {
-			gr.Close()
-			return nil, fmt.Errorf("reading gzip stream at offset %d: %w", start, err)
-		}
-		if err := gr.Close(); err != nil {
-			return nil, fmt.Errorf("closing gzip stream at offset %d: %w", start, err)
-		}
-		end := int64(len(raw)) - int64(r.Len())
-		out = append(out, raw[start:end])
-	}
-	return out, nil
-}
-
 // ReadAPKArch returns the value of the `arch =` field in the apk's PKGINFO.
 // Used by the passthrough path to redirect noarch packages to the `noarch/`
 // repo directory: apk-tools constructs fetch URLs from the APKINDEX as
@@ -230,7 +202,7 @@ func ReadAPKArch(srcAPK string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	streams, err := splitGzipStreams(raw)
+	streams, err := gzipframe.Streams(raw)
 	if err != nil {
 		return "", err
 	}

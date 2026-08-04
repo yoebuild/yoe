@@ -9,6 +9,9 @@ import (
 	"sort"
 
 	"github.com/yoebuild/yoe/internal/apkindex"
+	archpkg "github.com/yoebuild/yoe/internal/arch"
+	"github.com/yoebuild/yoe/internal/fsutil"
+	"github.com/yoebuild/yoe/internal/gzipframe"
 )
 
 // UpdateOptions tunes the `yoe update-feeds` behavior. The defaults
@@ -88,10 +91,10 @@ func UpdateFeeds(opts UpdateOptions) error {
 			return fmt.Errorf("update-feeds: %s: alpine_feed must declare keys=[...] for signature verification", d.Name)
 		}
 		for _, yoeArch := range arches {
-			alpineArch, ok := archMap[yoeArch]
-			if !ok {
-				return fmt.Errorf("update-feeds: %s: unsupported arch %q", d.Name, yoeArch)
+			if err := archpkg.Validate(yoeArch); err != nil {
+				return fmt.Errorf("update-feeds: %s: %w", d.Name, err)
 			}
+			alpineArch := archpkg.Apk(yoeArch)
 			n, err := fetchOne(opts, d, yoeArch, alpineArch, trustedKeys)
 			if err != nil {
 				return fmt.Errorf("update-feeds: %s/%s: %w", d.Name, alpineArch, err)
@@ -125,8 +128,8 @@ func pickArches(opts UpdateOptions, d FeedDecl) []string {
 			if !e.IsDir() {
 				continue
 			}
-			for yoeArch, alpineArch := range archMap {
-				if e.Name() == alpineArch {
+			for _, yoeArch := range archpkg.Supported() {
+				if e.Name() == archpkg.Apk(yoeArch) {
 					existing = append(existing, yoeArch)
 					break
 				}
@@ -137,9 +140,7 @@ func pickArches(opts UpdateOptions, d FeedDecl) []string {
 			return existing
 		}
 	}
-	all := supportedArches()
-	sort.Strings(all)
-	return all
+	return archpkg.Supported()
 }
 
 // resolveKeyPaths turns the relative `keys=[...]` paths declared in
@@ -199,7 +200,7 @@ func fetchOne(opts UpdateOptions, d FeedDecl, yoeArch, alpineArch string, truste
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return 0, fmt.Errorf("mkdir: %w", err)
 	}
-	if err := atomicWrite(dst, indexBytes); err != nil {
+	if err := fsutil.WriteFileAtomic(dst, indexBytes, 0o644); err != nil {
 		return 0, err
 	}
 
@@ -216,12 +217,12 @@ func fetchOne(opts UpdateOptions, d FeedDecl, yoeArch, alpineArch string, truste
 // human-readable index instead of the wrapped tarball — yoe's
 // resolver reads APKINDEX (plain text) at load time per U2/U5.
 func extractInnerAPKINDEX(tarball []byte) ([]byte, error) {
-	bounds, err := gzipStreamBoundaries(tarball)
+	bounds, err := gzipframe.Boundaries(tarball)
 	if err != nil {
 		return nil, err
 	}
 	for _, b := range bounds {
-		stream := tarball[b[0]:b[1]]
+		stream := b.Bytes(tarball)
 		index, err := extractAPKINDEXFromStream(stream)
 		if err != nil {
 			return nil, err
@@ -231,37 +232,6 @@ func extractInnerAPKINDEX(tarball []byte) ([]byte, error) {
 		}
 	}
 	return nil, fmt.Errorf("no APKINDEX entry in tarball")
-}
-
-// atomicWrite writes data to path via tmpfile + fsync + rename so a
-// SIGINT mid-write never leaves a partial file at the canonical
-// location.
-func atomicWrite(path string, data []byte) error {
-	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-	if err != nil {
-		return fmt.Errorf("create tmpfile: %w", err)
-	}
-	defer func() {
-		if _, statErr := os.Stat(tmp); statErr == nil {
-			_ = os.Remove(tmp)
-		}
-	}()
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("write: %w", err)
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("fsync: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("rename: %w", err)
-	}
-	return nil
 }
 
 // countEntries counts blank-line-separated blocks in APKINDEX text.

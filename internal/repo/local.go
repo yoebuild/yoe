@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/yoebuild/yoe/internal/artifact"
+	"github.com/yoebuild/yoe/internal/fsutil"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -81,20 +82,11 @@ func Publish(apkPath, repoDir, archDir string, signer *artifact.Signer) error {
 	name := filepath.Base(apkPath)
 	dst := filepath.Join(archPath, name)
 
-	src, err := os.Open(apkPath)
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	if _, err := io.Copy(out, src); err != nil {
-		return err
+	// Atomic: index generation and any concurrent `apk add` walk this
+	// same directory, and a half-written .apk there reads as a corrupt
+	// package rather than a missing one.
+	if err := fsutil.CopyFileAtomic(apkPath, dst, 0644); err != nil {
+		return fmt.Errorf("publishing %s: %w", name, err)
 	}
 
 	if signer != nil {

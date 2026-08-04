@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/yoebuild/yoe/internal/deb"
+	"github.com/yoebuild/yoe/internal/fsutil"
 )
 
 // stagedHelloDeb writes a minimal hello_1.0_amd64.deb into pool and
@@ -43,7 +44,7 @@ func stagedHelloDeb(t *testing.T, repoDir, pkg, version, arch string) string {
 		t.Fatal(err)
 	}
 	dst := filepath.Join(pool, pkg+"_"+version+"_"+arch+".deb")
-	if err := copyFile(out, dst); err != nil {
+	if err := fsutil.CopyFileAtomic(out, dst, 0644); err != nil {
 		t.Fatal(err)
 	}
 	return dst

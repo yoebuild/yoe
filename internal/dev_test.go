@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/yoebuild/yoe/internal/gitutil"
 	"github.com/yoebuild/yoe/internal/source"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
@@ -186,31 +187,6 @@ func run(t *testing.T, dir string, name string, args ...string) {
 // Tests cover the toggle library functions in isolation. Use a local
 // file:// URL as the "upstream" so `git fetch` works without network.
 
-func TestHTTPSToSSH(t *testing.T) {
-	cases := []struct {
-		in         string
-		want       string
-		wantOK     bool
-		wantSSHFmt bool
-	}{
-		{"https://github.com/foo/bar.git", "git@github.com:foo/bar.git", true, true},
-		{"https://gitlab.com/foo/bar.git", "git@gitlab.com:foo/bar.git", true, true},
-		{"https://example.com/path/to/repo.git", "git@example.com:path/to/repo.git", true, true},
-		{"https://foo.example.com/x.git", "git@foo.example.com:x.git", true, true},
-		{"git@github.com:foo/bar.git", "git@github.com:foo/bar.git", false, true},          // already SSH, no rewrite
-		{"git://git.kernel.org/linux.git", "git://git.kernel.org/linux.git", false, false}, // git:// not handled
-	}
-	for _, c := range cases {
-		got, ok := httpsToSSH(c.in)
-		if got != c.want {
-			t.Errorf("httpsToSSH(%q) = %q, want %q", c.in, got, c.want)
-		}
-		if ok != c.wantOK {
-			t.Errorf("httpsToSSH(%q) ok=%v, want %v", c.in, ok, c.wantOK)
-		}
-	}
-}
-
 // setupPinnedSrc creates a stub upstream git repo plus a src/ checkout
 // that's been clone'd from it shallow-style: working tree at the
 // upstream commit, `upstream` tag, no `origin` remote configured. This
@@ -263,7 +239,7 @@ func TestDevToUpstream_PinToDev(t *testing.T) {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
 	// Origin set?
-	out, err := gitCmd(srcDir, "remote", "get-url", "origin")
+	out, err := gitutil.Run(srcDir, "remote", "get-url", "origin")
 	if err != nil {
 		t.Fatalf("get-url after DevToUpstream: %v", err)
 	}
@@ -300,7 +276,7 @@ func TestDevToUpstream_Idempotent(t *testing.T) {
 	if err := DevToUpstream(dir, "x86_64", "alpine", unit, DevUpstreamOpts{}); err != nil {
 		t.Fatalf("DevToUpstream: %v", err)
 	}
-	out, _ := gitCmd(srcDir, "remote", "get-url", "origin")
+	out, _ := gitutil.Run(srcDir, "remote", "get-url", "origin")
 	if got := strings.TrimSpace(out); got != upstreamURL {
 		t.Errorf("stale origin not replaced: got %q, want %q", got, upstreamURL)
 	}
@@ -444,7 +420,7 @@ func TestDevPromoteToPin_HEADWithoutTag_WritesSHA(t *testing.T) {
 	if err := DevPromoteToPin(dir, "x86_64", "alpine", unit); err != nil {
 		t.Fatalf("DevPromoteToPin: %v", err)
 	}
-	headSha, _ := gitCmd(srcDir, "rev-parse", "HEAD")
+	headSha, _ := gitutil.Run(srcDir, "rev-parse", "HEAD")
 	wantSha := strings.TrimSpace(headSha)
 	got, _ := os.ReadFile(starPath)
 	if !strings.Contains(string(got), `tag = "`+wantSha+`"`) {
@@ -515,7 +491,7 @@ func TestDevPromoteToPin_PreservesBranchField(t *testing.T) {
 )
 `
 	srcDir, starPath, unit := setupDevModUnit(t, dir, "foo", starBody)
-	headSha, _ := gitCmd(srcDir, "rev-parse", "HEAD")
+	headSha, _ := gitutil.Run(srcDir, "rev-parse", "HEAD")
 	wantSha := strings.TrimSpace(headSha)
 
 	if err := DevPromoteToPin(dir, "x86_64", "alpine", unit); err != nil {
@@ -638,7 +614,7 @@ func setupPinnedSrcWithBranch(t *testing.T, projectDir, unitName, branch string)
 	run(t, upstream, "git", "add", "-A")
 	run(t, upstream, "git", "commit", "-q", "-m", "branch commit 2")
 
-	out, err := gitCmd(upstream, "rev-parse", "HEAD")
+	out, err := gitutil.Run(upstream, "rev-parse", "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -650,7 +626,7 @@ func TestDevToUpstream_BranchDeclared_ChecksOutBranchHead(t *testing.T) {
 	srcDir, upstreamURL, branchHead := setupPinnedSrcWithBranch(t, dir, "openssh", "main")
 	// Capture the pin commit before the toggle so we can verify the
 	// `upstream` tag stays anchored at it.
-	pinCommit, err := gitCmd(srcDir, "rev-parse", "yoe/pin")
+	pinCommit, err := gitutil.Run(srcDir, "rev-parse", "yoe/pin")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -14,8 +14,10 @@ import (
 	"time"
 
 	yoe "github.com/yoebuild/yoe/internal"
+	"github.com/yoebuild/yoe/internal/arch"
 	"github.com/yoebuild/yoe/internal/artifact"
 	"github.com/yoebuild/yoe/internal/deb"
+	"github.com/yoebuild/yoe/internal/fsutil"
 	"github.com/yoebuild/yoe/internal/repo"
 	"github.com/yoebuild/yoe/internal/resolve"
 	"github.com/yoebuild/yoe/internal/source"
@@ -106,23 +108,11 @@ func ScopeDir(unit *yoestar.Unit, arch, machine string) string {
 // looks up at install time. Machine-scoped units are built for a specific
 // arch and live alongside arch-scoped apks of the same arch; the unique
 // pkgname (e.g., `linux-rpi4` vs `linux-imx6ul`) keeps them from colliding.
-func RepoArchDir(unit *yoestar.Unit, arch string) string {
+func RepoArchDir(unit *yoestar.Unit, a string) string {
 	if unit.Scope == "noarch" {
 		return "noarch"
 	}
-	return ApkArch(arch)
-}
-
-// ApkArch translates yoe's internal architecture token to the value
-// apk-tools uses for the same architecture. yoe uses "arm64" everywhere
-// (matching Go's GOARCH and Docker's --platform), but apk-tools — like the
-// Linux kernel — calls it "aarch64". Other architectures (x86_64, riscv64)
-// share a name across both ecosystems and pass through unchanged.
-func ApkArch(arch string) string {
-	if arch == "arm64" {
-		return "aarch64"
-	}
-	return arch
+	return arch.Apk(a)
 }
 
 // BuildUnits builds the specified units (or all if names is empty).
@@ -457,12 +447,6 @@ func BuildUnits(proj *yoestar.Project, names []string, opts Options, w io.Writer
 	return nil
 }
 
-// debRepoArches lists the Debian arch tokens the project repo's index is
-// emitted for. Every dists/<codename>/main/binary-<arch>/ subtree named here
-// gets a Packages file, and Architecture: all packages are fanned out into
-// each of them.
-var debRepoArches = []string{"amd64", "arm64"}
-
 // refreshRepoIndex regenerates the project repo's package index for distro
 // from whatever is currently on disk. Both backends defer index generation
 // out of the publish path, so this is what makes a freshly published package
@@ -479,7 +463,7 @@ func refreshRepoIndex(proj *yoestar.Project, projectDir, distro string, signer *
 			RepoDir:    repoDir,
 			Codename:   codename,
 			Components: []string{"main"},
-			Arches:     debRepoArches,
+			Arches:     arch.DebRepoArches(),
 		}); err != nil {
 			return fmt.Errorf("refresh %s index: %w", distro, err)
 		}
@@ -734,15 +718,15 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		// libssl-dev's libssl.pc, libc6's ld-linux) are visible to
 		// pkg-config / ld / rtld during builds. Alpine ignores the
 		// multiarch paths since they don't exist in its sysroot.
-		"PKG_CONFIG_PATH": fmt.Sprintf("/build/sysroot/usr/lib/pkgconfig:/build/sysroot/usr/lib/%s/pkgconfig:/usr/lib/pkgconfig:/usr/lib/%s/pkgconfig", multiarchTuple(opts.Arch), multiarchTuple(opts.Arch)),
+		"PKG_CONFIG_PATH": fmt.Sprintf("/build/sysroot/usr/lib/pkgconfig:/build/sysroot/usr/lib/%s/pkgconfig:/usr/lib/pkgconfig:/usr/lib/%s/pkgconfig", arch.Multiarch(opts.Arch), arch.Multiarch(opts.Arch)),
 		// Debian/Ubuntu put arch-specific headers (e.g. openssl's
 		// opensslconf.h) under /usr/include/<tuple>/, the include-side
 		// analog of the multiarch lib dirs below. Add it so dep -dev
 		// headers resolve; alpine ignores the path (it doesn't exist).
-		"CFLAGS":          fmt.Sprintf("-I/build/sysroot/usr/include -I/build/sysroot/usr/include/%s", multiarchTuple(opts.Arch)),
-		"CPPFLAGS":        fmt.Sprintf("-I/build/sysroot/usr/include -I/build/sysroot/usr/include/%s", multiarchTuple(opts.Arch)),
-		"LDFLAGS":         fmt.Sprintf("-L/build/sysroot/usr/lib -L/build/sysroot/usr/lib/%s -L/build/sysroot/lib/%s", multiarchTuple(opts.Arch), multiarchTuple(opts.Arch)),
-		"LD_LIBRARY_PATH": fmt.Sprintf("/build/sysroot/usr/lib:/build/sysroot/usr/lib/%s:/build/sysroot/lib/%s", multiarchTuple(opts.Arch), multiarchTuple(opts.Arch)),
+		"CFLAGS":          fmt.Sprintf("-I/build/sysroot/usr/include -I/build/sysroot/usr/include/%s", arch.Multiarch(opts.Arch)),
+		"CPPFLAGS":        fmt.Sprintf("-I/build/sysroot/usr/include -I/build/sysroot/usr/include/%s", arch.Multiarch(opts.Arch)),
+		"LDFLAGS":         fmt.Sprintf("-L/build/sysroot/usr/lib -L/build/sysroot/usr/lib/%s -L/build/sysroot/lib/%s", arch.Multiarch(opts.Arch), arch.Multiarch(opts.Arch)),
+		"LD_LIBRARY_PATH": fmt.Sprintf("/build/sysroot/usr/lib:/build/sysroot/usr/lib/%s:/build/sysroot/lib/%s", arch.Multiarch(opts.Arch), arch.Multiarch(opts.Arch)),
 		"PYTHONPATH":      "/build/sysroot/usr/lib/python3.12/site-packages",
 		"REPO":            filepath.Join("/project", repoRelPath(proj, opts.ProjectDir), opts.EffectiveDistro),
 	}
@@ -1010,14 +994,14 @@ func packageDeb(unit *yoestar.Unit, destDir, srcDir, buildDir string, opts Optio
 			}
 		}
 		debPath = filepath.Join(pkgDir, unit.PassthroughDeb)
-		if err := copyDebFile(src, debPath); err != nil {
+		if err := fsutil.CopyFileAtomic(src, debPath, 0644); err != nil {
 			return fmt.Errorf("copy passthrough deb: %w", err)
 		}
 	} else {
 		// Build from destDir. Derive control fields from the unit's
 		// metadata; for v1 we use the unit name, version, runtime
 		// deps, and project maintainer.
-		debArch := debArchForYoe(opts.Arch)
+		debArch := arch.Deb(opts.Arch)
 		fname := fmt.Sprintf("%s_%s_%s.deb", unit.Name, unit.Version, debArch)
 		debPath = filepath.Join(pkgDir, fname)
 
@@ -1061,7 +1045,7 @@ func packageDeb(unit *yoestar.Unit, destDir, srcDir, buildDir string, opts Optio
 		RepoDir:    repoDir,
 		Codename:   codename,
 		Components: []string{"main"},
-		Arches:     debRepoArches,
+		Arches:     arch.DebRepoArches(),
 	}
 	if err := repo.PublishDeb(debPath, publishOpts, "main"); err != nil {
 		return fmt.Errorf("PublishDeb: %w", err)
@@ -1097,17 +1081,6 @@ func debProvides(provides []string, version string) string {
 		out = append(out, fmt.Sprintf("%s (= %s)", p, version))
 	}
 	return strings.Join(out, ", ")
-}
-
-func debArchForYoe(yoeArch string) string {
-	switch yoeArch {
-	case "x86_64":
-		return "amd64"
-	case "arm64":
-		return "arm64"
-	default:
-		return yoeArch
-	}
 }
 
 func copyDebFile(src, dst string) error {
@@ -1337,7 +1310,7 @@ func IsBuildCached(projectDir, arch, name, hash, distro string) bool {
 // and arch (the actual target architecture) because they diverge for
 // machine-scoped units: the build cache lives under build/<machine>/, but
 // the apk lives under repo/.../<arch>/.
-func CacheValid(proj *yoestar.Project, projectDir string, unit *yoestar.Unit, scopeDir, arch, hash, distro string) bool {
+func CacheValid(proj *yoestar.Project, projectDir string, unit *yoestar.Unit, scopeDir, a, hash, distro string) bool {
 	if !IsBuildCached(projectDir, scopeDir, unit.Name, hash, distro) {
 		return false
 	}
@@ -1357,13 +1330,13 @@ func CacheValid(proj *yoestar.Project, projectDir string, unit *yoestar.Unit, sc
 	if yoestar.IsAptFamily(distro) {
 		debName := filepath.Base(unit.PassthroughDeb)
 		if debName == "." || debName == "" {
-			debName = fmt.Sprintf("%s_%s_%s.deb", unit.Name, unit.Version, debArchForYoe(arch))
+			debName = fmt.Sprintf("%s_%s_%s.deb", unit.Name, unit.Version, arch.Deb(a))
 		}
 		matches, _ := filepath.Glob(filepath.Join(repoBase, "pool", "*", "*", "*", debName))
 		return len(matches) > 0
 	}
 
-	archDir := RepoArchDir(unit, arch)
+	archDir := RepoArchDir(unit, a)
 	apkName := fmt.Sprintf("%s-%s-r%d.apk", unit.Name, unit.Version, unit.Release)
 	if _, err := os.Stat(filepath.Join(repoBase, archDir, apkName)); err == nil {
 		return true

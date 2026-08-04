@@ -3,19 +3,19 @@ package apkindex
 import (
 	"archive/tar"
 	"bytes"
-	"compress/flate"
 	"compress/gzip"
 	"crypto"
 	"crypto/rsa"
 	"crypto/sha1"
 	"crypto/x509"
-	"encoding/binary"
 	"encoding/pem"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/yoebuild/yoe/internal/gzipframe"
 )
 
 // VerifySignature verifies the RSA-SHA1 signature on an Alpine
@@ -56,7 +56,7 @@ func VerifySignature(tarballPath string, trustedKeys []string) error {
 // filesystem, and for the `yoe update-feeds` path that has the bytes
 // in hand from the HTTP download anyway.
 func VerifySignatureBytes(data []byte, trustedKeys []string) error {
-	bounds, err := gzipStreamBoundaries(data)
+	bounds, err := gzipframe.Boundaries(data)
 	if err != nil {
 		return fmt.Errorf("apkindex verify: %w", err)
 	}
@@ -67,7 +67,7 @@ func VerifySignatureBytes(data []byte, trustedKeys []string) error {
 	}
 
 	// First stream carries .SIGN.RSA.<keyname> — extract.
-	keyName, signature, err := readSignatureEntry(data[bounds[0][0]:bounds[0][1]])
+	keyName, signature, err := readSignatureEntry(bounds[0].Bytes(data))
 	if err != nil {
 		return fmt.Errorf("apkindex verify: %w", err)
 	}
@@ -96,7 +96,7 @@ func VerifySignatureBytes(data []byte, trustedKeys []string) error {
 
 	// Signed content is the raw bytes of every gzip stream after the
 	// signature stream (data + description + index together).
-	signedStart := bounds[0][1]
+	signedStart := bounds[0].End
 	digest := sha1.Sum(data[signedStart:])
 	if err := rsa.VerifyPKCS1v15(pub, crypto.SHA1, digest[:], signature); err != nil {
 		return &SignatureMismatchError{KeyName: keyName, Err: err}
@@ -211,67 +211,4 @@ func loadPublicKey(path string) (*rsa.PublicKey, error) {
 	default:
 		return nil, fmt.Errorf("%s: unsupported PEM type %q", path, block.Type)
 	}
-}
-
-// gzipStreamBoundaries scans data for concatenated gzip streams and
-// returns their start/end byte offsets. Duplicates the logic in
-// internal/source/fetch.go to keep internal/apkindex free of cross-
-// package deps for what's a self-contained byte-level operation. The
-// two implementations should stay in sync; if a third caller appears,
-// promote this to a shared internal/gzipframe package.
-type gzipBound [2]int
-
-func gzipStreamBoundaries(data []byte) ([]gzipBound, error) {
-	var out []gzipBound
-	pos := 0
-	for pos < len(data) {
-		if pos+10 > len(data) || data[pos] != 0x1f || data[pos+1] != 0x8b {
-			break
-		}
-		start := pos
-		flg := data[pos+3]
-		hdrEnd := pos + 10
-		if flg&0x04 != 0 { // FEXTRA
-			if hdrEnd+2 > len(data) {
-				return nil, fmt.Errorf("truncated FEXTRA")
-			}
-			xlen := int(binary.LittleEndian.Uint16(data[hdrEnd : hdrEnd+2]))
-			hdrEnd += 2 + xlen
-		}
-		if flg&0x08 != 0 { // FNAME
-			for hdrEnd < len(data) && data[hdrEnd] != 0 {
-				hdrEnd++
-			}
-			hdrEnd++
-		}
-		if flg&0x10 != 0 { // FCOMMENT
-			for hdrEnd < len(data) && data[hdrEnd] != 0 {
-				hdrEnd++
-			}
-			hdrEnd++
-		}
-		if flg&0x02 != 0 { // FHCRC
-			hdrEnd += 2
-		}
-		if hdrEnd > len(data) {
-			return nil, fmt.Errorf("truncated gzip header")
-		}
-		br := bytes.NewReader(data[hdrEnd:])
-		zr := flate.NewReader(br)
-		if _, err := io.Copy(io.Discard, zr); err != nil {
-			zr.Close()
-			return nil, fmt.Errorf("deflate stream %d: %w", len(out), err)
-		}
-		if err := zr.Close(); err != nil {
-			return nil, fmt.Errorf("deflate close stream %d: %w", len(out), err)
-		}
-		deflateConsumed := (len(data) - hdrEnd) - br.Len()
-		end := hdrEnd + deflateConsumed + 8 // +8 for CRC32 + ISIZE trailer
-		if end > len(data) {
-			return nil, fmt.Errorf("truncated gzip trailer")
-		}
-		out = append(out, gzipBound{start, end})
-		pos = end
-	}
-	return out, nil
 }
