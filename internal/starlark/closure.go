@@ -2,6 +2,7 @@ package starlark
 
 import (
 	"fmt"
+	"sort"
 
 	"go.starlark.net/starlark"
 )
@@ -78,15 +79,17 @@ func (e *Engine) closure(roots []string, effectiveDistro string) ([]string, erro
 	if effectiveDistro == "" {
 		panic("starlark: closure walker called with empty effectiveDistro (programmer error — R21a requires per-image scope)")
 	}
-	// First pass: BFS to materialize every reachable unit.
-	seen := make(map[string]bool, len(roots)*4)
+	// First pass: BFS, materializing every reachable unit and recording
+	// its resolved dependency names as it goes. Resolving deps here
+	// rather than again in the sort keeps one resolver — and one
+	// distro context — across both passes; using the distro-blind one
+	// for the sort could have ordered against edges the walk never
+	// followed.
+	deps := make(map[string][]string, len(roots)*4)
 	queue := append([]string(nil), roots...)
 	for len(queue) > 0 {
 		name := queue[0]
 		queue = queue[1:]
-		if seen[name] {
-			continue
-		}
 		u, err := e.lookupOrMaterialize(name, effectiveDistro)
 		if err != nil {
 			return nil, err
@@ -95,57 +98,102 @@ func (e *Engine) closure(roots []string, effectiveDistro string) ([]string, erro
 			return nil, fmt.Errorf("unresolved name %q (not in any module, no provider, or filtered by distro=%q)%s",
 				name, effectiveDistro, e.flatKernelHint(name, effectiveDistro))
 		}
-		seen[u.Name] = true
+		if _, ok := deps[u.Name]; ok {
+			continue
+		}
+		resolved := make([]string, 0, len(u.RuntimeDepsForDistro(effectiveDistro)))
 		for _, dep := range u.RuntimeDepsForDistro(effectiveDistro) {
-			if seen[dep] {
+			du, err := e.lookupOrMaterialize(dep, effectiveDistro)
+			if err != nil {
+				return nil, err
+			}
+			if du == nil {
+				return nil, fmt.Errorf("unresolved name %q (runtime dep of %q; not in any module, no provider, or filtered by distro=%q)%s",
+					dep, u.Name, effectiveDistro, e.flatKernelHint(dep, effectiveDistro))
+			}
+			resolved = append(resolved, du.Name)
+		}
+		deps[u.Name] = resolved
+		queue = append(queue, resolved...)
+	}
+
+	return topoOrder(deps), nil
+}
+
+// topoOrder returns the names in deps ordered so a unit follows
+// everything it depends on. deps maps each unit to its already-resolved
+// dependency names.
+//
+// Kahn's algorithm, emitted in waves: every unit whose dependencies are
+// all satisfied goes out together, sorted. The sort is what makes the
+// result reproducible — this list becomes an image's artifact list, and
+// an order that varied between runs would be a difference with no cause.
+//
+// A cycle leaves units that never reach in-degree zero. They are
+// appended in sorted order rather than reported: a runtime-dep cycle
+// (two packages depending on each other) is normal in a distribution,
+// and both package managers resolve installation order themselves.
+func topoOrder(deps map[string][]string) []string {
+	indeg := make(map[string]int, len(deps))
+	rdeps := make(map[string][]string, len(deps))
+	for name, ds := range deps {
+		indeg[name] += 0
+		counted := make(map[string]bool, len(ds))
+		for _, d := range ds {
+			// A self-dependency, a dep outside the closure, or a
+			// repeated dep would each inflate the in-degree and strand
+			// the unit at the end.
+			if d == name || counted[d] {
 				continue
 			}
-			queue = append(queue, dep)
+			if _, ok := deps[d]; !ok {
+				continue
+			}
+			counted[d] = true
+			indeg[name]++
+			rdeps[d] = append(rdeps[d], name)
 		}
 	}
 
-	// Second pass: topological sort. Emit any unit whose deps are
-	// all already emitted; iterate until fixpoint. Bounds on iters
-	// match Starlark's old `len(remaining) + 1` for parity.
-	remaining := make([]string, 0, len(seen))
-	for n := range seen {
-		remaining = append(remaining, n)
+	var ready []string
+	for name, n := range indeg {
+		if n == 0 {
+			ready = append(ready, name)
+		}
 	}
-	emitted := make(map[string]bool, len(remaining))
-	ordered := make([]string, 0, len(remaining))
-	for range len(remaining) + 1 {
-		next := remaining[:0]
-		for _, name := range remaining {
-			u, _ := e.lookupOrMaterialize(name, effectiveDistro)
-			ready := true
-			if u != nil {
-				for _, dep := range u.RuntimeDepsForDistro(effectiveDistro) {
-					resolved := e.resolveProvides(dep)
-					if seen[resolved] && !emitted[resolved] {
-						ready = false
-						break
-					}
+	sort.Strings(ready)
+
+	ordered := make([]string, 0, len(deps))
+	for len(ready) > 0 {
+		ordered = append(ordered, ready...)
+		var next []string
+		for _, name := range ready {
+			for _, rd := range rdeps[name] {
+				indeg[rd]--
+				if indeg[rd] == 0 {
+					next = append(next, rd)
 				}
 			}
-			if ready {
-				ordered = append(ordered, name)
-				emitted[name] = true
-			} else {
-				next = append(next, name)
+		}
+		sort.Strings(next)
+		ready = next
+	}
+
+	if len(ordered) < len(deps) {
+		emitted := make(map[string]bool, len(ordered))
+		for _, n := range ordered {
+			emitted[n] = true
+		}
+		var stuck []string
+		for name := range deps {
+			if !emitted[name] {
+				stuck = append(stuck, name)
 			}
 		}
-		if len(next) == len(remaining) {
-			// No progress this round — append the rest (cycle or
-			// degenerate case) and stop. Matches Starlark's behavior.
-			ordered = append(ordered, next...)
-			return ordered, nil
-		}
-		remaining = next
-		if len(remaining) == 0 {
-			return ordered, nil
-		}
+		sort.Strings(stuck)
+		ordered = append(ordered, stuck...)
 	}
-	return ordered, nil
+	return ordered
 }
 
 // flatKernelHint returns a suffix pointing the machine author at

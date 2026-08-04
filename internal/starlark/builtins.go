@@ -244,31 +244,88 @@ func kwStringMap(kwargs []starlark.Tuple, key string) map[string]string {
 	return nil
 }
 
-// reservedUnitKwargs lists the kwargs that unit() and image() map to typed
-// fields on the Unit struct. Kwargs not in this set are captured into
-// Unit.Extra for template context rendering.
+// unitFields is the single table describing how a unit() kwarg becomes a
+// typed field on Unit. Each entry both reads the value and reserves the
+// kwarg name, so a field cannot be added without its name also being
+// excluded from Unit.Extra.
 //
-// When a new typed field is added to the Unit struct, add its kwarg name here
-// too so it isn't double-captured into Extra.
-var reservedUnitKwargs = map[string]bool{
-	"name": true, "version": true, "release": true, "scope": true,
-	"description": true, "license": true, "distro": true,
-	"source": true, "sha256": true,
-	"apk_checksum":    true,
-	"passthrough_apk": true,
-	"tag":             true, "branch": true, "patches": true, "deps": true,
-	"runtime_deps":        true,
-	"distro_deps":         true,
-	"distro_runtime_deps": true,
-	"container":           true, "container_arch": true,
-	"sandbox": true, "shell": true, "tasks": true, "provides": true,
-	"replaces": true,
-	"services": true, "conffiles": true, "environment": true,
-	"cache_dirs": true, "artifacts": true, "artifacts_explicit": true, "exclude": true,
-	"hostname": true, "timezone": true, "locale": true,
-	"partitions": true, "unit_class": true,
-	"unbuildable_machine": true, "machine_kernel_distros": true,
+// That mattered: the reservation used to be a separate hand-maintained
+// list, and it drifted. artifacts_explicit was read into a field but
+// missing from the list, so it was also captured into Extra — which is
+// part of the content-addressed hash. Every image sets it, so a purely
+// presentational value silently became part of every image's cache key.
+var unitFields = []struct {
+	kwarg string
+	set   func(*Unit, []starlark.Tuple)
+}{
+	{"version", func(u *Unit, kw []starlark.Tuple) { u.Version = kwString(kw, "version") }},
+	{"release", func(u *Unit, kw []starlark.Tuple) { u.Release = kwInt(kw, "release") }},
+	{"scope", func(u *Unit, kw []starlark.Tuple) { u.Scope = kwString(kw, "scope") }},
+	{"description", func(u *Unit, kw []starlark.Tuple) { u.Description = kwString(kw, "description") }},
+	{"license", func(u *Unit, kw []starlark.Tuple) { u.License = kwString(kw, "license") }},
+	{"distro", func(u *Unit, kw []starlark.Tuple) { u.Distro = kwString(kw, "distro") }},
+	{"source", func(u *Unit, kw []starlark.Tuple) { u.Source = kwString(kw, "source") }},
+	{"sha256", func(u *Unit, kw []starlark.Tuple) { u.SHA256 = kwString(kw, "sha256") }},
+	{"apk_checksum", func(u *Unit, kw []starlark.Tuple) { u.APKChecksum = kwString(kw, "apk_checksum") }},
+	{"passthrough_apk", func(u *Unit, kw []starlark.Tuple) { u.PassthroughAPK = kwString(kw, "passthrough_apk") }},
+	{"tag", func(u *Unit, kw []starlark.Tuple) { u.Tag = kwString(kw, "tag") }},
+	{"branch", func(u *Unit, kw []starlark.Tuple) { u.Branch = kwString(kw, "branch") }},
+	{"patches", func(u *Unit, kw []starlark.Tuple) { u.Patches = kwStringList(kw, "patches") }},
+	{"deps", func(u *Unit, kw []starlark.Tuple) { u.Deps = kwStringList(kw, "deps") }},
+	{"runtime_deps", func(u *Unit, kw []starlark.Tuple) { u.RuntimeDeps = kwStringList(kw, "runtime_deps") }},
+	{"distro_deps", func(u *Unit, kw []starlark.Tuple) { u.DistroDeps = kwStringListMap(kw, "distro_deps") }},
+	{"distro_runtime_deps", func(u *Unit, kw []starlark.Tuple) { u.DistroRuntimeDeps = kwStringListMap(kw, "distro_runtime_deps") }},
+	{"container", func(u *Unit, kw []starlark.Tuple) { u.Container = kwString(kw, "container") }},
+	{"container_arch", func(u *Unit, kw []starlark.Tuple) { u.ContainerArch = kwString(kw, "container_arch") }},
+	{"sandbox", func(u *Unit, kw []starlark.Tuple) { u.Sandbox = kwBool(kw, "sandbox") }},
+	{"shell", func(u *Unit, kw []starlark.Tuple) { u.Shell = kwString(kw, "shell") }},
+	{"provides", func(u *Unit, kw []starlark.Tuple) { u.Provides = kwStringList(kw, "provides") }},
+	{"replaces", func(u *Unit, kw []starlark.Tuple) { u.Replaces = kwStringList(kw, "replaces") }},
+	{"services", func(u *Unit, kw []starlark.Tuple) { u.Services = kwStringList(kw, "services") }},
+	{"conffiles", func(u *Unit, kw []starlark.Tuple) { u.Conffiles = kwStringList(kw, "conffiles") }},
+	{"environment", func(u *Unit, kw []starlark.Tuple) { u.Environment = kwStringMap(kw, "environment") }},
+	{"cache_dirs", func(u *Unit, kw []starlark.Tuple) { u.CacheDirs = kwStringMap(kw, "cache_dirs") }},
+	{"artifacts", func(u *Unit, kw []starlark.Tuple) { u.Artifacts = kwStringList(kw, "artifacts") }},
+	{"artifacts_explicit", func(u *Unit, kw []starlark.Tuple) { u.ArtifactsExplicit = kwStringList(kw, "artifacts_explicit") }},
+	{"exclude", func(u *Unit, kw []starlark.Tuple) { u.Exclude = kwStringList(kw, "exclude") }},
+	{"hostname", func(u *Unit, kw []starlark.Tuple) { u.Hostname = kwString(kw, "hostname") }},
+	{"timezone", func(u *Unit, kw []starlark.Tuple) { u.Timezone = kwString(kw, "timezone") }},
+	{"locale", func(u *Unit, kw []starlark.Tuple) { u.Locale = kwString(kw, "locale") }},
+	// Set by image() only on the skip path — the selected machine's
+	// kernel has no entry for this image's distro, so the image is
+	// registered inert instead of resolved. See Unit.NotBuildable.
+	{"unbuildable_machine", func(u *Unit, kw []starlark.Tuple) { u.UnbuildableMachine = kwString(kw, "unbuildable_machine") }},
+	{"machine_kernel_distros", func(u *Unit, kw []starlark.Tuple) {
+		u.MachineKernelDistros = kwStringList(kw, "machine_kernel_distros")
+	}},
+	{"tasks", func(u *Unit, kw []starlark.Tuple) {
+		for _, kv := range kw {
+			if string(kv[0].(starlark.String)) == "tasks" {
+				if list, ok := kv[1].(*starlark.List); ok {
+					u.Tasks = append(u.Tasks, ParseTaskList(list)...)
+				}
+			}
+		}
+	}},
+	{"partitions", func(u *Unit, kw []starlark.Tuple) {
+		for _, kv := range kw {
+			if string(kv[0].(starlark.String)) == "partitions" {
+				u.Partitions = append(u.Partitions, parsePartitions(kv[1])...)
+			}
+		}
+	}},
 }
+
+// reservedUnitKwargs is derived from unitFields, plus the two kwargs
+// registerUnit reads directly (name, and unit_class which overrides the
+// registering builtin's class). Nothing here is maintained by hand.
+var reservedUnitKwargs = func() map[string]bool {
+	m := map[string]bool{"name": true, "unit_class": true}
+	for _, f := range unitFields {
+		m[f.kwarg] = true
+	}
+	return m
+}()
 
 // parsePartitions reads a list of partition(...) structs into Partitions.
 // Shared by machine() (the board's default layout) and image() (an
@@ -691,63 +748,9 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 		return nil, fmt.Errorf("unit %q: invalid scope %q (valid: arch, machine, noarch; unset means arch)", name, scope)
 	}
 
-	r := &Unit{
-		Name:              name,
-		Version:           kwString(kwargs, "version"),
-		Release:           kwInt(kwargs, "release"),
-		Class:             cls,
-		Scope:             kwString(kwargs, "scope"),
-		Description:       kwString(kwargs, "description"),
-		License:           kwString(kwargs, "license"),
-		Distro:            kwString(kwargs, "distro"),
-		Source:            kwString(kwargs, "source"),
-		SHA256:            kwString(kwargs, "sha256"),
-		APKChecksum:       kwString(kwargs, "apk_checksum"),
-		PassthroughAPK:    kwString(kwargs, "passthrough_apk"),
-		Tag:               kwString(kwargs, "tag"),
-		Branch:            kwString(kwargs, "branch"),
-		Patches:           kwStringList(kwargs, "patches"),
-		Deps:              kwStringList(kwargs, "deps"),
-		RuntimeDeps:       kwStringList(kwargs, "runtime_deps"),
-		DistroDeps:        kwStringListMap(kwargs, "distro_deps"),
-		DistroRuntimeDeps: kwStringListMap(kwargs, "distro_runtime_deps"),
-		Container:         kwString(kwargs, "container"),
-		ContainerArch:     kwString(kwargs, "container_arch"),
-		Sandbox:           kwBool(kwargs, "sandbox"),
-		Shell:             kwString(kwargs, "shell"),
-		Provides:          kwStringList(kwargs, "provides"),
-		Replaces:          kwStringList(kwargs, "replaces"),
-		Services:          kwStringList(kwargs, "services"),
-		Conffiles:         kwStringList(kwargs, "conffiles"),
-		Environment:       kwStringMap(kwargs, "environment"),
-		CacheDirs:         kwStringMap(kwargs, "cache_dirs"),
-		Artifacts:         kwStringList(kwargs, "artifacts"),
-		ArtifactsExplicit: kwStringList(kwargs, "artifacts_explicit"),
-		Exclude:           kwStringList(kwargs, "exclude"),
-		Hostname:          kwString(kwargs, "hostname"),
-		Timezone:          kwString(kwargs, "timezone"),
-		Locale:            kwString(kwargs, "locale"),
-		// Set by image() only on the skip path — the selected machine's
-		// kernel has no entry for this image's distro, so the image is
-		// registered inert instead of resolved. See Unit.NotBuildable.
-		UnbuildableMachine:   kwString(kwargs, "unbuildable_machine"),
-		MachineKernelDistros: kwStringList(kwargs, "machine_kernel_distros"),
-	}
-
-	// Parse tasks
-	for _, kv := range kwargs {
-		if string(kv[0].(starlark.String)) == "tasks" {
-			if list, ok := kv[1].(*starlark.List); ok {
-				r.Tasks = append(r.Tasks, ParseTaskList(list)...)
-			}
-		}
-	}
-
-	// Parse partitions if present
-	for _, kv := range kwargs {
-		if string(kv[0].(starlark.String)) == "partitions" {
-			r.Partitions = append(r.Partitions, parsePartitions(kv[1])...)
-		}
+	r := &Unit{Name: name, Class: cls}
+	for _, f := range unitFields {
+		f.set(r, kwargs)
 	}
 
 	// Capture unrecognized kwargs into Extra (used for template context + hash).
@@ -779,7 +782,21 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 	// shadow the priority choice at lookup time for the matching
 	// distro only — alpine pins don't interfere with debian closures
 	// and vice versa.
+	// Two units of the same name tagged for different distros are not a
+	// collision — each is only ever reached by its own distro's closure,
+	// which is what the per-module catalog exists to allow (module-debian
+	// and module-ubuntu both define dev-image). This mirrors the
+	// exemption the provides-collision path already applies.
+	//
+	// Skipping the shadow machinery matters for more than the report: the
+	// shadow-loser branch returns before storing into the per-module
+	// catalog, so the lower-priority module's unit was dropped outright
+	// and its distro's image became unresolvable.
+	crossDistro := false
 	if existing, ok := e.units[name]; ok {
+		crossDistro = r.Distro != "" && existing.Distro != "" && r.Distro != existing.Distro
+	}
+	if existing, ok := e.units[name]; ok && !crossDistro {
 		// Same priority (same module, or both project root) → hard error.
 		// Cross-priority collisions are shadows: highest priority wins, with
 		// a stderr notice. Project priority is set strictly above any module
@@ -817,7 +834,13 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 				name, moduleSource(r.Module), moduleSource(existing.Module))
 		}
 	}
-	e.units[name] = r
+	// The flat catalog holds one unit per name. For a cross-distro pair
+	// there is no right answer there, so the first registration keeps the
+	// slot; anything that needs the distro-correct variant goes through
+	// the per-module catalog below.
+	if !crossDistro {
+		e.units[name] = r
+	}
 	// Also store in the per-module catalog. Same-named units from
 	// different modules coexist here (alpine.main's libssl3 doesn't
 	// shadow debian.main's); the closure walker picks per consuming

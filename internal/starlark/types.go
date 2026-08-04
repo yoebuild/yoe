@@ -41,6 +41,12 @@ type Project struct {
 	// tagged or materialized), even if the view is sparse.
 	DistroViews map[string]map[string]*Unit
 
+	// ProvidesViews maps a distro to the virtual names units tagged for
+	// that distro declare: [distro][virtual]unitName. Built alongside
+	// DistroViews and read by ResolveProvidesForDistro, which otherwise
+	// scans every unit in every module per lookup.
+	ProvidesViews map[string]map[string]string
+
 	// DefaultDistro is the project-wide effective-distro fallback used by
 	// image units that don't set their own `distro` field. The cascade
 	// resolves an image's effective distro as:
@@ -416,16 +422,25 @@ func (p *Project) ResolveProvidesForDistro(virtual, effectiveDistro string) stri
 			}
 		}
 	}
-	// Second: walk units tagged for effectiveDistro for a Provides match.
+	// Second: a unit tagged for effectiveDistro that declares this
+	// virtual. ProvidesViews indexes exactly that; when it is not built
+	// yet (during loading, before the views are computed) fall back to
+	// the scan it replaces so the answer does not depend on timing.
 	if effectiveDistro != "" {
-		for _, byName := range p.UnitsByModule {
-			for _, u := range byName {
-				if u.Distro != effectiveDistro {
-					continue
-				}
-				for _, v := range u.Provides {
-					if v == virtual {
-						return u.Name
+		if view, ok := p.ProvidesViews[effectiveDistro]; ok {
+			if name, ok := view[virtual]; ok {
+				return name
+			}
+		} else if p.ProvidesViews == nil {
+			for _, byName := range p.UnitsByModule {
+				for _, u := range byName {
+					if u.Distro != effectiveDistro {
+						continue
+					}
+					for _, v := range u.Provides {
+						if v == virtual {
+							return u.Name
+						}
 					}
 				}
 			}

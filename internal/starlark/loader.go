@@ -761,6 +761,7 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	// on every probe. Cross-distro same-name collisions resolve here
 	// once, not on every closure walk.
 	proj.DistroViews = buildDistroViews(proj)
+	proj.ProvidesViews = buildProvidesViews(proj)
 
 	return proj, nil
 }
@@ -814,6 +815,50 @@ func buildDistroViews(proj *Project) map[string]map[string]*Unit {
 			}
 		}
 		views[distro] = view
+	}
+	return views
+}
+
+// buildProvidesViews indexes, per distro, which unit satisfies each
+// virtual name a distro-tagged unit declares.
+//
+// ResolveProvidesForDistro answered this by scanning every unit in every
+// module, on essentially every dependency resolution — so a project with
+// a Debian feed paid a full-catalog walk per dep edge. The answer only
+// depends on what is registered, which stops changing once loading
+// finishes, so it is computed once here alongside DistroViews and shares
+// that memo's lifetime: valid for the loaded project, and rebuilt with
+// it on reload.
+//
+// Only tagged units are indexed. An untagged unit's provides serve every
+// distro and already live in the global proj.Provides table, which the
+// lookup falls through to.
+func buildProvidesViews(proj *Project) map[string]map[string]string {
+	if proj == nil {
+		return nil
+	}
+	views := map[string]map[string]string{}
+	for _, byName := range proj.UnitsByModule {
+		for _, u := range byName {
+			if u.Distro == "" || len(u.Provides) == 0 {
+				continue
+			}
+			view := views[u.Distro]
+			if view == nil {
+				view = map[string]string{}
+				views[u.Distro] = view
+			}
+			for _, v := range u.Provides {
+				if v == "" {
+					continue
+				}
+				// First registration wins, matching the order-dependent
+				// behavior of the scan this replaces.
+				if _, taken := view[v]; !taken {
+					view[v] = u.Name
+				}
+			}
+		}
 	}
 	return views
 }
