@@ -42,6 +42,7 @@ import (
 
 	archpkg "github.com/yoebuild/yoe/internal/arch"
 	"github.com/yoebuild/yoe/internal/dpkg"
+	"github.com/yoebuild/yoe/internal/feeds/feedcore"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -386,7 +387,7 @@ func parseKwargs(kwargs []starlark.Tuple) (aptFeedArgs, error) {
 			}
 		case "arches":
 			if list, ok := kv[1].(*starlark.List); ok {
-				a.arches = stringListFrom(list)
+				a.arches = feedcore.StringList(list)
 			}
 		case "index":
 			if v, ok := kv[1].(starlark.String); ok {
@@ -436,19 +437,6 @@ func stringDictFrom(d *starlark.Dict) map[string]string {
 		v, vok := item[1].(starlark.String)
 		if kok && vok {
 			out[string(k)] = string(v)
-		}
-	}
-	return out
-}
-
-func stringListFrom(list *starlark.List) []string {
-	out := make([]string, 0, list.Len())
-	iter := list.Iterate()
-	defer iter.Done()
-	var v starlark.Value
-	for iter.Next(&v) {
-		if s, ok := v.(starlark.String); ok {
-			out = append(out, string(s))
 		}
 	}
 	return out

@@ -10,6 +10,7 @@ import (
 
 	"github.com/yoebuild/yoe/internal/apkindex"
 	archpkg "github.com/yoebuild/yoe/internal/arch"
+	"github.com/yoebuild/yoe/internal/feeds/feedcore"
 	"github.com/yoebuild/yoe/internal/fsutil"
 	"github.com/yoebuild/yoe/internal/gzipframe"
 )
@@ -104,7 +105,7 @@ func UpdateFeeds(opts UpdateOptions) error {
 		}
 	}
 	fmt.Fprintf(opts.Out, "\nWrote %d APKINDEX file(s), %s total.\n",
-		totalWritten, humanBytes(totalBytes))
+		totalWritten, feedcore.HumanBytes(totalBytes))
 	fmt.Fprintf(opts.Out, "Review with `git diff` and commit when ready.\n")
 	return nil
 }
@@ -207,7 +208,7 @@ func fetchOne(opts UpdateOptions, d FeedDecl, yoeArch, alpineArch string, truste
 	// Lightweight summary — count entries the maintainer can spot-check.
 	entryCount := countEntries(indexBytes)
 	fmt.Fprintf(opts.Out, "  %s: wrote %s (%d entries, signed by %s)\n",
-		yoeArch, relTo(dst, opts.ModuleDir), entryCount, sigKeyName(trustedKeys[0]))
+		yoeArch, feedcore.RelTo(dst, opts.ModuleDir), entryCount, sigKeyName(trustedKeys[0]))
 	return int64(len(tarball)), nil
 }
 
@@ -249,37 +250,5 @@ func countEntries(index []byte) int {
 	return n
 }
 
-// relTo prints a friendly relative path for progress output, with a
-// safe fallback to the absolute path when relativization fails (e.g.,
-// different mount points).
-func relTo(path, base string) string {
-	rel, err := filepath.Rel(base, path)
-	if err != nil {
-		return path
-	}
-	return rel
-}
-
 // sigKeyName extracts the key basename for diagnostics output.
 func sigKeyName(keyPath string) string { return filepath.Base(keyPath) }
-
-// humanBytes returns "N B", "N.N KiB", "N.N MiB" — base-2 because
-// that's what apk-tools and du -h show. Used in the update-feeds
-// summary line.
-func humanBytes(n int64) string {
-	const (
-		KiB = 1024
-		MiB = 1024 * 1024
-		GiB = 1024 * 1024 * 1024
-	)
-	switch {
-	case n < KiB:
-		return fmt.Sprintf("%d B", n)
-	case n < MiB:
-		return fmt.Sprintf("%.1f KiB", float64(n)/KiB)
-	case n < GiB:
-		return fmt.Sprintf("%.1f MiB", float64(n)/MiB)
-	default:
-		return fmt.Sprintf("%.2f GiB", float64(n)/GiB)
-	}
-}

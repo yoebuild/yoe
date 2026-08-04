@@ -576,6 +576,56 @@ is the spec's R9 and gates every step.
    the Debian index (50k entries: parse, `Names()`, lookup) shows no regression;
    otherwise stop at 2 and record why.
 
+#### Outcome (measured 2026-08-04)
+
+**Step 2 landed, smaller than estimated. Step 3 rejected. Step 1 is still
+open and is a behavior decision, not a refactor.**
+
+The "literal fork, 257 identical lines in `builtin.go` alone" finding does not
+survive a function-by-function comparison. Of the 406 lines in functions the two
+backends share a name for, 49 are byte-identical, 10 more match after renaming
+types, and **347 are genuinely different** — different index formats, dependency
+grammars, transports, signature schemes, and kwargs. The files read as parallel
+because they have the same shape, not because they hold the same code.
+
+`internal/feeds/feedcore` therefore holds only `HumanBytes`, `RelTo`, and
+`StringList` — the three helpers that are both identical and type-independent.
+`feedStatesFor` and `registerFeedState` are byte-identical text but operate on
+each package's own `archState`, so moving them requires the generic half.
+
+The generic half is rejected, but not for the reason the plan anticipated.
+Benchmarked against the real Ubuntu main index (7.5MB, ~50k stanzas) on a
+Ryzen 9 3900X:
+
+| Operation             | Time   | Allocations   |
+| --------------------- | ------ | ------------- |
+| `ParseIndexFile`      | 64 ms  | 402k          |
+| `BuildProvidesTable`  | 4.0 ms | 105k          |
+| `Names()` iteration   | 6.1 µs | 0             |
+
+`Names()` is six microseconds. An interface call in front of it is free, so the
+performance objection is answered. The reason to stop is different: an
+`ArchState[E,T]` plus a `Backend` interface would exist to abstract over 347
+lines that differ on purpose, to save at most 59. That trades readable
+duplication for machinery that hides real differences — the same judgment
+Theme 7 already applies to the version comparators and dependency grammars.
+
+The benchmark is kept as `internal/feeds/apt/index_bench_test.go` so a future
+proposal is argued against these numbers. It also records the one measured hot
+spot in feed loading: parsing, at 64 ms per index, which nothing in this plan
+touches.
+
+Step 1's unresolved-dep policy is **left as an open decision**, deliberately.
+`apkindex.MaterializeUnit` errors on a token no provider satisfies;
+`dpkg.MaterializeUnit` skips it silently. Both are documented with a rationale,
+and they are not obviously reconcilable: Debian's graph legitimately contains
+tokens yoe cannot resolve (alternatives, packages outside the configured
+sections), so erroring would make the apt feed unusable, while a silent skip is
+the failure mode that produces an empty sysroot two units later. The likely
+answer is "skip, but record what was skipped so Diagnostics can surface it" —
+which is a behavior change with its own verification needs, not something to
+fold into a dedup pass.
+
 ### Phase 6 — TUI
 
 Order: F-T5 (`scanStatuses` + `newModel`) → F-T1 (`pane`) → column specs → F-T3

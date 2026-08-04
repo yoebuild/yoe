@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/yoebuild/yoe/internal/feeds/feedcore"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
 )
@@ -74,7 +75,7 @@ func PeekFeedDecls(modulePath string) ([]FeedDecl, error) {
 					}
 				case "keys":
 					if list, ok := kv[1].(*starlark.List); ok {
-						d.Keys = stringListFrom(list)
+						d.Keys = feedcore.StringList(list)
 					}
 				}
 			}

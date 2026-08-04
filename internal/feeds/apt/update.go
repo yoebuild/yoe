@@ -14,6 +14,7 @@ import (
 
 	archpkg "github.com/yoebuild/yoe/internal/arch"
 	"github.com/yoebuild/yoe/internal/dpkg"
+	"github.com/yoebuild/yoe/internal/feeds/feedcore"
 	"github.com/yoebuild/yoe/internal/fsutil"
 )
 
@@ -134,7 +135,7 @@ func UpdateFeeds(opts UpdateOptions) error {
 			totalBytes += n
 		}
 	}
-	fmt.Fprintf(opts.Out, "\nWrote %d Packages file(s), %s total.\n", totalWritten, humanBytes(totalBytes))
+	fmt.Fprintf(opts.Out, "\nWrote %d Packages file(s), %s total.\n", totalWritten, feedcore.HumanBytes(totalBytes))
 	fmt.Fprintf(opts.Out, "Review with `git diff` and commit when ready.\n")
 	return nil
 }
@@ -212,7 +213,7 @@ func fetchPackages(opts UpdateOptions, d FeedDecl, yoeArch, debArch string) (int
 		return 0, err
 	}
 	entryCount := countStanzas(raw)
-	fmt.Fprintf(opts.Out, "  %s: wrote %s (%d entries)\n", yoeArch, relTo(dst, opts.ModuleDir), entryCount)
+	fmt.Fprintf(opts.Out, "  %s: wrote %s (%d entries)\n", yoeArch, feedcore.RelTo(dst, opts.ModuleDir), entryCount)
 	return int64(len(gz)), nil
 }
 
@@ -311,30 +312,4 @@ func countStanzas(data []byte) int {
 		atStart = data[i] == '\n'
 	}
 	return n
-}
-
-func relTo(path, base string) string {
-	rel, err := filepath.Rel(base, path)
-	if err != nil {
-		return path
-	}
-	return rel
-}
-
-func humanBytes(n int64) string {
-	const (
-		KiB = 1024
-		MiB = 1024 * 1024
-		GiB = 1024 * 1024 * 1024
-	)
-	switch {
-	case n < KiB:
-		return fmt.Sprintf("%d B", n)
-	case n < MiB:
-		return fmt.Sprintf("%.1f KiB", float64(n)/KiB)
-	case n < GiB:
-		return fmt.Sprintf("%.1f MiB", float64(n)/MiB)
-	default:
-		return fmt.Sprintf("%.2f GiB", float64(n)/GiB)
-	}
 }

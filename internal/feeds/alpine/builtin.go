@@ -27,6 +27,7 @@ import (
 
 	"github.com/yoebuild/yoe/internal/apkindex"
 	archpkg "github.com/yoebuild/yoe/internal/arch"
+	"github.com/yoebuild/yoe/internal/feeds/feedcore"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -377,7 +378,7 @@ func parseKwargs(kwargs []starlark.Tuple) (alpineFeedArgs, error) {
 			}
 		case "keys":
 			if list, ok := kv[1].(*starlark.List); ok {
-				a.keys = stringListFrom(list)
+				a.keys = feedcore.StringList(list)
 			}
 		}
 	}
@@ -397,17 +398,4 @@ func parseKwargs(kwargs []starlark.Tuple) (alpineFeedArgs, error) {
 		return a, fmt.Errorf("index is required")
 	}
 	return a, nil
-}
-
-func stringListFrom(list *starlark.List) []string {
-	out := make([]string, 0, list.Len())
-	iter := list.Iterate()
-	defer iter.Done()
-	var v starlark.Value
-	for iter.Next(&v) {
-		if s, ok := v.(starlark.String); ok {
-			out = append(out, string(s))
-		}
-	}
-	return out
 }
