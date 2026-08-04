@@ -636,6 +636,35 @@ split, optional, last). Rendering fixes (`wrapLine`, `clipFixed`) opportunistic.
 Verify with the existing layout tests plus manual TUI passes; no scope changes
 (invariant 6).
 
+#### Outcome (2026-08-04)
+
+Landed: F-T5 (`scanStatuses` in Phase 0, `newModel` here), F-T4's actual
+defect, F-T8's trims, one `paneHeight` helper, and the three rendering
+correctness notes.
+
+The help overlay's view switch is now exhaustive with no default branch, so a
+new view without keys fails to compile rather than silently offering the Units
+keys — which is what the source progress screen did, listing build, flash and
+deploy shortcuts during a blocking git fetch when none of them do anything.
+
+The rendering fixes were all real. `clipFixed` measured and cut by byte, so a
+non-ASCII unit name, module path or version both mis-sized its column and could
+be sliced mid-rune; it now measures display width, and pads back out when a
+double-width character makes the cut land a column early. `wrapLine` sliced the
+original string by the byte length of an `ansi.Truncate` result, which is only a
+prefix of its input when the line has no escape sequences — so wrapped build-log
+lines lost their color and a break could land inside an escape sequence. It uses
+`ansi.Hardwrap` now. `renderStatus`'s blank is derived from the label it
+alternates with instead of being a hand-counted run of twelve spaces.
+
+Not done, and each still worth doing: F-T1's full `pane` component (only the
+height arithmetic was shared; the chrome declarations stay per-view), F-T2
+(cursor as a row in `m.visible`), F-T3 (nav/picker/quit helpers), F-T6
+(`textinput`), F-T7 (message-type consolidation), and F-T9 (the god-struct
+split, which the plan already scopes last and optional). F-T2 and F-T9 both
+touch the 37 hand-built `model{}` test literals, which is the reason to do them
+together and deliberately rather than opportunistically.
+
 ### Explicitly deferred / rejected
 
 - Generic feed half without a benchmark gate (Phase 5.3's condition).

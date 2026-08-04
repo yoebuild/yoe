@@ -594,15 +594,24 @@ type Config struct {
 	GlobalFlagArgs []string
 }
 
-// Run launches the TUI.
-func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
+// newModel builds the TUI's model from a loaded project: resolves the
+// arch and effective distro, builds the DAG, computes hashes, reads the
+// per-developer overrides, and initialises every map the update loop
+// assumes is non-nil.
+//
+// Run used to do this inline. Splitting it out gives the initialisation
+// a name to point at — several methods guard against a nil map with a
+// comment saying "newModel always initialises this" — and keeps Run to
+// what it is actually about: starting the program and wiring up the
+// watcher, notifications and teardown.
+func newModel(proj *yoestar.Project, projectDir string, cfg Config) (model, error) {
 	arch := build.Arch()
 	if m, ok := proj.Machines[proj.Defaults.Machine]; ok {
 		arch = m.Arch
 	}
 	distro, err := proj.EffectiveDistro()
 	if err != nil {
-		return fmt.Errorf("resolving effective distro: %w", err)
+		return model{}, fmt.Errorf("resolving effective distro: %w", err)
 	}
 
 	// Build the DAG against the effective distro's view, matching the
@@ -614,11 +623,11 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	// recomputed them.
 	dag, err := resolve.BuildDAG(proj, distro)
 	if err != nil {
-		return fmt.Errorf("building DAG: %w", err)
+		return model{}, fmt.Errorf("building DAG: %w", err)
 	}
 	hashes, err := resolve.ComputeAllHashes(dag, arch, proj.Defaults.Machine, build.SrcInputsFn(projectDir, arch, proj.Defaults.Machine, distro), distro)
 	if err != nil {
-		return fmt.Errorf("computing hashes: %w", err)
+		return model{}, fmt.Errorf("computing hashes: %w", err)
 	}
 
 	units := allUnits(proj)
@@ -679,6 +688,16 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	// no-op when the active query filters that image out.
 	if proj.Defaults.Image != "" {
 		m.scrollUnitIntoView(proj.Defaults.Image)
+	}
+
+	return m, nil
+}
+
+// Run launches the TUI.
+func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
+	m, err := newModel(proj, projectDir, cfg)
+	if err != nil {
+		return err
 	}
 
 	m.checkBinfmtWarning()
@@ -1514,11 +1533,7 @@ func (m model) modulesViewportHeight() int {
 	chrome++ // blank before bottom row
 	chrome++ // help / message
 	chrome += m.syntheticModulesSectionLines()
-	h := m.height - chrome
-	if h < 3 {
-		h = 3
-	}
-	return h
+	return m.paneHeight(chrome, 3)
 }
 
 // syntheticModulesSectionLines returns the vertical footprint of the
@@ -1543,11 +1558,7 @@ func (m model) diagnosticsViewportHeight() int {
 	chrome++ // ↓ more (always reserved)
 	chrome++ // blank before bottom row
 	chrome++ // help / message
-	h := m.height - chrome
-	if h < 3 {
-		h = 3
-	}
-	return h
+	return m.paneHeight(chrome, 3)
 }
 
 // updateDiagnosticsTab handles keys when the Diagnostics tab is active.
@@ -1692,7 +1703,7 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			Modules: m.moduleNames(),
 			Units:   m.units, // already sorted
 		}
-		start, end, cands := query.Complete(m.queryInput, len(m.queryInput), ctx)
+		start, end, cands := query.Complete(m.queryInput, ctx)
 		switch len(cands) {
 		case 0:
 			m.message = "no completions"
@@ -3482,7 +3493,19 @@ func (m model) helpSections() (string, []helpSection) {
 			helpGeneral(false),
 		}
 
-	default: // viewUnits — Units / Modules / Diagnostics tabs
+	case viewSourceProgress:
+		// A blocking git fetch or checkout. Nothing here responds to a
+		// keypress, which is exactly why the answer has to say so —
+		// falling through to the Units keys (as this did) offered a
+		// list of actions none of which would do anything.
+		return "Working — a source operation is in progress", []helpSection{
+			{title: "Keys", entries: []helpEntry{
+				{"", "none — this finishes on its own"},
+			}},
+			helpGeneral(false),
+		}
+
+	case viewUnits:
 		switch m.activeTab {
 		case tabModules:
 			return "Modules — external git modules and dev mode", []helpSection{
@@ -3535,6 +3558,12 @@ func (m model) helpSections() (string, []helpSection) {
 			}
 		}
 	}
+
+	// Every view above is named explicitly rather than sharing a default
+	// branch, so adding one and forgetting its keys lands here instead
+	// of quietly offering the Units keys — which is how the source
+	// progress screen came to answer with actions that did nothing.
+	return "Help", []helpSection{helpGeneral(true)}
 }
 
 // helpBodyLines formats the sections (the scrollable region between the
@@ -3573,11 +3602,8 @@ func (m model) helpViewportHeight() int {
 	if m.height <= 0 {
 		return 0
 	}
-	vp := m.height - 8
-	if vp < 1 {
-		vp = 1
-	}
-	return vp
+	const chrome = 8 // border 2 + padding 2 + title 2 + blank + footer
+	return m.paneHeight(chrome, 1)
 }
 
 // helpMaxScroll is the largest valid scroll offset for the current page and
@@ -4535,17 +4561,31 @@ func (m model) wrapLine(line string) []string {
 		return []string{line}
 	}
 	const contIndent = "    "
-	// First chunk fits the full width.
-	first := ansi.Truncate(line, w, "")
-	out := []string{first}
-	rest := line[len(first):]
-	for rest != "" {
-		chunk := ansi.Truncate(rest, w-len(contIndent), "")
-		if chunk == "" {
-			break
+
+	// ansi.Hardwrap splits on display width while carrying style across
+	// the break. Slicing the original string by the byte length of a
+	// truncated copy — the previous approach — assumed truncation
+	// returns a prefix of its input. It does not when the line contains
+	// escape sequences, so continuation lines lost their color and a
+	// break could land inside an escape sequence.
+	chunks := strings.Split(ansi.Hardwrap(line, w, false), "\n")
+	if len(chunks) == 0 {
+		return []string{line}
+	}
+	out := make([]string, 0, len(chunks))
+	out = append(out, chunks[0])
+	// Continuation lines are indented, so they have less room; re-wrap
+	// the remainder at the narrower width rather than letting an
+	// indented chunk overrun.
+	rest := strings.Join(chunks[1:], "")
+	if rest == "" {
+		return out
+	}
+	for _, c := range strings.Split(ansi.Hardwrap(rest, w-len(contIndent), false), "\n") {
+		if c == "" {
+			continue
 		}
-		out = append(out, contIndent+chunk)
-		rest = rest[len(chunk):]
+		out = append(out, contIndent+c)
 	}
 	return out
 }
@@ -4816,6 +4856,11 @@ func (m model) viewDetailFilesBody() string {
 	return b.String()
 }
 
+// buildingLabel is the status cell for a unit currently building. It
+// flashes on and off, so its width sets the width of the blank it
+// alternates with.
+const buildingLabel = "▌building..."
+
 func (m model) renderStatus(name string) string {
 	// An image the selected machine's kernel can't boot never builds, so
 	// it has no build status to report — say why instead of leaving the
@@ -4829,10 +4874,14 @@ func (m model) renderStatus(name string) string {
 	case statusWaiting:
 		return waitingStyle.Render("● waiting")
 	case statusBuilding:
+		// The building label flashes: it alternates with blanks of the
+		// same width so the columns after it don't jitter. Deriving the
+		// blank from the label keeps the two the same width; they were
+		// a string and a hand-counted run of twelve spaces.
 		if m.tick {
-			return buildingStyle.Render("▌building...")
+			return buildingStyle.Render(buildingLabel)
 		}
-		return "            " // blank when flashing off
+		return strings.Repeat(" ", ansi.StringWidth(buildingLabel))
 	case statusFailed:
 		return failedStyle.Render("● failed")
 	default:
@@ -5231,11 +5280,7 @@ func (m model) detailViewportHeight() int {
 		chrome++ // search bar
 	}
 	chrome++ // bottom row (help or message, single line)
-	h := m.height - chrome
-	if h < 5 {
-		h = 5
-	}
-	return h
+	return m.paneHeight(chrome, 5)
 }
 
 // detailFilesViewportHeight returns the number of file rows visible in
@@ -5248,11 +5293,21 @@ func (m model) detailFilesViewportHeight() int {
 	chrome++    // ↑ more (always reserved)
 	chrome++    // ↓ more (always reserved)
 	chrome++    // bottom row
-	h := m.height - chrome
-	if h < 3 {
-		h = 3
+	return m.paneHeight(chrome, 3)
+}
+
+// paneHeight returns how many content rows fit below `chrome` lines of
+// fixed decoration at the current terminal height, never less than min.
+//
+// Each pane declares its own chrome as a list of named lines, because
+// what sits above and below a pane genuinely differs. What was repeated
+// was this arithmetic and the clamp, spelled out at every pane with its
+// own minimum buried in it.
+func (m model) paneHeight(chrome, min int) int {
+	if h := m.height - chrome; h > min {
+		return h
 	}
-	return h
+	return min
 }
 
 // detailFilesMaxScroll returns the maximum scroll offset for the Files
@@ -5555,10 +5610,26 @@ func installedSize(buildDir string) int64 {
 // row off-screen. Assumes ASCII input — fine for unit/class/module
 // names today.
 func clipFixed(s string, w int) string {
-	if len(s) > w {
-		return s[:w-1] + "…"
+	if w <= 0 {
+		return ""
 	}
-	return fmt.Sprintf("%-*s", w, s)
+	// Measure and cut by display width, not bytes. Unit names, module
+	// paths and versions come from feeds and the filesystem, so a
+	// byte-indexed cut both mis-measured multi-byte text and could slice
+	// a rune in half — which renders as a replacement character and
+	// pushes every column after it out of alignment.
+	if n := ansi.StringWidth(s); n <= w {
+		return s + strings.Repeat(" ", w-n)
+	}
+	// Truncating to w-1 and appending the ellipsis can still come up
+	// short: a double-width character cannot straddle the boundary, so
+	// the cut lands a column early. Pad back out, or the columns after
+	// this one shift left by one for that row only.
+	out := ansi.Truncate(s, w-1, "") + "…"
+	if n := ansi.StringWidth(out); n < w {
+		out += strings.Repeat(" ", w-n)
+	}
+	return out
 }
 
 // detailSourceLine renders the SOURCE strip on the unit detail page:
