@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/yoebuild/yoe/internal/build"
 	"github.com/yoebuild/yoe/internal/gitutil"
 	"github.com/yoebuild/yoe/internal/source"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
@@ -216,15 +216,15 @@ func findUnitSrcDir(projectDir, unitName string) (string, error) {
 	return matches[0], nil
 }
 
-// devSrcDir returns the src/ path for a unit's build dir. Mirrors
-// build.UnitBuildDir without importing the build package (which
-// imports this package). distro is the consuming image's effective
-// distro per R14a; an empty distro is a programmer error and panics.
+// devSrcDir returns the src/ path inside a unit's build dir. An empty
+// distro is a programmer error and panics — every dev-mode entry point
+// resolves the consuming image's effective distro before it gets here,
+// and a build dir without one would silently point somewhere else.
 func devSrcDir(projectDir, scopeDir, unitName, distro string) string {
 	if distro == "" {
-		panic("devSrcDir: distro must not be empty (R14a)")
+		panic("devSrcDir: distro must not be empty")
 	}
-	return filepath.Join(projectDir, "build", distro, unitName+"."+scopeDir, "src")
+	return filepath.Join(build.UnitBuildDir(projectDir, scopeDir, unitName, distro), "src")
 }
 
 // DevUpstreamOpts configures the upstream-fetch performed when a unit
@@ -448,15 +448,8 @@ func DevToPin(projectDir, scopeDir, distro string, unit *yoestar.Unit, force boo
 // unreadable — the caller passes that to DetectState, which falls
 // back to the origin-remote heuristic.
 func readUnitSourceState(projectDir, scopeDir, unitName, distro string) source.State {
-	buildDir := filepath.Join(projectDir, "build", distro, unitName+"."+scopeDir)
-	data, err := os.ReadFile(filepath.Join(buildDir, "build.json"))
-	if err != nil {
-		return source.StateEmpty
-	}
-	var meta struct {
-		SourceState string `json:"source_state,omitempty"`
-	}
-	if err := json.Unmarshal(data, &meta); err != nil {
+	meta := build.ReadMeta(build.UnitBuildDir(projectDir, scopeDir, unitName, distro))
+	if meta == nil {
 		return source.StateEmpty
 	}
 	return source.State(meta.SourceState)
@@ -467,37 +460,19 @@ func readUnitSourceState(projectDir, scopeDir, unitName, distro string) source.S
 // to mark a unit as dev or clear it back to pin without re-running
 // the executor's full meta finalize.
 func writeUnitSourceState(projectDir, scopeDir, unitName, distro string, state source.State) error {
-	buildDir := filepath.Join(projectDir, "build", distro, unitName+"."+scopeDir)
+	buildDir := build.UnitBuildDir(projectDir, scopeDir, unitName, distro)
 	if err := os.MkdirAll(buildDir, 0o755); err != nil {
 		return err
 	}
-	metaPath := filepath.Join(buildDir, "build.json")
-	// Read whatever's there (or start with an empty struct).
-	type metaShape struct {
-		Status         string  `json:"status,omitempty"`
-		Started        any     `json:"started,omitempty"`
-		Finished       any     `json:"finished,omitempty"`
-		Duration       float64 `json:"duration_seconds,omitempty"`
-		DiskBytes      int64   `json:"disk_bytes,omitempty"`
-		InstalledBytes int64   `json:"installed_bytes,omitempty"`
-		Hash           string  `json:"hash,omitempty"`
-		Error          string  `json:"error,omitempty"`
-		SourceState    string  `json:"source_state,omitempty"`
-		SourceDescribe string  `json:"source_describe,omitempty"`
-	}
-	var meta metaShape
-	if data, err := os.ReadFile(metaPath); err == nil {
-		_ = json.Unmarshal(data, &meta)
+	meta := build.ReadMeta(buildDir)
+	if meta == nil {
+		meta = &build.BuildMeta{}
 	}
 	meta.SourceState = string(state)
 	if state == source.StateEmpty {
 		meta.SourceDescribe = ""
 	}
-	out, err := json.MarshalIndent(meta, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(metaPath, out, 0o644)
+	return build.WriteMeta(buildDir, meta)
 }
 
 // DevPromoteToPin captures the dev-mode checkout's current HEAD into

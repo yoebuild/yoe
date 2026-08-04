@@ -15,6 +15,7 @@ import (
 	yoe "github.com/yoebuild/yoe/internal"
 	"github.com/yoebuild/yoe/internal/artifact"
 	"github.com/yoebuild/yoe/internal/build"
+	"github.com/yoebuild/yoe/internal/container"
 	"github.com/yoebuild/yoe/internal/device"
 	"github.com/yoebuild/yoe/internal/feeds/alpine"
 	"github.com/yoebuild/yoe/internal/feeds/apt"
@@ -368,27 +369,18 @@ func cmdBuild(args []string) {
 	// per-distro view picks the right variants for cross-distro
 	// same-name collisions. When the user names a non-image unit (or
 	// no name — build everything), fall back to the project default.
-	if len(units) >= 1 {
-		for _, n := range units {
-			if u := proj.LookupUnit(proj.DefaultDistro, n); u != nil && u.Class == "image" {
-				if d, err := proj.EffectiveDistroForImage(n); err == nil {
-					opts.EffectiveDistro = d
-					break
-				}
-			}
-			// Fall back: scan AllUnits for any module's variant
-			// to catch images registered under a non-default distro.
-			for name, u := range proj.AllUnits() {
-				if name == n && u.Class == "image" {
-					if d, err := proj.EffectiveDistroForImage(n); err == nil {
-						opts.EffectiveDistro = d
-					}
-					break
-				}
-			}
-			if opts.EffectiveDistro != "" {
-				break
-			}
+	//
+	// AnyUnit rather than a lookup in the default distro's view: an image
+	// may be registered under a non-default distro (debian.dev-image in a
+	// project whose default is alpine), and naming it should still select
+	// its own distro.
+	for _, n := range units {
+		if u := proj.AnyUnit(n); u == nil || u.Class != "image" {
+			continue
+		}
+		if d, err := proj.EffectiveDistroForImage(n); err == nil {
+			opts.EffectiveDistro = d
+			break
 		}
 	}
 
@@ -456,7 +448,7 @@ func cmdContainer(args []string) {
 			fmt.Println("Cancelled.")
 			return
 		}
-		if err := yoe.RegisterBinfmt(os.Stdout); err != nil {
+		if err := container.RegisterBinfmt(os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -500,7 +492,7 @@ func cmdContainerShell() {
 	}
 
 	bwrapCmd := build.BwrapShellCommand(cfg)
-	mounts := []yoe.Mount{
+	mounts := []container.Mount{
 		{Host: srcDir, Container: "/build/src"},
 		{Host: destDir, Container: "/build/destdir"},
 		{Host: sysroot, Container: "/build/sysroot", ReadOnly: true},
@@ -509,9 +501,9 @@ func cmdContainerShell() {
 	// Resolve container image from project
 	proj := loadProject()
 
-	if err := yoe.RunInContainer(yoe.ContainerRunConfig{
+	if err := container.RunInContainer(container.ContainerRunConfig{
 		Shell:       "bash",
-		Image:       yoe.DefaultContainerImage(proj),
+		Image:       container.DefaultContainerImage(proj),
 		Command:     bwrapCmd,
 		ProjectDir:  projectDir,
 		Mounts:      mounts,

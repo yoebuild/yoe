@@ -2,10 +2,13 @@ package internal
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/yoebuild/yoe/internal/container"
 )
 
 func RunClean(projectDir, _ string, all bool, force bool, units []string) error {
@@ -24,7 +27,7 @@ func RunClean(projectDir, _ string, all bool, force bool, units []string) error 
 				return fmt.Errorf("globbing %s: %w", r, err)
 			}
 			for _, dir := range matches {
-				if err := RemoveDirAnyOwner(dir, projectDir); err != nil {
+				if err := container.RemoveDir(context.Background(), dir, projectDir, ""); err != nil {
 					return fmt.Errorf("removing %s: %w", dir, err)
 				}
 			}
@@ -47,7 +50,7 @@ func RunClean(projectDir, _ string, all bool, force bool, units []string) error 
 		}
 		dirs := []string{buildDir, filepath.Join(projectDir, "repo")}
 		for _, dir := range dirs {
-			if err := RemoveDirAnyOwner(dir, projectDir); err != nil {
+			if err := container.RemoveDir(context.Background(), dir, projectDir, ""); err != nil {
 				return fmt.Errorf("removing %s: %w", dir, err)
 			}
 		}
@@ -60,58 +63,13 @@ func RunClean(projectDir, _ string, all bool, force bool, units []string) error 
 				return nil
 			}
 		}
-		if err := RemoveDirAnyOwner(buildDir, projectDir); err != nil {
+		if err := container.RemoveDir(context.Background(), buildDir, projectDir, ""); err != nil {
 			return fmt.Errorf("removing %s: %w", buildDir, err)
 		}
 		fmt.Println("Cleaned build intermediates (packages preserved)")
 	}
 
 	return nil
-}
-
-// RemoveDirAnyOwner removes dir, falling back to a container-side `rm -rf`
-// when host-side os.RemoveAll hits EACCES on root- or service-user-owned
-// files left by image-class builds. The container runs as uid 0 (NoUser:
-// true) and has the privilege to remove them.
-//
-// dir must be under projectDir (we bind-mount projectDir into the container at
-// /project and translate). The host user cannot rm those files without sudo,
-// and yoe deliberately leaves them owned correctly so that
-// build/<image>.<arch>/destdir/rootfs inspects with the same uid/gid the
-// booted system will see — see docs/security.md and docs/comparisons.md.
-func RemoveDirAnyOwner(dir, projectDir string) error {
-	if err := os.RemoveAll(dir); err == nil {
-		return nil
-	}
-	if _, statErr := os.Stat(dir); os.IsNotExist(statErr) {
-		return nil
-	}
-	rel, err := filepath.Rel(projectDir, dir)
-	if err != nil {
-		return fmt.Errorf("computing container path for %s: %w", dir, err)
-	}
-	if strings.HasPrefix(rel, "..") {
-		return fmt.Errorf("refusing to container-rm a path outside the project tree: %s", dir)
-	}
-	cPath := "/project/" + filepath.ToSlash(rel)
-	// Use whichever toolchain image is present locally rather than a
-	// hardcoded version. The toolchain-musl version bumps over time and
-	// other distro toolchains (debian, ubuntu) may be the only ones
-	// installed; any of them can run `rm -rf`. Pinning a stale version
-	// (e.g. "15") made docker try to pull a yoe-local-only tag and fail
-	// with "pull access denied".
-	image := LocalToolchainImage(HostArch())
-	if image == "" {
-		return fmt.Errorf("cannot remove root-owned files in %s: no local yoe toolchain image found to run container-side rm "+
-			"(build a target first, or remove the directory manually with sudo)", dir)
-	}
-	return RunInContainer(ContainerRunConfig{
-		Image:      image,
-		Command:    "rm -rf " + cPath,
-		ProjectDir: projectDir,
-		NoUser:     true,
-		Quiet:      true,
-	})
 }
 
 func CleanLocks(projectDir, _ string) error {

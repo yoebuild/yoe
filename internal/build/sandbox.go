@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	yoe "github.com/yoebuild/yoe/internal"
 	"github.com/yoebuild/yoe/internal/arch"
+	"github.com/yoebuild/yoe/internal/container"
 	"github.com/yoebuild/yoe/internal/resolve"
 )
 
@@ -56,7 +56,7 @@ func RunInSandbox(cfg *SandboxConfig, command string) error {
 	bwrapCmd := bwrapCommand(cfg, command)
 	mounts := containerMountsForBuild(cfg)
 
-	return yoe.RunInContainer(yoe.ContainerRunConfig{
+	return container.RunInContainer(container.ContainerRunConfig{
 		Ctx:        cfg.Ctx,
 		Arch:       cfg.Arch,
 		Image:      cfg.Container,
@@ -96,7 +96,7 @@ func RunSimple(cfg *SandboxConfig, command string) error {
 
 	mounts := containerMountsForBuild(cfg)
 
-	return yoe.RunInContainer(yoe.ContainerRunConfig{
+	return container.RunInContainer(container.ContainerRunConfig{
 		Ctx:        cfg.Ctx,
 		Arch:       cfg.Arch,
 		Image:      cfg.Container,
@@ -188,27 +188,27 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
-func containerMountsForBuild(cfg *SandboxConfig) []yoe.Mount {
-	var mounts []yoe.Mount
+func containerMountsForBuild(cfg *SandboxConfig) []container.Mount {
+	var mounts []container.Mount
 
 	if cfg.SrcDir != "" {
-		mounts = append(mounts, yoe.Mount{
+		mounts = append(mounts, container.Mount{
 			Host: cfg.SrcDir, Container: "/build/src",
 		})
 	}
 	if cfg.DestDir != "" {
-		mounts = append(mounts, yoe.Mount{
+		mounts = append(mounts, container.Mount{
 			Host: cfg.DestDir, Container: "/build/destdir",
 		})
 	}
 	if cfg.Sysroot != "" {
-		mounts = append(mounts, yoe.Mount{
+		mounts = append(mounts, container.Mount{
 			Host: cfg.Sysroot, Container: "/build/sysroot", ReadOnly: true,
 		})
 	}
-	for host, container := range cfg.CacheDirs {
-		mounts = append(mounts, yoe.Mount{
-			Host: host, Container: container,
+	for host, guestPath := range cfg.CacheDirs {
+		mounts = append(mounts, container.Mount{
+			Host: host, Container: guestPath,
 		})
 	}
 

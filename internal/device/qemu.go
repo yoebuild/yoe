@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	yoe "github.com/yoebuild/yoe/internal"
 	"github.com/yoebuild/yoe/internal/arch"
+	"github.com/yoebuild/yoe/internal/container"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -270,8 +270,8 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 	args := buildArgs(containerImgPath, toContainer(hostKernel), toContainer(hostInitrd))
 	fullCmd := qemuBin + " " + strings.Join(args, " ")
 
-	return yoe.RunInContainer(yoe.ContainerRunConfig{
-		Image:       yoe.DefaultContainerImage(proj),
+	return container.RunInContainer(container.ContainerRunConfig{
+		Image:       container.DefaultContainerImage(proj),
 		Command:     fullCmd,
 		ProjectDir:  projectDir,
 		Interactive: !opts.Daemon,

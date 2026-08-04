@@ -129,14 +129,8 @@ func ParseTaskList(list *starlark.List) []Task {
 					switch val := sv.(type) {
 					case starlark.String:
 						t.Steps = append(t.Steps, Step{Command: string(val)})
-					case *InstallStepValue:
-						t.Steps = append(t.Steps, Step{Install: &InstallStep{
-							Kind:    val.Kind,
-							Src:     val.Src,
-							Dest:    val.Dest,
-							Mode:    val.Mode,
-							BaseDir: val.BaseDir,
-						}})
+					case *InstallStep:
+						t.Steps = append(t.Steps, Step{Install: val})
 					case starlark.Callable:
 						t.Steps = append(t.Steps, Step{Fn: val})
 					}
@@ -274,6 +268,45 @@ var reservedUnitKwargs = map[string]bool{
 	"hostname": true, "timezone": true, "locale": true,
 	"partitions": true, "unit_class": true,
 	"unbuildable_machine": true, "machine_kernel_distros": true,
+}
+
+// parsePartitions reads a list of partition(...) structs into Partitions.
+// Shared by machine() (the board's default layout) and image() (an
+// image overriding it), which must agree on the shape or an image's
+// layout would quietly differ from the machine's.
+//
+// A non-list value, or a list element that is not a struct, yields
+// nothing rather than an error: the surrounding kwarg loops accept
+// whatever Starlark handed them, and partition() is the only thing that
+// produces the struct this reads.
+func parsePartitions(v starlark.Value) []Partition {
+	list, ok := v.(*starlark.List)
+	if !ok {
+		return nil
+	}
+	var out []Partition
+	iter := list.Iterate()
+	defer iter.Done()
+	var item starlark.Value
+	for iter.Next(&item) {
+		st, ok := item.(*starlarkstruct.Struct)
+		if !ok {
+			continue
+		}
+		p := Partition{
+			Label:    structString(st, "label"),
+			Type:     structString(st, "type"),
+			Size:     structString(st, "size"),
+			Contents: structStringList(st, "contents"),
+		}
+		if rv, err := st.Attr("root"); err == nil {
+			if b, ok := rv.(starlark.Bool); ok {
+				p.Root = bool(b)
+			}
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // starlarkToGo converts a Starlark value into a Go value suitable for JSON
@@ -629,27 +662,7 @@ func (e *Engine) fnMachine(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.T
 				}
 			}
 		case "partitions":
-			if list, ok := kv[1].(*starlark.List); ok {
-				iter := list.Iterate()
-				defer iter.Done()
-				var v starlark.Value
-				for iter.Next(&v) {
-					if s, ok := v.(*starlarkstruct.Struct); ok {
-						p := Partition{
-							Label:    structString(s, "label"),
-							Type:     structString(s, "type"),
-							Size:     structString(s, "size"),
-							Contents: structStringList(s, "contents"),
-						}
-						if rv, err := s.Attr("root"); err == nil {
-							if b, ok := rv.(starlark.Bool); ok {
-								p.Root = bool(b)
-							}
-						}
-						m.Partitions = append(m.Partitions, p)
-					}
-				}
-			}
+			m.Partitions = append(m.Partitions, parsePartitions(kv[1])...)
 		}
 	}
 
@@ -733,27 +746,7 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 	// Parse partitions if present
 	for _, kv := range kwargs {
 		if string(kv[0].(starlark.String)) == "partitions" {
-			if list, ok := kv[1].(*starlark.List); ok {
-				iter := list.Iterate()
-				defer iter.Done()
-				var v starlark.Value
-				for iter.Next(&v) {
-					if s, ok := v.(*starlarkstruct.Struct); ok {
-						p := Partition{
-							Label:    structString(s, "label"),
-							Type:     structString(s, "type"),
-							Size:     structString(s, "size"),
-							Contents: structStringList(s, "contents"),
-						}
-						if rv, err := s.Attr("root"); err == nil {
-							if b, ok := rv.(starlark.Bool); ok {
-								p.Root = bool(b)
-							}
-						}
-						r.Partitions = append(r.Partitions, p)
-					}
-				}
-			}
+			r.Partitions = append(r.Partitions, parsePartitions(kv[1])...)
 		}
 	}
 

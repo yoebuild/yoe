@@ -677,13 +677,20 @@ type Step struct {
 	Install *InstallStep      // install_file / install_template step
 }
 
-// InstallStep describes a file installation action produced by the Starlark
-// install_file() / install_template() builtins. Executed by the build executor.
+// InstallStep describes a file installation action produced by the
+// Starlark install_file() / install_template() builtins and executed by
+// the build executor.
 //
-// BaseDir is the absolute directory captured from the .star file containing
-// the install_file() / install_template() call (see InstallStepValue). The
-// file to install lives at BaseDir/Src. Resolving relative to the call site
-// — rather than to the unit() call site — lets helper functions package
+// It is also the Starlark value those builtins return — see
+// install_step.go for the starlark.Value methods. One struct serves both
+// roles because they describe the same thing; two structs with identical
+// fields and a copy between them only created somewhere for the two to
+// drift apart.
+//
+// BaseDir is the absolute directory captured from the .star file
+// containing the install_file() / install_template() call. The file to
+// install lives at BaseDir/Src. Resolving relative to the call site —
+// rather than to the unit() call site — lets helper functions package
 // templates next to themselves and reuse them across many units.
 type InstallStep struct {
 	Kind    string // "file" or "template"

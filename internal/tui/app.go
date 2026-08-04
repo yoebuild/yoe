@@ -22,8 +22,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	yoe "github.com/yoebuild/yoe/internal"
 	"github.com/yoebuild/yoe/internal/build"
+	"github.com/yoebuild/yoe/internal/container"
 	"github.com/yoebuild/yoe/internal/device"
 	"github.com/yoebuild/yoe/internal/module"
 	"github.com/yoebuild/yoe/internal/resolve"
@@ -701,12 +701,12 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	})
 	defer m.srcWatcher.Stop()
 
-	yoe.OnNotify = func(msg string) {
+	container.OnNotify = func(msg string) {
 		if tuiProgram != nil {
 			tuiProgram.Send(notifyMsg(msg))
 		}
 	}
-	defer func() { yoe.OnNotify = nil }()
+	defer func() { container.OnNotify = nil }()
 
 	_, err = p.Run()
 	return err
@@ -1931,7 +1931,7 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else if strings.HasPrefix(action, "clean:") {
 			name := strings.TrimPrefix(action, "clean:")
 			buildDir := build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name, m.distro)
-			if err := yoe.RemoveDirAnyOwner(buildDir, m.projectDir); err != nil {
+			if err := container.RemoveDir(context.Background(), buildDir, m.projectDir, ""); err != nil {
 				m.message = fmt.Sprintf("Clean failed: %v", err)
 			} else {
 				m.setStatus(name, statusNone)
@@ -1949,7 +1949,7 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		} else if action == "clean-all" {
 			buildDir := filepath.Join(m.projectDir, "build")
-			if err := yoe.RemoveDirAnyOwner(buildDir, m.projectDir); err != nil {
+			if err := container.RemoveDir(context.Background(), buildDir, m.projectDir, ""); err != nil {
 				m.message = fmt.Sprintf("Clean failed: %v", err)
 			} else {
 				for _, name := range m.units {
@@ -5829,7 +5829,7 @@ func (m *model) recomputeStatuses() {
 // checkBinfmtWarning sets or clears the warning banner based on whether
 // binfmt_misc is registered for the current target arch.
 func (m *model) checkBinfmtWarning() {
-	if err := yoe.CheckBinfmt(m.arch); err != nil {
+	if err := container.CheckBinfmt(m.arch); err != nil {
 		m.warning = "⚠ Cross-arch build: run 'yoe container binfmt' to register QEMU emulation for " + m.arch
 	} else {
 		m.warning = ""

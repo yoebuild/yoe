@@ -10,27 +10,14 @@ import (
 	"go.starlark.net/starlark"
 )
 
-// InstallStepValue is the Starlark value returned by install_file() and
-// install_template(). It is an immutable, frozen, hashable description of a
-// file-install action; execution is performed by the build executor when it
-// reaches the step in a task's steps= list.
-//
-// BaseDir is captured at construction time from the .star file containing the
-// install_file()/install_template() call, so templates resolve relative to
-// the file that *uses* them — not relative to the unit() call site. This lets
-// helper functions (e.g. base_files() in base-files.star) generate install
-// steps for units defined in other .star files (e.g. dev-image.star).
-type InstallStepValue struct {
-	Kind    string // "file" or "template"
-	Src     string // relative to BaseDir
-	Dest    string // env-expanded at execution time
-	Mode    int
-	BaseDir string // absolute directory; templates live at BaseDir/Src
-}
+// InstallStep is the Starlark value returned by install_file() and
+// install_template(): an immutable, frozen, hashable description of a
+// file-install action. Execution happens later, when the build executor
+// reaches the step in a task's steps= list. The struct itself is
+// declared in types.go alongside the rest of the unit model.
+var _ starlark.Value = (*InstallStep)(nil)
 
-var _ starlark.Value = (*InstallStepValue)(nil)
-
-func (s *InstallStepValue) String() string {
+func (s *InstallStep) String() string {
 	fn := "install_file"
 	if s.Kind == "template" {
 		fn = "install_template"
@@ -38,11 +25,11 @@ func (s *InstallStepValue) String() string {
 	return fmt.Sprintf("%s(%q, %q, mode=0o%o)", fn, s.Src, s.Dest, s.Mode)
 }
 
-func (*InstallStepValue) Type() string         { return "InstallStep" }
-func (*InstallStepValue) Freeze()              {}
-func (*InstallStepValue) Truth() starlark.Bool { return starlark.True }
+func (*InstallStep) Type() string         { return "InstallStep" }
+func (*InstallStep) Freeze()              {}
+func (*InstallStep) Truth() starlark.Bool { return starlark.True }
 
-func (s *InstallStepValue) Hash() (uint32, error) {
+func (s *InstallStep) Hash() (uint32, error) {
 	h := fnv.New32a()
 	h.Write([]byte(s.Kind))
 	h.Write([]byte{0})
@@ -88,7 +75,7 @@ func buildInstallStep(thread *starlark.Thread, name, kind string, args starlark.
 		}
 		mode = int(v)
 	}
-	return &InstallStepValue{
+	return &InstallStep{
 		Kind:    kind,
 		Src:     string(src),
 		Dest:    string(dest),

@@ -103,6 +103,37 @@ func WithBuiltin(name string, factory BuiltinFactory) LoadOption {
 
 // LoadProject finds the project root, evaluates all .star files, and returns
 // a fully populated Project.
+// resolvedModule pairs a module's canonical name with the on-disk
+// directory its .star files were found in, in project declaration order.
+type resolvedModule struct {
+	name string
+	path string
+}
+
+// evalPhase runs one evaluation phase: every .star file in the named
+// subdirectory of the project root, then of each module, with the
+// engine's current module and priority set for each so registrations
+// carry the right owner. Phases run in a fixed order — machines,
+// containers, units, images — because each depends on what the previous
+// one registered.
+//
+// The project root evaluates first at the highest priority so its
+// definitions win any name collision; modules follow in declaration
+// order, so a later module shadows an earlier one.
+func evalPhase(eng *Engine, root string, modules []resolvedModule, projectIdx int, dir string) error {
+	eng.SetCurrentModule("", projectIdx)
+	if err := evalDir(eng, root, dir); err != nil {
+		return err
+	}
+	for i, rm := range modules {
+		eng.SetCurrentModule(rm.name, i+1)
+		if err := evalDir(eng, rm.path, dir); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func LoadProject(startDir string, opts ...LoadOption) (*Project, error) {
 	root, err := findProjectRoot(startDir)
 	if err != nil {
@@ -251,10 +282,6 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	// present; otherwise it falls back to the path/URL basename. The same
 	// name is used for "@name//..." load references, u.Module tags, and
 	// TUI / diagnostic display.
-	type resolvedModule struct {
-		name string
-		path string
-	}
 	var resolvedModules []resolvedModule
 	var resolvedForProject []ResolvedModule
 	if proj := eng.Project(); proj != nil {
@@ -294,15 +321,8 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	// Phase 1: Evaluate all machine definitions (project + modules).
 	// Machines must be loaded before units/images so that target_arch()
 	// returns the correct value during Starlark evaluation.
-	eng.SetCurrentModule("", projectIdx)
-	if err := evalDir(eng, root, "machines"); err != nil {
+	if err := evalPhase(eng, root, resolvedModules, projectIdx, "machines"); err != nil {
 		return nil, err
-	}
-	for i, rm := range resolvedModules {
-		eng.SetCurrentModule(rm.name, i+1)
-		if err := evalDir(eng, rm.path, "machines"); err != nil {
-			return nil, err
-		}
 	}
 
 	// Apply machine override before evaluating units/images.
@@ -417,27 +437,13 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 
 	// Phase 1b: Evaluate container definitions (project + modules).
 	// Containers must be loaded before units so that units can reference them.
-	eng.SetCurrentModule("", projectIdx)
-	if err := evalDir(eng, root, "containers"); err != nil {
+	if err := evalPhase(eng, root, resolvedModules, projectIdx, "containers"); err != nil {
 		return nil, err
-	}
-	for i, rm := range resolvedModules {
-		eng.SetCurrentModule(rm.name, i+1)
-		if err := evalDir(eng, rm.path, "containers"); err != nil {
-			return nil, err
-		}
 	}
 
 	// Phase 2a: Evaluate all unit definitions (project + modules).
-	eng.SetCurrentModule("", projectIdx)
-	if err := evalDir(eng, root, "units"); err != nil {
+	if err := evalPhase(eng, root, resolvedModules, projectIdx, "units"); err != nil {
 		return nil, err
-	}
-	for i, rm := range resolvedModules {
-		eng.SetCurrentModule(rm.name, i+1)
-		if err := evalDir(eng, rm.path, "units"); err != nil {
-			return nil, err
-		}
 	}
 
 	// Now that all units are loaded, update predeclared variables before
@@ -525,15 +531,8 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	}
 
 	// Phase 2b: Evaluate image definitions (project + modules).
-	eng.SetCurrentModule("", projectIdx)
-	if err := evalDir(eng, root, "images"); err != nil {
+	if err := evalPhase(eng, root, resolvedModules, projectIdx, "images"); err != nil {
 		return nil, err
-	}
-	for i, rm := range resolvedModules {
-		eng.SetCurrentModule(rm.name, i+1)
-		if err := evalDir(eng, rm.path, "images"); err != nil {
-			return nil, err
-		}
 	}
 
 	proj := eng.Project()

@@ -13,9 +13,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	yoe "github.com/yoebuild/yoe/internal"
 	"github.com/yoebuild/yoe/internal/arch"
 	"github.com/yoebuild/yoe/internal/artifact"
+	"github.com/yoebuild/yoe/internal/container"
 	"github.com/yoebuild/yoe/internal/deb"
 	"github.com/yoebuild/yoe/internal/fsutil"
 	"github.com/yoebuild/yoe/internal/repo"
@@ -630,19 +630,19 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 	// preserves per-file ownership from each apk's tar headers so that
 	// destdir/rootfs inspects with the same uid/gid the booted system
 	// sees — see docs/security.md and docs/comparisons.md. The next
-	// build's removeDirRobust below handles cleanup via the container if
+	// build's container.RemoveDir below handles cleanup via the container if
 	// host-side RemoveAll hits EACCES on root- or service-user-owned
 	// files; that's slower than a plain rm but correct, and it's what
 	// makes the visibility-vs-cleanup tradeoff workable.
 
 	if opts.Clean {
-		if err := removeDirRobust(ctx, srcDir, opts.ProjectDir, containerImage); err != nil {
+		if err := container.RemoveDir(ctx, srcDir, opts.ProjectDir, containerImage); err != nil {
 			return fmt.Errorf("removing srcdir: %w", err)
 		}
 	}
 
 	// Always start with an empty destdir.
-	if err := removeDirRobust(ctx, destDir, opts.ProjectDir, containerImage); err != nil {
+	if err := container.RemoveDir(ctx, destDir, opts.ProjectDir, containerImage); err != nil {
 		return fmt.Errorf("removing destdir: %w", err)
 	}
 	if err := EnsureDir(destDir); err != nil {
@@ -1234,53 +1234,6 @@ func resolveContainerImage(proj *yoestar.Project, unit *yoestar.Unit, arch, effe
 	}
 
 	return container
-}
-
-// removeDirRobust removes dir and its contents. If RemoveAll fails (typically
-// because a previous failed image build left root-owned files behind), it
-// attempts to chown the tree back to the host user via the container, then
-// retries. Returns an error if the directory cannot be removed.
-func removeDirRobust(ctx context.Context, dir, projectDir, image string) error {
-	err := os.RemoveAll(dir)
-	if err == nil {
-		return nil
-	}
-	if _, statErr := os.Stat(dir); os.IsNotExist(statErr) {
-		return nil
-	}
-	if cerr := chownDirToHost(ctx, dir, projectDir, image); cerr != nil {
-		return fmt.Errorf("%w (and ownership recovery failed: %v)", err, cerr)
-	}
-	if err := os.RemoveAll(dir); err != nil {
-		return fmt.Errorf("removing after ownership recovery: %w", err)
-	}
-	return nil
-}
-
-// chownDirToHost runs chown -R uid:gid on dir inside the container, where
-// the container has the privilege to chown root-owned files. Used to recover
-// destdir ownership after a failed image build (image class chowns rootfs to
-// root for mkfs.ext4 -d). No-op if dir does not exist.
-func chownDirToHost(ctx context.Context, dir, projectDir, image string) error {
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		return nil
-	}
-	if image == "" {
-		return fmt.Errorf("no container image available for ownership recovery of %s", dir)
-	}
-	parent := filepath.Dir(dir)
-	base := filepath.Base(dir)
-	uid := os.Getuid()
-	gid := os.Getgid()
-	return yoe.RunInContainer(yoe.ContainerRunConfig{
-		Ctx:        ctx,
-		Image:      image,
-		Command:    fmt.Sprintf("chown -R %d:%d /__yoe_cleanup/%s", uid, gid, base),
-		ProjectDir: projectDir,
-		Mounts:     []yoe.Mount{{Host: parent, Container: "/__yoe_cleanup"}},
-		NoUser:     true,
-		Quiet:      true,
-	})
 }
 
 // --- Simple file-based cache ---
