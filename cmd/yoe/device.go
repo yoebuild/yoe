@@ -15,22 +15,19 @@ import (
 
 func cmdDevice(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s device <repo> ...\n", os.Args[0])
-		os.Exit(1)
+		fail("Usage: %s device <repo> ...", os.Args[0])
 	}
 	switch args[0] {
 	case "repo":
 		cmdDeviceRepo(args[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown device subcommand: %s\n", args[0])
-		os.Exit(1)
+		fail("Unknown device subcommand: %s", args[0])
 	}
 }
 
 func cmdDeviceRepo(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s device repo <add|remove|list> ...\n", os.Args[0])
-		os.Exit(1)
+		fail("Usage: %s device repo <add|remove|list> ...", os.Args[0])
 	}
 	switch args[0] {
 	case "add":
@@ -40,8 +37,7 @@ func cmdDeviceRepo(args []string) {
 	case "list":
 		cmdDeviceRepoList(args[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown device repo subcommand: %s\n", args[0])
-		os.Exit(1)
+		fail("Unknown device repo subcommand: %s", args[0])
 	}
 }
 
@@ -53,21 +49,18 @@ func cmdDeviceRepoAdd(args []string) {
 	user := fs.String("user", "root", "ssh user (overridden by user@ in target)")
 	fs.Parse(args)
 	if fs.NArg() < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s device repo add <[user@]host[:port]> [--feed URL] [--name N] [--push-key] [--user U]\n", os.Args[0])
-		os.Exit(1)
+		fail("Usage: %s device repo add <[user@]host[:port]> [--feed URL] [--name N] [--push-key] [--user U]", os.Args[0])
 	}
 	target, err := device.ParseSSHTarget(fs.Arg(0), *user)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 
 	url := *feedURL
 	if url == "" {
 		discovered, err := discoverFeed(*pushKey)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			fail("Error: %v", err)
 		}
 		url = discovered
 	}
@@ -77,8 +70,7 @@ func cmdDeviceRepoAdd(args []string) {
 	if *pushKey {
 		keyPath, keyName, err := stagePubKey()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: stage pubkey: %v\n", err)
-			os.Exit(1)
+			fail("Error: stage pubkey: %v", err)
 		}
 		defer os.Remove(keyPath)
 		in.PushKeyFrom = keyPath
@@ -87,8 +79,7 @@ func cmdDeviceRepoAdd(args []string) {
 
 	ops := device.RepoOps{SSH: device.DefaultSSH, SCP: device.DefaultSCP}
 	if err := ops.Add(context.Background(), target, in); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 	fmt.Printf("configured %s -> %s on %s\n", *name, url, target.Host)
 }
@@ -99,18 +90,15 @@ func cmdDeviceRepoRemove(args []string) {
 	user := fs.String("user", "root", "ssh user (overridden by user@ in target)")
 	fs.Parse(args)
 	if fs.NArg() < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s device repo remove <[user@]host[:port]> [--name N]\n", os.Args[0])
-		os.Exit(1)
+		fail("Usage: %s device repo remove <[user@]host[:port]> [--name N]", os.Args[0])
 	}
 	target, err := device.ParseSSHTarget(fs.Arg(0), *user)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 	ops := device.RepoOps{SSH: device.DefaultSSH}
 	if err := ops.Remove(context.Background(), target, *name, os.Stdout); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 }
 
@@ -119,18 +107,15 @@ func cmdDeviceRepoList(args []string) {
 	user := fs.String("user", "root", "ssh user (overridden by user@ in target)")
 	fs.Parse(args)
 	if fs.NArg() < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s device repo list <[user@]host[:port]>\n", os.Args[0])
-		os.Exit(1)
+		fail("Usage: %s device repo list <[user@]host[:port]>", os.Args[0])
 	}
 	target, err := device.ParseSSHTarget(fs.Arg(0), *user)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 	ops := device.RepoOps{SSH: device.DefaultSSH}
 	if err := ops.List(context.Background(), target, os.Stdout, os.Stderr); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 }
 

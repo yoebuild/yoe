@@ -72,34 +72,6 @@ func RunClean(projectDir, _ string, all bool, force bool, units []string) error 
 	return nil
 }
 
-func CleanLocks(projectDir, _ string) error {
-	// Per-R14a build layout: build/<distro>/<unit>.<scope>/.lock. Walk
-	// every distro subtree rather than a single per-arch tree.
-	lockPaths, err := filepath.Glob(filepath.Join(projectDir, "build", "*", "*.*/.lock"))
-	if err != nil {
-		return err
-	}
-	if len(lockPaths) == 0 {
-		// Surface "no build dir" vs "build dir with no locks" so the
-		// user knows whether a typo or a clean slate is to blame.
-		if _, err := os.Stat(filepath.Join(projectDir, "build")); os.IsNotExist(err) {
-			fmt.Println("No build directory")
-			return nil
-		}
-		fmt.Println("No stale locks found")
-		return nil
-	}
-	for _, lockPath := range lockPaths {
-		os.Remove(lockPath)
-		// Surface the unit name plus its enclosing distro so the user
-		// sees which build was holding the lock.
-		rel, _ := filepath.Rel(filepath.Join(projectDir, "build"), filepath.Dir(lockPath))
-		fmt.Printf("Removed lock: %s\n", rel)
-	}
-	fmt.Printf("Removed %d lock(s)\n", len(lockPaths))
-	return nil
-}
-
 func confirmYes() bool {
 	scanner := bufio.NewScanner(os.Stdin)
 	if !scanner.Scan() {

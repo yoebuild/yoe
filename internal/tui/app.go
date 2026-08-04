@@ -939,12 +939,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.deployStage = deployDone
 			// Persist the host so next time the field is pre-filled.
-			ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
-			if ov.Machine == "" {
-				ov.Machine = m.proj.Defaults.Machine
+			if warn := m.mutateOverrides(func(ov *yoestar.LocalOverrides) {
+				if ov.Machine == "" {
+					ov.Machine = m.proj.Defaults.Machine
+				}
+				ov.DeployHost = strings.TrimSpace(m.deployHost)
+			}); warn != "" {
+				m.message = warn
 			}
-			ov.DeployHost = strings.TrimSpace(m.deployHost)
-			_ = yoestar.WriteLocalOverrides(m.projectDir, ov)
 		}
 		return m, nil
 
@@ -1396,10 +1398,10 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "S":
 		// Save the current active query to local.star as the new default.
-		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
-		ov.Query = m.query.String()
-		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
-			m.message = fmt.Sprintf("save query failed: %v", err)
+		if warn := m.mutateOverrides(func(ov *yoestar.LocalOverrides) {
+			ov.Query = m.query.String()
+		}); warn != "" {
+			m.message = fmt.Sprintf("save query failed: %s", warn)
 			return m, nil
 		}
 		m.savedQuery = m.query.String()
@@ -1817,6 +1819,22 @@ func (m *model) setStatus(name string, st unitStatus) {
 	}
 }
 
+// mutateOverrides loads local.star, hands it to edit, and writes it
+// back. Returns an error message for the status line, or "" on success.
+//
+// The load-modify-write sequence appeared at every place the TUI
+// persists a per-developer setting, and two of those places discarded
+// the write error — so a preference the user had just set could silently
+// fail to stick, with the UI showing it as applied.
+func (m *model) mutateOverrides(edit func(*yoestar.LocalOverrides)) string {
+	ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+	edit(&ov)
+	if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
+		return fmt.Sprintf("could not save to local.star: %v", err)
+	}
+	return ""
+}
+
 // clearStatus drops a unit's recorded build status, keeping the filtered
 // row set in agreement the same way setStatus does.
 func (m *model) clearStatus(name string) {
@@ -2110,10 +2128,10 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				m.parallelBuilds++
 			}
-			ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
-			ov.ParallelBuilds = m.parallelBuilds
-			if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
-				m.message = fmt.Sprintf("Parallel builds set to %d (warning: failed to save local.star: %v)", m.parallelBuilds, err)
+			if warn := m.mutateOverrides(func(ov *yoestar.LocalOverrides) {
+				ov.ParallelBuilds = m.parallelBuilds
+			}); warn != "" {
+				m.message = fmt.Sprintf("Parallel builds set to %d (warning: %s)", m.parallelBuilds, warn)
 			} else {
 				m.message = fmt.Sprintf("Parallel builds set to %d (saved to local.star)", m.parallelBuilds)
 			}
@@ -2421,16 +2439,16 @@ func (m *model) deleteEffectivePort(idx int) {
 // state to local.star and updates the status line with the user-facing
 // label of what just changed.
 func (m *model) saveQEMUSettings(label string) {
-	ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
-	ov.QEMUMemory = m.qemuMemory
-	ov.QEMUDisplay = m.qemuDisplay
-	if len(m.qemuPorts) == 0 {
-		ov.QEMUPorts = nil
-	} else {
-		ov.QEMUPorts = append([]string(nil), m.qemuPorts...)
-	}
-	if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
-		m.message = fmt.Sprintf("%s (warning: failed to save local.star: %v)", label, err)
+	if warn := m.mutateOverrides(func(ov *yoestar.LocalOverrides) {
+		ov.QEMUMemory = m.qemuMemory
+		ov.QEMUDisplay = m.qemuDisplay
+		if len(m.qemuPorts) == 0 {
+			ov.QEMUPorts = nil
+		} else {
+			ov.QEMUPorts = append([]string(nil), m.qemuPorts...)
+		}
+	}); warn != "" {
+		m.message = fmt.Sprintf("%s (warning: %s)", label, warn)
 		return
 	}
 	m.message = fmt.Sprintf("%s (saved to local.star)", label)
@@ -2488,11 +2506,11 @@ func (m model) updateSetupImage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.queryError = ""
 			m.savedQuery = m.query.String()
 		}
-		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
-		ov.Image = picked
-		ov.Query = newQ
-		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
-			m.message = fmt.Sprintf("Image set to %s (warning: failed to save local.star: %v)", picked, err)
+		if warn := m.mutateOverrides(func(ov *yoestar.LocalOverrides) {
+			ov.Image = picked
+			ov.Query = newQ
+		}); warn != "" {
+			m.message = fmt.Sprintf("Image set to %s (warning: %s)", picked, warn)
 		} else {
 			m.message = fmt.Sprintf("Image set to %s (saved to local.star)", picked)
 		}
@@ -2531,10 +2549,10 @@ func (m model) updateSetupMachine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.recomputeStatuses()
 		m.checkBinfmtWarning()
-		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
-		ov.Machine = picked
-		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
-			m.message = fmt.Sprintf("Machine set to %s (warning: failed to save local.star: %v)", picked, err)
+		if warn := m.mutateOverrides(func(ov *yoestar.LocalOverrides) {
+			ov.Machine = picked
+		}); warn != "" {
+			m.message = fmt.Sprintf("Machine set to %s (warning: %s)", picked, warn)
 		} else {
 			m.message = fmt.Sprintf("Machine set to %s (saved to local.star)", picked)
 		}
@@ -2619,27 +2637,25 @@ func (m model) updateSetupDistro(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		picked := choices[m.distroCursor]
-		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+		override := picked
 		if picked == "(none)" {
-			ov.DefaultDistroOverride = ""
-			m.proj.DefaultDistroOverride = ""
-		} else {
-			ov.DefaultDistroOverride = picked
-			m.proj.DefaultDistroOverride = picked
+			override = ""
 		}
+		m.proj.DefaultDistroOverride = override
+		saveWarn := m.mutateOverrides(func(ov *yoestar.LocalOverrides) {
+			ov.DefaultDistroOverride = override
+		})
 		// Effective distro changes ripple into the build/<distro>/
 		// and repo/<project>/<distro>/ subtrees the TUI inspects,
 		// so refresh the cached distro and re-walk statuses.
 		if d, derr := m.proj.EffectiveDistro(); derr == nil {
 			m.distro = d
 		}
-		var msgText string
-		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
-			msgText = fmt.Sprintf("Default Distro set to %s (warning: failed to save local.star: %v)", picked, err)
+		if saveWarn != "" {
+			m.message = fmt.Sprintf("Default Distro set to %s (warning: %s)", picked, saveWarn)
 		} else {
-			msgText = fmt.Sprintf("Default Distro set to %s (saved to local.star)", picked)
+			m.message = fmt.Sprintf("Default Distro set to %s (saved to local.star)", picked)
 		}
-		m.message = msgText
 		m.recomputeStatuses()
 		m.setupField = ""
 		return m, nil
@@ -6177,10 +6193,9 @@ func (m model) updateFlash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			// Remember this device for next time. Best-effort: a write
 			// failure doesn't block the flash (the user is mid-action).
-			if ov, lerr := yoestar.LoadLocalOverrides(m.projectDir); lerr == nil {
+			_ = m.mutateOverrides(func(ov *yoestar.LocalOverrides) {
 				ov.FlashDevice = cand.Path
-				_ = yoestar.WriteLocalOverrides(m.projectDir, ov)
-			}
+			})
 			m.flashImagePath = imgPath
 			m.flashTotal = imgSize
 			m.flashWritten = 0

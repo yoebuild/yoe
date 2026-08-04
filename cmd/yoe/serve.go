@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	"github.com/yoebuild/yoe/internal/feed"
-	"github.com/yoebuild/yoe/internal/repo"
 )
 
 func cmdServe(args []string) {
@@ -21,44 +19,22 @@ func cmdServe(args []string) {
 	fs.Parse(args)
 
 	proj := loadProject()
-	if proj.Name == "" {
-		fmt.Fprintf(os.Stderr, "Error: project has no name\n")
-		os.Exit(1)
-	}
 
-	projRepoDir := repo.RepoDir(proj, projectDir())
-	httpRoot := filepath.Dir(projRepoDir)
-
-	// Arches live one level deeper now (repo/<project>/<distro>/<arch>/).
-	// Walk the project's effective-distro subtree to advertise the
-	// arches mDNS clients should expect under that distro prefix. A
-	// future multi-distro serve will iterate every distro subtree.
-	distro, derr := proj.EffectiveDistro()
-	if derr != nil {
-		fmt.Fprintf(os.Stderr, "Error: resolve effective distro: %v\n", derr)
-		os.Exit(1)
-	}
-	archs, err := repo.ArchDirs(repo.RepoDistroDir(proj, projectDir(), distro))
+	cfg, err := feed.ConfigForProject(proj, projectDir())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: list arch dirs: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
+	cfg.BindAddr = fmt.Sprintf("%s:%d", *bind, *port)
+	cfg.Instance = *instance
+	cfg.NoMDNS = *noMDNS
+	cfg.LogW = os.Stderr
 
-	srv, err := feed.Start(feed.Config{
-		RepoDir:  httpRoot,
-		BindAddr: fmt.Sprintf("%s:%d", *bind, *port),
-		Project:  proj.Name,
-		Archs:    archs,
-		Instance: *instance,
-		NoMDNS:   *noMDNS,
-		LogW:     os.Stderr,
-	})
+	srv, err := feed.Start(cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 
-	fmt.Printf("serving %s/ at %s\n", httpRoot, srv.URL())
+	fmt.Printf("serving %s/ at %s\n", cfg.RepoDir, srv.URL())
 	if !*noMDNS {
 		instName := *instance
 		if instName == "" {
@@ -73,7 +49,6 @@ func cmdServe(args []string) {
 	<-sig
 	fmt.Println("\nshutting down...")
 	if err := srv.Stop(); err != nil {
-		fmt.Fprintf(os.Stderr, "shutdown: %v\n", err)
-		os.Exit(1)
+		fail("shutdown: %v", err)
 	}
 }

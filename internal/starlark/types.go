@@ -17,6 +17,13 @@ type Project struct {
 	Modules  []ModuleRef
 	Machines map[string]*Machine
 
+	// Root is the absolute directory holding PROJECT.star. The loader
+	// already walks up to find it, so carrying it on the project spares
+	// every consumer from repeating that walk — and from disagreeing
+	// about the answer when run from a subdirectory, which is how
+	// `yoe config show` came to read local.star from the wrong place.
+	Root string
+
 	// UnitsByModule is the primary unit storage: [moduleName][unitName]*Unit.
 	// Every unit registers under its declaring module's canonical name; same-
 	// named units from different modules (e.g. libcap2 from alpine.main and

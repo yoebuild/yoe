@@ -3,11 +3,8 @@ package tui
 import (
 	"fmt"
 	"io"
-	"path/filepath"
-	"time"
 
 	"github.com/yoebuild/yoe/internal/feed"
-	"github.com/yoebuild/yoe/internal/repo"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -21,31 +18,18 @@ func startProjectFeed(proj *yoestar.Project, projectDir string) (stop func(), st
 		return stop, "skipped: project has no name"
 	}
 
-	results, _ := feed.BrowseMDNS(500 * time.Millisecond)
-	for _, r := range results {
-		if r.Project == proj.Name {
-			return stop, fmt.Sprintf("reusing %s", r.URL())
-		}
+	if url := feed.DiscoverForProject(proj); url != "" {
+		return stop, fmt.Sprintf("reusing %s", url)
 	}
 
-	projRepoDir := repo.RepoDir(proj, projectDir)
-	httpRoot := filepath.Dir(projRepoDir)
-	// Arches now live under repo/<project>/<distro>/<arch>/. Use the
-	// project's effective distro; multi-distro support reads arches
-	// from each distro subtree separately.
-	distro, derr := proj.EffectiveDistro()
-	if derr != nil {
-		return stop, fmt.Sprintf("skipped: resolve distro: %v", derr)
+	cfg, err := feed.ConfigForProject(proj, projectDir)
+	if err != nil {
+		return stop, fmt.Sprintf("skipped: %v", err)
 	}
-	archs, _ := repo.ArchDirs(repo.RepoDistroDir(proj, projectDir, distro))
+	cfg.BindAddr = "0.0.0.0:8765"
+	cfg.LogW = io.Discard
 
-	srv, err := feed.Start(feed.Config{
-		RepoDir:  httpRoot,
-		BindAddr: "0.0.0.0:8765",
-		Project:  proj.Name,
-		Archs:    archs,
-		LogW:     io.Discard,
-	})
+	srv, err := feed.Start(cfg)
 	if err != nil {
 		return stop, fmt.Sprintf("skipped: %v", err)
 	}

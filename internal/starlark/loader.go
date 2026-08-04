@@ -135,7 +135,7 @@ func evalPhase(eng *Engine, root string, modules []resolvedModule, projectIdx in
 }
 
 func LoadProject(startDir string, opts ...LoadOption) (*Project, error) {
-	root, err := findProjectRoot(startDir)
+	root, err := FindProjectRoot(startDir)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +152,7 @@ func LoadProject(startDir string, opts ...LoadOption) (*Project, error) {
 // Honored LoadOptions: WithProjectFile. Others (machine, shadows, sync
 // callback) don't apply because no module content is loaded.
 func ProjectModuleRefs(startDir string, opts ...LoadOption) ([]ModuleRef, error) {
-	root, err := findProjectRoot(startDir)
+	root, err := FindProjectRoot(startDir)
 	if err != nil {
 		return nil, err
 	}
@@ -182,8 +182,13 @@ func ProjectModuleRefs(startDir string, opts ...LoadOption) ([]ModuleRef, error)
 	return proj.Modules, nil
 }
 
-// findProjectRoot walks up from startDir looking for PROJECT.star.
-func findProjectRoot(startDir string) (string, error) {
+// FindProjectRoot walks up from startDir looking for PROJECT.star and
+// returns the directory holding it. This is what "the project root"
+// means everywhere in yoe — the directory local.star sits beside, that
+// build/ and repo/ are created under, and that module paths resolve
+// against. Commands run from a subdirectory rely on it to reach the same
+// answer a build would.
+func FindProjectRoot(startDir string) (string, error) {
 	dir, err := filepath.Abs(startDir)
 	if err != nil {
 		return "", fmt.Errorf("resolving path: %w", err)
@@ -247,6 +252,7 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	// parallel_builds) are consumed by their own callsites via
 	// LoadLocalOverrides directly.
 	if proj := eng.Project(); proj != nil {
+		proj.Root = root
 		if ov, err := LoadLocalOverrides(root); err == nil {
 			if ov.DefaultDistroOverride != "" {
 				proj.DefaultDistroOverride = ov.DefaultDistroOverride

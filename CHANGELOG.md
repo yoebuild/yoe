@@ -54,6 +54,11 @@ and this project adheres to
   discarded them, so a project configuring a Go proxy, a shared cache, or a
   bootloader through them got no effect and no warning. Machines name a kernel
   and bootloader unit instead, which is how every in-tree machine already works.
+- **Removed `yoe clean --locks`.** Builds no longer write lock files, so there
+  is nothing left for it to clean up. A build that is interrupted leaves nothing
+  behind that a later build has to be told to ignore.
+- **A unit that runs one privileged build step no longer loses its own
+  root-user setting for every step after it.**
 - Image units get a one-time rebuild: a display-only field was being folded into
   their cache key.
 

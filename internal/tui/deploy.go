@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -144,15 +143,8 @@ func (m model) startDeployCmd() tea.Cmd {
 // resolveFeedURL picks an mDNS feed URL matching the project, or returns
 // "" if none is advertised. The TUI auto-starts a feed at startup, so
 // under normal circumstances this answers immediately.
-func resolveFeedURL(proj *yoestar.Project, projectDir string) string {
-	_ = projectDir
-	results, _ := feed.BrowseMDNS(500 * time.Millisecond)
-	for _, r := range results {
-		if r.Project == proj.Name {
-			return r.URL()
-		}
-	}
-	return ""
+func resolveFeedURL(proj *yoestar.Project, _ string) string {
+	return feed.DiscoverForProject(proj)
 }
 
 // lineWriter is an io.Writer that splits on newlines and emits each line.
