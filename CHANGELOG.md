@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-18
+
+**This release is a large refactor/simplification of the code base.** ... may
+containe some regressions.
+
 - **Parallel builds no longer drop packages from the Alpine package index.** Two
   units finishing at the same time could each regenerate the index and leave out
   the other's package, so `apk add` intermittently failed to find something that
