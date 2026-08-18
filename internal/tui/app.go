@@ -684,11 +684,8 @@ func newModel(proj *yoestar.Project, projectDir string, cfg Config) (model, erro
 	m.applyQuery()
 	m.recomputeMetrics()
 	// Park the cursor on the default image so the table opens centered
-	// on the artifact most users care about. scrollUnitIntoView is a
-	// no-op when the active query filters that image out.
-	if proj.Defaults.Image != "" {
-		m.scrollUnitIntoView(proj.Defaults.Image)
-	}
+	// on the artifact most users care about.
+	m.focusDefaultImage()
 
 	return m, nil
 }
@@ -2114,7 +2111,11 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "esc", "q":
+		// Leaving Setup lands on the target image, whether or not
+		// anything changed — a Setup visit is almost always about the
+		// image, and coming back to it is where the user wants to be.
 		m.view = viewUnits
+		m.focusDefaultImage()
 		return m, nil
 
 	case "up", "k":
@@ -2569,6 +2570,7 @@ func (m model) updateSetupMachine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.setupField = ""
 		m.view = viewUnits
+		m.focusDefaultImage()
 		return m, nil
 	}
 	return m, nil
@@ -2668,6 +2670,7 @@ func (m model) updateSetupDistro(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.message = fmt.Sprintf("Default Distro set to %s (saved to local.star)", picked)
 		}
 		m.recomputeStatuses()
+		m.focusDefaultImage()
 		m.setupField = ""
 		return m, nil
 	}
@@ -4590,6 +4593,20 @@ func (m model) wrapLine(line string) []string {
 	return out
 }
 
+// formatBuildDuration renders a build's wall-clock time compactly:
+// sub-minute values keep a decimal ("42.3s"), longer ones roll up into
+// minutes and hours so a multi-hour toolchain build stays readable.
+func formatBuildDuration(seconds float64) string {
+	if seconds < 60 {
+		return fmt.Sprintf("%.1fs", seconds)
+	}
+	total := int(seconds)
+	if total < 3600 {
+		return fmt.Sprintf("%dm%ds", total/60, total%60)
+	}
+	return fmt.Sprintf("%dh%dm%ds", total/3600, (total%3600)/60, total%60)
+}
+
 func (m model) viewDetail() string {
 	var b strings.Builder
 
@@ -4610,12 +4627,15 @@ func (m model) viewDetail() string {
 		currentHash := m.hashes[m.detailUnit]
 		if meta := build.ReadMeta(buildDir); meta != nil && meta.Hash == currentHash {
 			info := fmt.Sprintf("  %s", meta.Status)
-			if meta.Duration > 0 {
-				if meta.Duration < 60 {
-					info += fmt.Sprintf("  %.1fs", meta.Duration)
-				} else {
-					info += fmt.Sprintf("  %dm%ds", int(meta.Duration)/60, int(meta.Duration)%60)
-				}
+			// While the unit is building, build.json holds only a start
+			// time — count up from it so the user can see how long the
+			// unit has been running. Finished builds show the recorded
+			// wall-clock duration instead.
+			switch {
+			case meta.Status == "building" && meta.Started != nil:
+				info += "  " + formatBuildDuration(time.Since(*meta.Started).Seconds())
+			case meta.Duration > 0:
+				info += "  " + formatBuildDuration(meta.Duration)
 			}
 			if meta.DiskBytes > 0 {
 				mb := float64(meta.DiskBytes) / (1024 * 1024)
@@ -5374,6 +5394,20 @@ func (m *model) adjustListOffset() {
 // user isn't looking at — cursor follows so `enter` opens the detail
 // view of whatever is actively building, and j/k continues from there.
 // No-op if the unit isn't in m.visible (current query filtered it out).
+// focusDefaultImage parks the cursor on the project's target image.
+// Reloading the project (a new machine or distro) rebuilds the unit
+// list and resets the cursor to row 0, which is rarely a unit anyone
+// was looking at. Re-anchoring on the image means the units table
+// reads the same way it does at startup, whichever setting the user
+// just changed. A no-op when no image is set or the active query
+// filters it out.
+func (m *model) focusDefaultImage() {
+	if m.proj.Defaults.Image == "" {
+		return
+	}
+	m.scrollUnitIntoView(m.proj.Defaults.Image)
+}
+
 func (m *model) scrollUnitIntoView(name string) {
 	visible := m.visibleIndices()
 	idx := -1

@@ -8,6 +8,24 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Switching machine or distro keeps your target image.** The TUI reloaded the
+  project and fell back to the image named in `PROJECT.star`, so the header, the
+  cursor, and anything you built or ran next pointed at the wrong image until
+  you restarted. Your `local.star` image now survives the reload.
+- **The unit list returns to the target image when you leave Setup.** Picking a
+  new machine or default distro, or simply backing out of the page, left the
+  cursor at the top of the list; it now lands on the target image, as it does at
+  startup.
+- **See how long a unit has been building.** The detail page now counts up from
+  the moment a build starts, so it is clear a long compile is still making
+  progress. The elapsed time is replaced by the total build time when it
+  finishes.
+
+## [0.14.0] - 2026-08-18
+
+**This release is a large refactor/simplification of the code base.** ... may
+containe some regressions.
+
 - **Parallel builds no longer drop packages from the Alpine package index.** Two
   units finishing at the same time could each regenerate the index and leave out
   the other's package, so `apk add` intermittently failed to find something that

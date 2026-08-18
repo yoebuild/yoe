@@ -91,3 +91,26 @@ func TestWrapLine_ShortLineUnchanged(t *testing.T) {
 		t.Errorf("wrapLine reformatted a line that already fits: %q", got)
 	}
 }
+
+// The detail page shows a unit's build time — counting up while the
+// build runs, and as a recorded total once it finishes.
+func TestFormatBuildDuration(t *testing.T) {
+	cases := []struct {
+		in   float64
+		want string
+	}{
+		{0.4, "0.4s"},
+		{42.35, "42.4s"},
+		{59.9, "59.9s"},
+		{60, "1m0s"},
+		{125, "2m5s"},
+		{3599, "59m59s"},
+		{3600, "1h0m0s"},
+		{7325, "2h2m5s"},
+	}
+	for _, c := range cases {
+		if got := formatBuildDuration(c.in); got != c.want {
+			t.Errorf("formatBuildDuration(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

@@ -247,13 +247,17 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	}
 
 	// Layer local.star's per-developer overrides on top of the
-	// project's committed defaults. Today only DefaultDistroOverride
-	// flows through here; the other fields (machine, image, qemu_*,
-	// parallel_builds) are consumed by their own callsites via
-	// LoadLocalOverrides directly.
+	// project's committed defaults. DefaultDistroOverride is applied
+	// here, before units and images evaluate; the image override is
+	// applied at the end of the load, once the catalog exists to
+	// validate the name against. The remaining fields (machine,
+	// qemu_*, parallel_builds) are consumed by their own callsites
+	// via LoadLocalOverrides directly.
+	var localOv LocalOverrides
 	if proj := eng.Project(); proj != nil {
 		proj.Root = root
 		if ov, err := LoadLocalOverrides(root); err == nil {
+			localOv = ov
 			if ov.DefaultDistroOverride != "" {
 				proj.DefaultDistroOverride = ov.DefaultDistroOverride
 			}
@@ -762,6 +766,17 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	// once, not on every closure walk.
 	proj.DistroViews = buildDistroViews(proj)
 	proj.ProvidesViews = buildProvidesViews(proj)
+
+	// local.star's image override, applied last because it names a
+	// unit and the catalog only exists now. Every load path goes
+	// through here — the CLI at startup, and the TUI whenever a new
+	// machine or distro sends it back to LoadProject — so the target
+	// image survives a reload instead of snapping back to
+	// PROJECT.star's default. A name no unit answers to is left for
+	// the caller to report; the committed default stays in place.
+	if localOv.Image != "" && proj.AnyUnit(localOv.Image) != nil {
+		proj.Defaults.Image = localOv.Image
+	}
 
 	return proj, nil
 }
