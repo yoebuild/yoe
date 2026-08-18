@@ -1623,3 +1623,33 @@ func TestFocusDefaultImage_NoImageOrFilteredOut(t *testing.T) {
 		}
 	}
 }
+
+// Leaving Setup — with or without a settings change — returns to the
+// unit list with the cursor on the target image.
+func TestUpdateSetup_ExitFocusesTargetImage(t *testing.T) {
+	keys := map[string]tea.KeyMsg{
+		"esc": {Type: tea.KeyEsc},
+		"q":   {Type: tea.KeyRunes, Runes: []rune("q")},
+	}
+	for name, key := range keys {
+		m := model{
+			view:    viewSetup,
+			units:   []string{"busybox", "base-image", "openssl"},
+			visible: []int{0, 1, 2},
+			cursor:  0,
+			height:  40,
+			width:   120,
+			proj: &yoestar.Project{
+				Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
+			},
+		}
+		next, _ := m.updateSetup(key)
+		got := next.(model)
+		if got.view != viewUnits {
+			t.Errorf("%s: view = %v, want viewUnits", name, got.view)
+		}
+		if got.units[got.cursor] != "base-image" {
+			t.Errorf("%s: cursor on %q, want base-image", name, got.units[got.cursor])
+		}
+	}
+}

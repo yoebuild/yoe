@@ -2111,7 +2111,11 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "esc", "q":
+		// Leaving Setup lands on the target image, whether or not
+		// anything changed — a Setup visit is almost always about the
+		// image, and coming back to it is where the user wants to be.
 		m.view = viewUnits
+		m.focusDefaultImage()
 		return m, nil
 
 	case "up", "k":

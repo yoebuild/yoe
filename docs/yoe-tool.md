@@ -910,9 +910,9 @@ been idle for a couple of seconds — pressing `j/k` or typing into the query ba
 suppresses the follow so the cursor stays where you put it. Pressing `b` or `B`
 re-arms the follow so the build cascade is visible.
 
-Changing the machine, image, or default distro on the Setup page reloads the
-project, and the cursor lands on the target image when the unit list comes back
-— the same place it sits when the TUI starts.
+Leaving the Setup page returns the cursor to the target image, whether you
+changed a setting or just looked around — the same place it sits when the TUI
+starts.
 
 #### Detail view
 

@@ -8,9 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
-- **The unit list returns to the target image after a Setup change.** Picking a
-  new machine or default distro left the cursor at the top of the list; it now
-  lands on the image those settings apply to, as it does at startup.
+- **The unit list returns to the target image when you leave Setup.** Picking a
+  new machine or default distro, or simply backing out of the page, left the
+  cursor at the top of the list; it now lands on the target image, as it does at
+  startup.
 - **See how long a unit has been building.** The detail page now counts up from
   the moment a build starts, so it is clear a long compile is still making
   progress. The elapsed time is replaced by the total build time when it
