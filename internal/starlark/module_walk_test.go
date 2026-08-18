@@ -48,7 +48,7 @@ func TestLoadProject_TransitiveCycle(t *testing.T) {
         module("https://example.com/a.git", local = "modules/a"),
     ],
 )`,
-		"machines/qemu.star": `machine(name = "qemu-x86_64", arch = "x86_64")`,
+		"machines/qemu.star":    `machine(name = "qemu-x86_64", arch = "x86_64")`,
 		"modules/a/MODULE.star": `module_info(name = "a", deps = [module("https://example.com/b.git", local = "modules/b")])`,
 		"modules/b/MODULE.star": `module_info(name = "b", deps = [module("https://example.com/a.git", local = "modules/a")])`,
 	}); err != nil {
@@ -78,9 +78,9 @@ func TestLoadProject_TransitiveConflict(t *testing.T) {
         module("https://example.com/b.git", local = "modules/b"),
     ],
 )`,
-		"machines/qemu.star": `machine(name = "qemu-x86_64", arch = "x86_64")`,
-		"modules/a/MODULE.star": `module_info(name = "a", deps = [module("https://example.com/shared.git", local = "modules/shared-x")])`,
-		"modules/b/MODULE.star": `module_info(name = "b", deps = [module("https://example.com/shared.git", local = "modules/shared-y")])`,
+		"machines/qemu.star":           `machine(name = "qemu-x86_64", arch = "x86_64")`,
+		"modules/a/MODULE.star":        `module_info(name = "a", deps = [module("https://example.com/shared.git", local = "modules/shared-x")])`,
+		"modules/b/MODULE.star":        `module_info(name = "b", deps = [module("https://example.com/shared.git", local = "modules/shared-y")])`,
 		"modules/shared-x/MODULE.star": `module_info(name = "shared")`,
 		"modules/shared-y/MODULE.star": `module_info(name = "shared")`,
 	}); err != nil {
@@ -109,10 +109,10 @@ func TestLoadProject_TransitiveProjectWins(t *testing.T) {
         module("https://example.com/a.git", local = "modules/a"),
     ],
 )`,
-		"machines/qemu.star": `machine(name = "qemu-x86_64", arch = "x86_64")`,
+		"machines/qemu.star":                 `machine(name = "qemu-x86_64", arch = "x86_64")`,
 		"modules/shared-project/MODULE.star": `module_info(name = "shared")`,
-		"modules/a/MODULE.star": `module_info(name = "a", deps = [module("https://example.com/shared.git", local = "modules/shared-other")])`,
-		"modules/shared-other/MODULE.star": `module_info(name = "shared")`,
+		"modules/a/MODULE.star":              `module_info(name = "a", deps = [module("https://example.com/shared.git", local = "modules/shared-other")])`,
+		"modules/shared-other/MODULE.star":   `module_info(name = "shared")`,
 	}); err != nil {
 		t.Fatal(err)
 	}

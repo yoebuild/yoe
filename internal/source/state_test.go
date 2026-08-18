@@ -313,4 +313,3 @@ func commitFile(t *testing.T, dir, name, content, msg string) {
 	run(t, dir, "git", "add", "-A")
 	run(t, dir, "git", "commit", "-q", "-m", msg)
 }
-

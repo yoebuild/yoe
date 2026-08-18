@@ -106,17 +106,7 @@ func feedHost(feedURL string) (string, error) {
 // apk del+add.
 func alpineDeployScript(repoBase, unit string) string {
 	return fmt.Sprintf(`set -e
-mkdir -p /etc/apk
-touch /etc/apk/repositories
-# Strip any existing yoe-dev block, then append a fresh one. apk-tools 2.x
-# reads /etc/apk/repositories directly — there is no repositories.d/.
-sed -i '/^# >>> yoe-dev$/,/^# <<< yoe-dev$/d' /etc/apk/repositories
-{
-    printf '# >>> yoe-dev\n'
-    printf '%%s\n' '%s'
-    printf '# <<< yoe-dev\n'
-} >> /etc/apk/repositories
-# update the cache
+%s# update the cache
 apk update
 # Dev iteration rebuilds an apk with the same pkgver-r<rel> string,
 # so the various --upgrade / --force-reinstall / fix --reinstall paths
@@ -132,7 +122,7 @@ apk update
 # binary; apk doesn't restart services on its own anyway.
 apk del --no-scripts %s 2>/dev/null || true
 apk add %s
-`, repoBase, unit, unit)
+`, apkRepoWriteBlock("dev", repoBase), unit, unit)
 }
 
 // debianDeployScript writes the dev feed into apt's sources.list.d (plus

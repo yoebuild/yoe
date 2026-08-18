@@ -12,7 +12,8 @@ import (
 	"strings"
 	"time"
 
-	yoe "github.com/yoebuild/yoe/internal"
+	"github.com/yoebuild/yoe/internal/arch"
+	"github.com/yoebuild/yoe/internal/container"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -193,7 +194,7 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 
 	// Try host QEMU first
 	if _, err := exec.LookPath(qemuBin); err == nil {
-		if machine.Arch == detectHostArch() && !kvmAvailable() {
+		if machine.Arch == arch.Host() && !kvmAvailable() {
 			fmt.Fprintf(w, "  /dev/kvm not available — using TCG software emulation (slower)\n")
 		}
 		// An EFI-only kernel (Ubuntu's arm64 zboot) boots through UEFI
@@ -269,8 +270,8 @@ func RunQEMU(proj *yoestar.Project, unitName, machineName, projectDir string, op
 	args := buildArgs(containerImgPath, toContainer(hostKernel), toContainer(hostInitrd))
 	fullCmd := qemuBin + " " + strings.Join(args, " ")
 
-	return yoe.RunInContainer(yoe.ContainerRunConfig{
-		Image:       yoe.DefaultContainerImage(proj),
+	return container.RunInContainer(container.ContainerRunConfig{
+		Image:       container.DefaultContainerImage(proj),
 		Command:     fullCmd,
 		ProjectDir:  projectDir,
 		Interactive: !opts.Daemon,
@@ -538,20 +539,6 @@ func BuildQEMUArgs(machine *yoestar.Machine, opts QEMUOptions, imgPath, kernelPa
 	return a
 }
 
-func detectHostArch() string {
-	out, err := exec.Command("uname", "-m").Output()
-	if err != nil {
-		return "x86_64"
-	}
-	arch := strings.TrimSpace(string(out))
-	switch arch {
-	case "aarch64":
-		return "arm64"
-	default:
-		return arch
-	}
-}
-
 // kvmAvailable reports whether /dev/kvm exists — the prerequisite for KVM
 // acceleration. Inside a QEMU guest it is absent unless the outer guest
 // was started with nested virtualization, so qemu-in-qemu runs fall back
@@ -590,7 +577,7 @@ func baseQEMUArgs(machine *yoestar.Machine, opts QEMUOptions) []string {
 	// KVM needs a same-arch host with an accessible /dev/kvm. The latter
 	// is absent in qemu-in-qemu unless the outer guest was given nested
 	// virtualization, so fall back to TCG emulation rather than failing.
-	useKVM := machine.Arch == detectHostArch() && kvmAvailable()
+	useKVM := machine.Arch == arch.Host() && kvmAvailable()
 
 	qemu := machine.QEMU
 	if qemu != nil {

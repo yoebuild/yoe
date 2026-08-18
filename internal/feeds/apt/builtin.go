@@ -40,7 +40,9 @@ import (
 
 	"go.starlark.net/starlark"
 
+	archpkg "github.com/yoebuild/yoe/internal/arch"
 	"github.com/yoebuild/yoe/internal/dpkg"
+	"github.com/yoebuild/yoe/internal/feeds/feedcore"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -65,13 +67,6 @@ func feedStatesFor(eng *yoestar.Engine) []*archState {
 	out := make([]*archState, len(src))
 	copy(out, src)
 	return out
-}
-
-// archMap maps yoe canonical arches to Debian arch tokens used in URLs
-// and as directory names under feed indices.
-var archMap = map[string]string{
-	"x86_64": "amd64",
-	"arm64":  "arm64",
 }
 
 // Builtin is the BuiltinFactory passed to yoestar.WithBuiltin. The
@@ -179,11 +174,10 @@ func (s *archState) cacheFor(arch string) (*archCache, error) {
 	if c, ok := s.byArch[arch]; ok {
 		return c, nil
 	}
-	debArch, ok := archMap[arch]
-	if !ok {
-		return nil, fmt.Errorf("apt_feed: unsupported arch %q (supported: %s)",
-			arch, strings.Join(supportedArches(), ", "))
+	if err := archpkg.Validate(arch); err != nil {
+		return nil, fmt.Errorf("apt_feed: %w", err)
 	}
+	debArch := archpkg.Deb(arch)
 	indexPath := filepath.Join(s.indexRoot, debArch, "Packages")
 	entries, err := dpkg.ParseIndexFile(indexPath)
 	if err != nil {
@@ -393,7 +387,7 @@ func parseKwargs(kwargs []starlark.Tuple) (aptFeedArgs, error) {
 			}
 		case "arches":
 			if list, ok := kv[1].(*starlark.List); ok {
-				a.arches = stringListFrom(list)
+				a.arches = feedcore.StringList(list)
 			}
 		case "index":
 			if v, ok := kv[1].(starlark.String); ok {
@@ -444,27 +438,6 @@ func stringDictFrom(d *starlark.Dict) map[string]string {
 		if kok && vok {
 			out[string(k)] = string(v)
 		}
-	}
-	return out
-}
-
-func stringListFrom(list *starlark.List) []string {
-	out := make([]string, 0, list.Len())
-	iter := list.Iterate()
-	defer iter.Done()
-	var v starlark.Value
-	for iter.Next(&v) {
-		if s, ok := v.(starlark.String); ok {
-			out = append(out, string(s))
-		}
-	}
-	return out
-}
-
-func supportedArches() []string {
-	out := make([]string, 0, len(archMap))
-	for a := range archMap {
-		out = append(out, a)
 	}
 	return out
 }

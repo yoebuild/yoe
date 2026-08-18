@@ -12,10 +12,10 @@ package starlark
 // surfaces source-tagged entries. The difference is purely in *when* the
 // *Unit pointer comes into existence:
 //
-//   real modules:      every .star in units/ evaluates at load time,
-//                      registering its *Unit into the engine's catalog.
-//   synthetic modules: Lookup(name) is called from the closure walk
-//                      (U7); materialization happens on first reference.
+//	real modules:      every .star in units/ evaluates at load time,
+//	                   registering its *Unit into the engine's catalog.
+//	synthetic modules: Lookup(name) is called from the closure walk
+//	                   (U7); materialization happens on first reference.
 //
 // All fields are required. A nil Lookup or Names is a programmer error,
 // not a runtime condition.
@@ -114,8 +114,6 @@ func (e *Engine) RegisterSyntheticModule(sm *SyntheticModule) error {
 	if sm.Lookup == nil || sm.Names == nil {
 		return errSyntheticModuleMissingCallbacks
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	for _, existing := range e.syntheticModules {
 		if existing.Name == sm.Name {
 			return &duplicateSyntheticModuleError{Name: sm.Name}
@@ -129,37 +127,11 @@ func (e *Engine) RegisterSyntheticModule(sm *SyntheticModule) error {
 // registration order. The loader uses this after evaluating MODULE.star
 // files to assign Priority values and attach the list to the project.
 func (e *Engine) SyntheticModules() []*SyntheticModule {
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	// Return a copy so callers iterating during further evaluation
 	// don't race with concurrent registrations.
 	out := make([]*SyntheticModule, len(e.syntheticModules))
 	copy(out, e.syntheticModules)
 	return out
-}
-
-// LookupInSynthetics walks the project's synthetic modules in priority
-// order (highest Priority first) and returns the first *Unit whose name
-// matches. Used by the closure walk (U7) when a referenced name isn't
-// in proj.Units.
-//
-// The loader assigns Priority = -registration_index, so the slice is
-// already in high-to-low priority order and a forward walk gives the
-// correct precedence.
-//
-// Returns (nil, nil) when no synthetic module provides the name —
-// distinguished from (nil, err) on parse/cache failure.
-func LookupInSynthetics(synths []*SyntheticModule, name string) (*Unit, error) {
-	for _, sm := range synths {
-		u, err := sm.Lookup(name)
-		if err != nil {
-			return nil, err
-		}
-		if u != nil {
-			return u, nil
-		}
-	}
-	return nil, nil
 }
 
 // Error sentinels — exported via the dedicated types below so callers can

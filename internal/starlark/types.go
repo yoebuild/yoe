@@ -14,9 +14,15 @@ type Project struct {
 	Version  string
 	Defaults Defaults
 	Cache    CacheConfig
-	Sources  SourcesConfig
 	Modules  []ModuleRef
 	Machines map[string]*Machine
+
+	// Root is the absolute directory holding PROJECT.star. The loader
+	// already walks up to find it, so carrying it on the project spares
+	// every consumer from repeating that walk — and from disagreeing
+	// about the answer when run from a subdirectory, which is how
+	// `yoe config show` came to read local.star from the wrong place.
+	Root string
 
 	// UnitsByModule is the primary unit storage: [moduleName][unitName]*Unit.
 	// Every unit registers under its declaring module's canonical name; same-
@@ -34,6 +40,12 @@ type Project struct {
 	// A distro key is present whenever any unit is registered for it (either
 	// tagged or materialized), even if the view is sparse.
 	DistroViews map[string]map[string]*Unit
+
+	// ProvidesViews maps a distro to the virtual names units tagged for
+	// that distro declare: [distro][virtual]unitName. Built alongside
+	// DistroViews and read by ResolveProvidesForDistro, which otherwise
+	// scans every unit in every module per lookup.
+	ProvidesViews map[string]map[string]string
 
 	// DefaultDistro is the project-wide effective-distro fallback used by
 	// image units that don't set their own `distro` field. The cascade
@@ -159,25 +171,7 @@ type Defaults struct {
 }
 
 type CacheConfig struct {
-	Path      string
-	Remote    []CacheRemote
-	Retention int // days
-	Signing   string
-}
-
-type CacheRemote struct {
-	Name     string
-	Bucket   string
-	Endpoint string
-	Region   string
-	Prefix   string
-}
-
-type SourcesConfig struct {
-	GoProxy       string
-	CargoRegistry string
-	NpmRegistry   string
-	PypiMirror    string
+	Path string
 }
 
 type ModuleRef struct {
@@ -200,7 +194,6 @@ type Machine struct {
 	Arch        string
 	Description string
 	Kernel      KernelConfig
-	Bootloader  BootloaderConfig
 	QEMU        *QEMUConfig // nil if not a QEMU machine
 	Packages    []string    // distro-neutral board packages merged into every image for this machine
 	// DistroPackages adds per-distro board packages on top of Packages, e.g.
@@ -214,14 +207,10 @@ type Machine struct {
 }
 
 type KernelConfig struct {
-	Repo        string
-	Branch      string
-	Tag         string
-	Defconfig   string
-	DeviceTrees []string
-	Unit        string
-	Cmdline     string
-	Provides    string // virtual package name (e.g., "linux")
+	Defconfig string
+	Unit      string
+	Cmdline   string
+	Provides  string // virtual package name (e.g., "linux")
 	// DistroUnit selects the kernel unit per distro, e.g.
 	// {"alpine": "linux-qemu", "debian": "linux-image-amd64"}. Empty for
 	// single-form machines (which set Unit). image() resolves the entry
@@ -236,13 +225,6 @@ type KernelConfig struct {
 // this rather than `Unit != ""`, which is empty for distro_unit machines.
 func (k KernelConfig) HasKernel() bool {
 	return k.Unit != "" || len(k.DistroUnit) > 0
-}
-
-type BootloaderConfig struct {
-	Type      string
-	Repo      string
-	Branch    string
-	Defconfig string
 }
 
 type QEMUConfig struct {
@@ -440,16 +422,25 @@ func (p *Project) ResolveProvidesForDistro(virtual, effectiveDistro string) stri
 			}
 		}
 	}
-	// Second: walk units tagged for effectiveDistro for a Provides match.
+	// Second: a unit tagged for effectiveDistro that declares this
+	// virtual. ProvidesViews indexes exactly that; when it is not built
+	// yet (during loading, before the views are computed) fall back to
+	// the scan it replaces so the answer does not depend on timing.
 	if effectiveDistro != "" {
-		for _, byName := range p.UnitsByModule {
-			for _, u := range byName {
-				if u.Distro != effectiveDistro {
-					continue
-				}
-				for _, v := range u.Provides {
-					if v == virtual {
-						return u.Name
+		if view, ok := p.ProvidesViews[effectiveDistro]; ok {
+			if name, ok := view[virtual]; ok {
+				return name
+			}
+		} else if p.ProvidesViews == nil {
+			for _, byName := range p.UnitsByModule {
+				for _, u := range byName {
+					if u.Distro != effectiveDistro {
+						continue
+					}
+					for _, v := range u.Provides {
+						if v == virtual {
+							return u.Name
+						}
 					}
 				}
 			}
@@ -708,13 +699,20 @@ type Step struct {
 	Install *InstallStep      // install_file / install_template step
 }
 
-// InstallStep describes a file installation action produced by the Starlark
-// install_file() / install_template() builtins. Executed by the build executor.
+// InstallStep describes a file installation action produced by the
+// Starlark install_file() / install_template() builtins and executed by
+// the build executor.
 //
-// BaseDir is the absolute directory captured from the .star file containing
-// the install_file() / install_template() call (see InstallStepValue). The
-// file to install lives at BaseDir/Src. Resolving relative to the call site
-// — rather than to the unit() call site — lets helper functions package
+// It is also the Starlark value those builtins return — see
+// install_step.go for the starlark.Value methods. One struct serves both
+// roles because they describe the same thing; two structs with identical
+// fields and a copy between them only created somewhere for the two to
+// drift apart.
+//
+// BaseDir is the absolute directory captured from the .star file
+// containing the install_file() / install_template() call. The file to
+// install lives at BaseDir/Src. Resolving relative to the call site —
+// rather than to the unit() call site — lets helper functions package
 // templates next to themselves and reuse them across many units.
 type InstallStep struct {
 	Kind    string // "file" or "template"
@@ -753,6 +751,18 @@ var validArchitectures = map[string]bool{
 	"arm64":   true,
 	"riscv64": true,
 	"x86_64":  true,
+}
+
+// validScopes enumerates the accepted values of a unit's `scope` kwarg.
+// Both "" and "arch" mean per-architecture scoping — the default — so a
+// unit can either leave scope out or spell the default it wants. Anything
+// else is a typo, and a typo that silently fell through to arch scoping
+// would build and publish to the wrong place.
+var validScopes = map[string]bool{
+	"":        true,
+	"arch":    true,
+	"machine": true,
+	"noarch":  true,
 }
 
 // NotBuildable reports whether this unit was registered inert because

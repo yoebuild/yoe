@@ -22,8 +22,7 @@ import (
 // network operations live in the post-confirmation handler).
 func (m model) openSourcePromptForUnit(unitName string) (tea.Model, tea.Cmd) {
 	u := m.proj.LookupUnit(m.distro, unitName)
-	ok := u != nil
-	if !ok || u.Class == "image" || u.Class == "container" {
+	if u == nil || u.Class == "image" || u.Class == "container" {
 		m.message = fmt.Sprintf("%s has no source dir to toggle", unitName)
 		return m, nil
 	}
@@ -138,8 +137,7 @@ func (m model) openSourcePromptForModule(rmName string) (tea.Model, tea.Cmd) {
 // `tag` field.
 func (m model) openPromotePrompt(unitName string) (tea.Model, tea.Cmd) {
 	u := m.proj.LookupUnit(m.distro, unitName)
-	ok := u != nil
-	if !ok || u.Class == "image" || u.Class == "container" {
+	if u == nil || u.Class == "image" || u.Class == "container" {
 		m.message = fmt.Sprintf("%s has no source dir to pin", unitName)
 		return m, nil
 	}
@@ -356,8 +354,7 @@ func depthOptionToFetch(value string) depthFetchSpec {
 // tens of seconds — so blocking the Update loop would freeze the UI.
 func (m model) runDevToUpstream(unitName string, ssh bool, depth depthFetchSpec) (tea.Model, tea.Cmd) {
 	u := m.proj.LookupUnit(m.distro, unitName)
-	ok := u != nil
-	if !ok {
+	if u == nil {
 		m.message = fmt.Sprintf("unit %s not found", unitName)
 		return m, nil
 	}
@@ -396,8 +393,7 @@ func depthLabel(d depthFetchSpec) string {
 // the upstream toggle.
 func (m model) runDevToPin(unitName string, force bool) (tea.Model, tea.Cmd) {
 	u := m.proj.LookupUnit(m.distro, unitName)
-	ok := u != nil
-	if !ok {
+	if u == nil {
 		m.message = fmt.Sprintf("unit %s not found", unitName)
 		return m, nil
 	}
@@ -423,8 +419,7 @@ func (m model) runDevToPin(unitName string, force bool) (tea.Model, tea.Cmd) {
 // a "working…" hint instead of a frozen screen.
 func (m model) runDevPromote(unitName string) (tea.Model, tea.Cmd) {
 	u := m.proj.LookupUnit(m.distro, unitName)
-	ok := u != nil
-	if !ok {
+	if u == nil {
 		m.message = fmt.Sprintf("unit %s not found", unitName)
 		return m, nil
 	}
@@ -654,8 +649,7 @@ func (m model) invalidateUnitState(name string) {
 // correctly.
 func (m model) persistedUnitSourceState(name string) source.State {
 	u := m.proj.LookupUnit(m.distro, name)
-	ok := u != nil
-	if !ok {
+	if u == nil {
 		return source.StateEmpty
 	}
 	sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)

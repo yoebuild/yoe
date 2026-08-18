@@ -1,6 +1,8 @@
 package starlark
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -237,5 +239,81 @@ func TestLoadProject_ProjectShadowsModules(t *testing.T) {
 	}
 	if u.Module != "" {
 		t.Errorf("musl Module = %q, want \"\" (project root)", u.Module)
+	}
+}
+
+// writeImageProject writes a throwaway project with two image units so
+// a test can exercise which one ends up as Defaults.Image.
+func writeImageProject(t *testing.T, dir string) {
+	t.Helper()
+	proj := `project(
+    name = "override-test",
+    version = "0.1.0",
+    defaults = defaults(machine = "qemu-x86_64", image = "base-image"),
+)
+`
+	image := func(name string) string {
+		return fmt.Sprintf(`image(
+    name = %q,
+    version = "1.0.0",
+    artifacts = ["busybox"],
+    container = "toolchain-musl",
+    container_arch = "target",
+    partitions = [
+        partition(label="rootfs", type="ext4", size="fill", root=True),
+    ],
+)
+`, name)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "units"), 0755); err != nil {
+		t.Fatalf("mkdir units: %v", err)
+	}
+	files := map[string]string{
+		"PROJECT.star":          proj,
+		"units/base-image.star": image("base-image"),
+		"units/dev-image.star":  image("dev-image"),
+	}
+	for rel, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte(body), 0644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+}
+
+// local.star's image override is layered onto the project's committed
+// default by the loader itself, so every load path agrees on the target
+// image — including the TUI, which reloads the project whenever the
+// machine or distro changes.
+func TestLoadProject_LocalImageOverride(t *testing.T) {
+	dir := t.TempDir()
+	writeImageProject(t, dir)
+	if err := WriteLocalOverrides(dir, LocalOverrides{Image: "dev-image"}); err != nil {
+		t.Fatalf("write local.star: %v", err)
+	}
+
+	proj, err := LoadProject(dir)
+	if err != nil {
+		t.Fatalf("LoadProject: %v", err)
+	}
+	if proj.Defaults.Image != "dev-image" {
+		t.Errorf("Defaults.Image = %q, want dev-image (local.star override)", proj.Defaults.Image)
+	}
+}
+
+// An override naming a unit the project no longer has leaves the
+// committed default in place rather than pointing at nothing.
+func TestLoadProject_LocalImageOverride_UnknownUnitIgnored(t *testing.T) {
+	dir := t.TempDir()
+	writeImageProject(t, dir)
+	if err := WriteLocalOverrides(dir, LocalOverrides{Image: "image-that-was-deleted"}); err != nil {
+		t.Fatalf("write local.star: %v", err)
+	}
+
+	proj, err := LoadProject(dir)
+	if err != nil {
+		t.Fatalf("LoadProject: %v", err)
+	}
+	if proj.Defaults.Image != "base-image" {
+		t.Errorf("Defaults.Image = %q, want base-image (PROJECT.star default)", proj.Defaults.Image)
 	}
 }

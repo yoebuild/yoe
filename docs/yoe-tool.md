@@ -910,10 +910,22 @@ been idle for a couple of seconds — pressing `j/k` or typing into the query ba
 suppresses the follow so the cursor stays where you put it. Pressing `b` or `B`
 re-arms the follow so the build cascade is visible.
 
+Leaving the Setup page returns the cursor to the target image, whether you
+changed a setting or just looked around — the same place it sits when the TUI
+starts. The target image is the one recorded in `local.star` (the Setup page's
+**Image** picker writes it there), and it stays selected as you switch machines
+and distros.
+
 #### Detail view
 
 Pressing Enter on a unit opens a detail view with two tabs (`tab` / `shift+tab`
 to cycle): **Info** and **Files**.
+
+A summary line under the unit name reports the unit's build status along with
+its build-directory and installed sizes. While the unit is building, that line
+shows a timer counting up from the moment the build started, so a long compile
+is visibly making progress; once the build finishes the timer is replaced by the
+total wall-clock time it took.
 
 The **Info** tab shows the unit's place in the project plus its build streams:
 

@@ -65,8 +65,8 @@ func TestUpdateSearch_CtrlU_ClearsInput(t *testing.T) {
 		queryInput:       "in:base-image type:image status:failed",
 		queryCompletions: []string{"in:", "module:"},
 		proj: &yoestar.Project{
-			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			UnitsByModule:    map[string]map[string]*yoestar.Unit{"": {}},
+			Defaults:      yoestar.Defaults{Machine: "qemu-x86_64"},
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {}},
 		},
 	}
 	updated, _ := m.updateSearch(tea.KeyMsg{Type: tea.KeyCtrlU})
@@ -119,8 +119,8 @@ func TestRenderQueryCompletions_EmptyReturnsNothing(t *testing.T) {
 func TestViewModulesTab_RendersSyntheticModules(t *testing.T) {
 	m := model{
 		proj: &yoestar.Project{
-			Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
-			UnitsByModule:    map[string]map[string]*yoestar.Unit{"": {}},
+			Defaults:      yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {}},
 			ResolvedModules: []yoestar.ResolvedModule{
 				{Name: "module-core", URL: "https://example.com/core.git"},
 			},
@@ -168,7 +168,7 @@ func TestViewModulesTab_FeedsDoNotPushTopOffScreen(t *testing.T) {
 	m := model{
 		proj: &yoestar.Project{
 			Defaults:        yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
-			UnitsByModule:           map[string]map[string]*yoestar.Unit{"": {}},
+			UnitsByModule:   map[string]map[string]*yoestar.Unit{"": {}},
 			ResolvedModules: mods,
 			SyntheticModules: []*yoestar.SyntheticModule{
 				{Name: "alpine.main", Parent: "alpine",
@@ -262,8 +262,8 @@ func TestViewUnitsTab_HelpBarOmitsEditForFeedUnits(t *testing.T) {
 func TestViewUnitsTab_CompletionsRenderUnderQueryLine(t *testing.T) {
 	m := model{
 		proj: &yoestar.Project{
-			Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
-			UnitsByModule:    map[string]map[string]*yoestar.Unit{"": {}},
+			Defaults:      yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {}},
 		},
 		queryEditing:     true,
 		queryInput:       "o",
@@ -316,8 +316,8 @@ func TestRefreshUnitSize_UnknownUnit_NoOp(t *testing.T) {
 		arch:       "x86_64",
 		distro:     "alpine",
 		proj: &yoestar.Project{
-			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			UnitsByModule:    map[string]map[string]*yoestar.Unit{"": {}},
+			Defaults:      yoestar.Defaults{Machine: "qemu-x86_64"},
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {}},
 		},
 	}
 	// Should not panic, should not allocate spurious entries.
@@ -1575,5 +1575,81 @@ func TestQEMUSettingsSummary_CountsEffectiveNotDoubled(t *testing.T) {
 	m := qemuTestModel(t, []string{"8080:8080"}, []string{"18080:8080"})
 	if got := m.qemuSettingsSummary(); !strings.Contains(got, "1 port(s)") {
 		t.Fatalf("summary = %q, want it to report 1 port(s)", got)
+	}
+}
+
+// Changing the machine or distro reloads the project and resets the
+// cursor to row 0. focusDefaultImage puts it back on the target image
+// so the units table reads the same way it does at startup.
+func TestFocusDefaultImage_ParksCursorOnImage(t *testing.T) {
+	m := &model{
+		units:   []string{"busybox", "base-image", "openssl"},
+		visible: []int{0, 1, 2},
+		cursor:  0,
+		height:  40,
+		width:   120,
+		proj: &yoestar.Project{
+			Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
+		},
+	}
+	m.focusDefaultImage()
+	if m.units[m.cursor] != "base-image" {
+		t.Errorf("cursor on %q, want base-image", m.units[m.cursor])
+	}
+}
+
+// No image configured, or an image the active query filters out, leaves
+// the cursor where it was rather than jumping somewhere arbitrary.
+func TestFocusDefaultImage_NoImageOrFilteredOut(t *testing.T) {
+	base := func(image string, visible []int) *model {
+		return &model{
+			units:   []string{"busybox", "base-image", "openssl"},
+			visible: visible,
+			cursor:  2,
+			height:  40,
+			width:   120,
+			proj: &yoestar.Project{
+				Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: image},
+			},
+		}
+	}
+	for name, m := range map[string]*model{
+		"no image":     base("", []int{0, 1, 2}),
+		"filtered out": base("base-image", []int{0, 2}),
+	} {
+		m.focusDefaultImage()
+		if m.cursor != 2 {
+			t.Errorf("%s: cursor moved to %d, want it left at 2", name, m.cursor)
+		}
+	}
+}
+
+// Leaving Setup — with or without a settings change — returns to the
+// unit list with the cursor on the target image.
+func TestUpdateSetup_ExitFocusesTargetImage(t *testing.T) {
+	keys := map[string]tea.KeyMsg{
+		"esc": {Type: tea.KeyEsc},
+		"q":   {Type: tea.KeyRunes, Runes: []rune("q")},
+	}
+	for name, key := range keys {
+		m := model{
+			view:    viewSetup,
+			units:   []string{"busybox", "base-image", "openssl"},
+			visible: []int{0, 1, 2},
+			cursor:  0,
+			height:  40,
+			width:   120,
+			proj: &yoestar.Project{
+				Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
+			},
+		}
+		next, _ := m.updateSetup(key)
+		got := next.(model)
+		if got.view != viewUnits {
+			t.Errorf("%s: view = %v, want viewUnits", name, got.view)
+		}
+		if got.units[got.cursor] != "base-image" {
+			t.Errorf("%s: cursor on %q, want base-image", name, got.units[got.cursor])
+		}
 	}
 }

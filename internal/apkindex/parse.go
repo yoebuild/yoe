@@ -26,18 +26,18 @@ import (
 // single-letter keys (P, V, T, ...) by intent — see the K-to-field map
 // in parseEntry — so a reader can cross-reference upstream docs.
 type Entry struct {
-	Name          string   // P
-	Version       string   // V
-	Description   string   // T (title)
-	URL           string   // U
-	License       string   // L
-	Arch          string   // A
-	Size          int64    // S — apk file size in bytes
-	InstalledSize int64    // I — installed footprint
-	Origin        string   // o — source-package origin
-	Maintainer    string   // m
-	BuildTime     int64    // t — unix timestamp
-	Commit        string   // c — aports commit sha
+	Name          string // P
+	Version       string // V
+	Description   string // T (title)
+	URL           string // U
+	License       string // L
+	Arch          string // A
+	Size          int64  // S — apk file size in bytes
+	InstalledSize int64  // I — installed footprint
+	Origin        string // o — source-package origin
+	Maintainer    string // m
+	BuildTime     int64  // t — unix timestamp
+	Commit        string // c — aports commit sha
 
 	// Checksum is the raw SHA1 bytes decoded from the APKINDEX `C:`
 	// field. The on-disk format is "Q1<base64-sha1>="; we keep both the
@@ -82,7 +82,7 @@ func ParseIndex(r io.Reader) ([]Entry, error) {
 			return fmt.Errorf("apkindex: line %d: block has no P: (package name)", blockLn)
 		}
 		if cur.ChecksumText != "" {
-			raw, err := decodeChecksum(cur.ChecksumText)
+			raw, err := DecodeChecksum(cur.ChecksumText)
 			if err != nil {
 				return fmt.Errorf("apkindex: line %d: %s: %w", blockLn, cur.Name, err)
 			}
@@ -235,11 +235,15 @@ func splitTokens(s string) []string {
 	return fs
 }
 
-// decodeChecksum parses Alpine's `C:` value. Format: "Q1<base64-sha1>="
-// — the "Q1" prefix tags hash type (Q1=sha1). Returns the raw 20 sha1
-// bytes. Mirrors the same parsing in internal/source/fetch.go so the
-// two stay byte-identical for cache-key purposes.
-func decodeChecksum(s string) ([]byte, error) {
+// DecodeChecksum parses Alpine's APKINDEX `C:` value and returns the raw
+// 20 sha1 bytes. Format: "Q1<base64-sha1>=" — the "Q1" prefix tags the
+// hash type (Q1 = sha1; Q2 = sha256 was reserved but never deployed at
+// scale). Returns an error for any other prefix or malformed input.
+//
+// This is the single definition. The value feeds cache keys, so a second
+// implementation that disagreed by even a byte would make the same
+// package hash differently depending on which code path read it.
+func DecodeChecksum(s string) ([]byte, error) {
 	if !strings.HasPrefix(s, "Q1") {
 		return nil, fmt.Errorf("apk_checksum: expected Q1 (sha1) prefix, got %q", s)
 	}
@@ -253,4 +257,3 @@ func decodeChecksum(s string) ([]byte, error) {
 	}
 	return raw, nil
 }
-

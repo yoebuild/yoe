@@ -28,35 +28,38 @@ type ExecResult struct {
 type RealExecer struct{}
 
 func (RealExecer) Run(ctx context.Context, cfg *SandboxConfig, command string, privileged bool) (ExecResult, error) {
-	cfg.Ctx = ctx
+	// Work on a copy. The caller's SandboxConfig is shared across every
+	// step of a unit's build, and this call needs three things changed
+	// for its own duration: the context, the output writers, and (when
+	// privileged) NoUser. Mutating and restoring in place got NoUser
+	// wrong — it restored the literal false rather than what the caller
+	// had set — so a unit that legitimately runs as root lost that for
+	// every step after its first privileged one.
+	run := *cfg
+	run.Ctx = ctx
 
 	// Capture stdout/stderr into buffers while still writing to the log.
 	var stdoutBuf, stderrBuf bytes.Buffer
-	origStdout, origStderr := cfg.Stdout, cfg.Stderr
-	if origStdout != nil {
-		cfg.Stdout = io.MultiWriter(origStdout, &stdoutBuf)
+	if cfg.Stdout != nil {
+		run.Stdout = io.MultiWriter(cfg.Stdout, &stdoutBuf)
 	} else {
-		cfg.Stdout = &stdoutBuf
+		run.Stdout = &stdoutBuf
 	}
-	if origStderr != nil {
-		cfg.Stderr = io.MultiWriter(origStderr, &stderrBuf)
+	if cfg.Stderr != nil {
+		run.Stderr = io.MultiWriter(cfg.Stderr, &stderrBuf)
 	} else {
-		cfg.Stderr = &stderrBuf
+		run.Stderr = &stderrBuf
 	}
 
 	var err error
 	if privileged {
-		// Run directly in container without bwrap and as root
-		// (for losetup, mount, extlinux, etc.)
-		cfg.NoUser = true
-		err = RunSimple(cfg, command)
-		cfg.NoUser = false
+		// Run directly in the container without bwrap and as root, for
+		// losetup, mount, extlinux and the like.
+		run.NoUser = true
+		err = RunSimple(&run, command)
 	} else {
-		err = RunInSandbox(cfg, command)
+		err = RunInSandbox(&run, command)
 	}
-
-	// Restore original writers
-	cfg.Stdout, cfg.Stderr = origStdout, origStderr
 
 	if err != nil {
 		return ExecResult{ExitCode: 1, Stdout: stdoutBuf.String(), Stderr: stderrBuf.String()}, err

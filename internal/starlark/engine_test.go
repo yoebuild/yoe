@@ -43,15 +43,9 @@ machine(
     arch = "arm64",
     description = "BeagleBone Black",
     kernel = kernel(
-        repo = "https://github.com/beagleboard/linux.git",
-        branch = "6.6",
+        unit = "linux-beagleplay",
         defconfig = "bb.org_defconfig",
-        device_trees = ["am335x-boneblack.dtb"],
-    ),
-    uboot = uboot(
-        repo = "https://github.com/beagleboard/u-boot.git",
-        branch = "v2024.01",
-        defconfig = "am335x_evm_defconfig",
+        cmdline = "console=ttyS2,115200",
     ),
 )
 `
@@ -70,14 +64,11 @@ machine(
 	if m.Kernel.Defconfig != "bb.org_defconfig" {
 		t.Errorf("Kernel.Defconfig = %q, want %q", m.Kernel.Defconfig, "bb.org_defconfig")
 	}
-	if len(m.Kernel.DeviceTrees) != 1 {
-		t.Errorf("Kernel.DeviceTrees = %v, want 1 entry", m.Kernel.DeviceTrees)
+	if m.Kernel.Unit != "linux-beagleplay" {
+		t.Errorf("Kernel.Unit = %q, want %q", m.Kernel.Unit, "linux-beagleplay")
 	}
-	if m.Bootloader.Type != "u-boot" {
-		t.Errorf("Bootloader.Type = %q, want %q", m.Bootloader.Type, "u-boot")
-	}
-	if m.Bootloader.Defconfig != "am335x_evm_defconfig" {
-		t.Errorf("Bootloader.Defconfig = %q, want %q", m.Bootloader.Defconfig, "am335x_evm_defconfig")
+	if m.Kernel.Cmdline != "console=ttyS2,115200" {
+		t.Errorf("Kernel.Cmdline = %q, want %q", m.Kernel.Cmdline, "console=ttyS2,115200")
 	}
 }
 

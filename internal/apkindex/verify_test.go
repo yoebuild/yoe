@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/yoebuild/yoe/internal/gzipframe"
 )
 
 // makeKeyPair generates a 1024-bit RSA keypair (small for fast tests
@@ -160,7 +162,7 @@ func TestVerifySignature_TamperedPayload(t *testing.T) {
 
 	// Flip a byte well inside the payload stream (past the signature
 	// stream's bounds) so the signature SHA1 no longer matches.
-	bounds, err := gzipStreamBoundaries(tarball)
+	bounds, err := gzipframe.Boundaries(tarball)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +170,7 @@ func TestVerifySignature_TamperedPayload(t *testing.T) {
 		t.Fatalf("need >= 2 streams to tamper, got %d", len(bounds))
 	}
 	mutated := append([]byte(nil), tarball...)
-	mutated[bounds[1][0]+15] ^= 0x01
+	mutated[bounds[1].Start+15] ^= 0x01
 
 	err = VerifySignatureBytes(mutated, []string{pubPath})
 	var me *SignatureMismatchError

@@ -382,9 +382,9 @@ func TestIsGitURL(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := isGitURL(tt.url)
+		got := IsGitURL(tt.url)
 		if got != tt.want {
-			t.Errorf("isGitURL(%q) = %v, want %v", tt.url, got, tt.want)
+			t.Errorf("IsGitURL(%q) = %v, want %v", tt.url, got, tt.want)
 		}
 	}
 }

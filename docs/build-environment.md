@@ -149,8 +149,8 @@ Bubblewrap provides:
 
 ## Why Not Docker for Builds?
 
-Docker is used for Tier 0 (the bootstrap) but not for Tier 1/2 (the actual
-builds). This is deliberate:
+Docker is used for Tier 0 (the toolchain container) but not for Tier 1/2 (the
+actual builds). This is deliberate:
 
 |                       | Docker                     | bubblewrap + apk          |
 | --------------------- | -------------------------- | ------------------------- |
@@ -166,12 +166,22 @@ and you have a working environment. But for the build system itself, bubblewrap
 
 - apk is simpler, faster, and more granular.
 
-## Bootstrap Process
+## Bootstrap Process (planned)
+
+> **Status:** Design only — the `yoe bootstrap` subcommand described below does
+> not exist. Today the base toolchain comes from the container image the
+> project's classes select (`container` / `container_arch` on each unit), and
+> everything above it is an ordinary unit built from source. The staged
+> bootstrap here describes how `[yoe]` would build its own base packages without
+> depending on another distribution's toolchain; nothing in it is wired up.
+> Running `[yoe]` on a `[yoe]`-built device is a separate, shipped capability —
+> see [Self-Hosting](selfhost.md), which uses the normal build path rather than
+> anything on this page.
 
 There is a chicken-and-egg problem: `[yoe]` needs glibc, gcc, and other base
 packages in its repository before it can build anything inside a `[yoe]` chroot.
-This is solved with a staged bootstrap, the same approach used by Alpine, Arch,
-Gentoo, and every other self-hosting distribution.
+This would be solved with a staged bootstrap, the same approach used by Alpine,
+Arch, Gentoo, and every other self-hosting distribution.
 
 ### Stage 0: Cross-Pollination
 

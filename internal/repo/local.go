@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/yoebuild/yoe/internal/artifact"
+	"github.com/yoebuild/yoe/internal/fsutil"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -42,9 +44,17 @@ func RepoDistroDir(proj *yoestar.Project, projectDir, distro string) string {
 	return filepath.Join(RepoDir(proj, projectDir), distro)
 }
 
+// apkPublishMu serializes Publish across goroutines. Parallel unit builds
+// each finish by copying their .apk into the shared per-arch tree; the lock
+// keeps concurrent directory creation and file copies from racing. Index
+// generation no longer happens here — it is deferred to a single scan when
+// the index is consumed (see GenerateAllIndexes) — so the lock only guards
+// the cheap copy.
+var apkPublishMu sync.Mutex
+
 // Publish copies an .apk file into the per-arch subdirectory of the local
-// repository and regenerates the APKINDEX for that arch. The on-disk layout
-// matches Alpine's convention so `apk add -X <repoDir>` Just Works:
+// repository. The on-disk layout matches Alpine's convention so
+// `apk add -X <repoDir>` Just Works once the index has been generated:
 //
 //	<repoDir>/<archDir>/<pkg>-<ver>-r<N>.apk
 //	<repoDir>/<archDir>/APKINDEX.tar.gz
@@ -54,7 +64,16 @@ func RepoDistroDir(proj *yoestar.Project, projectDir, distro string) string {
 // "noarch" for portable packages. The public key sits in <repoDir>/keys/
 // so apk add can verify the repo via `--keys-dir <repoDir>/keys` without
 // any further configuration.
+//
+// Publishing does not write APKINDEX.tar.gz: the caller regenerates the
+// index once every package it intends to publish has landed. Doing it here
+// would be both O(units²) and unsafe, since every per-arch index folds in
+// the shared noarch tree and two workers regenerating at once can drop each
+// other's entries.
 func Publish(apkPath, repoDir, archDir string, signer *artifact.Signer) error {
+	apkPublishMu.Lock()
+	defer apkPublishMu.Unlock()
+
 	archPath := filepath.Join(repoDir, archDir)
 	if err := os.MkdirAll(archPath, 0755); err != nil {
 		return err
@@ -63,20 +82,11 @@ func Publish(apkPath, repoDir, archDir string, signer *artifact.Signer) error {
 	name := filepath.Base(apkPath)
 	dst := filepath.Join(archPath, name)
 
-	src, err := os.Open(apkPath)
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	if _, err := io.Copy(out, src); err != nil {
-		return err
+	// Atomic: index generation and any concurrent `apk add` walk this
+	// same directory, and a half-written .apk there reads as a corrupt
+	// package rather than a missing one.
+	if err := fsutil.CopyFileAtomic(apkPath, dst, 0644); err != nil {
+		return fmt.Errorf("publishing %s: %w", name, err)
 	}
 
 	if signer != nil {
@@ -84,25 +94,29 @@ func Publish(apkPath, repoDir, archDir string, signer *artifact.Signer) error {
 			return fmt.Errorf("publishing public key: %w", err)
 		}
 	}
+	return nil
+}
 
-	if err := GenerateIndex(archPath, signer); err != nil {
+// GenerateAllIndexes regenerates the APKINDEX for every arch subdirectory of
+// repoDir. Callers run it once after a batch of Publish calls and again
+// before anything consumes the repo (image assembly, a feed server), so the
+// on-disk index always matches what is actually in the tree.
+//
+// Every per-arch index includes the shared noarch packages, so a single
+// noarch publish invalidates all of them — regenerating the whole set is the
+// only correct response, and at one pass per build it costs far less than
+// the per-publish regeneration it replaces.
+func GenerateAllIndexes(repoDir string, signer *artifact.Signer) error {
+	archDirs, err := ArchDirs(repoDir)
+	if err != nil {
 		return err
 	}
-	// A noarch publish has to refresh every per-arch APKINDEX too —
-	// each one includes noarch entries via GenerateIndex's sibling
-	// scan, so adding a noarch apk silently invalidates them all.
-	if archDir == "noarch" {
-		archDirs, err := ArchDirs(repoDir)
-		if err != nil {
-			return err
+	for _, ad := range archDirs {
+		if ad == "keys" {
+			continue
 		}
-		for _, ad := range archDirs {
-			if ad == "noarch" {
-				continue
-			}
-			if err := GenerateIndex(filepath.Join(repoDir, ad), signer); err != nil {
-				return fmt.Errorf("regenerating %s APKINDEX after noarch publish: %w", ad, err)
-			}
+		if err := GenerateIndex(filepath.Join(repoDir, ad), signer); err != nil {
+			return fmt.Errorf("regenerating %s APKINDEX: %w", ad, err)
 		}
 	}
 	return nil

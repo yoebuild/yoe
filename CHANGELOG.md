@@ -11,10 +11,84 @@ and this project adheres to
 - **Extended attribute tools build again on Alpine.** The `attr` package failed
   to compile against musl, which stopped any image carrying getfattr/setfattr or
   `cp --preserve=xattr` support before it finished.
-- **BeaglePlay images build again.** The readline library was built without its
-  terminal-handling support, so any program that loaded it — including the
+- **BeaglePlay images build on Alpine.** The readline library was built without
+  its terminal-handling support, so any program that loaded it — including the
   Python that BeaglePlay's secure-world firmware build runs — failed to start on
   Alpine images.
+
+## [0.14.1] - 2026-08-18
+
+- **Switching machine or distro keeps your target image.** The TUI reloaded the
+  project and fell back to the image named in `PROJECT.star`, so the header, the
+  cursor, and anything you built or ran next pointed at the wrong image until
+  you restarted. Your `local.star` image now survives the reload.
+- **The unit list returns to the target image when you leave Setup.** Picking a
+  new machine or default distro, or simply backing out of the page, left the
+  cursor at the top of the list; it now lands on the target image, as it does at
+  startup.
+- **See how long a unit has been building.** The detail page now counts up from
+  the moment a build starts, so it is clear a long compile is still making
+  progress. The elapsed time is replaced by the total build time when it
+  finishes.
+
+## [0.14.0] - 2026-08-18
+
+**This release is a large refactor/simplification of the code base.** ... may
+containe some regressions.
+
+- **Parallel builds no longer drop packages from the Alpine package index.** Two
+  units finishing at the same time could each regenerate the index and leave out
+  the other's package, so `apk add` intermittently failed to find something that
+  had just been built. The index is now written once per build, after everything
+  has been published.
+- **`conffiles` now does what it says on Debian and Ubuntu.** Config files a
+  unit declares are recorded in the package, so a locally edited copy survives a
+  package upgrade instead of being overwritten. Declaring a path the unit does
+  not install is now reported as an error. On Alpine, apk already preserves
+  modified config files on its own.
+- **A build no longer reports success when another yoe process is already
+  building the same unit.** It skipped the unit but still recorded it as built,
+  so the next unit that depended on it failed with a confusing missing-header
+  error. The situation is now reported directly.
+- **`yoe desc` prints the same hash a build uses.** It previously computed the
+  hash without the distro, machine, and source state, so the value never matched
+  the one in the build cache.
+- **The TUI's `status:` searches keep up with a running build.** A filter like
+  `status:building` now updates as units start and finish instead of showing
+  whatever matched when it was typed.
+- **The TUI shows `cached` only for units the next build will actually reuse.**
+  It previously trusted a cache marker even when the package it stood for was
+  gone.
+- **Unit build logs in the TUI are no longer interleaved or truncated.** The TUI
+  and the build engine were both writing to the same file.
+- **`yoe dev` accepts every source a build treats as a git repository.** A unit
+  sourced from a bare `github.com/...` path was fetched as git but rejected by
+  `yoe dev` as a non-git source.
+- **`yoe config show`, `yoe source`, `yoe module list`, and `yoe dev` work in
+  projects that use package feeds.** They loaded the project without the feed
+  extensions and failed with `undefined: alpine_feed`. `yoe config show` also
+  now reads local settings from the project root rather than the current
+  directory.
+- **Removed the unimplemented `yoe bootstrap` subcommand.** It could not run;
+  building yoe on a yoe-built device is unaffected and continues to work through
+  the normal build path.
+- **A unit with a misspelled `scope` is now rejected instead of silently built
+  for the wrong target.** An unrecognized value fell through to per-architecture
+  scoping, so the package was built and published somewhere nobody expected.
+  Valid values are `arch`, `machine`, and `noarch`; leaving it out still means
+  `arch`.
+- **Removed `sources(...)`, `s3_cache(...)`, and `uboot(...)`, along with the
+  `kernel(...)` source fields.** All of them accepted their arguments and
+  discarded them, so a project configuring a Go proxy, a shared cache, or a
+  bootloader through them got no effect and no warning. Machines name a kernel
+  and bootloader unit instead, which is how every in-tree machine already works.
+- **Removed `yoe clean --locks`.** Builds no longer write lock files, so there
+  is nothing left for it to clean up. A build that is interrupted leaves nothing
+  behind that a later build has to be told to ignore.
+- **A unit that runs one privileged build step no longer loses its own root-user
+  setting for every step after it.**
+- Image units get a one-time rebuild: a display-only field was being folded into
+  their cache key.
 
 ## [0.13.1] - 2026-07-29
 

@@ -132,9 +132,9 @@ func TestMaterializeUnit_SkipsSelfReference(t *testing.T) {
 
 func TestMaterializeUnit_VersionSplit(t *testing.T) {
 	cases := []struct {
-		in           string
-		wantVer      string
-		wantRel      int
+		in      string
+		wantVer string
+		wantRel int
 	}{
 		{"1.2.5-r11", "1.2.5", 11},
 		{"9.9_p2-r0", "9.9_p2", 0},

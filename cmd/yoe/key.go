@@ -21,8 +21,7 @@ import (
 // ~/.config/yoe/keys/<project>.rsa.
 func cmdKey(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s key <generate|info>\n", os.Args[0])
-		os.Exit(1)
+		fail("Usage: %s key <generate|info>", os.Args[0])
 	}
 
 	proj := loadProject()
@@ -31,8 +30,7 @@ func cmdKey(args []string) {
 	case "generate":
 		signer, err := artifact.LoadOrGenerateSigner(proj.Name, proj.SigningKey)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			fail("Error: %v", err)
 		}
 		fmt.Printf("Signing key: %s\n", keyPathFor(proj.Name, proj.SigningKey))
 		fmt.Printf("Public key:  %s\n", keyPathFor(proj.Name, proj.SigningKey)+".pub")
@@ -48,8 +46,7 @@ func cmdKey(args []string) {
 		}
 		signer, err := artifact.LoadOrGenerateSigner(proj.Name, proj.SigningKey)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			fail("Error: %v", err)
 		}
 		fmt.Printf("Signing key: %s\n", path)
 		fmt.Printf("Public key:  %s\n", path+".pub")
@@ -57,8 +54,7 @@ func cmdKey(args []string) {
 		fmt.Printf("Fingerprint: %s\n", fingerprint(signer.PubPEM))
 
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown key subcommand: %s\n", args[0])
-		os.Exit(1)
+		fail("Unknown key subcommand: %s", args[0])
 	}
 }
 

@@ -2,11 +2,9 @@ package source
 
 import (
 	"bytes"
-	"compress/flate"
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/yoebuild/yoe/internal/apkindex"
+	"github.com/yoebuild/yoe/internal/gzipframe"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -31,106 +31,17 @@ var httpClient = &http.Client{
 	Transport: &http.Transport{DisableCompression: true},
 }
 
-// decodeAPKChecksum parses Alpine's APKINDEX `C:` value and returns the
-// raw expected sha1 bytes. Format: "Q1<base64-encoded-sha1>=" — the "Q1"
-// prefix is a hash-type tag (Q1 = sha1; Q2 = sha256 was reserved but
-// never deployed at scale). Returns an error for any other prefix or
-// malformed input.
-func decodeAPKChecksum(s string) ([]byte, error) {
-	if !strings.HasPrefix(s, "Q1") {
-		return nil, fmt.Errorf("apk_checksum: expected Q1 (sha1) prefix, got %q", s)
-	}
-	raw, err := base64.StdEncoding.DecodeString(s[2:])
-	if err != nil {
-		return nil, fmt.Errorf("apk_checksum: base64 decode: %w", err)
-	}
-	if len(raw) != sha1.Size {
-		return nil, fmt.Errorf("apk_checksum: wanted %d sha1 bytes, got %d",
-			sha1.Size, len(raw))
-	}
-	return raw, nil
-}
-
 // apkControlSegment returns the raw bytes of the control segment (the
 // second gzip stream) in an apk file. APKINDEX `C:` is sha1 of this
 // byte range — NOT of the whole file, and NOT of the data segment.
 //
 // An apk is three gzip streams concatenated: signature, control, data.
-// compress/gzip won't tell us precisely where one stream ends in the
-// underlying byte slice, so we parse gzip framing by hand and use
-// compress/flate to consume each deflate body until its end-of-block
-// marker. bytes.Reader implements io.ByteReader, so flate.NewReader
-// uses it directly with no buffering — we recover the exact byte
-// boundary from br.Len() after each stream.
 func apkControlSegment(data []byte) ([]byte, error) {
-	bounds, err := gzipStreamBoundaries(data)
+	seg, err := gzipframe.Stream(data, 1)
 	if err != nil {
 		return nil, fmt.Errorf("apk parse: %w", err)
 	}
-	if len(bounds) < 2 {
-		return nil, fmt.Errorf("apk has %d gzip stream(s), expected >=2",
-			len(bounds))
-	}
-	s2 := bounds[1]
-	return data[s2[0]:s2[1]], nil
-}
-
-type gzipBound [2]int
-
-func gzipStreamBoundaries(data []byte) ([]gzipBound, error) {
-	var out []gzipBound
-	pos := 0
-	for pos < len(data) {
-		if pos+10 > len(data) || data[pos] != 0x1f || data[pos+1] != 0x8b {
-			break
-		}
-		start := pos
-		flg := data[pos+3]
-		hdrEnd := pos + 10
-		if flg&0x04 != 0 { // FEXTRA
-			if hdrEnd+2 > len(data) {
-				return nil, fmt.Errorf("truncated FEXTRA")
-			}
-			xlen := int(binary.LittleEndian.Uint16(data[hdrEnd : hdrEnd+2]))
-			hdrEnd += 2 + xlen
-		}
-		if flg&0x08 != 0 { // FNAME — null-terminated
-			for hdrEnd < len(data) && data[hdrEnd] != 0 {
-				hdrEnd++
-			}
-			hdrEnd++
-		}
-		if flg&0x10 != 0 { // FCOMMENT — null-terminated
-			for hdrEnd < len(data) && data[hdrEnd] != 0 {
-				hdrEnd++
-			}
-			hdrEnd++
-		}
-		if flg&0x02 != 0 { // FHCRC
-			hdrEnd += 2
-		}
-		if hdrEnd > len(data) {
-			return nil, fmt.Errorf("truncated gzip header")
-		}
-		br := bytes.NewReader(data[hdrEnd:])
-		zr := flate.NewReader(br)
-		if _, err := io.Copy(io.Discard, zr); err != nil {
-			zr.Close()
-			return nil, fmt.Errorf("deflate stream %d: %w", len(out), err)
-		}
-		if err := zr.Close(); err != nil {
-			return nil, fmt.Errorf("deflate close stream %d: %w", len(out), err)
-		}
-		// Bytes consumed from data[hdrEnd:] = original-len minus what's left.
-		deflateConsumed := (len(data) - hdrEnd) - br.Len()
-		end := hdrEnd + deflateConsumed + 8 // +8 for CRC32 + ISIZE trailer
-		if end > len(data) {
-			return nil, fmt.Errorf("truncated gzip trailer")
-		}
-		out = append(out, gzipBound{start, end})
-		pos = end
-	}
-	return out, nil
+	return seg, nil
 }
 
 // CacheDir returns the source cache directory, creating it if needed.
@@ -159,7 +70,7 @@ func Fetch(unit *yoestar.Unit, w io.Writer) (string, error) {
 		return "", fmt.Errorf("unit %q has no source", unit.Name)
 	}
 
-	if isGitURL(unit.Source) {
+	if IsGitURL(unit.Source) {
 		return fetchGit(cacheDir, unit, w)
 	}
 	return fetchHTTP(cacheDir, unit, w)
@@ -192,7 +103,7 @@ func fetchHTTP(cacheDir string, unit *yoestar.Unit, w io.Writer) (string, error)
 	// Pre-validate apk_checksum format before paying the download cost.
 	var apkExpected []byte
 	if unit.APKChecksum != "" {
-		raw, err := decodeAPKChecksum(unit.APKChecksum)
+		raw, err := apkindex.DecodeChecksum(unit.APKChecksum)
 		if err != nil {
 			return "", fmt.Errorf("unit %q: %w", unit.Name, err)
 		}
@@ -301,7 +212,7 @@ func Verify(unit *yoestar.Unit) error {
 	if unit.SHA256 == "" {
 		return nil // no hash to verify
 	}
-	if isGitURL(unit.Source) {
+	if IsGitURL(unit.Source) {
 		return nil // git sources verified by commit hash
 	}
 
@@ -334,10 +245,19 @@ func Verify(unit *yoestar.Unit) error {
 	return nil
 }
 
-func isGitURL(url string) bool {
+// IsGitURL reports whether a unit's source URL is fetched as a git clone
+// rather than downloaded as an archive. This is the single definition:
+// anything deciding "is this unit git-backed" (the fetcher choosing a
+// strategy, `yoe dev` deciding whether a unit can enter dev mode) must
+// agree, or a unit fetched as git gets rejected as a non-git source.
+//
+// A bare github.com/... path counts: those are repo URLs unless they point
+// at a generated archive or a release asset, which are plain downloads.
+func IsGitURL(url string) bool {
 	return strings.HasSuffix(url, ".git") ||
 		strings.HasPrefix(url, "git://") ||
 		strings.HasPrefix(url, "git@") ||
+		strings.HasPrefix(url, "ssh://") ||
 		(strings.Contains(url, "github.com/") && !strings.Contains(url, "/archive/") && !strings.Contains(url, "/releases/"))
 }
 

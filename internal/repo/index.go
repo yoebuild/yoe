@@ -364,4 +364,3 @@ func pkginfoSize(p pkginfoMap) int64 {
 	fmt.Sscanf(val, "%d", &n)
 	return n
 }
-

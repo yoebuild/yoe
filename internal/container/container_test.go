@@ -1,9 +1,11 @@
-package internal
+package container
 
 import (
 	"fmt"
 	"os/user"
 	"testing"
+
+	archpkg "github.com/yoebuild/yoe/internal/arch"
 )
 
 func TestContainerRunArgs_Basic(t *testing.T) {
@@ -148,13 +150,13 @@ func TestContainerRunArgs_PullPolicy(t *testing.T) {
 // as "exec format error".
 func TestContainerRunArgs_PlatformAlwaysSet(t *testing.T) {
 	host, err := containerRunArgs(ContainerRunConfig{
-		Command: "true", Image: "golang:1.26", ProjectDir: "/p", Arch: hostArch(),
+		Command: "true", Image: "golang:1.26", ProjectDir: "/p", Arch: archpkg.Host(),
 	})
 	if err != nil {
 		t.Fatalf("containerRunArgs (host arch): %v", err)
 	}
 	assertContains(t, host, "--platform")
-	assertContains(t, host, "linux/"+hostArch())
+	assertContains(t, host, "linux/"+archpkg.Host())
 
 	cross, err := containerRunArgs(ContainerRunConfig{
 		Command: "true", Image: "yoe/toolchain-musl:15-arm64", ProjectDir: "/p", Arch: "arm64",

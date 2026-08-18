@@ -42,36 +42,46 @@ func TestDryRun(t *testing.T) {
 	}
 }
 
-func TestCacheMarker(t *testing.T) {
+// The cache marker is BuildMeta: a completed build at a matching hash.
+// A build.json that records something else — still building, or failed —
+// must not read as cached, or a failed unit would be skipped forever.
+func TestIsBuildCached(t *testing.T) {
 	dir := t.TempDir()
 	name := "test-unit"
 	hash := "abc123def456"
 
 	arch := "x86_64"
 	distro := "alpine"
+	buildDir := UnitBuildDir(dir, arch, name, distro)
 
-	// Not cached initially
 	if IsBuildCached(dir, arch, name, hash, distro) {
-		t.Error("should not be cached initially")
+		t.Error("should not be cached with no build.json")
 	}
 
-	// Write marker
-	writeCacheMarker(dir, arch, name, hash, distro)
-
-	// Now cached
+	EnsureDir(buildDir)
+	if err := WriteMeta(buildDir, &BuildMeta{Status: "complete", Hash: hash}); err != nil {
+		t.Fatal(err)
+	}
 	if !IsBuildCached(dir, arch, name, hash, distro) {
-		t.Error("should be cached after writing marker")
+		t.Error("should be cached after a completed build at this hash")
 	}
 
-	// Different hash not cached
 	if IsBuildCached(dir, arch, name, "different", distro) {
-		t.Error("different hash should not be cached")
+		t.Error("a different hash should not be cached")
 	}
 
-	// Different distro is a separate cache slot — R14a disambiguation
-	// at the disk layer is what U6 enables.
+	// Each distro is its own cache slot on disk.
 	if IsBuildCached(dir, arch, name, hash, "debian") {
-		t.Error("different distro should not share the cache marker")
+		t.Error("a different distro should not share the cache marker")
+	}
+
+	for _, status := range []string{"building", "failed", "cancelled"} {
+		if err := WriteMeta(buildDir, &BuildMeta{Status: status, Hash: hash}); err != nil {
+			t.Fatal(err)
+		}
+		if IsBuildCached(dir, arch, name, hash, distro) {
+			t.Errorf("status %q should not read as cached", status)
+		}
 	}
 }
 
@@ -181,20 +191,20 @@ func TestBuildUnits_WithDeps(t *testing.T) {
 		t.Errorf("output should mention done: %s", output)
 	}
 
-	// Verify cache marker was written
-	if !IsBuildCached(projectDir, "x86_64", "hello", "", "alpine") {
-		// The hash won't be "" — just verify the marker file exists
-		markerDir := filepath.Join(projectDir, "build", "alpine", "hello.x86_64")
-		entries, _ := os.ReadDir(markerDir)
-		found := false
-		for _, e := range entries {
-			if e.Name() == ".yoe-hash" {
-				found = true
-			}
-		}
-		if !found {
-			t.Error("cache marker not written")
-		}
+	// The build must have recorded itself as complete, which is what a
+	// later run reads to decide the unit is cached.
+	meta := ReadMeta(UnitBuildDir(projectDir, "x86_64", "hello", "alpine"))
+	if meta == nil {
+		t.Fatal("no build.json written")
+	}
+	if meta.Status != "complete" {
+		t.Errorf("build.json status = %q, want complete", meta.Status)
+	}
+	if meta.Hash == "" {
+		t.Error("build.json recorded no input hash")
+	}
+	if !IsBuildCached(projectDir, "x86_64", "hello", meta.Hash, "alpine") {
+		t.Error("a completed build should read as cached at its own hash")
 	}
 }
 

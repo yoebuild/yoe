@@ -15,13 +15,10 @@ func (e *Engine) builtins() starlark.StringDict {
 		"project":          starlark.NewBuiltin("project", e.fnProject),
 		"defaults":         starlark.NewBuiltin("defaults", fnDefaults),
 		"cache":            starlark.NewBuiltin("cache", fnCache),
-		"s3_cache":         starlark.NewBuiltin("s3_cache", fnS3Cache),
-		"sources":          starlark.NewBuiltin("sources", fnSources),
 		"module":           starlark.NewBuiltin("module", fnModule),
 		"module_info":      starlark.NewBuiltin("module_info", e.fnModuleInfo),
 		"machine":          starlark.NewBuiltin("machine", e.fnMachine),
 		"kernel":           starlark.NewBuiltin("kernel", fnKernel),
-		"uboot":            starlark.NewBuiltin("uboot", fnUboot),
 		"qemu_config":      starlark.NewBuiltin("qemu_config", fnQEMUConfig),
 		"unit":             starlark.NewBuiltin("unit", e.fnUnit),
 		"image":            starlark.NewBuiltin("image", e.fnImage),
@@ -132,14 +129,8 @@ func ParseTaskList(list *starlark.List) []Task {
 					switch val := sv.(type) {
 					case starlark.String:
 						t.Steps = append(t.Steps, Step{Command: string(val)})
-					case *InstallStepValue:
-						t.Steps = append(t.Steps, Step{Install: &InstallStep{
-							Kind:    val.Kind,
-							Src:     val.Src,
-							Dest:    val.Dest,
-							Mode:    val.Mode,
-							BaseDir: val.BaseDir,
-						}})
+					case *InstallStep:
+						t.Steps = append(t.Steps, Step{Install: val})
 					case starlark.Callable:
 						t.Steps = append(t.Steps, Step{Fn: val})
 					}
@@ -253,30 +244,126 @@ func kwStringMap(kwargs []starlark.Tuple, key string) map[string]string {
 	return nil
 }
 
-// reservedUnitKwargs lists the kwargs that unit() and image() map to typed
-// fields on the Unit struct. Kwargs not in this set are captured into
-// Unit.Extra for template context rendering.
+// unitFields is the single table describing how a unit() kwarg becomes a
+// typed field on Unit. Each entry both reads the value and reserves the
+// kwarg name, so a field cannot be added without its name also being
+// excluded from Unit.Extra.
 //
-// When a new typed field is added to the Unit struct, add its kwarg name here
-// too so it isn't double-captured into Extra.
-var reservedUnitKwargs = map[string]bool{
-	"name": true, "version": true, "release": true, "scope": true,
-	"description": true, "license": true, "distro": true,
-	"source": true, "sha256": true,
-	"apk_checksum":    true,
-	"passthrough_apk": true,
-	"tag":             true, "branch": true, "patches": true, "deps": true,
-	"runtime_deps":        true,
-	"distro_deps":         true,
-	"distro_runtime_deps": true,
-	"container":           true, "container_arch": true,
-	"sandbox": true, "shell": true, "tasks": true, "provides": true,
-	"replaces": true,
-	"services": true, "conffiles": true, "environment": true,
-	"cache_dirs": true, "artifacts": true, "exclude": true,
-	"hostname": true, "timezone": true, "locale": true,
-	"partitions": true, "unit_class": true,
-	"unbuildable_machine": true, "machine_kernel_distros": true,
+// That mattered: the reservation used to be a separate hand-maintained
+// list, and it drifted. artifacts_explicit was read into a field but
+// missing from the list, so it was also captured into Extra — which is
+// part of the content-addressed hash. Every image sets it, so a purely
+// presentational value silently became part of every image's cache key.
+var unitFields = []struct {
+	kwarg string
+	set   func(*Unit, []starlark.Tuple)
+}{
+	{"version", func(u *Unit, kw []starlark.Tuple) { u.Version = kwString(kw, "version") }},
+	{"release", func(u *Unit, kw []starlark.Tuple) { u.Release = kwInt(kw, "release") }},
+	{"scope", func(u *Unit, kw []starlark.Tuple) { u.Scope = kwString(kw, "scope") }},
+	{"description", func(u *Unit, kw []starlark.Tuple) { u.Description = kwString(kw, "description") }},
+	{"license", func(u *Unit, kw []starlark.Tuple) { u.License = kwString(kw, "license") }},
+	{"distro", func(u *Unit, kw []starlark.Tuple) { u.Distro = kwString(kw, "distro") }},
+	{"source", func(u *Unit, kw []starlark.Tuple) { u.Source = kwString(kw, "source") }},
+	{"sha256", func(u *Unit, kw []starlark.Tuple) { u.SHA256 = kwString(kw, "sha256") }},
+	{"apk_checksum", func(u *Unit, kw []starlark.Tuple) { u.APKChecksum = kwString(kw, "apk_checksum") }},
+	{"passthrough_apk", func(u *Unit, kw []starlark.Tuple) { u.PassthroughAPK = kwString(kw, "passthrough_apk") }},
+	{"tag", func(u *Unit, kw []starlark.Tuple) { u.Tag = kwString(kw, "tag") }},
+	{"branch", func(u *Unit, kw []starlark.Tuple) { u.Branch = kwString(kw, "branch") }},
+	{"patches", func(u *Unit, kw []starlark.Tuple) { u.Patches = kwStringList(kw, "patches") }},
+	{"deps", func(u *Unit, kw []starlark.Tuple) { u.Deps = kwStringList(kw, "deps") }},
+	{"runtime_deps", func(u *Unit, kw []starlark.Tuple) { u.RuntimeDeps = kwStringList(kw, "runtime_deps") }},
+	{"distro_deps", func(u *Unit, kw []starlark.Tuple) { u.DistroDeps = kwStringListMap(kw, "distro_deps") }},
+	{"distro_runtime_deps", func(u *Unit, kw []starlark.Tuple) { u.DistroRuntimeDeps = kwStringListMap(kw, "distro_runtime_deps") }},
+	{"container", func(u *Unit, kw []starlark.Tuple) { u.Container = kwString(kw, "container") }},
+	{"container_arch", func(u *Unit, kw []starlark.Tuple) { u.ContainerArch = kwString(kw, "container_arch") }},
+	{"sandbox", func(u *Unit, kw []starlark.Tuple) { u.Sandbox = kwBool(kw, "sandbox") }},
+	{"shell", func(u *Unit, kw []starlark.Tuple) { u.Shell = kwString(kw, "shell") }},
+	{"provides", func(u *Unit, kw []starlark.Tuple) { u.Provides = kwStringList(kw, "provides") }},
+	{"replaces", func(u *Unit, kw []starlark.Tuple) { u.Replaces = kwStringList(kw, "replaces") }},
+	{"services", func(u *Unit, kw []starlark.Tuple) { u.Services = kwStringList(kw, "services") }},
+	{"conffiles", func(u *Unit, kw []starlark.Tuple) { u.Conffiles = kwStringList(kw, "conffiles") }},
+	{"environment", func(u *Unit, kw []starlark.Tuple) { u.Environment = kwStringMap(kw, "environment") }},
+	{"cache_dirs", func(u *Unit, kw []starlark.Tuple) { u.CacheDirs = kwStringMap(kw, "cache_dirs") }},
+	{"artifacts", func(u *Unit, kw []starlark.Tuple) { u.Artifacts = kwStringList(kw, "artifacts") }},
+	{"artifacts_explicit", func(u *Unit, kw []starlark.Tuple) { u.ArtifactsExplicit = kwStringList(kw, "artifacts_explicit") }},
+	{"exclude", func(u *Unit, kw []starlark.Tuple) { u.Exclude = kwStringList(kw, "exclude") }},
+	{"hostname", func(u *Unit, kw []starlark.Tuple) { u.Hostname = kwString(kw, "hostname") }},
+	{"timezone", func(u *Unit, kw []starlark.Tuple) { u.Timezone = kwString(kw, "timezone") }},
+	{"locale", func(u *Unit, kw []starlark.Tuple) { u.Locale = kwString(kw, "locale") }},
+	// Set by image() only on the skip path — the selected machine's
+	// kernel has no entry for this image's distro, so the image is
+	// registered inert instead of resolved. See Unit.NotBuildable.
+	{"unbuildable_machine", func(u *Unit, kw []starlark.Tuple) { u.UnbuildableMachine = kwString(kw, "unbuildable_machine") }},
+	{"machine_kernel_distros", func(u *Unit, kw []starlark.Tuple) {
+		u.MachineKernelDistros = kwStringList(kw, "machine_kernel_distros")
+	}},
+	{"tasks", func(u *Unit, kw []starlark.Tuple) {
+		for _, kv := range kw {
+			if string(kv[0].(starlark.String)) == "tasks" {
+				if list, ok := kv[1].(*starlark.List); ok {
+					u.Tasks = append(u.Tasks, ParseTaskList(list)...)
+				}
+			}
+		}
+	}},
+	{"partitions", func(u *Unit, kw []starlark.Tuple) {
+		for _, kv := range kw {
+			if string(kv[0].(starlark.String)) == "partitions" {
+				u.Partitions = append(u.Partitions, parsePartitions(kv[1])...)
+			}
+		}
+	}},
+}
+
+// reservedUnitKwargs is derived from unitFields, plus the two kwargs
+// registerUnit reads directly (name, and unit_class which overrides the
+// registering builtin's class). Nothing here is maintained by hand.
+var reservedUnitKwargs = func() map[string]bool {
+	m := map[string]bool{"name": true, "unit_class": true}
+	for _, f := range unitFields {
+		m[f.kwarg] = true
+	}
+	return m
+}()
+
+// parsePartitions reads a list of partition(...) structs into Partitions.
+// Shared by machine() (the board's default layout) and image() (an
+// image overriding it), which must agree on the shape or an image's
+// layout would quietly differ from the machine's.
+//
+// A non-list value, or a list element that is not a struct, yields
+// nothing rather than an error: the surrounding kwarg loops accept
+// whatever Starlark handed them, and partition() is the only thing that
+// produces the struct this reads.
+func parsePartitions(v starlark.Value) []Partition {
+	list, ok := v.(*starlark.List)
+	if !ok {
+		return nil
+	}
+	var out []Partition
+	iter := list.Iterate()
+	defer iter.Done()
+	var item starlark.Value
+	for iter.Next(&item) {
+		st, ok := item.(*starlarkstruct.Struct)
+		if !ok {
+			continue
+		}
+		p := Partition{
+			Label:    structString(st, "label"),
+			Type:     structString(st, "type"),
+			Size:     structString(st, "size"),
+			Contents: structStringList(st, "contents"),
+		}
+		if rv, err := st.Attr("root"); err == nil {
+			if b, ok := rv.(starlark.Bool); ok {
+				p.Root = bool(b)
+			}
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // starlarkToGo converts a Starlark value into a Go value suitable for JSON
@@ -422,14 +509,6 @@ func fnCache(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs [
 	return makeStruct("cache", kwargs), nil
 }
 
-func fnS3Cache(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	return makeStruct("s3_cache", kwargs), nil
-}
-
-func fnSources(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	return makeStruct("sources", kwargs), nil
-}
-
 func fnModule(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	if len(args) < 1 {
 		return nil, fmt.Errorf("module() requires a URL argument")
@@ -449,10 +528,6 @@ func fnKernel(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs 
 	return makeStruct("kernel", kwargs), nil
 }
 
-func fnUboot(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	return makeStruct("uboot", kwargs), nil
-}
-
 func fnQEMUConfig(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	return makeStruct("qemu_config", kwargs), nil
 }
@@ -464,8 +539,6 @@ func fnPartition(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwar
 // --- Built-in functions that register module info ---
 
 func (e *Engine) fnModuleInfo(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
 
 	name := kwString(kwargs, "name")
 	if name == "" {
@@ -503,8 +576,6 @@ func (e *Engine) fnModuleInfo(_ *starlark.Thread, _ *starlark.Builtin, _ starlar
 // --- Built-in functions that register targets (side-effecting) ---
 
 func (e *Engine) fnProject(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
 
 	if e.project != nil {
 		return nil, fmt.Errorf("project() called more than once")
@@ -603,19 +674,14 @@ func (e *Engine) fnMachine(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.T
 	kernelS := kwStruct(kwargs, "kernel")
 
 	kc := KernelConfig{
-		Repo:        structString(kernelS, "repo"),
-		Branch:      structString(kernelS, "branch"),
-		Tag:         structString(kernelS, "tag"),
-		Defconfig:   structString(kernelS, "defconfig"),
-		DeviceTrees: structStringList(kernelS, "device_trees"),
-		Unit:        structString(kernelS, "unit"),
-		Cmdline:     structString(kernelS, "cmdline"),
-		Provides:    structString(kernelS, "provides"),
-		DistroUnit:  structStringMap(kernelS, "distro_unit"),
+		Defconfig:  structString(kernelS, "defconfig"),
+		Unit:       structString(kernelS, "unit"),
+		Cmdline:    structString(kernelS, "cmdline"),
+		Provides:   structString(kernelS, "provides"),
+		DistroUnit: structStringMap(kernelS, "distro_unit"),
 	}
 	// `unit` and `distro_unit` are two spellings of "which unit provides this
-	// kernel" — one flat, one per-distro. Setting both is ambiguous. (A
-	// repo/branch source kernel sets neither, which is fine.)
+	// kernel" — one flat, one per-distro. Setting both is ambiguous.
 	if kc.Unit != "" && len(kc.DistroUnit) > 0 {
 		return nil, fmt.Errorf("machine %q: kernel sets both unit and distro_unit (use one)", name)
 	}
@@ -636,26 +702,12 @@ func (e *Engine) fnMachine(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.T
 	for _, kv := range kwargs {
 		key := string(kv[0].(starlark.String))
 		switch key {
-		case "bootloader", "uboot", "qemu":
+		case "qemu":
 			s, ok := kv[1].(*starlarkstruct.Struct)
 			if !ok {
 				continue
 			}
 			switch key {
-			case "bootloader":
-				m.Bootloader = BootloaderConfig{
-					Type:      structString(s, "type"),
-					Repo:      structString(s, "repo"),
-					Branch:    structString(s, "branch"),
-					Defconfig: structString(s, "defconfig"),
-				}
-			case "uboot":
-				m.Bootloader = BootloaderConfig{
-					Type:      "u-boot",
-					Repo:      structString(s, "repo"),
-					Branch:    structString(s, "branch"),
-					Defconfig: structString(s, "defconfig"),
-				}
 			case "qemu":
 				m.QEMU = &QEMUConfig{
 					Machine:  structString(s, "machine"),
@@ -667,33 +719,11 @@ func (e *Engine) fnMachine(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.T
 				}
 			}
 		case "partitions":
-			if list, ok := kv[1].(*starlark.List); ok {
-				iter := list.Iterate()
-				defer iter.Done()
-				var v starlark.Value
-				for iter.Next(&v) {
-					if s, ok := v.(*starlarkstruct.Struct); ok {
-						p := Partition{
-							Label:    structString(s, "label"),
-							Type:     structString(s, "type"),
-							Size:     structString(s, "size"),
-							Contents: structStringList(s, "contents"),
-						}
-						if rv, err := s.Attr("root"); err == nil {
-							if b, ok := rv.(starlark.Bool); ok {
-								p.Root = bool(b)
-							}
-						}
-						m.Partitions = append(m.Partitions, p)
-					}
-				}
-			}
+			m.Partitions = append(m.Partitions, parsePartitions(kv[1])...)
 		}
 	}
 
-	e.mu.Lock()
 	e.machines[name] = m
-	e.mu.Unlock()
 
 	return starlark.None, nil
 }
@@ -710,83 +740,17 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 		cls = class
 	}
 
-	r := &Unit{
-		Name:              name,
-		Version:           kwString(kwargs, "version"),
-		Release:           kwInt(kwargs, "release"),
-		Class:             cls,
-		Scope:             kwString(kwargs, "scope"),
-		Description:       kwString(kwargs, "description"),
-		License:           kwString(kwargs, "license"),
-		Distro:            kwString(kwargs, "distro"),
-		Source:            kwString(kwargs, "source"),
-		SHA256:            kwString(kwargs, "sha256"),
-		APKChecksum:       kwString(kwargs, "apk_checksum"),
-		PassthroughAPK:    kwString(kwargs, "passthrough_apk"),
-		Tag:               kwString(kwargs, "tag"),
-		Branch:            kwString(kwargs, "branch"),
-		Patches:           kwStringList(kwargs, "patches"),
-		Deps:              kwStringList(kwargs, "deps"),
-		RuntimeDeps:       kwStringList(kwargs, "runtime_deps"),
-		DistroDeps:        kwStringListMap(kwargs, "distro_deps"),
-		DistroRuntimeDeps: kwStringListMap(kwargs, "distro_runtime_deps"),
-		Container:         kwString(kwargs, "container"),
-		ContainerArch:     kwString(kwargs, "container_arch"),
-		Sandbox:           kwBool(kwargs, "sandbox"),
-		Shell:             kwString(kwargs, "shell"),
-		Provides:          kwStringList(kwargs, "provides"),
-		Replaces:          kwStringList(kwargs, "replaces"),
-		Services:          kwStringList(kwargs, "services"),
-		Conffiles:         kwStringList(kwargs, "conffiles"),
-		Environment:       kwStringMap(kwargs, "environment"),
-		CacheDirs:         kwStringMap(kwargs, "cache_dirs"),
-		Artifacts:         kwStringList(kwargs, "artifacts"),
-		ArtifactsExplicit: kwStringList(kwargs, "artifacts_explicit"),
-		Exclude:           kwStringList(kwargs, "exclude"),
-		Hostname:          kwString(kwargs, "hostname"),
-		Timezone:          kwString(kwargs, "timezone"),
-		Locale:            kwString(kwargs, "locale"),
-		// Set by image() only on the skip path — the selected machine's
-		// kernel has no entry for this image's distro, so the image is
-		// registered inert instead of resolved. See Unit.NotBuildable.
-		UnbuildableMachine:   kwString(kwargs, "unbuildable_machine"),
-		MachineKernelDistros: kwStringList(kwargs, "machine_kernel_distros"),
+	// Scope decides which build subtree the unit lands in and which repo
+	// arch dir its package publishes to. A typo silently falls through to
+	// arch scoping, which builds and publishes to the wrong place — so
+	// reject unknown values the way an invalid machine arch is rejected.
+	if scope := kwString(kwargs, "scope"); !validScopes[scope] {
+		return nil, fmt.Errorf("unit %q: invalid scope %q (valid: arch, machine, noarch; unset means arch)", name, scope)
 	}
 
-	// Parse tasks
-	for _, kv := range kwargs {
-		if string(kv[0].(starlark.String)) == "tasks" {
-			if list, ok := kv[1].(*starlark.List); ok {
-				r.Tasks = append(r.Tasks, ParseTaskList(list)...)
-			}
-		}
-	}
-
-	// Parse partitions if present
-	for _, kv := range kwargs {
-		if string(kv[0].(starlark.String)) == "partitions" {
-			if list, ok := kv[1].(*starlark.List); ok {
-				iter := list.Iterate()
-				defer iter.Done()
-				var v starlark.Value
-				for iter.Next(&v) {
-					if s, ok := v.(*starlarkstruct.Struct); ok {
-						p := Partition{
-							Label:    structString(s, "label"),
-							Type:     structString(s, "type"),
-							Size:     structString(s, "size"),
-							Contents: structStringList(s, "contents"),
-						}
-						if rv, err := s.Attr("root"); err == nil {
-							if b, ok := rv.(starlark.Bool); ok {
-								p.Root = bool(b)
-							}
-						}
-						r.Partitions = append(r.Partitions, p)
-					}
-				}
-			}
-		}
+	r := &Unit{Name: name, Class: cls}
+	for _, f := range unitFields {
+		f.set(r, kwargs)
 	}
 
 	// Capture unrecognized kwargs into Extra (used for template context + hash).
@@ -818,14 +782,26 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 	// shadow the priority choice at lookup time for the matching
 	// distro only — alpine pins don't interfere with debian closures
 	// and vice versa.
-	e.mu.Lock()
+	// Two units of the same name tagged for different distros are not a
+	// collision — each is only ever reached by its own distro's closure,
+	// which is what the per-module catalog exists to allow (module-debian
+	// and module-ubuntu both define dev-image). This mirrors the
+	// exemption the provides-collision path already applies.
+	//
+	// Skipping the shadow machinery matters for more than the report: the
+	// shadow-loser branch returns before storing into the per-module
+	// catalog, so the lower-priority module's unit was dropped outright
+	// and its distro's image became unresolvable.
+	crossDistro := false
 	if existing, ok := e.units[name]; ok {
+		crossDistro = r.Distro != "" && existing.Distro != "" && r.Distro != existing.Distro
+	}
+	if existing, ok := e.units[name]; ok && !crossDistro {
 		// Same priority (same module, or both project root) → hard error.
 		// Cross-priority collisions are shadows: highest priority wins, with
 		// a stderr notice. Project priority is set strictly above any module
 		// in loader.go, so project units always win.
 		if r.ModuleIndex == existing.ModuleIndex {
-			e.mu.Unlock()
 			return nil, fmt.Errorf("unit %q already defined (first defined in %s)",
 				name, moduleSource(existing.Module))
 		}
@@ -837,7 +813,6 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 				LoserModule:  r.Module,
 				LoserDir:     r.DefinedIn,
 			})
-			e.mu.Unlock()
 			if e.showShadows {
 				fmt.Fprintf(os.Stderr,
 					"notice: unit %q from %s is shadowed by %s\n",
@@ -859,13 +834,18 @@ func (e *Engine) registerUnit(class string, kwargs []starlark.Tuple) (*Unit, err
 				name, moduleSource(r.Module), moduleSource(existing.Module))
 		}
 	}
-	e.units[name] = r
+	// The flat catalog holds one unit per name. For a cross-distro pair
+	// there is no right answer there, so the first registration keeps the
+	// slot; anything that needs the distro-correct variant goes through
+	// the per-module catalog below.
+	if !crossDistro {
+		e.units[name] = r
+	}
 	// Also store in the per-module catalog. Same-named units from
 	// different modules coexist here (alpine.main's libssl3 doesn't
 	// shadow debian.main's); the closure walker picks per consuming
 	// distro at lookup time.
 	e.storeByModule(r)
-	e.mu.Unlock()
 
 	return r, nil
 }
@@ -969,9 +949,7 @@ func (e *Engine) fnCommand(thread *starlark.Thread, _ *starlark.Builtin, _ starl
 		}
 	}
 
-	e.mu.Lock()
 	e.commands[name] = cmd
-	e.mu.Unlock()
 
 	return starlark.None, nil
 }

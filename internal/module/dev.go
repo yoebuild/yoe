@@ -2,12 +2,11 @@ package module
 
 import (
 	"fmt"
-	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/yoebuild/yoe/internal/gitutil"
 	"github.com/yoebuild/yoe/internal/source"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
@@ -51,10 +50,10 @@ func ModuleToUpstream(m yoestar.ResolvedModule, opts ModuleUpstreamOpts) error {
 	}
 
 	if opts.SSH {
-		current, err := gitOut(repo, "remote", "get-url", "origin")
+		current, err := gitutil.Run(repo, "remote", "get-url", "origin")
 		if err == nil {
-			if rewrote, ok := httpsToSSH(strings.TrimSpace(current)); ok {
-				if _, err := gitOut(repo, "remote", "set-url", "origin", rewrote); err != nil {
+			if rewrote, ok := gitutil.HTTPSToSSH(strings.TrimSpace(current)); ok {
+				if _, err := gitutil.Run(repo, "remote", "set-url", "origin", rewrote); err != nil {
 					return fmt.Errorf("ModuleToUpstream: switching origin to SSH: %w", err)
 				}
 			}
@@ -70,7 +69,7 @@ func ModuleToUpstream(m yoestar.ResolvedModule, opts ModuleUpstreamOpts) error {
 	// HEAD == upstream, dev-mod after a local commit, dev-dirty when
 	// the work tree is dirty). Modules don't get this tag at sync time
 	// — only when the user opts into dev mode.
-	if _, err := gitOut(repo, "tag", "-f", source.PinTag, "HEAD"); err != nil {
+	if _, err := gitutil.Run(repo, "tag", "-f", source.PinTag, "HEAD"); err != nil {
 		return fmt.Errorf("ModuleToUpstream: tagging upstream: %w", err)
 	}
 	// Hide the state file from `git status` so it doesn't taint the
@@ -117,17 +116,17 @@ func ModuleToPin(m yoestar.ResolvedModule, force bool) error {
 	if ref == "" {
 		ref = "main"
 	}
-	if _, err := gitOut(repo, "fetch", "origin", ref); err != nil {
+	if _, err := gitutil.Run(repo, "fetch", "origin", ref); err != nil {
 		return fmt.Errorf("ModuleToPin: fetch origin %s: %w", ref, err)
 	}
-	if _, err := gitOut(repo, "reset", "--hard", "FETCH_HEAD"); err != nil {
+	if _, err := gitutil.Run(repo, "reset", "--hard", "FETCH_HEAD"); err != nil {
 		return fmt.Errorf("ModuleToPin: reset --hard: %w", err)
 	}
 	// Advance the upstream tag to the new HEAD so any future
 	// source.DetectState query (during a TUI cold-start before the
 	// user re-toggles to dev) doesn't see the old upstream commit and
 	// misreport dev-mod against a freshly reset clone.
-	if _, err := gitOut(repo, "tag", "-f", source.PinTag, "HEAD"); err != nil {
+	if _, err := gitutil.Run(repo, "tag", "-f", source.PinTag, "HEAD"); err != nil {
 		// best effort; the state-file clear below is the authoritative
 		// signal for the TUI.
 		_ = err
@@ -135,62 +134,16 @@ func ModuleToPin(m yoestar.ResolvedModule, force bool) error {
 	return WriteState(repo, source.StateEmpty)
 }
 
-// httpsToSSH rewrites a github/gitlab-style HTTPS URL to SSH.
-// Mirror of the helper in internal/dev.go — kept private to this
-// package to avoid a circular-import chain.
-//
-//	https://github.com/foo/bar.git → git@github.com:foo/bar.git
-func httpsToSSH(httpsURL string) (string, bool) {
-	u, err := url.Parse(httpsURL)
-	if err != nil || u.Scheme != "https" {
-		return httpsURL, false
-	}
-	path := strings.TrimPrefix(u.Path, "/")
-	if path == "" {
-		return httpsURL, false
-	}
-	return "git@" + u.Host + ":" + path, true
-}
-
-// moduleFetchOrigin runs the upstream fetch with the depth strategy
-// chosen in opts — mirrors devFetchOrigin in internal/dev.go but
-// keeps a thin private copy here to avoid pulling internal/dev's
-// dependency tree (yoestar.Unit, source state writers) into the
-// module package, which is meant to stay narrow.
-//
-// Depth fetches narrow the refspec to the module's pinned ref and
-// pass `--filter=blob:none` so the transfer is commits + trees only.
-// Full-unshallow paths skip both — the user asked for everything.
+// moduleFetchOrigin brings origin up to date in a module clone,
+// honoring the caller's depth preference. Unlike a unit source tree, a
+// clone that already has full history is left alone — a module toggle
+// has nothing to pick up there.
 func moduleFetchOrigin(dir string, opts ModuleUpstreamOpts, pinnedRef string) error {
-	shallow, _ := gitOut(dir, "rev-parse", "--is-shallow-repository")
-	isShallow := strings.TrimSpace(shallow) == "true"
-
-	var args []string
-	var refspec string
-	useFilter := false
-	switch {
-	case opts.FetchDepth > 0:
-		args = []string{"fetch", fmt.Sprintf("--depth=%d", opts.FetchDepth)}
-		refspec = pinnedRef
-		useFilter = true
-	case isShallow:
-		args = []string{"fetch", "--unshallow"}
-	default:
-		// Already full-history clones don't need a re-fetch on toggle —
-		// the user already has everything. Skip silently.
-		return nil
-	}
-	if useFilter {
-		args = append(args, "--filter=blob:none")
-	}
-	args = append(args, "origin")
-	if refspec != "" {
-		args = append(args, refspec)
-	}
-	if _, err := gitOut(dir, args...); err != nil {
-		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
-	}
-	return nil
+	return gitutil.FetchOrigin(dir, gitutil.FetchOptions{
+		Depth:        opts.FetchDepth,
+		PinnedRef:    pinnedRef,
+		SkipWhenFull: true,
+	})
 }
 
 // excludeFromGit appends entry to <gitDir>/.git/info/exclude so the
@@ -215,16 +168,4 @@ func excludeFromGit(gitDir, entry string) error {
 	defer f.Close()
 	_, err = f.WriteString(entry + "\n")
 	return err
-}
-
-// gitOut runs git in dir and returns combined output. Used by both
-// ModuleTo* paths; mirrors internal/dev.go's gitCmd shape.
-func gitOut(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("%s: %s", err, strings.TrimSpace(string(out)))
-	}
-	return string(out), nil
 }
