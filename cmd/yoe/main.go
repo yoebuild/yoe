@@ -652,13 +652,9 @@ func loadProjectWithMachineDistro(machineName, distroOverride string) *yoestar.P
 		dir = "."
 	}
 	// Precedence: --machine flag > local.star > PROJECT.star defaults.
-	// Local image override is also captured here and applied below — it
-	// doesn't affect Starlark eval, so we just patch proj.Defaults.Image.
-	var ovImage string
+	ov := readOverrides()
 	if machineName == "" {
-		ov := readOverrides()
 		machineName = ov.Machine
-		ovImage = ov.Image
 	}
 	opts := projectLoadOpts()
 	if machineName != "" {
@@ -671,12 +667,12 @@ func loadProjectWithMachineDistro(machineName, distroOverride string) *yoestar.P
 	if err != nil {
 		fail("Error: %v", err)
 	}
-	if ovImage != "" {
-		if proj.AnyUnit(ovImage) != nil {
-			proj.Defaults.Image = ovImage
-		} else {
-			fmt.Fprintf(os.Stderr, "Warning: local.star image %q not found in project; ignoring\n", ovImage)
-		}
+	// LoadProject applies the local.star image override itself; the
+	// check here is only to say so when the name has gone stale, which
+	// the loader stays quiet about so a TUI reload never writes over
+	// the screen.
+	if ov.Image != "" && proj.AnyUnit(ov.Image) == nil {
+		fmt.Fprintf(os.Stderr, "Warning: local.star image %q not found in project; ignoring\n", ov.Image)
 	}
 	return proj
 }

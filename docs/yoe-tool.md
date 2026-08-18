@@ -912,7 +912,9 @@ re-arms the follow so the build cascade is visible.
 
 Leaving the Setup page returns the cursor to the target image, whether you
 changed a setting or just looked around — the same place it sits when the TUI
-starts.
+starts. The target image is the one recorded in `local.star` (the Setup page's
+**Image** picker writes it there), and it stays selected as you switch machines
+and distros.
 
 #### Detail view
 

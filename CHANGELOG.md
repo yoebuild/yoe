@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Switching machine or distro keeps your target image.** The TUI reloaded the
+  project and fell back to the image named in `PROJECT.star`, so the header, the
+  cursor, and anything you built or ran next pointed at the wrong image until
+  you restarted. Your `local.star` image now survives the reload.
 - **The unit list returns to the target image when you leave Setup.** Picking a
   new machine or default distro, or simply backing out of the page, left the
   cursor at the top of the list; it now lands on the target image, as it does at
