@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **See how long a unit has been building.** The detail page now counts up from
+  the moment a build starts, so it is clear a long compile is still making
+  progress. The elapsed time is replaced by the total build time when it
+  finishes.
+
 ## [0.14.0] - 2026-08-18
 
 **This release is a large refactor/simplification of the code base.** ... may

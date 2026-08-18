@@ -4590,6 +4590,20 @@ func (m model) wrapLine(line string) []string {
 	return out
 }
 
+// formatBuildDuration renders a build's wall-clock time compactly:
+// sub-minute values keep a decimal ("42.3s"), longer ones roll up into
+// minutes and hours so a multi-hour toolchain build stays readable.
+func formatBuildDuration(seconds float64) string {
+	if seconds < 60 {
+		return fmt.Sprintf("%.1fs", seconds)
+	}
+	total := int(seconds)
+	if total < 3600 {
+		return fmt.Sprintf("%dm%ds", total/60, total%60)
+	}
+	return fmt.Sprintf("%dh%dm%ds", total/3600, (total%3600)/60, total%60)
+}
+
 func (m model) viewDetail() string {
 	var b strings.Builder
 
@@ -4610,12 +4624,15 @@ func (m model) viewDetail() string {
 		currentHash := m.hashes[m.detailUnit]
 		if meta := build.ReadMeta(buildDir); meta != nil && meta.Hash == currentHash {
 			info := fmt.Sprintf("  %s", meta.Status)
-			if meta.Duration > 0 {
-				if meta.Duration < 60 {
-					info += fmt.Sprintf("  %.1fs", meta.Duration)
-				} else {
-					info += fmt.Sprintf("  %dm%ds", int(meta.Duration)/60, int(meta.Duration)%60)
-				}
+			// While the unit is building, build.json holds only a start
+			// time — count up from it so the user can see how long the
+			// unit has been running. Finished builds show the recorded
+			// wall-clock duration instead.
+			switch {
+			case meta.Status == "building" && meta.Started != nil:
+				info += "  " + formatBuildDuration(time.Since(*meta.Started).Seconds())
+			case meta.Duration > 0:
+				info += "  " + formatBuildDuration(meta.Duration)
 			}
 			if meta.DiskBytes > 0 {
 				mb := float64(meta.DiskBytes) / (1024 * 1024)
