@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-08-18
+
 - **Switching machine or distro keeps your target image.** The TUI reloaded the
   project and fell back to the image named in `PROJECT.star`, so the header, the
   cursor, and anything you built or ran next pointed at the wrong image until
