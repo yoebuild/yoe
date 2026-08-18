@@ -1900,7 +1900,6 @@ retry policy).
 **Approach:**
 
 - `StageAptConfig` writes the following into the staging rootfs:
-
   - `/etc/apt/keyrings/<project>.gpg` (binary, 0644).
   - `/etc/apt/sources.list.d/<project>.sources` (deb822, 0644). Body:
     `Types: deb`, `URIs: <project repo URL>/debian`, `Suites: <suite>`,

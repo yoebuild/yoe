@@ -134,7 +134,6 @@ If absent: `no built image found — run yoe build <unit>` and exit non-zero.
 4. **Open the device** with `O_WRONLY | O_EXCL`. `O_EXCL` on a block device is
    the kernel's belt-and-suspenders for "no partitions are currently mounted" —
    it fails fast even if step 2 missed something.
-
    - On `EACCES`: print
 
      ```
@@ -164,7 +163,6 @@ If absent: `no built image found — run yoe build <unit>` and exit non-zero.
 
    The callback is invoked at most every 250ms (or every 16 MiB, whichever comes
    first) to avoid flooding either consumer.
-
    - **CLI** binds the callback to a stderr writer that overprints a single line
      with `\r`: `written 256 MiB / 612 MiB (42%) — 18.4 MiB/s`
    - **TUI** binds the callback to a tea.Cmd that emits

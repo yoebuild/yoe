@@ -71,7 +71,6 @@ how the device _trusts_ them.
 ## Key Flows
 
 - F1. Mirror an upstream Alpine apk verbatim
-
   - **Trigger:** A unit resolves to an upstream Alpine package (passthrough /
     synthetic-feed entry) during `yoe build`.
   - **Actors:** A2.
@@ -84,7 +83,6 @@ how the device _trusts_ them.
   - **Covered by:** R1, R2, R3.
 
 - F2. Generate and sign the merged index
-
   - **Trigger:** Publish step after F1, or any project-built apk landing in the
     repo.
   - **Actors:** A2.
@@ -97,7 +95,6 @@ how the device _trusts_ them.
   - **Covered by:** R4, R5.
 
 - F3. Ship both keysets into the rootfs
-
   - **Trigger:** `yoe build <image-unit>` stages `base-files`.
   - **Actors:** A3.
   - **Steps:** Extract the Alpine build-host public keys from the pinned

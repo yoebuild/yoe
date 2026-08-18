@@ -103,7 +103,6 @@ Reading the escalations out of Starlark and into Go has three properties:
 ## Key Flows
 
 - F1. Unit task calls `run("make && make install")`.
-
   - **Trigger:** Build executes a unit's task step.
   - **Actors:** A1, A3.
   - **Steps:** The Starlark `run()` builtin routes through `RunInSandbox` with
@@ -115,7 +114,6 @@ Reading the escalations out of Starlark and into Go has three properties:
   - **Covered by:** R1, R6.
 
 - F2. Image-class unit builds (e.g. `jukebox-image`).
-
   - **Trigger:** Build executes a unit whose `Class == "image"`.
   - **Actors:** A3 (Go executor), A2 (image class declares image shape via
     fields only — packages, hostname, services).
@@ -132,7 +130,6 @@ Reading the escalations out of Starlark and into Go has three properties:
   - **Covered by:** R2, R4, R5.
 
 - F3. Container-class unit builds (e.g. `toolchain-musl`).
-
   - **Trigger:** Build executes a unit whose `Class == "container"`.
   - **Actors:** A3 (Go executor), A2 (container class declares the Dockerfile
     path).
@@ -146,7 +143,6 @@ Reading the escalations out of Starlark and into Go has three properties:
   - **Covered by:** R3, R5.
 
 - F4. Unit author writes `run("...", privileged = True)`.
-
   - **Trigger:** Starlark thread tries to call `run` with the kwarg.
   - **Actors:** A1, the parser.
   - **Steps:** `fnRun` rejects the kwarg with a clear error pointing at
