@@ -601,6 +601,7 @@ Moving classes from Go builtins to Starlark files requires these changes to the
 
 2. **Implement `load()` resolution.** The Starlark thread's load handler must
    resolve:
+
    - `//path` — relative to the current file's module root (or project root if
      not in a module)
    - `@module-name//path` — relative to the named module's root

@@ -190,6 +190,7 @@ targets are flashed, not deployed; use `yoe flash <image>`".
    starting its own. If `8765` is in use by something other than yoe,
    `bind: address already in use` surfaces immediately and the user passes
    `--port`.
+
    - If `--host-ip` is set, advertise `http://<host-ip>:<port>/<project>` to the
      device.
    - Otherwise advertise `http://<hostname>.local:<port>/<project>` where

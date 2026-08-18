@@ -15,12 +15,16 @@ name: Machine Build
 # build path. Each cell surfaces as its own CI check, e.g.
 # "Machine Build (beagleplay / alpine)".
 #
-# Distro is alpine unless the board itself constrains it, which none of the
-# boards below do today. Each cell still carries its own distro key rather
-# than sharing one default, because that constraint is a board property: a
-# machine whose kernel and board packages come from a vendor apt feed (the
-# Arduino UNO Q's, for example) can only build the distro that feed is
-# ABI-coupled to, and it should say so next to the board it applies to.
+# Each cell carries its own distro key rather than sharing one default,
+# because distro coverage is a board property. raspberrypi5 and beagleplay
+# build all three distros (alpine, debian, ubuntu) so the glibc BSP paths --
+# kernel packaging, bootloader install, partition layout on a dpkg rootfs --
+# get the same nightly signal the musl path does. raspberrypi4 stays
+# alpine-only: it shares its BSP units with raspberrypi5, so the extra cells
+# would re-test the same code on a second board. A machine whose kernel and
+# board packages come from a vendor apt feed (the Arduino UNO Q's, for
+# example) can only build the distro that feed is ABI-coupled to, and it
+# should say so next to the board it applies to.
 #
 # There is no boot test: these images target physical boards, and QEMU
 # cannot stand in for them. Each cell verifies the image artifact exists,
@@ -47,9 +51,9 @@ jobs:
       # siblings on the first red cell.
       fail-fast: false
       matrix:
-        # Each board pins its own distro and runner, so a board that needs
-        # something other than the alpine default carries the reason with it
-        # rather than in a separate exclude list.
+        # Every cell spells out its machine, distro, and runner, so the
+        # distro coverage a board gets is visible next to the board rather
+        # than implied by a default plus an exclude list.
         include:
           - machine: raspberrypi4
             distro: alpine
@@ -57,8 +61,20 @@ jobs:
           - machine: raspberrypi5
             distro: alpine
             runner: ubuntu-24.04-arm
+          - machine: raspberrypi5
+            distro: debian
+            runner: ubuntu-24.04-arm
+          - machine: raspberrypi5
+            distro: ubuntu
+            runner: ubuntu-24.04-arm
           - machine: beagleplay
             distro: alpine
+            runner: ubuntu-24.04-arm
+          - machine: beagleplay
+            distro: debian
+            runner: ubuntu-24.04-arm
+          - machine: beagleplay
+            distro: ubuntu
             runner: ubuntu-24.04-arm
 
     steps:
@@ -159,7 +175,7 @@ jobs:
           # Already zstd-compressed, so skip the action's own zip pass.
           compression-level: 0
           # These are nightly regression builds, not releases. A week is long
-          # enough to grab one and flash a board; keeping every night's five
-          # boards indefinitely would grow without bound.
+          # enough to grab one and flash a board; keeping every night's seven
+          # images indefinitely would grow without bound.
           retention-days: 7
           if-no-files-found: error

@@ -1060,7 +1060,7 @@ a new parameter and applies the filter before recursing/returning candidates.
 
 #### U5. Virtual-container resolution in executor
 
-> **Status:** Landed in a10c883. `internal/build/executor.go`
+> **Status:** Landed in a10c883. `internal/build/executor.go` >
 > `resolveContainerImage` calls `proj.ResolveProvidesForDistro` and picks the
 > matching toolchain unit's container reference.
 
@@ -2140,7 +2140,7 @@ chmod/ownership preserved.
 
 #### U17. `dpkg --configure -a` under no-network binfmt sandbox
 
-> **Status:** Landed in 5d8aa80. `internal/image/debian_configure.go`
+> **Status:** Landed in 5d8aa80. `internal/image/debian_configure.go` >
 > `ConfigureDebianRootfs` runs configure in toolchain-glibc under
 > `--network=none`; installs policy-rc.d / ischroot stubs before, removes after.
 > Privileged mode enabled to allow chown after configure rewrites file

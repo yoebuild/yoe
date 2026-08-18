@@ -341,6 +341,7 @@ materialization. For each invocation, the closure walker:
 
 1. **BFS** the runtime-dep graph rooted at the artifact names. For each name
    dequeued:
+
    - Resolve provides through `ResolveProvidesForDistro(distro, name)`.
    - `LookupUnit(distro, resolved)` returns the `*Unit` from
      `DistroViews[distro][resolved]`; on a miss, the synthetic walk fires and

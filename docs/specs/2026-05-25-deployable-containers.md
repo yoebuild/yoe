@@ -83,6 +83,7 @@ container path also serves.
 ## Key Flows
 
 - F1. **Author and build a container.**
+
   - **Trigger:** unit author writes a container declaration referencing a
     package set; runs `yoe build`.
   - **Actors:** A1, A2.
@@ -97,6 +98,7 @@ container path also serves.
   - **Covered by:** R1, R2, R4, R5, R6, R7.
 
 - F2. **Deploy to an OCI registry.**
+
   - **Trigger:** build user runs `yoe deploy <container> --registry <url>`.
   - **Actors:** A2, A4.
   - **Steps:** yoe locates the cached `.apk` → extracts the OCI archive from
@@ -109,6 +111,7 @@ container path also serves.
   - **Covered by:** R8, R10, R12.
 
 - F3. **Deploy to local Docker (dev loop).**
+
   - **Trigger:** build user runs `yoe deploy <container> --docker`.
   - **Actors:** A2, A5.
   - **Steps:** yoe builds the container if stale → extracts OCI archive from the
@@ -258,6 +261,7 @@ embeds OCI archive at
   transitively. It is a v1 deliverable, not an assumption. Its OpenRC service
   materializes container archives from the loader's well-known on-disk path into
   the runtime daemon via two entry points:
+
   - **At boot** — runs after the docker daemon is up but before any user-facing
     container service starts; loaded once per archive, not on every reboot, when
     the on-disk archive has not changed.

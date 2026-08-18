@@ -60,6 +60,7 @@ directory" into a buildable thing without surrounding project ceremony.
 ## Key Flows
 
 - F1. **Standalone build from an app repo**
+
   - **Trigger:** `yoe build` invoked in a directory containing `yoe.star` and no
     surrounding `PROJECT.star`
   - **Actors:** A1, A3
@@ -74,6 +75,7 @@ directory" into a buildable thing without surrounding project ceremony.
   - **Covered by:** R1, R2, R5, R6, R8, R9
 
 - F2. **Monorepo build from an app subdir**
+
   - **Trigger:** `yoe build` invoked from `apps/<name>/` in a repo whose root
     has `PROJECT.star`
   - **Actors:** A1, A3
@@ -87,6 +89,7 @@ directory" into a buildable thing without surrounding project ceremony.
   - **Covered by:** R1, R3, R4, R6, R8
 
 - F3. **Image bake via `app_source(...)`**
+
   - **Trigger:** A project's `app_source(local = "./apps/foo")` or
     `app_source(url = ..., ref = ...)` is reached during an image build
   - **Actors:** A2, A3

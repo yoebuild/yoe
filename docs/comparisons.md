@@ -2151,6 +2151,7 @@ images as a first-class concern.
   (`docs/plans/host-image-building-bwrap.md`) proposed migrating image assembly
   to host-side `bwrap --unshare-user`. After working through the tradeoffs we
   picked the other path. Two reasons drove the decision:
+
   - **Debug visibility.** With container-as-root,
     `ls -la build/<image>.<arch>/destdir/rootfs/var/lib/navidrome` on the host
     shows `navidrome:navidrome` directly — the same uid/gid the booted system
@@ -2185,6 +2186,7 @@ images as a first-class concern.
   image-class units have existed, and it's what gives apk
   `chown(path, hdr.uid, hdr.gid)` rights at extract time. The fix is to stop
   _throwing the result away_:
+
   - Drop the post-apk `chown -R $(stat -c %u:%g /project) $DESTDIR/rootfs` that
     normalizes everything to the host build user so subsequent host-side walks
     (`dir_size_mb`) can enter the tree.

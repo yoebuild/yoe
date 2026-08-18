@@ -96,6 +96,7 @@ of a small one.
 ## Key Flows
 
 - F1. Project resolves units for a Debian image
+
   - **Trigger:** `yoe build` runs against a project whose target image declares
     `distro = "debian"`.
   - **Actors:** A2, A3.
@@ -111,6 +112,7 @@ of a small one.
   - **Covered by:** R1, R2, R3, R7, R8, R9.
 
 - F2. Module maintainer refreshes the Debian feed
+
   - **Trigger:** New Debian point release, security update, or routine refresh.
   - **Actors:** A1.
   - **Steps:** Maintainer runs `yoe update-feeds` inside `module-debian`. Yoe
@@ -126,6 +128,7 @@ of a small one.
 
 - F3. Image assembly stages debs, runs maintainer scripts, and bakes a Debian
   rootfs
+
   - **Trigger:** Build of a `distro = "debian"` image after dependency
     resolution.
   - **Actors:** A4.
@@ -144,6 +147,7 @@ of a small one.
   - **Covered by:** R12, R13, R14, R17, R18, R19, R20, R26.
 
 - F4. Project-built unit ships as a deb in the project Debian repo
+
   - **Trigger:** A project-built unit lands in a `distro = "debian"` image.
   - **Actors:** A5.
   - **Steps:** Yoe packages the unit's destdir as a `.deb` with a control file
@@ -344,6 +348,7 @@ of a small one.
   they're referenced under each distro.
 
   Why a directory-level split instead of a suffix on the unit name:
+
   - Composes consistently with R14's `repo/<project>/<distro>/...` shape.
   - Mirrors how `cache/modules/<module>/` already isolates per-source state.
   - Allows surgical reset (`rm -rf build/debian/`) without globbing into

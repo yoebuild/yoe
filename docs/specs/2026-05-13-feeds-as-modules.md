@@ -77,6 +77,7 @@ type system.
 ## Key Flows
 
 - F1. Project resolves units across feeds and modules
+
   - **Trigger:** `yoe build` runs.
   - **Actors:** A2, A3.
   - **Steps:** Project's `modules` list is walked. Each entry contributes: a
@@ -138,6 +139,7 @@ type system.
 
 - R6. `alpine_feed(name, url, branch, section, index, keys)` registers a feed
   for the declaring module. Parameter semantics:
+
   - `name`: feed name used to compose the synthetic module name
     (`<parent-module-name>.<name>`, e.g., `alpine.main`).
   - `url`: mirror base URL (e.g., `https://dl-cdn.alpinelinux.org/alpine`).
@@ -271,6 +273,7 @@ type system.
   ~3,672 main units + ~79 community units — the bulk auto-generated, with the
   community count artificially low because each package required a hand-edited
   `.star` file. After cutover the layout becomes:
+
   - `module-alpine/feeds/<section>/<arch>/APKINDEX` — checked-in upstream
     indices
   - `module-alpine/units/<service>-enable.star` — companion units, one per

@@ -82,13 +82,17 @@ Three workflows run under `.github/workflows/`:
 - `machine-build.yaml` — the same from-source build of `dev-image` for each
   supported hardware machine (Raspberry Pi 4 and 5, BeaglePlay), covering the
   board's kernel, bootloader, and partition layout. Runs nightly and on manual
-  dispatch. Distro is Alpine unless a board constrains it — a board whose kernel
-  and packages come from a vendor apt feed can only build the distro that feed
-  is ABI-coupled to. There is no boot test: these images target physical boards,
-  so each cell verifies the image artifact and reports its partition table. Each
-  image is uploaded zstd-compressed and kept for seven days, so a nightly build
-  can be downloaded from the run's Artifacts section and flashed to hardware
-  (`unzstd` it first; `yoe flash` takes the decompressed `.img`).
+  dispatch. Raspberry Pi 5 and BeaglePlay build all three distros (Alpine,
+  Debian, Ubuntu) so the glibc BSP paths get the same signal as the musl one;
+  Raspberry Pi 4 stays Alpine-only because it shares its BSP units with the
+  Pi 5. A board whose kernel and packages come from a vendor apt feed can only
+  build the distro that feed is ABI-coupled to, so each cell carries its own
+  distro rather than inheriting a default. There is no boot test: these images
+  target physical boards, so each cell verifies the image artifact and reports
+  its partition table. Each image is uploaded zstd-compressed and kept for seven
+  days, so a nightly build can be downloaded from the run's Artifacts section
+  and flashed to hardware (`unzstd` it first; `yoe flash` takes the decompressed
+  `.img`).
 
 Both nightly workflows reuse the content-addressed cache via `actions/cache`, so
 an unchanged graph rebuilds incrementally.

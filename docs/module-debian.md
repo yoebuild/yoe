@@ -251,6 +251,7 @@ substantial follow-up rather than routine work.
   rescue userland, no `Priority: standard` set, unless an image lists it. Three
   consequences follow. All are handled automatically during assembly, but they
   are visible in the log and shape what an image must declare:
+
   - **The Essential / required userland is seeded explicitly.** Debian
     maintainer scripts assume `sed`, `grep`, `awk`, `find`, `gzip`, `login`, and
     the rest of the Priority:required toolset are present — `libc6`'s own
