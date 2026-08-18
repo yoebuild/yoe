@@ -146,12 +146,12 @@ participates in the cache hash) rather than mapping to a typed field.
 
 ### Services, config, and environment
 
-| Field         | Type           | Meaning                                                                                                                                                               |
-| ------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `services`    | list[str]      | Init services (OpenRC scripts, systemd units) the package enables at boot by baking the runlevel/target symlink into itself. The unit — not the image — decides this. |
+| Field         | Type           | Meaning                                                                                                                                                                                                |
+| ------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `services`    | list[str]      | Init services (OpenRC scripts, systemd units) the package enables at boot by baking the runlevel/target symlink into itself. The unit — not the image — decides this.                                  |
 | `conffiles`   | list[str]      | Config-file paths preserved across package upgrades. On Debian and Ubuntu these become the package's `conffiles` list; on Alpine, apk preserves modified files on its own, so the field has no effect. |
-| `environment` | dict[str, str] | Environment-variable definitions embedded in the unit's package metadata.                                                                                             |
-| `cache_dirs`  | dict[str, str] | Build-time cache mounts: container path → host cache subdirectory.                                                                                                    |
+| `environment` | dict[str, str] | Environment-variable definitions embedded in the unit's package metadata.                                                                                                                              |
+| `cache_dirs`  | dict[str, str] | Build-time cache mounts: container path → host cache subdirectory.                                                                                                                                     |
 
 ### Image fields
 
@@ -207,16 +207,16 @@ few run only inside build tasks.
 
 These return a struct for use as an argument to one of the declarations above.
 
-| Builtin                        | Used in                 | Purpose                                                                        |
-| ------------------------------ | ----------------------- | ------------------------------------------------------------------------------ |
-| `module(...)`                  | `project(modules=...)`  | A module reference (url, ref, path, or local override).                        |
-| `defaults(...)`                | `project(defaults=...)` | Default machine, image, and distro for the project.                            |
-| `cache(...)`                   | `project(cache=...)`    | Local build-cache location.                                                    |
-| `kernel(...)`                  | `machine(kernel=...)`   | The unit providing the kernel, plus defconfig and command line.                |
-| `qemu_config(...)`             | `machine(qemu=...)`     | QEMU machine, CPU, memory, firmware, and port settings.                        |
-| `partition(...)`               | `machine`/`image`       | A disk partition (label, type, size, contents, root flag).                     |
-| `task(...)`                    | `unit(tasks=...)`       | A named build phase: a shell command, a Starlark function, or a list of steps. |
-| `arg(...)`                     | `command(args=...)`     | A command-line argument descriptor for a custom command.                       |
+| Builtin            | Used in                 | Purpose                                                                        |
+| ------------------ | ----------------------- | ------------------------------------------------------------------------------ |
+| `module(...)`      | `project(modules=...)`  | A module reference (url, ref, path, or local override).                        |
+| `defaults(...)`    | `project(defaults=...)` | Default machine, image, and distro for the project.                            |
+| `cache(...)`       | `project(cache=...)`    | Local build-cache location.                                                    |
+| `kernel(...)`      | `machine(kernel=...)`   | The unit providing the kernel, plus defconfig and command line.                |
+| `qemu_config(...)` | `machine(qemu=...)`     | QEMU machine, CPU, memory, firmware, and port settings.                        |
+| `partition(...)`   | `machine`/`image`       | A disk partition (label, type, size, contents, root flag).                     |
+| `task(...)`        | `unit(tasks=...)`       | A named build phase: a shell command, a Starlark function, or a list of steps. |
+| `arg(...)`         | `command(args=...)`     | A command-line argument descriptor for a custom command.                       |
 
 ### Build steps and task-time helpers
 

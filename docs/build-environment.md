@@ -172,11 +172,11 @@ and you have a working environment. But for the build system itself, bubblewrap
 > not exist. Today the base toolchain comes from the container image the
 > project's classes select (`container` / `container_arch` on each unit), and
 > everything above it is an ordinary unit built from source. The staged
-> bootstrap here describes how `[yoe]` would build its own base packages
-> without depending on another distribution's toolchain; nothing in it is
-> wired up. Running `[yoe]` on a `[yoe]`-built device is a separate, shipped
-> capability — see [Self-Hosting](selfhost.md), which uses the normal build
-> path rather than anything on this page.
+> bootstrap here describes how `[yoe]` would build its own base packages without
+> depending on another distribution's toolchain; nothing in it is wired up.
+> Running `[yoe]` on a `[yoe]`-built device is a separate, shipped capability —
+> see [Self-Hosting](selfhost.md), which uses the normal build path rather than
+> anything on this page.
 
 There is a chicken-and-egg problem: `[yoe]` needs glibc, gcc, and other base
 packages in its repository before it can build anything inside a `[yoe]` chroot.

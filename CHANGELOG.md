@@ -13,8 +13,8 @@ and this project adheres to
   the other's package, so `apk add` intermittently failed to find something that
   had just been built. The index is now written once per build, after everything
   has been published.
-- **`conffiles` now does what it says on Debian and Ubuntu.** Config files a unit
-  declares are recorded in the package, so a locally edited copy survives a
+- **`conffiles` now does what it says on Debian and Ubuntu.** Config files a
+  unit declares are recorded in the package, so a locally edited copy survives a
   package upgrade instead of being overwritten. Declaring a path the unit does
   not install is now reported as an error. On Alpine, apk already preserves
   modified config files on its own.
@@ -57,8 +57,8 @@ and this project adheres to
 - **Removed `yoe clean --locks`.** Builds no longer write lock files, so there
   is nothing left for it to clean up. A build that is interrupted leaves nothing
   behind that a later build has to be told to ignore.
-- **A unit that runs one privileged build step no longer loses its own
-  root-user setting for every step after it.**
+- **A unit that runs one privileged build step no longer loses its own root-user
+  setting for every step after it.**
 - Image units get a one-time rebuild: a display-only field was being folded into
   their cache key.
 

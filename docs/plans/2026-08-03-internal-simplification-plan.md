@@ -578,8 +578,8 @@ is the spec's R9 and gates every step.
 
 #### Outcome (measured 2026-08-04)
 
-**Step 2 landed, smaller than estimated. Step 3 rejected. Step 1 is still
-open and is a behavior decision, not a refactor.**
+**Step 2 landed, smaller than estimated. Step 3 rejected. Step 1 is still open
+and is a behavior decision, not a refactor.**
 
 The "literal fork, 257 identical lines in `builtin.go` alone" finding does not
 survive a function-by-function comparison. Of the 406 lines in functions the two
@@ -594,21 +594,21 @@ because they have the same shape, not because they hold the same code.
 each package's own `archState`, so moving them requires the generic half.
 
 The generic half is rejected, but not for the reason the plan anticipated.
-Benchmarked against the real Ubuntu main index (7.5MB, ~50k stanzas) on a
-Ryzen 9 3900X:
+Benchmarked against the real Ubuntu main index (7.5MB, ~50k stanzas) on a Ryzen
+9 3900X:
 
-| Operation             | Time   | Allocations   |
-| --------------------- | ------ | ------------- |
-| `ParseIndexFile`      | 64 ms  | 402k          |
-| `BuildProvidesTable`  | 4.0 ms | 105k          |
-| `Names()` iteration   | 6.1 µs | 0             |
+| Operation            | Time   | Allocations |
+| -------------------- | ------ | ----------- |
+| `ParseIndexFile`     | 64 ms  | 402k        |
+| `BuildProvidesTable` | 4.0 ms | 105k        |
+| `Names()` iteration  | 6.1 µs | 0           |
 
 `Names()` is six microseconds. An interface call in front of it is free, so the
 performance objection is answered. The reason to stop is different: an
 `ArchState[E,T]` plus a `Backend` interface would exist to abstract over 347
 lines that differ on purpose, to save at most 59. That trades readable
-duplication for machinery that hides real differences — the same judgment
-Theme 7 already applies to the version comparators and dependency grammars.
+duplication for machinery that hides real differences — the same judgment Theme
+7 already applies to the version comparators and dependency grammars.
 
 The benchmark is kept as `internal/feeds/apt/index_bench_test.go` so a future
 proposal is argued against these numbers. It also records the one measured hot
@@ -638,9 +638,9 @@ Verify with the existing layout tests plus manual TUI passes; no scope changes
 
 #### Outcome (2026-08-04)
 
-Landed: F-T5 (`scanStatuses` in Phase 0, `newModel` here), F-T4's actual
-defect, F-T8's trims, one `paneHeight` helper, and the three rendering
-correctness notes.
+Landed: F-T5 (`scanStatuses` in Phase 0, `newModel` here), F-T4's actual defect,
+F-T8's trims, one `paneHeight` helper, and the three rendering correctness
+notes.
 
 The help overlay's view switch is now exhaustive with no default branch, so a
 new view without keys fails to compile rather than silently offering the Units
