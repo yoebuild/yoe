@@ -1,0 +1,33 @@
+From 7b1c0d2e4a9f5c3b8d6e1f0a2c4b6d8e0f1a3c5b Mon Sep 17 00:00:00 2001
+From: yoe build <yoe@build>
+Date: Tue, 18 Aug 2026 17:00:00 -0400
+Subject: [PATCH] tools/attr: include <libgen.h> for basename()
+
+attr 2.5.2's tools/attr.c calls basename() but only includes
+<string.h>. glibc declares the GNU basename() there, so the omission
+goes unnoticed; musl declares only the POSIX basename() in <libgen.h>
+and dropped the <string.h> declaration in 1.2.5, so the call compiles
+as an implicit declaration -- an error under GCC 14, which rejects
+-Wimplicit-function-declaration by default:
+
+  tools/attr.c:69:20: error: implicit declaration of function 'basename'
+
+The sibling tools already get this right (tools/getfattr.c and
+tools/setfattr.c both include <libgen.h>); attr.c was simply missed.
+Add the include in the same position they use. POSIX basename() may
+modify its argument, which is fine here -- the argument is argv[0].
+---
+ tools/attr.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/tools/attr.c b/tools/attr.c
+--- a/tools/attr.c
++++ b/tools/attr.c
+@@ -28,6 +28,7 @@
+ #include <errno.h>
+ #include <string.h>
+ #include <locale.h>
++#include <libgen.h>
+ 
+ #include <attr/attributes.h>
+ 

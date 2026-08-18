@@ -9,6 +9,13 @@ unit(
     license = "LGPL-2.1-or-later",
     description = "Extended attribute (xattr) library — libattr + getfattr/setfattr",
     deps = ["toolchain"],
+    # tools/attr.c calls basename() without including <libgen.h>. glibc
+    # declares it in <string.h>, so upstream never noticed; musl declares
+    # only the POSIX basename() in <libgen.h>, so the call compiles as an
+    # implicit declaration and GCC 14 rejects it. The sibling tools
+    # (getfattr.c, setfattr.c) already include <libgen.h> -- attr.c was
+    # missed.
+    patches = ["attr/0001-tools-attr-include-libgen.h-for-basename.patch"],
     container = "toolchain",
     container_arch = "target",
     tasks = [

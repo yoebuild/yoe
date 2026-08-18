@@ -8,6 +8,9 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Extended attribute tools build again on Alpine.** The `attr` package failed
+  to compile against musl, which stopped any image carrying getfattr/setfattr or
+  `cp --preserve=xattr` support before it finished.
 - **BeaglePlay images build again.** The readline library was built without its
   terminal-handling support, so any program that loaded it — including the
   Python that BeaglePlay's secure-world firmware build runs — failed to start on
