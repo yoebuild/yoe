@@ -391,9 +391,9 @@ has meaningful data to display).
 **Approach:**
 
 - Read `unit.Branch` at render time. If set, the SOURCE line shows:
-  `SOURCE   dev   (https://...)`
-  `         tracking origin/<branch> (3 commits past v1.36.1)` — the
-  parenthetical "N commits past <pin>" is omitted when N is 0.
+  `SOURCE dev (https://...)`
+  ` tracking origin/<branch> (3 commits past v1.36.1)` — the parenthetical "N
+  commits past <pin>" is omitted when N is 0.
 - If `unit.Branch == ""`, render as today (state token + URL + cached
   `git describe` string).
 - The commit count comes from a small helper:
@@ -579,9 +579,9 @@ renderer falls back to live `DetectState`, which works but is slower).
 - Image and container units → blank (these have no source dir; the existing
   unit-class guard in the renderer keeps them empty).
 - Detail page SOURCE line:
-  - `pin` state: `SOURCE   pin   (pinned at v1.36.1)` — show the pin ref from
-    the unit's `Tag` field.
-  - `empty` state: `SOURCE   (not built)`.
+  - `pin` state: `SOURCE pin (pinned at v1.36.1)` — show the pin ref from the
+    unit's `Tag` field.
+  - `empty` state: `SOURCE (not built)`.
 - The `dimStyle` choice keeps `pin` visually quieter than the dev states
   (cyan/green/red), so dev units still pop in a scan of the column.
 

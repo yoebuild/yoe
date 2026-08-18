@@ -23,7 +23,7 @@ save-to-local.star (`S`).
 - `internal/tui/app.go` swaps its `searchText`/`filtered` fields for a
   `query.Query` plus visible-index slice; rendering reads from the same query in
   both search-mode and normal mode (search mode is just "the bar is focused for
-  editing"). The TUI also gains a header line (`Query: …  Units: N/M`), `\`
+  editing"). The TUI also gains a header line (`Query: … Units: N/M`), `\`
   snap-back, and capital `S` save.
 
 **Tech Stack:** Go 1.21+, bubbletea/lipgloss (already in use), no new
@@ -147,7 +147,7 @@ func (q Query) String() string {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd /scratch4/yoe/yoe && go test ./internal/tui/query/...` Expected:
-`ok  github.com/yoebuild/yoe/internal/tui/query`.
+`ok github.com/yoebuild/yoe/internal/tui/query`.
 
 - [ ] **Step 5: Commit**
 
@@ -989,9 +989,8 @@ git commit -m "tui/query: BuildInClosure for in: operator"
 Current `LocalOverrides` has `Machine` and `DeployHost`. Add `Query`. The writer
 currently has two branches (with/without DeployHost) producing distinct shapes;
 replace it with a single multi-line emission that always uses
-`local(\n    machine = ...,\n    deploy_host = ...,\n    query = ...,\n)` and
-skips empty fields. This avoids combinatorial growth as new optional fields
-land.
+`local(\n machine = ...,\n deploy_host = ...,\n query = ...,\n)` and skips empty
+fields. This avoids combinatorial growth as new optional fields land.
 
 Care: existing TUI calls to `WriteLocalOverrides` sometimes pass a
 partially-populated struct (e.g. the machine-switch handler at `app.go:865`
@@ -1535,7 +1534,7 @@ git commit -m "tui: live query parsing in the search bar with bootstrap from loc
 
 ---
 
-### Task 8: Header line — `Query: …  Units: N/M`
+### Task 8: Header line — `Query: … Units: N/M`
 
 **Files:**
 
@@ -1608,9 +1607,9 @@ if m.queryEditing {
 
 Run: `cd /scratch4/yoe/yoe && CGO_ENABLED=0 go build -o yoe ./cmd/yoe` Visual
 check in `testdata/e2e-project`: header now shows
-`Query: in:base-image    Units: 87/3104` (or similar). Type `type:image` —
-counter updates each keystroke. Type `fizz:foo` — bar shows red error, list
-freezes. Backspace until valid — bar clears red, list updates.
+`Query: in:base-image Units: 87/3104` (or similar). Type `type:image` — counter
+updates each keystroke. Type `fizz:foo` — bar shows red error, list freezes.
+Backspace until valid — bar clears red, list updates.
 
 - [ ] **Step 5: Commit**
 
@@ -2027,7 +2026,7 @@ case "S":
 - [ ] **Step 2: Update the help bar text in `viewUnits`**
 
 Find the existing help string near the bottom of `viewUnits` and add
-`\\ snap-back  S save query`. Example:
+`\\ snap-back S save query`. Example:
 
 ```go
 help := "  b build  D deploy  x cancel  e edit  d diagnose  l log  c clean  s setup  / search  \\ home  S save  q quit"

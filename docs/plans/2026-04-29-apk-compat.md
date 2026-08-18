@@ -176,7 +176,7 @@ detection, depsolving, and `/lib/apk/db/installed` population for free.
 
 - [x] In the build container, confirm `apk add` against a yoe-built repo works.
       _(Verified: stock alpine:3.21 installs from a yoe-built repo via
-      `apk add --allow-untrusted --root /tmp/test --initdb -X /repo     --no-network <pkg>`;
+      `apk add --allow-untrusted --root /tmp/test --initdb -X /repo --no-network <pkg>`;
       transitive deps resolve from APKINDEX. This required reshaping the on-disk
       repo to Alpine's `<repo>/<arch>/APKINDEX.tar.gz` layout — Phase 2.1a
       refactor.)_
@@ -283,8 +283,8 @@ on the target so `apk` runs without `--allow-untrusted`.
       bytes with the project key (RSA-PKCS#1 v1.5, SHA-1 — what apk2 expects)
       and prepend a `.SIGN.RSA.<keyname>.rsa.pub` entry as the first
       concatenated gzip stream. _(Implementation in `internal/artifact/sign.go`
-      with `Signer.SignStream`; `CreateAPK` writes
-      `sigGz + controlGz +     dataGz` to the .apk file.)_
+      with `Signer.SignStream`; `CreateAPK` writes `sigGz + controlGz + dataGz`
+      to the .apk file.)_
 - [x] Re-run phase 1's round-trip test without `--allow-untrusted`. Should
       succeed once the public key is in `/etc/apk/keys/`.
       _(`TestAPKSignedRepoInstallWithUpstreamApk` in `apk_compat_test.go` builds

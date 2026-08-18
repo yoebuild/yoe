@@ -8,6 +8,18 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Nightly board builds now cover Debian and Ubuntu.** Raspberry Pi 5 and
+  BeaglePlay images are built for all three distros each night, so a glibc-only
+  break in a board's kernel, bootloader, or partition layout shows up without
+  waiting for someone to try it.
+- **Extended attribute tools build again on Alpine.** The `attr` package failed
+  to compile against musl, which stopped any image carrying getfattr/setfattr or
+  `cp --preserve=xattr` support before it finished.
+- **BeaglePlay images build on Alpine.** The readline library was built without
+  its terminal-handling support, so any program that loaded it — including the
+  Python that BeaglePlay's secure-world firmware build runs — failed to start on
+  Alpine images.
+
 ## [0.14.1] - 2026-08-18
 
 - **Switching machine or distro keeps your target image.** The TUI reloaded the

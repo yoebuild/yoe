@@ -3,12 +3,13 @@
 > **Status:** Code landed, build/boot verification pending. Implements
 > [docs/specs/2026-06-26-on-device-upstream-feeds.md](../specs/2026-06-26-on-device-upstream-feeds.md).
 > Phases 1–3 are written (reference doc, the three distro-module
-> `upstream-feeds` units + scripts, `dev-image` inclusion, and the `image.star`
-> `copy:` cleanup); static checks pass (shellcheck, Starlark parse, `go build`,
-> `prettier`). **The three distro-module units live in external modules and must
-> be committed and pushed upstream before any build** — `yoe build` does
-> `git fetch && git checkout FETCH_HEAD` and discards the un-pushed cache edits.
-> Phase 4 (boottest) and the live networked install (Phase 5 verify) remain.
+> `upstream-feeds` units + scripts, `dev-image` inclusion, and the
+> `image.star` > `copy:` cleanup); static checks pass (shellcheck, Starlark
+> parse, `go build`, `prettier`). **The three distro-module units live in
+> external modules and must be committed and pushed upstream before any build**
+> — `yoe build` does `git fetch && git checkout FETCH_HEAD` and discards the
+> un-pushed cache edits. Phase 4 (boottest) and the live networked install
+> (Phase 5 verify) remain.
 
 ## Problem
 
