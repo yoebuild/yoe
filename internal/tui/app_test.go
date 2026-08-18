@@ -1577,3 +1577,49 @@ func TestQEMUSettingsSummary_CountsEffectiveNotDoubled(t *testing.T) {
 		t.Fatalf("summary = %q, want it to report 1 port(s)", got)
 	}
 }
+
+// Changing the machine or distro reloads the project and resets the
+// cursor to row 0. focusDefaultImage puts it back on the target image
+// so the units table reads the same way it does at startup.
+func TestFocusDefaultImage_ParksCursorOnImage(t *testing.T) {
+	m := &model{
+		units:   []string{"busybox", "base-image", "openssl"},
+		visible: []int{0, 1, 2},
+		cursor:  0,
+		height:  40,
+		width:   120,
+		proj: &yoestar.Project{
+			Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
+		},
+	}
+	m.focusDefaultImage()
+	if m.units[m.cursor] != "base-image" {
+		t.Errorf("cursor on %q, want base-image", m.units[m.cursor])
+	}
+}
+
+// No image configured, or an image the active query filters out, leaves
+// the cursor where it was rather than jumping somewhere arbitrary.
+func TestFocusDefaultImage_NoImageOrFilteredOut(t *testing.T) {
+	base := func(image string, visible []int) *model {
+		return &model{
+			units:   []string{"busybox", "base-image", "openssl"},
+			visible: visible,
+			cursor:  2,
+			height:  40,
+			width:   120,
+			proj: &yoestar.Project{
+				Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: image},
+			},
+		}
+	}
+	for name, m := range map[string]*model{
+		"no image":     base("", []int{0, 1, 2}),
+		"filtered out": base("base-image", []int{0, 2}),
+	} {
+		m.focusDefaultImage()
+		if m.cursor != 2 {
+			t.Errorf("%s: cursor moved to %d, want it left at 2", name, m.cursor)
+		}
+	}
+}

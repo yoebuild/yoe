@@ -684,11 +684,8 @@ func newModel(proj *yoestar.Project, projectDir string, cfg Config) (model, erro
 	m.applyQuery()
 	m.recomputeMetrics()
 	// Park the cursor on the default image so the table opens centered
-	// on the artifact most users care about. scrollUnitIntoView is a
-	// no-op when the active query filters that image out.
-	if proj.Defaults.Image != "" {
-		m.scrollUnitIntoView(proj.Defaults.Image)
-	}
+	// on the artifact most users care about.
+	m.focusDefaultImage()
 
 	return m, nil
 }
@@ -2569,6 +2566,7 @@ func (m model) updateSetupMachine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.setupField = ""
 		m.view = viewUnits
+		m.focusDefaultImage()
 		return m, nil
 	}
 	return m, nil
@@ -2668,6 +2666,7 @@ func (m model) updateSetupDistro(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.message = fmt.Sprintf("Default Distro set to %s (saved to local.star)", picked)
 		}
 		m.recomputeStatuses()
+		m.focusDefaultImage()
 		m.setupField = ""
 		return m, nil
 	}
@@ -5391,6 +5390,20 @@ func (m *model) adjustListOffset() {
 // user isn't looking at — cursor follows so `enter` opens the detail
 // view of whatever is actively building, and j/k continues from there.
 // No-op if the unit isn't in m.visible (current query filtered it out).
+// focusDefaultImage parks the cursor on the project's target image.
+// Reloading the project (a new machine or distro) rebuilds the unit
+// list and resets the cursor to row 0, which is rarely a unit anyone
+// was looking at. Re-anchoring on the image means the units table
+// reads the same way it does at startup, whichever setting the user
+// just changed. A no-op when no image is set or the active query
+// filters it out.
+func (m *model) focusDefaultImage() {
+	if m.proj.Defaults.Image == "" {
+		return
+	}
+	m.scrollUnitIntoView(m.proj.Defaults.Image)
+}
+
 func (m *model) scrollUnitIntoView(name string) {
 	visible := m.visibleIndices()
 	idx := -1
