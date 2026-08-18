@@ -11,12 +11,7 @@ import (
 )
 
 // FetchAll downloads sources for all units (or specific ones).
-func FetchAll(projectDir string, unitNames []string, w io.Writer) error {
-	proj, err := yoestar.LoadProject(projectDir)
-	if err != nil {
-		return err
-	}
-
+func FetchAll(proj *yoestar.Project, unitNames []string, w io.Writer) error {
 	units := filterUnits(proj, unitNames)
 	for _, unit := range units {
 		if unit.Source == "" {
@@ -31,12 +26,7 @@ func FetchAll(projectDir string, unitNames []string, w io.Writer) error {
 }
 
 // ListSources shows cached sources and their status.
-func ListSources(projectDir string, w io.Writer) error {
-	proj, err := yoestar.LoadProject(projectDir)
-	if err != nil {
-		return err
-	}
-
+func ListSources(proj *yoestar.Project, w io.Writer) error {
 	cacheDir, err := CacheDir()
 	if err != nil {
 		return err
@@ -68,12 +58,7 @@ func ListSources(projectDir string, w io.Writer) error {
 }
 
 // VerifyAll checks SHA256 of cached sources.
-func VerifyAll(projectDir string, w io.Writer) error {
-	proj, err := yoestar.LoadProject(projectDir)
-	if err != nil {
-		return err
-	}
-
+func VerifyAll(proj *yoestar.Project, w io.Writer) error {
 	allOk := true
 	seen := map[string]bool{}
 	for name, unit := range proj.AllUnits() {
@@ -151,7 +136,7 @@ func filterUnits(proj *yoestar.Project, names []string) []*yoestar.Unit {
 
 func isCached(cacheDir string, unit *yoestar.Unit) bool {
 	urlHash := fmt.Sprintf("%x", sha256.Sum256([]byte(unit.Source)))
-	if isGitURL(unit.Source) {
+	if IsGitURL(unit.Source) {
 		_, err := os.Stat(filepath.Join(cacheDir, urlHash+".git"))
 		return err == nil
 	}

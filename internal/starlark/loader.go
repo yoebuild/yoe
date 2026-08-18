@@ -103,8 +103,39 @@ func WithBuiltin(name string, factory BuiltinFactory) LoadOption {
 
 // LoadProject finds the project root, evaluates all .star files, and returns
 // a fully populated Project.
+// resolvedModule pairs a module's canonical name with the on-disk
+// directory its .star files were found in, in project declaration order.
+type resolvedModule struct {
+	name string
+	path string
+}
+
+// evalPhase runs one evaluation phase: every .star file in the named
+// subdirectory of the project root, then of each module, with the
+// engine's current module and priority set for each so registrations
+// carry the right owner. Phases run in a fixed order — machines,
+// containers, units, images — because each depends on what the previous
+// one registered.
+//
+// The project root evaluates first at the highest priority so its
+// definitions win any name collision; modules follow in declaration
+// order, so a later module shadows an earlier one.
+func evalPhase(eng *Engine, root string, modules []resolvedModule, projectIdx int, dir string) error {
+	eng.SetCurrentModule("", projectIdx)
+	if err := evalDir(eng, root, dir); err != nil {
+		return err
+	}
+	for i, rm := range modules {
+		eng.SetCurrentModule(rm.name, i+1)
+		if err := evalDir(eng, rm.path, dir); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func LoadProject(startDir string, opts ...LoadOption) (*Project, error) {
-	root, err := findProjectRoot(startDir)
+	root, err := FindProjectRoot(startDir)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +152,7 @@ func LoadProject(startDir string, opts ...LoadOption) (*Project, error) {
 // Honored LoadOptions: WithProjectFile. Others (machine, shadows, sync
 // callback) don't apply because no module content is loaded.
 func ProjectModuleRefs(startDir string, opts ...LoadOption) ([]ModuleRef, error) {
-	root, err := findProjectRoot(startDir)
+	root, err := FindProjectRoot(startDir)
 	if err != nil {
 		return nil, err
 	}
@@ -151,8 +182,13 @@ func ProjectModuleRefs(startDir string, opts ...LoadOption) ([]ModuleRef, error)
 	return proj.Modules, nil
 }
 
-// findProjectRoot walks up from startDir looking for PROJECT.star.
-func findProjectRoot(startDir string) (string, error) {
+// FindProjectRoot walks up from startDir looking for PROJECT.star and
+// returns the directory holding it. This is what "the project root"
+// means everywhere in yoe — the directory local.star sits beside, that
+// build/ and repo/ are created under, and that module paths resolve
+// against. Commands run from a subdirectory rely on it to reach the same
+// answer a build would.
+func FindProjectRoot(startDir string) (string, error) {
 	dir, err := filepath.Abs(startDir)
 	if err != nil {
 		return "", fmt.Errorf("resolving path: %w", err)
@@ -216,6 +252,7 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	// parallel_builds) are consumed by their own callsites via
 	// LoadLocalOverrides directly.
 	if proj := eng.Project(); proj != nil {
+		proj.Root = root
 		if ov, err := LoadLocalOverrides(root); err == nil {
 			if ov.DefaultDistroOverride != "" {
 				proj.DefaultDistroOverride = ov.DefaultDistroOverride
@@ -251,10 +288,6 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	// present; otherwise it falls back to the path/URL basename. The same
 	// name is used for "@name//..." load references, u.Module tags, and
 	// TUI / diagnostic display.
-	type resolvedModule struct {
-		name string
-		path string
-	}
 	var resolvedModules []resolvedModule
 	var resolvedForProject []ResolvedModule
 	if proj := eng.Project(); proj != nil {
@@ -294,15 +327,8 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	// Phase 1: Evaluate all machine definitions (project + modules).
 	// Machines must be loaded before units/images so that target_arch()
 	// returns the correct value during Starlark evaluation.
-	eng.SetCurrentModule("", projectIdx)
-	if err := evalDir(eng, root, "machines"); err != nil {
+	if err := evalPhase(eng, root, resolvedModules, projectIdx, "machines"); err != nil {
 		return nil, err
-	}
-	for i, rm := range resolvedModules {
-		eng.SetCurrentModule(rm.name, i+1)
-		if err := evalDir(eng, rm.path, "machines"); err != nil {
-			return nil, err
-		}
 	}
 
 	// Apply machine override before evaluating units/images.
@@ -417,27 +443,13 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 
 	// Phase 1b: Evaluate container definitions (project + modules).
 	// Containers must be loaded before units so that units can reference them.
-	eng.SetCurrentModule("", projectIdx)
-	if err := evalDir(eng, root, "containers"); err != nil {
+	if err := evalPhase(eng, root, resolvedModules, projectIdx, "containers"); err != nil {
 		return nil, err
-	}
-	for i, rm := range resolvedModules {
-		eng.SetCurrentModule(rm.name, i+1)
-		if err := evalDir(eng, rm.path, "containers"); err != nil {
-			return nil, err
-		}
 	}
 
 	// Phase 2a: Evaluate all unit definitions (project + modules).
-	eng.SetCurrentModule("", projectIdx)
-	if err := evalDir(eng, root, "units"); err != nil {
+	if err := evalPhase(eng, root, resolvedModules, projectIdx, "units"); err != nil {
 		return nil, err
-	}
-	for i, rm := range resolvedModules {
-		eng.SetCurrentModule(rm.name, i+1)
-		if err := evalDir(eng, rm.path, "units"); err != nil {
-			return nil, err
-		}
 	}
 
 	// Now that all units are loaded, update predeclared variables before
@@ -525,15 +537,8 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	}
 
 	// Phase 2b: Evaluate image definitions (project + modules).
-	eng.SetCurrentModule("", projectIdx)
-	if err := evalDir(eng, root, "images"); err != nil {
+	if err := evalPhase(eng, root, resolvedModules, projectIdx, "images"); err != nil {
 		return nil, err
-	}
-	for i, rm := range resolvedModules {
-		eng.SetCurrentModule(rm.name, i+1)
-		if err := evalDir(eng, rm.path, "images"); err != nil {
-			return nil, err
-		}
 	}
 
 	proj := eng.Project()
@@ -756,6 +761,7 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 	// on every probe. Cross-distro same-name collisions resolve here
 	// once, not on every closure walk.
 	proj.DistroViews = buildDistroViews(proj)
+	proj.ProvidesViews = buildProvidesViews(proj)
 
 	return proj, nil
 }
@@ -809,6 +815,50 @@ func buildDistroViews(proj *Project) map[string]map[string]*Unit {
 			}
 		}
 		views[distro] = view
+	}
+	return views
+}
+
+// buildProvidesViews indexes, per distro, which unit satisfies each
+// virtual name a distro-tagged unit declares.
+//
+// ResolveProvidesForDistro answered this by scanning every unit in every
+// module, on essentially every dependency resolution — so a project with
+// a Debian feed paid a full-catalog walk per dep edge. The answer only
+// depends on what is registered, which stops changing once loading
+// finishes, so it is computed once here alongside DistroViews and shares
+// that memo's lifetime: valid for the loaded project, and rebuilt with
+// it on reload.
+//
+// Only tagged units are indexed. An untagged unit's provides serve every
+// distro and already live in the global proj.Provides table, which the
+// lookup falls through to.
+func buildProvidesViews(proj *Project) map[string]map[string]string {
+	if proj == nil {
+		return nil
+	}
+	views := map[string]map[string]string{}
+	for _, byName := range proj.UnitsByModule {
+		for _, u := range byName {
+			if u.Distro == "" || len(u.Provides) == 0 {
+				continue
+			}
+			view := views[u.Distro]
+			if view == nil {
+				view = map[string]string{}
+				views[u.Distro] = view
+			}
+			for _, v := range u.Provides {
+				if v == "" {
+					continue
+				}
+				// First registration wins, matching the order-dependent
+				// behavior of the scan this replaces.
+				if _, taken := view[v]; !taken {
+					view[v] = u.Name
+				}
+			}
+		}
 	}
 	return views
 }

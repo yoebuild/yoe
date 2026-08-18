@@ -7,13 +7,13 @@ import (
 
 func TestEffectiveDistroForImage_Cascade(t *testing.T) {
 	cases := []struct {
-		name              string
-		imageDistro       string
-		overrideDistro    string
-		projectDistro     string
-		wantDistro        string
-		wantErr           bool
-		wantErrContains   string
+		name            string
+		imageDistro     string
+		overrideDistro  string
+		projectDistro   string
+		wantDistro      string
+		wantErr         bool
+		wantErrContains string
 	}{
 		{
 			name:        "image.distro wins",

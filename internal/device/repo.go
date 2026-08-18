@@ -52,18 +52,7 @@ func (r RepoOps) Add(ctx context.Context, t SSHTarget, in RepoAddInput) error {
 		}
 	}
 
-	script := fmt.Sprintf(`set -e
-mkdir -p /etc/apk
-touch /etc/apk/repositories
-# Strip any existing yoe-%s block, then append a fresh one.
-sed -i '/^# >>> yoe-%s$/,/^# <<< yoe-%s$/d' /etc/apk/repositories
-{
-    printf '# >>> yoe-%s\n'
-    printf '%%s\n' '%s'
-    printf '# <<< yoe-%s\n'
-} >> /etc/apk/repositories
-apk update
-`, in.Name, in.Name, in.Name, in.Name, in.FeedURL, in.Name)
+	script := "set -e\n" + apkRepoWriteBlock(in.Name, in.FeedURL) + "apk update\n"
 
 	return r.SSH(ctx, t, script, in.Out, in.Out)
 }
@@ -80,10 +69,7 @@ func (r RepoOps) Remove(ctx context.Context, t SSHTarget, name string, out io.Wr
 	if out == nil {
 		out = io.Discard
 	}
-	script := fmt.Sprintf(`set -e
-[ -f /etc/apk/repositories ] || exit 0
-sed -i '/^# >>> yoe-%s$/,/^# <<< yoe-%s$/d' /etc/apk/repositories
-`, name, name)
+	script := "set -e\n[ -f /etc/apk/repositories ] || exit 0\n" + apkRepoStripBlock(name)
 	return r.SSH(ctx, t, script, out, out)
 }
 

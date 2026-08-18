@@ -99,6 +99,14 @@ func (q Query) InRoot() string {
 	return vs[0]
 }
 
+// FiltersStatus reports whether q constrains a unit's build status. A
+// caller that keeps a precomputed visible set uses this to know that a
+// status change (a unit starting to build, finishing, or failing) can move
+// rows in and out of the set and the filter must be re-applied.
+func (q Query) FiltersStatus() bool {
+	return len(q.fields["status"]) > 0
+}
+
 // BareTerms returns the parsed bare substring terms. Each is already
 // lowercased by Parse; callers should compare against a lowercased
 // haystack.

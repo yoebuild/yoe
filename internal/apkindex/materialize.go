@@ -67,15 +67,15 @@ func MaterializeUnit(entry Entry, providers Providers, moduleName string) (*yoes
 	}
 
 	u := &yoestar.Unit{
-		Name:          entry.Name,
-		Class:         "unit",
-		Description:   entry.Description,
-		License:       entry.License,
-		APKChecksum:   entry.ChecksumText,
-		RuntimeDeps:   deps,
-		Provides:      filterProvides(entry.Provides),
-		Replaces:      filterProvides(entry.Replaces),
-		Module:        moduleName,
+		Name:           entry.Name,
+		Class:          "unit",
+		Description:    entry.Description,
+		License:        entry.License,
+		APKChecksum:    entry.ChecksumText,
+		RuntimeDeps:    deps,
+		Provides:       filterProvides(entry.Provides),
+		Replaces:       filterProvides(entry.Replaces),
+		Module:         moduleName,
 		PassthroughAPK: "", // set by the alpine_feed wrapper
 	}
 

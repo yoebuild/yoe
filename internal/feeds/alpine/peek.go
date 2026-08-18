@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/yoebuild/yoe/internal/feeds/feedcore"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
 )
@@ -14,11 +15,11 @@ import (
 // absolute paths the maintainer playbook (U9) needs to fetch and
 // write feed contents.
 type FeedDecl struct {
-	Name    string // feed name (becomes alpine.<name>)
-	URL     string // mirror root URL, e.g. https://dl-cdn.alpinelinux.org/alpine
-	Branch  string // Alpine release tag, e.g. v3.21
-	Section string // repo section, e.g. main / community
-	Index   string // in-module directory holding <arch>/APKINDEX (relative to MODULE.star)
+	Name    string   // feed name (becomes alpine.<name>)
+	URL     string   // mirror root URL, e.g. https://dl-cdn.alpinelinux.org/alpine
+	Branch  string   // Alpine release tag, e.g. v3.21
+	Section string   // repo section, e.g. main / community
+	Index   string   // in-module directory holding <arch>/APKINDEX (relative to MODULE.star)
 	Keys    []string // public key files for signature verification (relative to MODULE.star)
 }
 
@@ -74,7 +75,7 @@ func PeekFeedDecls(modulePath string) ([]FeedDecl, error) {
 					}
 				case "keys":
 					if list, ok := kv[1].(*starlark.List); ok {
-						d.Keys = stringListFrom(list)
+						d.Keys = feedcore.StringList(list)
 					}
 				}
 			}

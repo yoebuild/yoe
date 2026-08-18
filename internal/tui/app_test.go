@@ -65,8 +65,8 @@ func TestUpdateSearch_CtrlU_ClearsInput(t *testing.T) {
 		queryInput:       "in:base-image type:image status:failed",
 		queryCompletions: []string{"in:", "module:"},
 		proj: &yoestar.Project{
-			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			UnitsByModule:    map[string]map[string]*yoestar.Unit{"": {}},
+			Defaults:      yoestar.Defaults{Machine: "qemu-x86_64"},
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {}},
 		},
 	}
 	updated, _ := m.updateSearch(tea.KeyMsg{Type: tea.KeyCtrlU})
@@ -119,8 +119,8 @@ func TestRenderQueryCompletions_EmptyReturnsNothing(t *testing.T) {
 func TestViewModulesTab_RendersSyntheticModules(t *testing.T) {
 	m := model{
 		proj: &yoestar.Project{
-			Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
-			UnitsByModule:    map[string]map[string]*yoestar.Unit{"": {}},
+			Defaults:      yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {}},
 			ResolvedModules: []yoestar.ResolvedModule{
 				{Name: "module-core", URL: "https://example.com/core.git"},
 			},
@@ -168,7 +168,7 @@ func TestViewModulesTab_FeedsDoNotPushTopOffScreen(t *testing.T) {
 	m := model{
 		proj: &yoestar.Project{
 			Defaults:        yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
-			UnitsByModule:           map[string]map[string]*yoestar.Unit{"": {}},
+			UnitsByModule:   map[string]map[string]*yoestar.Unit{"": {}},
 			ResolvedModules: mods,
 			SyntheticModules: []*yoestar.SyntheticModule{
 				{Name: "alpine.main", Parent: "alpine",
@@ -262,8 +262,8 @@ func TestViewUnitsTab_HelpBarOmitsEditForFeedUnits(t *testing.T) {
 func TestViewUnitsTab_CompletionsRenderUnderQueryLine(t *testing.T) {
 	m := model{
 		proj: &yoestar.Project{
-			Defaults: yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
-			UnitsByModule:    map[string]map[string]*yoestar.Unit{"": {}},
+			Defaults:      yoestar.Defaults{Machine: "qemu-x86_64", Image: "base-image"},
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {}},
 		},
 		queryEditing:     true,
 		queryInput:       "o",
@@ -316,8 +316,8 @@ func TestRefreshUnitSize_UnknownUnit_NoOp(t *testing.T) {
 		arch:       "x86_64",
 		distro:     "alpine",
 		proj: &yoestar.Project{
-			Defaults: yoestar.Defaults{Machine: "qemu-x86_64"},
-			UnitsByModule:    map[string]map[string]*yoestar.Unit{"": {}},
+			Defaults:      yoestar.Defaults{Machine: "qemu-x86_64"},
+			UnitsByModule: map[string]map[string]*yoestar.Unit{"": {}},
 		},
 	}
 	// Should not panic, should not allocate spurious entries.

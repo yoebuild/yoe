@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/yoebuild/yoe/internal/gitutil"
+
 	"github.com/yoebuild/yoe/internal/source"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
@@ -62,7 +64,7 @@ func TestModuleToUpstream_UnshallowsShallow(t *testing.T) {
 	if err := ModuleToUpstream(m, ModuleUpstreamOpts{}); err != nil {
 		t.Fatalf("ModuleToUpstream: %v", err)
 	}
-	got, err := gitOut(moduleDir, "rev-parse", "--is-shallow-repository")
+	got, err := gitutil.Run(moduleDir, "rev-parse", "--is-shallow-repository")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,23 +161,5 @@ func TestModuleToPin_LocalRefuses(t *testing.T) {
 	err := ModuleToPin(m, false)
 	if err == nil {
 		t.Fatal("expected error for local module")
-	}
-}
-
-func TestHTTPSToSSH(t *testing.T) {
-	cases := []struct {
-		in     string
-		want   string
-		wantOK bool
-	}{
-		{"https://github.com/foo/bar.git", "git@github.com:foo/bar.git", true},
-		{"https://gitlab.com/foo/bar.git", "git@gitlab.com:foo/bar.git", true},
-		{"git@github.com:foo/bar.git", "git@github.com:foo/bar.git", false},
-	}
-	for _, c := range cases {
-		got, ok := httpsToSSH(c.in)
-		if got != c.want || ok != c.wantOK {
-			t.Errorf("httpsToSSH(%q) = (%q, %v), want (%q, %v)", c.in, got, ok, c.want, c.wantOK)
-		}
 	}
 }

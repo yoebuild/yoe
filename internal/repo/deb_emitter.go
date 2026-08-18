@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,7 +14,7 @@ import (
 	"time"
 
 	"github.com/yoebuild/yoe/internal/deb"
-	"github.com/yoebuild/yoe/internal/dpkg"
+	"github.com/yoebuild/yoe/internal/fsutil"
 )
 
 // debPublishMu serializes PublishDeb across goroutines. Parallel unit
@@ -311,7 +310,7 @@ func PublishDeb(debPath string, opts DebRepoOptions, component string) error {
 		return err
 	}
 	dst := filepath.Join(poolDir, filepath.Base(debPath))
-	if err := copyFile(debPath, dst); err != nil {
+	if err := fsutil.CopyFileAtomic(debPath, dst, 0644); err != nil {
 		return fmt.Errorf("PublishDeb: copy: %w", err)
 	}
 	return nil
@@ -336,33 +335,6 @@ func initialOf(src string) string {
 		return "_"
 	}
 	return string(src[0])
-}
-
-// copyFile atomically copies src to dst via tmpfile + rename so a
-// concurrent reader never sees a partial file at the canonical path.
-// The pool-side .deb is read by GenerateDebianIndex right after copy,
-// and parallel publishes scan the same tree.
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	tmp := dst + ".tmp"
-	out, err := os.Create(tmp)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := out.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return os.Rename(tmp, dst)
 }
 
 // VerifyMirrorSHA256 is the R15 sanity hook: before adding a
@@ -391,8 +363,3 @@ func sha256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return fmt.Sprintf("%x", sum[:])
 }
-
-// PackagesParseDelete is a small unused export to ensure the dpkg
-// dependency stays compiled into the binary. Remove when project repo
-// reads use this for sanity checks.
-var _ = dpkg.ParseIndex

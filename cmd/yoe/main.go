@@ -14,8 +14,8 @@ import (
 
 	yoe "github.com/yoebuild/yoe/internal"
 	"github.com/yoebuild/yoe/internal/artifact"
-	"github.com/yoebuild/yoe/internal/bootstrap"
 	"github.com/yoebuild/yoe/internal/build"
+	"github.com/yoebuild/yoe/internal/container"
 	"github.com/yoebuild/yoe/internal/device"
 	"github.com/yoebuild/yoe/internal/feeds/alpine"
 	"github.com/yoebuild/yoe/internal/feeds/apt"
@@ -33,11 +33,6 @@ var version = "dev"
 var (
 	globalProjectFile string
 	globalShowShadows bool
-	// Default true while units-alpine's linux-firmware-* fan-out (~100
-	// packages all providing `linux-firmware-any`) keeps tripping the
-	// strict intra-module collision check. Flip back once that's fixed
-	// upstream.
-	globalAllowDuplicateProvides = true
 )
 
 // stringSlice implements flag.Value for repeatable string flags.
@@ -59,9 +54,6 @@ func main() {
 			args = append(args[:i], args[i+2:]...)
 		case args[i] == "--show-shadows":
 			globalShowShadows = true
-			args = append(args[:i], args[i+1:]...)
-		case args[i] == "--allow-duplicate-provides":
-			globalAllowDuplicateProvides = true
 			args = append(args[:i], args[i+1:]...)
 		default:
 			i++
@@ -94,8 +86,6 @@ func main() {
 		cmdUpdateFeeds(cmdArgs)
 	case "build":
 		cmdBuild(cmdArgs)
-	case "bootstrap":
-		cmdBootstrap(cmdArgs)
 	case "flash":
 		cmdFlash(cmdArgs)
 	case "run":
@@ -139,6 +129,15 @@ func main() {
 	}
 }
 
+// fail prints a message to stderr and exits non-zero. The CLI's error
+// path is uniform — there is nothing to unwind and no partial output to
+// clean up — so the 50-odd places that hit an error all did the same two
+// lines, and a few of them drifted in wording or forgot the exit.
+func fail(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	os.Exit(1)
+}
+
 func printUsage() {
 	fmt.Fprintf(os.Stderr, "Usage: %s [GLOBAL OPTIONS] COMMAND [OPTIONS]\n\n", os.Args[0])
 	fmt.Fprintf(os.Stderr, "Yoe embedded Linux distribution builder\n\n")
@@ -146,8 +145,6 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  --project <file>            Use an alternative project file instead of PROJECT.star\n")
 	fmt.Fprintf(os.Stderr, "  --show-shadows              Print stderr notices about cross-module unit shadowing\n")
 	fmt.Fprintf(os.Stderr, "                              and intra-module provides overrides\n")
-	fmt.Fprintf(os.Stderr, "  --allow-duplicate-provides  Allow multiple units in the same module to declare\n")
-	fmt.Fprintf(os.Stderr, "                              the same virtual provide (first registered wins)\n")
 	fmt.Fprintf(os.Stderr, "\n")
 	fmt.Fprintf(os.Stderr, "Commands:\n")
 	fmt.Fprintf(os.Stderr, "  (no args)               Launch the interactive TUI\n")
@@ -164,7 +161,6 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  update-feeds            Refresh APKINDEX files for the alpine_feed declarations\n")
 	fmt.Fprintf(os.Stderr, "                          in the current module (run inside a module repo)\n")
 	fmt.Fprintf(os.Stderr, "  repo                    Manage the local apk package repository\n")
-	fmt.Fprintf(os.Stderr, "  cache                   Manage the build cache (local and remote)\n")
 	fmt.Fprintf(os.Stderr, "  source                  Download and manage source archives/repos\n")
 	fmt.Fprintf(os.Stderr, "  config                  View and edit project configuration\n")
 	fmt.Fprintf(os.Stderr, "  desc <unit>           Describe a unit or target\n")
@@ -218,13 +214,11 @@ func cmdUpdateFeeds(args []string) {
 		var err error
 		dir, err = os.Getwd()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "update-feeds: %v\n", err)
-			os.Exit(1)
+			fail("update-feeds: %v", err)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(dir, "MODULE.star")); err != nil {
-		fmt.Fprintf(os.Stderr, "update-feeds: %s: no MODULE.star here (run inside the module repo)\n", dir)
-		os.Exit(1)
+		fail("update-feeds: %s: no MODULE.star here (run inside the module repo)", dir)
 	}
 
 	var arches []string
@@ -240,8 +234,7 @@ func cmdUpdateFeeds(args []string) {
 	alpineDecls, alpineErr := alpine.PeekFeedDecls(dir)
 	aptDecls, aptErr := apt.PeekFeedDecls(dir)
 	if alpineErr != nil && aptErr != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", alpineErr)
-		os.Exit(1)
+		fail("Error: %v", alpineErr)
 	}
 
 	ran := false
@@ -249,8 +242,7 @@ func cmdUpdateFeeds(args []string) {
 		ran = true
 		opts := alpine.UpdateOptions{ModuleDir: dir, Out: os.Stdout, Arches: arches}
 		if err := alpine.UpdateFeeds(opts); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			fail("Error: %v", err)
 		}
 	}
 	if len(aptDecls) > 0 {
@@ -262,20 +254,17 @@ func cmdUpdateFeeds(args []string) {
 			AllowKeyUpdate: *allowKeyUpdate,
 		}
 		if err := apt.UpdateFeeds(opts); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			fail("Error: %v", err)
 		}
 	}
 	if !ran {
-		fmt.Fprintf(os.Stderr, "update-feeds: no alpine_feed() or apt_feed() in %s/MODULE.star\n", dir)
-		os.Exit(1)
+		fail("update-feeds: no alpine_feed() or apt_feed() in %s/MODULE.star", dir)
 	}
 }
 
 func cmdModule(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s module <sync|list|info> [...]\n", os.Args[0])
-		os.Exit(1)
+		fail("Usage: %s module <sync|list> [...]", os.Args[0])
 	}
 
 	dir := os.Getenv("YOE_PROJECT")
@@ -289,27 +278,17 @@ func cmdModule(args []string) {
 		// can still be re-synced to pull in the fix that unblocks it.
 		modules, err := yoestar.ProjectModuleRefs(dir, projectLoadOpts()...)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			fail("Error: %v", err)
 		}
 		if _, err := module.Sync(modules, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			fail("Error: %v", err)
 		}
 	case "list":
-		if err := yoe.ListModules(dir, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+		if err := yoe.ListModules(loadProject(), os.Stdout); err != nil {
+			fail("Error: %v", err)
 		}
-	case "info":
-		fmt.Fprintf(os.Stderr, "module info: not yet implemented\n")
-		os.Exit(1)
-	case "check-updates":
-		fmt.Fprintf(os.Stderr, "module check-updates: not yet implemented\n")
-		os.Exit(1)
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown module subcommand: %s\n", args[0])
-		os.Exit(1)
+		fail("Unknown module subcommand: %s", args[0])
 	}
 }
 
@@ -338,13 +317,13 @@ func cmdBuild(args []string) {
 	verbose := fs.Bool("verbose", false, "verbose output")
 	machineName := fs.String("machine", "", "target machine")
 	distroName := fs.String("distro", "", "target distro for this build (overrides local.star/defaults; useful when an image name exists in multiple distros)")
-	all := fs.Bool("all", false, "build all units")
 	jobs := fs.Int("jobs", 0, "max units to build in parallel (saved to local.star; default 5)")
 	fs.BoolVar(verbose, "v", false, "verbose output (shorthand)")
 	fs.IntVar(jobs, "j", 0, "max units to build in parallel (shorthand)")
 	fs.Parse(args)
 
-	_ = all // build all when no positional args — handled by empty units slice
+	// No positional args means "build everything" — an empty units slice
+	// is what BuildUnits reads as the whole project.
 	units := fs.Args()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -363,8 +342,7 @@ func cmdBuild(args []string) {
 	proj := loadProjectWithMachineDistro(*machineName, *distroName)
 	targetArch, err := resolveTargetArch(proj, *machineName)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 	resolvedMachine := *machineName
 	if resolvedMachine == "" {
@@ -388,52 +366,38 @@ func cmdBuild(args []string) {
 	// per-distro view picks the right variants for cross-distro
 	// same-name collisions. When the user names a non-image unit (or
 	// no name — build everything), fall back to the project default.
-	if len(units) >= 1 {
-		for _, n := range units {
-			if u := proj.LookupUnit(proj.DefaultDistro, n); u != nil && u.Class == "image" {
-				if d, err := proj.EffectiveDistroForImage(n); err == nil {
-					opts.EffectiveDistro = d
-					break
-				}
-			}
-			// Fall back: scan AllUnits for any module's variant
-			// to catch images registered under a non-default distro.
-			for name, u := range proj.AllUnits() {
-				if name == n && u.Class == "image" {
-					if d, err := proj.EffectiveDistroForImage(n); err == nil {
-						opts.EffectiveDistro = d
-					}
-					break
-				}
-			}
-			if opts.EffectiveDistro != "" {
-				break
-			}
+	//
+	// AnyUnit rather than a lookup in the default distro's view: an image
+	// may be registered under a non-default distro (debian.dev-image in a
+	// project whose default is alpine), and naming it should still select
+	// its own distro.
+	for _, n := range units {
+		if u := proj.AnyUnit(n); u == nil || u.Class != "image" {
+			continue
+		}
+		if d, err := proj.EffectiveDistroForImage(n); err == nil {
+			opts.EffectiveDistro = d
+			break
 		}
 	}
 
 	// Parallelism precedence: -j flag > local.star parallel_builds >
 	// build.DefaultParallel. A -j value is also persisted so subsequent
 	// builds (and the TUI) reuse it without re-passing the flag.
-	if root, err := findProjectRootForLocal(pdir); err == nil {
-		ov, _ := yoestar.LoadLocalOverrides(root)
-		opts.Parallel = ov.ParallelBuilds
-		if *jobs > 0 {
-			opts.Parallel = *jobs
-			if ov.ParallelBuilds != *jobs {
-				ov.ParallelBuilds = *jobs
-				if werr := yoestar.WriteLocalOverrides(root, ov); werr != nil {
-					fmt.Fprintf(os.Stderr, "Warning: could not save parallel_builds to local.star: %v\n", werr)
-				}
-			}
-		}
-	} else if *jobs > 0 {
+	opts.Parallel = readOverrides().ParallelBuilds
+	if *jobs > 0 {
 		opts.Parallel = *jobs
+		mutateOverrides(func(ov *yoestar.LocalOverrides) bool {
+			if ov.ParallelBuilds == *jobs {
+				return false
+			}
+			ov.ParallelBuilds = *jobs
+			return true
+		})
 	}
 
 	if err := build.BuildUnits(proj, units, opts, os.Stdout); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 }
 
@@ -451,8 +415,7 @@ func projectDir() string {
 
 func cmdContainer(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s container <build|shell|status|binfmt>\n", os.Args[0])
-		os.Exit(1)
+		fail("Usage: %s container <build|shell|status|binfmt>", os.Args[0])
 	}
 
 	switch args[0] {
@@ -476,13 +439,11 @@ func cmdContainer(args []string) {
 			fmt.Println("Cancelled.")
 			return
 		}
-		if err := yoe.RegisterBinfmt(os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+		if err := container.RegisterBinfmt(os.Stdout); err != nil {
+			fail("Error: %v", err)
 		}
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown container subcommand: %s\n", args[0])
-		os.Exit(1)
+		fail("Unknown container subcommand: %s", args[0])
 	}
 }
 
@@ -520,7 +481,7 @@ func cmdContainerShell() {
 	}
 
 	bwrapCmd := build.BwrapShellCommand(cfg)
-	mounts := []yoe.Mount{
+	mounts := []container.Mount{
 		{Host: srcDir, Container: "/build/src"},
 		{Host: destDir, Container: "/build/destdir"},
 		{Host: sysroot, Container: "/build/sysroot", ReadOnly: true},
@@ -529,16 +490,15 @@ func cmdContainerShell() {
 	// Resolve container image from project
 	proj := loadProject()
 
-	if err := yoe.RunInContainer(yoe.ContainerRunConfig{
+	if err := container.RunInContainer(container.ContainerRunConfig{
 		Shell:       "bash",
-		Image:       yoe.DefaultContainerImage(proj),
+		Image:       container.DefaultContainerImage(proj),
 		Command:     bwrapCmd,
 		ProjectDir:  projectDir,
 		Mounts:      mounts,
 		Interactive: true,
 	}); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 }
 
@@ -548,32 +508,25 @@ func cmdInit(args []string) {
 	fs.Parse(args)
 
 	if fs.NArg() < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s init <project-dir> [--machine <name>]\n", os.Args[0])
-		os.Exit(1)
+		fail("Usage: %s init <project-dir> [--machine <name>]", os.Args[0])
 	}
 
 	if err := yoe.RunInit(fs.Arg(0), *machine); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 }
 
 func cmdConfig(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s config <show|set> [...]\n", os.Args[0])
-		os.Exit(1)
+		fail("Usage: %s config <show|set> [...]", os.Args[0])
 	}
 
-	dir := os.Getenv("YOE_PROJECT")
-	if dir == "" {
-		dir = "."
-	}
+	dir := projectDir()
 
 	switch args[0] {
 	case "show":
-		if err := yoe.ShowConfig(dir, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+		if err := yoe.ShowConfig(loadProject(), dir, os.Stdout); err != nil {
+			fail("Error: %v", err)
 		}
 	case "set":
 		// local.star is yoe-generated and safe to rewrite, so the
@@ -582,36 +535,21 @@ func cmdConfig(args []string) {
 		if len(args) == 3 && args[1] == "parallel-builds" {
 			n, err := strconv.Atoi(args[2])
 			if err != nil || n < 1 {
-				fmt.Fprintf(os.Stderr, "config set parallel-builds: value must be an integer >= 1\n")
-				os.Exit(1)
+				fail("config set parallel-builds: value must be an integer >= 1")
 			}
-			root, err := findProjectRootForLocal(projectDir())
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				os.Exit(1)
-			}
-			ov, _ := yoestar.LoadLocalOverrides(root)
-			ov.ParallelBuilds = n
-			if err := yoestar.WriteLocalOverrides(root, ov); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				os.Exit(1)
-			}
+			mutateOverrides(func(ov *yoestar.LocalOverrides) bool {
+				ov.ParallelBuilds = n
+				return true
+			})
 			fmt.Printf("parallel-builds = %d (saved to local.star)\n", n)
 			return
 		}
 		if len(args) == 3 && args[1] == "qemu-memory" {
 			mem := strings.TrimSpace(args[2])
-			root, err := findProjectRootForLocal(projectDir())
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				os.Exit(1)
-			}
-			ov, _ := yoestar.LoadLocalOverrides(root)
-			ov.QEMUMemory = mem // empty string clears it — machine default reapplies
-			if err := yoestar.WriteLocalOverrides(root, ov); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				os.Exit(1)
-			}
+			mutateOverrides(func(ov *yoestar.LocalOverrides) bool {
+				ov.QEMUMemory = mem // empty clears it — the machine default reapplies
+				return true
+			})
 			if mem == "" {
 				fmt.Printf("qemu-memory cleared from local.star; the machine default applies\n")
 			} else {
@@ -619,11 +557,9 @@ func cmdConfig(args []string) {
 			}
 			return
 		}
-		fmt.Fprintf(os.Stderr, "config set: supported keys are 'parallel-builds <n>' and 'qemu-memory <size>'; edit PROJECT.star directly for project config\n")
-		os.Exit(1)
+		fail("config set: supported keys are 'parallel-builds <n>' and 'qemu-memory <size>'; edit PROJECT.star directly for project config")
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown config subcommand: %s\n", args[0])
-		os.Exit(1)
+		fail("Unknown config subcommand: %s", args[0])
 	}
 }
 
@@ -631,7 +567,6 @@ func cmdClean(args []string) {
 	fs := flag.NewFlagSet("clean", flag.ExitOnError)
 	all := fs.Bool("all", false, "remove all build artifacts")
 	force := fs.Bool("force", false, "skip confirmation prompt")
-	locks := fs.Bool("locks", false, "remove stale lock files")
 	fs.BoolVar(force, "f", false, "skip confirmation prompt (shorthand)")
 	fs.Parse(args)
 
@@ -640,17 +575,8 @@ func cmdClean(args []string) {
 		dir = "."
 	}
 
-	if *locks {
-		if err := yoe.CleanLocks(dir, build.Arch()); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-		return
-	}
-
 	if err := yoe.RunClean(dir, build.Arch(), *all, *force, fs.Args()); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 }
 
@@ -661,14 +587,19 @@ func loadProject() *yoestar.Project {
 // tryLoadProject returns nil if no project is loadable from the cwd
 // (rather than os.Exit'ing like loadProject). Useful for commands that
 // can run inside or outside a project, like `yoe device repo list`.
-// projectLoadOpts returns the LoadOptions derived from global CLI flags. The
-// TUI also needs these so reloads (after editing .star files or switching
-// machines) honor flags like --allow-duplicate-provides.
+// projectLoadOpts returns the LoadOptions every project load uses: the
+// module-sync callback, the feed builtins, and whatever the global CLI flags
+// say. The TUI needs these too, so reloads (after editing .star files or
+// switching machines) behave the same as the initial load.
 func projectLoadOpts() []yoestar.LoadOption {
 	opts := []yoestar.LoadOption{
 		yoestar.WithModuleSync(module.SyncIfNeeded),
 		yoestar.WithShowShadows(globalShowShadows),
-		yoestar.WithAllowDuplicateProvides(globalAllowDuplicateProvides),
+		// Relaxed while units-alpine's linux-firmware-* fan-out (~100
+		// packages all providing `linux-firmware-any`) keeps tripping
+		// the strict intra-module collision check. Tighten once that's
+		// fixed upstream.
+		yoestar.WithAllowDuplicateProvides(true),
 		yoestar.WithBuiltin("alpine_feed", alpine.Builtin),
 		yoestar.WithBuiltin("apt_feed", apt.Builtin),
 	}
@@ -688,9 +619,6 @@ func globalFlagArgs() []string {
 	}
 	if globalShowShadows {
 		args = append(args, "--show-shadows")
-	}
-	if globalAllowDuplicateProvides {
-		args = append(args, "--allow-duplicate-provides")
 	}
 	return args
 }
@@ -728,17 +656,9 @@ func loadProjectWithMachineDistro(machineName, distroOverride string) *yoestar.P
 	// doesn't affect Starlark eval, so we just patch proj.Defaults.Image.
 	var ovImage string
 	if machineName == "" {
-		absDir, err := filepath.Abs(dir)
-		if err == nil {
-			if root, err := findProjectRootForLocal(absDir); err == nil {
-				if ov, err := yoestar.LoadLocalOverrides(root); err == nil {
-					machineName = ov.Machine
-					ovImage = ov.Image
-				} else {
-					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-				}
-			}
-		}
+		ov := readOverrides()
+		machineName = ov.Machine
+		ovImage = ov.Image
 	}
 	opts := projectLoadOpts()
 	if machineName != "" {
@@ -749,8 +669,7 @@ func loadProjectWithMachineDistro(machineName, distroOverride string) *yoestar.P
 	}
 	proj, err := yoestar.LoadProject(dir, opts...)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 	if ovImage != "" {
 		if proj.AnyUnit(ovImage) != nil {
@@ -762,20 +681,42 @@ func loadProjectWithMachineDistro(machineName, distroOverride string) *yoestar.P
 	return proj
 }
 
-// findProjectRootForLocal walks up from dir looking for PROJECT.star so
-// LoadLocalOverrides can be called against the project root (where
-// local.star lives) rather than the working dir.
-func findProjectRootForLocal(dir string) (string, error) {
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "PROJECT.star")); err == nil {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", fmt.Errorf("no PROJECT.star in %s or parents", dir)
-		}
-		dir = parent
+// mutateOverrides loads local.star from the project root, hands it to
+// edit, and writes it back if edit reports a change.
+//
+// The load-modify-write sequence was spelled out at every place the CLI
+// persists a per-developer setting, and each spelled its own error
+// handling: some warned, some exited, and the walk to the project root
+// was repeated in all of them. Persisting a setting from a subdirectory
+// has to reach the same local.star a build would.
+//
+// Failures are warnings on stderr, never fatal: the user is mid-command
+// and the setting is a convenience, so the command carries on with the
+// value it was given.
+func mutateOverrides(edit func(*yoestar.LocalOverrides) bool) {
+	root, err := yoestar.FindProjectRoot(projectDir())
+	if err != nil {
+		return
 	}
+	ov, _ := yoestar.LoadLocalOverrides(root)
+	if !edit(&ov) {
+		return
+	}
+	if err := yoestar.WriteLocalOverrides(root, ov); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not save to local.star: %v\n", err)
+	}
+}
+
+// readOverrides returns the project's local.star settings, or the zero
+// value when there is no project or no local.star. Callers treat unset
+// fields as "no preference".
+func readOverrides() yoestar.LocalOverrides {
+	root, err := yoestar.FindProjectRoot(projectDir())
+	if err != nil {
+		return yoestar.LocalOverrides{}
+	}
+	ov, _ := yoestar.LoadLocalOverrides(root)
+	return ov
 }
 
 // unitBuildDirForCWD resolves the build directory for a named unit in the
@@ -796,14 +737,7 @@ func unitBuildDirForCWD(dir, unitName string) (string, error) {
 	opts := projectLoadOpts()
 	// Honor the developer's local.star machine/distro override so we navigate
 	// the same build/<distro>/<name>.<scope>/ subtree `yoe build` wrote to.
-	var ov yoestar.LocalOverrides
-	if absDir, aerr := filepath.Abs(dir); aerr == nil {
-		if root, rerr := findProjectRootForLocal(absDir); rerr == nil {
-			if loaded, lerr := yoestar.LoadLocalOverrides(root); lerr == nil {
-				ov = loaded
-			}
-		}
-	}
+	ov := readOverrides()
 	machine := ov.Machine
 	if machine != "" {
 		opts = append(opts, yoestar.WithMachine(machine))
@@ -850,14 +784,23 @@ func defaultArch(proj *yoestar.Project) string {
 
 func cmdDesc(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s desc <unit>\n", os.Args[0])
-		os.Exit(1)
+		fail("Usage: %s desc <unit>", os.Args[0])
 	}
 	proj := loadProject()
 	arch := defaultArch(proj)
-	if err := resolve.Describe(os.Stdout, proj, args[0], arch); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+	distro, err := proj.EffectiveDistro()
+	if err != nil {
+		fail("Error: resolving effective distro: %v", err)
+	}
+	dir := projectDir()
+	machine := proj.Defaults.Machine
+	if err := resolve.Describe(os.Stdout, proj, args[0], resolve.DescribeOptions{
+		Arch:      arch,
+		Machine:   machine,
+		Distro:    distro,
+		SrcInputs: build.SrcInputsFn(dir, arch, machine, distro),
+	}); err != nil {
+		fail("Error: %v", err)
 	}
 }
 
@@ -867,14 +810,12 @@ func cmdRefs(args []string) {
 	fs.Parse(args)
 
 	if fs.NArg() < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s refs <unit> [--direct]\n", os.Args[0])
-		os.Exit(1)
+		fail("Usage: %s refs <unit> [--direct]", os.Args[0])
 	}
 
 	proj := loadProject()
 	if err := resolve.Refs(os.Stdout, proj, fs.Arg(0), *direct); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 }
 
@@ -887,15 +828,13 @@ func cmdGraph(args []string) {
 
 	proj := loadProject()
 	if err := resolve.Graph(os.Stdout, proj, *format, filter); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 }
 
 func cmdDev(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s dev <extract|diff|status> [unit]\n", os.Args[0])
-		os.Exit(1)
+		fail("Usage: %s dev <extract|diff|status> [unit]", os.Args[0])
 	}
 
 	dir := os.Getenv("YOE_PROJECT")
@@ -906,61 +845,24 @@ func cmdDev(args []string) {
 	switch args[0] {
 	case "extract":
 		if len(args) < 2 {
-			fmt.Fprintf(os.Stderr, "Usage: %s dev extract <unit>\n", os.Args[0])
-			os.Exit(1)
+			fail("Usage: %s dev extract <unit>", os.Args[0])
 		}
-		if err := yoe.DevExtract(dir, build.Arch(), args[1], os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+		if err := yoe.DevExtract(loadProject(), dir, args[1], os.Stdout); err != nil {
+			fail("Error: %v", err)
 		}
 	case "diff":
 		if len(args) < 2 {
-			fmt.Fprintf(os.Stderr, "Usage: %s dev diff <unit>\n", os.Args[0])
-			os.Exit(1)
+			fail("Usage: %s dev diff <unit>", os.Args[0])
 		}
-		if err := yoe.DevDiff(dir, build.Arch(), args[1], os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+		if err := yoe.DevDiff(dir, args[1], os.Stdout); err != nil {
+			fail("Error: %v", err)
 		}
 	case "status":
-		if err := yoe.DevStatus(dir, build.Arch(), os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+		if err := yoe.DevStatus(dir, os.Stdout); err != nil {
+			fail("Error: %v", err)
 		}
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown dev subcommand: %s\n", args[0])
-		os.Exit(1)
-	}
-}
-
-func cmdBootstrap(args []string) {
-	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s bootstrap <stage0|stage1|status>\n", os.Args[0])
-		os.Exit(1)
-	}
-
-	proj := loadProject()
-	dir := projectDir()
-
-	switch args[0] {
-	case "stage0":
-		if err := bootstrap.Stage0(proj, dir, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-	case "stage1":
-		if err := bootstrap.Stage1(proj, dir, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-	case "status":
-		if err := bootstrap.Status(proj, dir, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-	default:
-		fmt.Fprintf(os.Stderr, "Unknown bootstrap subcommand: %s\n", args[0])
-		os.Exit(1)
+		fail("Unknown dev subcommand: %s", args[0])
 	}
 }
 
@@ -976,8 +878,7 @@ func cmdLog(args []string) {
 	if unitName != "" {
 		buildDir, derr := unitBuildDirForCWD(dir, unitName)
 		if derr != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", derr)
-			os.Exit(1)
+			fail("Error: %v", derr)
 		}
 		logPath = filepath.Join(buildDir, "build.log")
 	} else {
@@ -985,8 +886,7 @@ func cmdLog(args []string) {
 	}
 
 	if logPath == "" {
-		fmt.Fprintln(os.Stderr, "No build logs found")
-		os.Exit(1)
+		fail("No build logs found")
 	}
 
 	if *edit {
@@ -999,16 +899,14 @@ func cmdLog(args []string) {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			fail("Error: %v", err)
 		}
 		return
 	}
 
 	data, err := os.ReadFile(logPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 	os.Stdout.Write(data)
 }
@@ -1024,8 +922,7 @@ func cmdDiagnose(args []string) {
 	if unitName != "" {
 		buildDir, derr := unitBuildDirForCWD(dir, unitName)
 		if derr != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", derr)
-			os.Exit(1)
+			fail("Error: %v", derr)
 		}
 		logPath = filepath.Join(buildDir, "build.log")
 	} else {
@@ -1033,19 +930,16 @@ func cmdDiagnose(args []string) {
 	}
 
 	if logPath == "" {
-		fmt.Fprintln(os.Stderr, "No build logs found")
-		os.Exit(1)
+		fail("No build logs found")
 	}
 
 	if _, err := os.Stat(logPath); err != nil {
-		fmt.Fprintf(os.Stderr, "Build log not found: %s\n", logPath)
-		os.Exit(1)
+		fail("Build log not found: %s", logPath)
 	}
 
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error: claude not found in PATH")
-		os.Exit(1)
+		fail("Error: claude not found in PATH")
 	}
 
 	prompt := fmt.Sprintf("diagnose %s", logPath)
@@ -1072,7 +966,7 @@ func cmdSkills(args []string) {
 	// Install at the project root when we're inside a project (where the
 	// developer opens Claude); fall back to the working directory otherwise.
 	root := projectDir()
-	if r, err := findProjectRootForLocal(root); err == nil {
+	if r, err := yoestar.FindProjectRoot(root); err == nil {
 		root = r
 	}
 
@@ -1082,19 +976,16 @@ func cmdSkills(args []string) {
 		force := fs.Bool("force", false, "overwrite skill directories that already exist")
 		fs.Parse(args[1:])
 		if err := skills.Install(root, *force, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			fail("Error: %v", err)
 		}
 	case "update":
 		if err := skills.Install(root, true, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			fail("Error: %v", err)
 		}
 	case "list":
 		names, err := skills.Names()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			fail("Error: %v", err)
 		}
 		for _, n := range names {
 			fmt.Println(n)
@@ -1151,8 +1042,7 @@ func findLatestBuildLog(projectDir string) string {
 
 func cmdUpdate() {
 	if err := yoe.Update(version); err != nil {
-		fmt.Fprintf(os.Stderr, "Update failed: %v\n", err)
-		os.Exit(1)
+		fail("Update failed: %v", err)
 	}
 }
 
@@ -1163,8 +1053,7 @@ func cmdTUI(_ []string) {
 		GlobalFlagArgs: globalFlagArgs(),
 	}
 	if err := tui.Run(proj, projectDir(), cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 }
 
@@ -1182,30 +1071,26 @@ func cmdFlash(args []string) {
 
 	if fs.NArg() < 1 {
 		fmt.Fprintf(os.Stderr, "Usage: %s flash <image-unit> <device> [--machine <name>] [--yes] [--dry-run]\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "       %s flash list\n", os.Args[0])
-		os.Exit(1)
+		fail("       %s flash list", os.Args[0])
 	}
 
 	unitName := fs.Arg(0)
 	devicePath := fs.Arg(1)
 
 	if devicePath == "" && !*dryRun {
-		fmt.Fprintf(os.Stderr, "Usage: %s flash <image-unit> <device>\n", os.Args[0])
-		os.Exit(1)
+		fail("Usage: %s flash <image-unit> <device>", os.Args[0])
 	}
 
 	proj := loadProjectWithMachine(*machineName)
 	if err := device.Flash(proj, unitName, devicePath, projectDir(), *dryRun, *assumeYes, os.Stdout); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 }
 
 func cmdFlashList(_ []string) {
 	cands, err := device.ListCandidates()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 	if len(cands) == 0 {
 		fmt.Println("No removable devices detected.")
@@ -1277,26 +1162,23 @@ func cmdRun(args []string) {
 	// list before the run-side merge with the machine's declared forwards.
 	// The CLI list comes last so a one-off --port still beats a saved
 	// override for the same guest port.
-	if root, err := findProjectRootForLocal(projectDir()); err == nil {
-		ov, _ := yoestar.LoadLocalOverrides(root)
-		opts.Memory = ov.QEMUMemory
-		if *memory != "" {
-			opts.Memory = *memory
-			if ov.QEMUMemory != *memory {
-				ov.QEMUMemory = *memory
-				if werr := yoestar.WriteLocalOverrides(root, ov); werr != nil {
-					fmt.Fprintf(os.Stderr, "Warning: could not save qemu_memory to local.star: %v\n", werr)
-				}
-			}
-		}
-		if !displaySet {
-			opts.Display = ov.QEMUDisplay == "on"
-		}
-		if len(ov.QEMUPorts) > 0 {
-			opts.Ports = append(append([]string(nil), ov.QEMUPorts...), opts.Ports...)
-		}
-	} else if *memory != "" {
+	ov := readOverrides()
+	opts.Memory = ov.QEMUMemory
+	if !displaySet {
+		opts.Display = ov.QEMUDisplay == "on"
+	}
+	if len(ov.QEMUPorts) > 0 {
+		opts.Ports = append(append([]string(nil), ov.QEMUPorts...), opts.Ports...)
+	}
+	if *memory != "" {
 		opts.Memory = *memory
+		mutateOverrides(func(ov *yoestar.LocalOverrides) bool {
+			if ov.QEMUMemory == *memory {
+				return false
+			}
+			ov.QEMUMemory = *memory
+			return true
+		})
 	}
 
 	// Apply the distro override the same way `yoe build --distro` does, so a
@@ -1314,20 +1196,17 @@ func cmdRun(args []string) {
 		unitName = proj.Defaults.Image
 	}
 	if unitName == "" {
-		fmt.Fprintf(os.Stderr, "Usage: %s run <image-unit> [--machine <name>]\n", os.Args[0])
-		os.Exit(1)
+		fail("Usage: %s run <image-unit> [--machine <name>]", os.Args[0])
 	}
 
 	if err := device.RunQEMU(proj, unitName, *machineName, projectDir(), opts, os.Stdout); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 }
 
 func cmdRepo(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s repo <list|info|remove|clean> [args...]\n", os.Args[0])
-		os.Exit(1)
+		fail("Usage: %s repo <list|info|remove|clean> [args...]", os.Args[0])
 	}
 
 	proj := loadProject()
@@ -1337,96 +1216,75 @@ func cmdRepo(args []string) {
 	// subtree separately.
 	distro, err := proj.EffectiveDistro()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 	repoDir := repo.RepoDistroDir(proj, projectDir(), distro)
 
 	switch args[0] {
 	case "list":
 		if err := repo.List(repoDir, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			fail("Error: %v", err)
 		}
 	case "info":
 		if len(args) < 2 {
-			fmt.Fprintf(os.Stderr, "Usage: %s repo info <package>\n", os.Args[0])
-			os.Exit(1)
+			fail("Usage: %s repo info <package>", os.Args[0])
 		}
 		if err := repo.Info(repoDir, args[1], os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			fail("Error: %v", err)
 		}
 	case "remove":
 		if len(args) < 2 {
-			fmt.Fprintf(os.Stderr, "Usage: %s repo remove <package>\n", os.Args[0])
-			os.Exit(1)
+			fail("Usage: %s repo remove <package>", os.Args[0])
 		}
 		// Load the project's signing key so the regenerated APKINDEX stays
 		// signed. Failure here is fatal — an unsigned index would silently
 		// break apk add against this repo.
 		signer, err := artifact.LoadOrGenerateSigner(proj.Name, proj.SigningKey)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: loading signing key: %v\n", err)
-			os.Exit(1)
+			fail("Error: loading signing key: %v", err)
 		}
 		if err := repo.Remove(repoDir, args[1], signer, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			fail("Error: %v", err)
 		}
 	case "clean":
 		// Drops .apk files no current unit produces, then re-signs the
 		// regenerated APKINDEX. Same signer concern as `remove`.
 		signer, err := artifact.LoadOrGenerateSigner(proj.Name, proj.SigningKey)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: loading signing key: %v\n", err)
-			os.Exit(1)
+			fail("Error: loading signing key: %v", err)
 		}
 		if err := repo.Clean(proj, repoDir, signer, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			fail("Error: %v", err)
 		}
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown repo subcommand: %s\n", args[0])
-		os.Exit(1)
+		fail("Unknown repo subcommand: %s", args[0])
 	}
 }
 
 func cmdSource(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s source <fetch|list|verify|clean> [units...]\n", os.Args[0])
-		os.Exit(1)
-	}
-
-	dir := os.Getenv("YOE_PROJECT")
-	if dir == "" {
-		dir = "."
+		fail("Usage: %s source <fetch|list|verify|clean> [units...]", os.Args[0])
 	}
 
 	switch args[0] {
 	case "fetch":
-		if err := source.FetchAll(dir, args[1:], os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+		if err := source.FetchAll(loadProject(), args[1:], os.Stdout); err != nil {
+			fail("Error: %v", err)
 		}
 	case "list":
-		if err := source.ListSources(dir, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+		if err := source.ListSources(loadProject(), os.Stdout); err != nil {
+			fail("Error: %v", err)
 		}
 	case "verify":
-		if err := source.VerifyAll(dir, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+		if err := source.VerifyAll(loadProject(), os.Stdout); err != nil {
+			fail("Error: %v", err)
 		}
 	case "clean":
 		if err := source.CleanSources(os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			fail("Error: %v", err)
 		}
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown source subcommand: %s\n", args[0])
-		os.Exit(1)
+		fail("Unknown source subcommand: %s", args[0])
 	}
 }
 
@@ -1451,8 +1309,7 @@ func tryCustomCommand(command string, args []string) bool {
 
 	eng := engines[command]
 	if err := yoestar.RunCommand(eng, cmd, args, dir); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 	return true
 }

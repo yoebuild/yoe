@@ -22,16 +22,16 @@ t = install_template("inittab.tmpl", "$DESTDIR/etc/inittab")
 	if err != nil {
 		t.Fatalf("ExecFile: %v", err)
 	}
-	f, ok := globals["f"].(*InstallStepValue)
+	f, ok := globals["f"].(*InstallStep)
 	if !ok {
-		t.Fatalf("f = %T, want *InstallStepValue", globals["f"])
+		t.Fatalf("f = %T, want *InstallStep", globals["f"])
 	}
 	if f.Kind != "file" || f.Src != "sshd" || f.Dest != "$DESTDIR/etc/init.d/sshd" || f.Mode != 0o755 {
 		t.Errorf("f = %+v, unexpected fields", f)
 	}
-	tt, ok := globals["t"].(*InstallStepValue)
+	tt, ok := globals["t"].(*InstallStep)
 	if !ok {
-		t.Fatalf("t = %T, want *InstallStepValue", globals["t"])
+		t.Fatalf("t = %T, want *InstallStep", globals["t"])
 	}
 	if tt.Kind != "template" || tt.Mode != 0o644 {
 		t.Errorf("t = %+v, want default mode 0o644", tt)
@@ -73,9 +73,9 @@ v = make_steps()
 	if err != nil {
 		t.Fatalf("ExecFile: %v", err)
 	}
-	v, ok := globals["v"].(*InstallStepValue)
+	v, ok := globals["v"].(*InstallStep)
 	if !ok {
-		t.Fatalf("v = %T, want *InstallStepValue", globals["v"])
+		t.Fatalf("v = %T, want *InstallStep", globals["v"])
 	}
 	want := filepath.Join(tmp, "helper")
 	if v.BaseDir != want {
@@ -83,15 +83,15 @@ v = make_steps()
 	}
 }
 
-func TestInstallStepValue_HashStable(t *testing.T) {
-	a := &InstallStepValue{Kind: "file", Src: "a", Dest: "/b", Mode: 0o644}
-	b := &InstallStepValue{Kind: "file", Src: "a", Dest: "/b", Mode: 0o644}
+func TestInstallStep_HashStable(t *testing.T) {
+	a := &InstallStep{Kind: "file", Src: "a", Dest: "/b", Mode: 0o644}
+	b := &InstallStep{Kind: "file", Src: "a", Dest: "/b", Mode: 0o644}
 	ha, _ := a.Hash()
 	hb, _ := b.Hash()
 	if ha != hb {
 		t.Errorf("equal values hash differently: %d vs %d", ha, hb)
 	}
-	c := &InstallStepValue{Kind: "file", Src: "a", Dest: "/b", Mode: 0o755}
+	c := &InstallStep{Kind: "file", Src: "a", Dest: "/b", Mode: 0o755}
 	hc, _ := c.Hash()
 	if ha == hc {
 		t.Error("different modes should produce different hashes")

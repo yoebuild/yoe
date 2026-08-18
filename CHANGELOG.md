@@ -8,6 +8,60 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Parallel builds no longer drop packages from the Alpine package index.** Two
+  units finishing at the same time could each regenerate the index and leave out
+  the other's package, so `apk add` intermittently failed to find something that
+  had just been built. The index is now written once per build, after everything
+  has been published.
+- **`conffiles` now does what it says on Debian and Ubuntu.** Config files a
+  unit declares are recorded in the package, so a locally edited copy survives a
+  package upgrade instead of being overwritten. Declaring a path the unit does
+  not install is now reported as an error. On Alpine, apk already preserves
+  modified config files on its own.
+- **A build no longer reports success when another yoe process is already
+  building the same unit.** It skipped the unit but still recorded it as built,
+  so the next unit that depended on it failed with a confusing missing-header
+  error. The situation is now reported directly.
+- **`yoe desc` prints the same hash a build uses.** It previously computed the
+  hash without the distro, machine, and source state, so the value never matched
+  the one in the build cache.
+- **The TUI's `status:` searches keep up with a running build.** A filter like
+  `status:building` now updates as units start and finish instead of showing
+  whatever matched when it was typed.
+- **The TUI shows `cached` only for units the next build will actually reuse.**
+  It previously trusted a cache marker even when the package it stood for was
+  gone.
+- **Unit build logs in the TUI are no longer interleaved or truncated.** The TUI
+  and the build engine were both writing to the same file.
+- **`yoe dev` accepts every source a build treats as a git repository.** A unit
+  sourced from a bare `github.com/...` path was fetched as git but rejected by
+  `yoe dev` as a non-git source.
+- **`yoe config show`, `yoe source`, `yoe module list`, and `yoe dev` work in
+  projects that use package feeds.** They loaded the project without the feed
+  extensions and failed with `undefined: alpine_feed`. `yoe config show` also
+  now reads local settings from the project root rather than the current
+  directory.
+- **Removed the unimplemented `yoe bootstrap` subcommand.** It could not run;
+  building yoe on a yoe-built device is unaffected and continues to work through
+  the normal build path.
+- **A unit with a misspelled `scope` is now rejected instead of silently built
+  for the wrong target.** An unrecognized value fell through to per-architecture
+  scoping, so the package was built and published somewhere nobody expected.
+  Valid values are `arch`, `machine`, and `noarch`; leaving it out still means
+  `arch`.
+- **Removed `sources(...)`, `s3_cache(...)`, and `uboot(...)`, along with the
+  `kernel(...)` source fields.** All of them accepted their arguments and
+  discarded them, so a project configuring a Go proxy, a shared cache, or a
+  bootloader through them got no effect and no warning. Machines name a kernel
+  and bootloader unit instead, which is how every in-tree machine already works.
+- **Removed `yoe clean --locks`.** Builds no longer write lock files, so there
+  is nothing left for it to clean up. A build that is interrupted leaves nothing
+  behind that a later build has to be told to ignore.
+- **A unit that runs one privileged build step no longer loses its own root-user
+  setting for every step after it.**
+- Image units get a one-time rebuild: a display-only field was being folded into
+  their cache key.
+
 ## [0.13.1] - 2026-07-29
 
 - **Debian and Ubuntu projects can now pull in a vendor package repository

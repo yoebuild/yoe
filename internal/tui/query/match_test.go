@@ -10,12 +10,12 @@ import (
 // the matcher is expected to filter on.
 func fixtureProject() map[string]*yoestar.Unit {
 	return map[string]*yoestar.Unit{
-		"base-image":      {Name: "base-image", Class: "image", Module: "module-core"},
-		"toolchain-musl":  {Name: "toolchain-musl", Class: "container", Module: "module-core"},
-		"openssl":         {Name: "openssl", Class: "unit", Module: "module-core"},
-		"musl":            {Name: "musl", Class: "unit", Module: "module-alpine"},
-		"libcrypto3":      {Name: "libcrypto3", Class: "unit", Module: "module-alpine"},
-		"my-app":          {Name: "my-app", Class: "unit", Module: ""}, // project root
+		"base-image":     {Name: "base-image", Class: "image", Module: "module-core"},
+		"toolchain-musl": {Name: "toolchain-musl", Class: "container", Module: "module-core"},
+		"openssl":        {Name: "openssl", Class: "unit", Module: "module-core"},
+		"musl":           {Name: "musl", Class: "unit", Module: "module-alpine"},
+		"libcrypto3":     {Name: "libcrypto3", Class: "unit", Module: "module-alpine"},
+		"my-app":         {Name: "my-app", Class: "unit", Module: ""}, // project root
 	}
 }
 

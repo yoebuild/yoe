@@ -29,8 +29,8 @@ var statusValues = []string{"building", "cached", "failed", "pending"}
 // start/end describe the byte range of the token to be replaced.
 // Candidates are sorted deterministically. Empty result when there is
 // nothing to suggest.
-func Complete(input string, cursor int, ctx Context) (start, end int, candidates []string) {
-	start, end = tokenSpan(input, cursor)
+func Complete(input string, ctx Context) (start, end int, candidates []string) {
+	start, end = lastTokenSpan(input)
 	tok := strings.ToLower(input[start:end])
 
 	if i := strings.IndexByte(tok, ':'); i >= 0 {
@@ -71,22 +71,20 @@ func Complete(input string, cursor int, ctx Context) (start, end int, candidates
 	return start, end, substringMatch(ctx.Units, tok)
 }
 
-func tokenSpan(input string, cursor int) (int, int) {
-	if cursor < 0 {
-		cursor = 0
-	}
-	if cursor > len(input) {
-		cursor = len(input)
-	}
-	start := cursor
+// lastTokenSpan returns the byte range of the token being typed — the
+// run of non-space characters at the end of input.
+//
+// Completion only ever applies to the end of the query. The field used
+// to take a cursor position and complete the token around it, which
+// looked more general but had one caller that always passed the end of
+// the string: the query field is append-only, with no way to move the
+// caret into the middle of it.
+func lastTokenSpan(input string) (int, int) {
+	start := len(input)
 	for start > 0 && input[start-1] != ' ' {
 		start--
 	}
-	end := cursor
-	for end < len(input) && input[end] != ' ' {
-		end++
-	}
-	return start, end
+	return start, len(input)
 }
 
 func prefixMatch(pool []string, prefix string) []string {

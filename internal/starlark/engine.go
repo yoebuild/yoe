@@ -3,7 +3,6 @@ package starlark
 import (
 	"fmt"
 	"path/filepath"
-	"sync"
 
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
@@ -11,16 +10,19 @@ import (
 
 var fileOpts = &syntax.FileOptions{}
 
-// Engine evaluates .star files and collects results.
+// Engine evaluates .star files and collects results. One Engine per
+// project load; it is not safe for concurrent use. Evaluation is
+// single-threaded by construction — Starlark files are executed in
+// sequence and the closure walk runs on the same goroutine — so the
+// catalog maps are written and read without synchronization.
 type Engine struct {
-	mu         sync.Mutex
-	project    *Project
-	machines   map[string]*Machine
+	project  *Project
+	machines map[string]*Machine
 	// units is the legacy flat catalog: one slot per name, populated
 	// in module-priority order (or first-wins for cross-priority
 	// ties). The closure walker still consults it for the fast path;
 	// cross-distro collisions fall back to unitsByModule.
-	units      map[string]*Unit
+	units map[string]*Unit
 	// unitsByModule is the primary per-module storage that lets two
 	// modules' same-named units coexist. Same-named units from
 	// alpine.main and debian.main both register here; the closure
@@ -28,8 +30,8 @@ type Engine struct {
 	// synthetic units also register here under their synthetic module
 	// name (e.g., e.unitsByModule["alpine.main"]["openssl"]).
 	unitsByModule map[string]map[string]*Unit
-	commands   map[string]*Command
-	moduleInfo *ModuleInfo
+	commands      map[string]*Command
+	moduleInfo    *ModuleInfo
 
 	// Current module context — set by the loader before evaluating each
 	// module's directories so registerUnit can tag units.
@@ -82,7 +84,6 @@ type Engine struct {
 	// matching the project's arch without needing the arch passed in
 	// through every call site.
 	activeArch string
-
 }
 
 // SetExtraBuiltins materializes the WithBuiltin factories. Called by the
@@ -123,8 +124,6 @@ func NewEngine() *Engine {
 // materialization callback resolves the same name); the latest write
 // wins inside one module. Cross-module same-name collisions register
 // independently — that's the whole point of the nested map.
-//
-// Must be called with e.mu held.
 func (e *Engine) storeByModule(u *Unit) {
 	if u == nil {
 		return
@@ -136,16 +135,15 @@ func (e *Engine) storeByModule(u *Unit) {
 	e.unitsByModule[mod][u.Name] = u
 }
 
-
 // SetVar sets a predeclared variable available in all subsequently evaluated
 // .star files. Used to inject ARCH after machines are loaded.
 func (e *Engine) SetVar(name string, value starlark.Value) {
 	e.vars[name] = value
 }
 
-func (e *Engine) Project() *Project              { return e.project }
-func (e *Engine) Machines() map[string]*Machine   { return e.machines }
-func (e *Engine) Units() map[string]*Unit     { return e.units }
+func (e *Engine) Project() *Project             { return e.project }
+func (e *Engine) Machines() map[string]*Machine { return e.machines }
+func (e *Engine) Units() map[string]*Unit       { return e.units }
 
 // UnitsByModule returns the per-module unit catalog populated during
 // registration and synthetic materialization. Same-named units from
@@ -153,9 +151,9 @@ func (e *Engine) Units() map[string]*Unit     { return e.units }
 // to seed Project.UnitsByModule and DistroViews.
 func (e *Engine) UnitsByModule() map[string]map[string]*Unit { return e.unitsByModule }
 
-func (e *Engine) Commands() map[string]*Command   { return e.commands }
-func (e *Engine) ModuleInfo() *ModuleInfo         { return e.moduleInfo }
-func (e *Engine) Globals() starlark.StringDict    { return e.globals }
+func (e *Engine) Commands() map[string]*Command { return e.commands }
+func (e *Engine) ModuleInfo() *ModuleInfo       { return e.moduleInfo }
+func (e *Engine) Globals() starlark.StringDict  { return e.globals }
 
 // SetCurrentModule sets the module context for subsequent unit registrations.
 func (e *Engine) SetCurrentModule(name string, index int) {

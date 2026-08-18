@@ -7,15 +7,12 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/yoebuild/yoe/internal/build"
 	"github.com/yoebuild/yoe/internal/device"
 	"github.com/yoebuild/yoe/internal/feed"
-	"github.com/yoebuild/yoe/internal/repo"
 	"github.com/yoebuild/yoe/internal/resolve"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
@@ -28,8 +25,7 @@ func cmdDeploy(args []string) {
 	machineName := fs.String("machine", "", "target machine")
 	fs.Parse(args)
 	if fs.NArg() < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s deploy <unit> <[user@]host[:port]> [--user U] [--port P] [--host-ip IP] [--machine M]\n", os.Args[0])
-		os.Exit(1)
+		fail("Usage: %s deploy <unit> <[user@]host[:port]> [--user U] [--port P] [--host-ip IP] [--machine M]", os.Args[0])
 	}
 	unitName := fs.Arg(0)
 	hostArg := fs.Arg(1)
@@ -41,37 +37,31 @@ func cmdDeploy(args []string) {
 	// per-distro views via opts.EffectiveDistro.
 	unit := proj.AnyUnit(unitName)
 	if unit == nil {
-		fmt.Fprintf(os.Stderr, "Error: unit %q not found\n", unitName)
-		os.Exit(1)
+		fail("Error: unit %q not found", unitName)
 	}
 	if unit.Class == "image" {
-		fmt.Fprintf(os.Stderr, "Error: image targets are flashed, not deployed; use `yoe flash %s`\n", unitName)
-		os.Exit(1)
+		fail("Error: image targets are flashed, not deployed; use `yoe flash %s`", unitName)
 	}
 
 	// 1. Build.
 	if err := buildUnitForDeploy(proj, unitName, *machineName); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: build %s: %v\n", unitName, err)
-		os.Exit(1)
+		fail("Error: build %s: %v", unitName, err)
 	}
 
 	// 2. Resolve a feed URL: existing yoe serve, or start ephemeral.
 	feedURL, stopFeed, err := resolveOrStartFeed(proj, projectDir(), *port, *hostIP)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: feed: %v\n", err)
-		os.Exit(1)
+		fail("Error: feed: %v", err)
 	}
 	defer stopFeed()
 
 	target, err := device.ParseSSHTarget(hostArg, *user)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 	deployDistro, err := proj.EffectiveDistro()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: resolve effective distro: %v\n", err)
-		os.Exit(1)
+		fail("Error: resolve effective distro: %v", err)
 	}
 	// The codename is only meaningful for apt-family targets (it stamps
 	// the apt sources.list line); alpine deploys ignore it. Read it from
@@ -80,8 +70,7 @@ func cmdDeploy(args []string) {
 	codename := ""
 	if yoestar.IsAptFamily(deployDistro) {
 		if codename, err = proj.CodenameForDistro(deployDistro); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			fail("Error: %v", err)
 		}
 	}
 	err = device.Deploy(context.Background(), device.DeployInput{
@@ -93,8 +82,7 @@ func cmdDeploy(args []string) {
 		Out:      os.Stdout,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fail("Error: %v", err)
 	}
 	fmt.Printf("\ndeployed %s to %s (feed: %s)\n", unitName, hostArg, feedURL)
 }
@@ -136,39 +124,25 @@ func buildUnitForDeploy(proj *yoestar.Project, unit, machineName string) error {
 // (teardown is a no-op). Otherwise spin up an ephemeral feed on the
 // pinned port.
 func resolveOrStartFeed(proj *yoestar.Project, projDir string, port int, hostIP string) (string, func(), error) {
-	results, _ := feed.BrowseMDNS(500 * time.Millisecond)
-	for _, r := range results {
-		if r.Project == proj.Name {
-			fmt.Printf("reusing existing feed %s -> %s\n", r.Instance, r.URL())
-			return r.URL(), func() {}, nil
-		}
+	if url := feed.DiscoverForProject(proj); url != "" {
+		fmt.Printf("reusing existing feed %s\n", url)
+		return url, func() {}, nil
 	}
 
-	projRepoDir := repo.RepoDir(proj, projDir)
-	httpRoot := filepath.Dir(projRepoDir)
-	// Arches live under repo/<project>/<distro>/<arch>/ now; advertise
-	// arches found under the project's effective-distro subtree.
-	deployDistro, derr := proj.EffectiveDistro()
-	if derr != nil {
-		return "", nil, fmt.Errorf("resolve effective distro: %w", derr)
+	cfg, err := feed.ConfigForProject(proj, projDir)
+	if err != nil {
+		return "", nil, err
 	}
-	archs, _ := repo.ArchDirs(repo.RepoDistroDir(proj, projDir, deployDistro))
-
 	bind := "0.0.0.0"
-	hostName := ""
 	if hostIP != "" {
 		bind = hostIP
-		hostName = hostIP
+		cfg.HostName = hostIP
 	}
-	srv, err := feed.Start(feed.Config{
-		RepoDir:  httpRoot,
-		BindAddr: net.JoinHostPort(bind, strconv.Itoa(port)),
-		Project:  proj.Name,
-		Archs:    archs,
-		NoMDNS:   true, // ephemeral; do not advertise
-		HostName: hostName,
-		LogW:     os.Stderr,
-	})
+	cfg.BindAddr = net.JoinHostPort(bind, strconv.Itoa(port))
+	cfg.NoMDNS = true // ephemeral; do not advertise
+	cfg.LogW = os.Stderr
+
+	srv, err := feed.Start(cfg)
 	if err != nil {
 		return "", nil, fmt.Errorf("start ephemeral feed: %w", err)
 	}

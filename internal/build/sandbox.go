@@ -9,7 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	yoe "github.com/yoebuild/yoe/internal"
+	"github.com/yoebuild/yoe/internal/arch"
+	"github.com/yoebuild/yoe/internal/container"
 	"github.com/yoebuild/yoe/internal/resolve"
 )
 
@@ -20,17 +21,16 @@ type SandboxConfig struct {
 	Container  string // Docker image tag (e.g., "yoe/toolchain-musl:15")
 	Sandbox    bool   // use bwrap sandbox inside container
 	Shell      string // shell for build commands: "sh" (default) or "bash"
-	BuildRoot  string
 	SrcDir     string
 	DestDir    string
 	Sysroot    string
 	Env        map[string]string
 	ProjectDir string
-	NoUser     bool      // run as root (for losetup/mount)
-	HostDir    string    // working directory for run(host=True) commands
+	NoUser     bool              // run as root (for losetup/mount)
+	HostDir    string            // working directory for run(host=True) commands
 	CacheDirs  map[string]string // host:container cache mount mappings
-	Stdout     io.Writer // build output (nil = os.Stdout)
-	Stderr     io.Writer // build errors (nil = os.Stderr)
+	Stdout     io.Writer         // build output (nil = os.Stdout)
+	Stderr     io.Writer         // build errors (nil = os.Stderr)
 }
 
 // resolveShell returns the shell to use for build commands.
@@ -49,14 +49,14 @@ func resolveShell(cfg *SandboxConfig) string {
 func RunInSandbox(cfg *SandboxConfig, command string) error {
 	// Cross-arch builds can't use bwrap (no user namespaces under QEMU),
 	// and non-sandbox units skip bwrap entirely.
-	if !cfg.Sandbox || (cfg.Arch != "" && cfg.Arch != yoe.HostArch()) {
+	if !cfg.Sandbox || (cfg.Arch != "" && cfg.Arch != arch.Host()) {
 		return RunSimple(cfg, command)
 	}
 
 	bwrapCmd := bwrapCommand(cfg, command)
 	mounts := containerMountsForBuild(cfg)
 
-	return yoe.RunInContainer(yoe.ContainerRunConfig{
+	return container.RunInContainer(container.ContainerRunConfig{
 		Ctx:        cfg.Ctx,
 		Arch:       cfg.Arch,
 		Image:      cfg.Container,
@@ -96,7 +96,7 @@ func RunSimple(cfg *SandboxConfig, command string) error {
 
 	mounts := containerMountsForBuild(cfg)
 
-	return yoe.RunInContainer(yoe.ContainerRunConfig{
+	return container.RunInContainer(container.ContainerRunConfig{
 		Ctx:        cfg.Ctx,
 		Arch:       cfg.Arch,
 		Image:      cfg.Container,
@@ -114,11 +114,7 @@ func bwrapCommand(cfg *SandboxConfig, command string) string {
 	var parts []string
 	parts = append(parts, "bwrap", "--die-with-parent")
 
-	if cfg.BuildRoot != "" {
-		parts = append(parts, "--bind", cfg.BuildRoot, "/")
-	} else {
-		parts = append(parts, "--bind", "/", "/")
-	}
+	parts = append(parts, "--bind", "/", "/")
 
 	if cfg.Sysroot != "" {
 		parts = append(parts, "--ro-bind", "/build/sysroot", "/build/sysroot")
@@ -155,11 +151,7 @@ func BwrapShellCommand(cfg *SandboxConfig) string {
 	var parts []string
 	parts = append(parts, "bwrap", "--die-with-parent")
 
-	if cfg.BuildRoot != "" {
-		parts = append(parts, "--bind", cfg.BuildRoot, "/")
-	} else {
-		parts = append(parts, "--bind", "/", "/")
-	}
+	parts = append(parts, "--bind", "/", "/")
 
 	if cfg.Sysroot != "" {
 		parts = append(parts, "--ro-bind", "/build/sysroot", "/build/sysroot")
@@ -196,27 +188,27 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
-func containerMountsForBuild(cfg *SandboxConfig) []yoe.Mount {
-	var mounts []yoe.Mount
+func containerMountsForBuild(cfg *SandboxConfig) []container.Mount {
+	var mounts []container.Mount
 
 	if cfg.SrcDir != "" {
-		mounts = append(mounts, yoe.Mount{
+		mounts = append(mounts, container.Mount{
 			Host: cfg.SrcDir, Container: "/build/src",
 		})
 	}
 	if cfg.DestDir != "" {
-		mounts = append(mounts, yoe.Mount{
+		mounts = append(mounts, container.Mount{
 			Host: cfg.DestDir, Container: "/build/destdir",
 		})
 	}
 	if cfg.Sysroot != "" {
-		mounts = append(mounts, yoe.Mount{
+		mounts = append(mounts, container.Mount{
 			Host: cfg.Sysroot, Container: "/build/sysroot", ReadOnly: true,
 		})
 	}
-	for host, container := range cfg.CacheDirs {
-		mounts = append(mounts, yoe.Mount{
-			Host: host, Container: container,
+	for host, guestPath := range cfg.CacheDirs {
+		mounts = append(mounts, container.Mount{
+			Host: host, Container: guestPath,
 		})
 	}
 
@@ -284,39 +276,12 @@ func NProc() string {
 	return strings.TrimSpace(string(out))
 }
 
-// multiarchTuple maps a yoe arch name to debian's multiarch tuple
-// for /usr/lib/<tuple>/ paths. Used by the build env so debian feed
-// packages' .so / .pc files (which live under
-// /usr/lib/x86_64-linux-gnu/ on amd64) are visible to pkg-config /
-// ld / rtld during compile-from-source units. The tuple is empty
-// for unknown arches — the caller's path-join still works; the
-// resulting `/usr/lib//pkgconfig` entry is harmless noise.
-func multiarchTuple(arch string) string {
-	switch arch {
-	case "x86_64":
-		return "x86_64-linux-gnu"
-	case "arm64":
-		return "aarch64-linux-gnu"
-	case "riscv64":
-		return "riscv64-linux-gnu"
-	}
-	return ""
-}
-
-// Arch returns the current machine architecture in Yoe format.
-func Arch() string {
-	out, err := exec.Command("uname", "-m").Output()
-	if err != nil {
-		return "x86_64"
-	}
-	arch := strings.TrimSpace(string(out))
-	switch arch {
-	case "aarch64":
-		return "arm64"
-	default:
-		return arch
-	}
-}
+// Arch returns the host machine's architecture as a yoe token.
+//
+// Deprecated in favor of arch.Host, which this forwards to; kept so the
+// many build-path callers that already say build.Arch() keep reading
+// naturally next to the rest of the build API.
+func Arch() string { return arch.Host() }
 
 // UnitBuildDir returns the build directory for a unit.
 // The scopeDir is "noarch", an architecture name, or a machine name,

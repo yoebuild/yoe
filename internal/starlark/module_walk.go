@@ -36,7 +36,7 @@ func expandTransitiveDeps(initial []ModuleRef, projectRoot string,
 		if err != nil {
 			return nil, err
 		}
-		seen[id] = &moduleRecord{ref: combined[i], projectLevel: true, id: id}
+		seen[id] = &moduleRecord{ref: combined[i], projectLevel: true}
 	}
 
 	// Bound the fixpoint loop. A pathological MODULE.star that
@@ -76,7 +76,7 @@ func expandTransitiveDeps(initial []ModuleRef, projectRoot string,
 				if err != nil {
 					return nil, fmt.Errorf("module %s deps: %w", parentName, err)
 				}
-				depName := dep.peekName(projectRoot)
+				depName := pathBasename(dep)
 				depGraph[parentName] = appendUnique(depGraph[parentName], depName)
 
 				existing, alreadySeen := seen[depID]
@@ -100,7 +100,7 @@ func expandTransitiveDeps(initial []ModuleRef, projectRoot string,
 						depName, refDesc(conflict.ref), refDesc(dep))
 				}
 
-				seen[depID] = &moduleRecord{ref: dep, projectLevel: false, id: depID}
+				seen[depID] = &moduleRecord{ref: dep, projectLevel: false}
 				newRefs = append(newRefs, dep)
 				// Avoid relying on Go's address of loop variable —
 				// `existing` may be a stale reference here.
@@ -120,13 +120,12 @@ func expandTransitiveDeps(initial []ModuleRef, projectRoot string,
 }
 
 // moduleRecord carries the bookkeeping for one entry in the
-// visited-set: the canonical ID, the ref that contributed it, and
-// whether the project root declared it (project-level entries win
-// against transitive collisions).
+// visited-set: the ref that contributed it, and whether the project
+// root declared it (project-level entries win against transitive
+// collisions). The canonical ID is the map key.
 type moduleRecord struct {
 	ref          ModuleRef
 	projectLevel bool
-	id           string
 }
 
 // canonicalIdentity returns a stable string identity for a ModuleRef so
@@ -192,18 +191,6 @@ func findNameConflict(seen map[string]*moduleRecord, candidate ModuleRef, depNam
 		}
 	}
 	return nil
-}
-
-// peekName returns the canonical name a ModuleRef will register
-// under. For local modules it's the directory name (basename of
-// path/local). For remote modules it's the URL basename minus `.git`.
-//
-// Used by the dep-graph and conflict-check paths so they're keyed on
-// the same string the loader uses in its module name → priority
-// assignment. projectRoot is unused here (kept for signature symmetry
-// with canonicalIdentity).
-func (m ModuleRef) peekName(_ string) string {
-	return pathBasename(m)
 }
 
 // refDesc formats a ModuleRef for error messages: prefers URL + ref

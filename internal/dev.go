@@ -1,17 +1,16 @@
 package internal
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/yoebuild/yoe/internal/build"
+	"github.com/yoebuild/yoe/internal/gitutil"
 	"github.com/yoebuild/yoe/internal/source"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
@@ -20,12 +19,7 @@ import (
 // files and updates the unit's patches list. Patches land in <unitDir>/<unit>/
 // — alongside the unit's .star file — so the patch paths in `patches = [...]`
 // stay relative to the unit and ship with the module that defines it.
-func DevExtract(projectDir, arch, unitName string, w io.Writer) error {
-	proj, err := yoestar.LoadProject(projectDir)
-	if err != nil {
-		return err
-	}
-
+func DevExtract(proj *yoestar.Project, projectDir, unitName string, w io.Writer) error {
 	// DevExtract operates on the unit's source-control state, not
 	// its distro-specific build artifact, so AnyUnit is enough — the
 	// patch list and source URL it reads are distro-neutral fields.
@@ -41,10 +35,9 @@ func DevExtract(projectDir, arch, unitName string, w io.Writer) error {
 	if _, err := os.Stat(filepath.Join(srcDir, ".git")); os.IsNotExist(err) {
 		return fmt.Errorf("%s is not a git repo — build the recipe first with yoe build", srcDir)
 	}
-	_ = arch // legacy parameter; unitSrcDir now globs across the per-distro build subtree
 
 	// Check if there are commits beyond upstream
-	out, err := gitCmd(srcDir, "rev-list", source.PinTag+"..HEAD")
+	out, err := gitutil.Run(srcDir, "rev-list", source.PinTag+"..HEAD")
 	if err != nil {
 		return fmt.Errorf("no 'upstream' tag in %s — was this source fetched by yoe?", srcDir)
 	}
@@ -73,7 +66,7 @@ func DevExtract(projectDir, arch, unitName string, w io.Writer) error {
 	}
 
 	// Extract patches with git format-patch
-	_, err = gitCmd(srcDir, "format-patch", "--output-directory", patchDir, source.PinTag+"..HEAD")
+	_, err = gitutil.Run(srcDir, "format-patch", "--output-directory", patchDir, source.PinTag+"..HEAD")
 	if err != nil {
 		return fmt.Errorf("git format-patch: %w", err)
 	}
@@ -114,7 +107,7 @@ func DevExtract(projectDir, arch, unitName string, w io.Writer) error {
 }
 
 // DevDiff shows local commits beyond upstream in a unit's build directory.
-func DevDiff(projectDir, arch, unitName string, w io.Writer) error {
+func DevDiff(projectDir, unitName string, w io.Writer) error {
 	srcDir, err := findUnitSrcDir(projectDir, unitName)
 	if err != nil {
 		return err
@@ -122,9 +115,8 @@ func DevDiff(projectDir, arch, unitName string, w io.Writer) error {
 	if _, err := os.Stat(filepath.Join(srcDir, ".git")); os.IsNotExist(err) {
 		return fmt.Errorf("%s is not a git repo — build the recipe first", srcDir)
 	}
-	_ = arch
 
-	out, err := gitCmd(srcDir, "log", "--oneline", source.PinTag+"..HEAD")
+	out, err := gitutil.Run(srcDir, "log", "--oneline", source.PinTag+"..HEAD")
 	if err != nil {
 		return fmt.Errorf("no 'upstream' tag in %s", srcDir)
 	}
@@ -147,7 +139,7 @@ func DevDiff(projectDir, arch, unitName string, w io.Writer) error {
 //
 // Walks every build/<distro>/<name>.<scope>/src/ subtree so units that
 // only built under one consuming distro still surface.
-func DevStatus(projectDir, _ string, w io.Writer) error {
+func DevStatus(projectDir string, w io.Writer) error {
 	// glob: build/<distro>/<name>.<scope>/src/.git
 	matches, err := filepath.Glob(filepath.Join(projectDir, "build", "*", "*.*", "src", ".git"))
 	if err != nil {
@@ -177,7 +169,7 @@ func DevStatus(projectDir, _ string, w io.Writer) error {
 		if dot := strings.Index(base, "."); dot > 0 {
 			name = base[:dot]
 		}
-		out, err := gitCmd(srcDir, "rev-list", "--count", source.PinTag+"..HEAD")
+		out, err := gitutil.Run(srcDir, "rev-list", "--count", source.PinTag+"..HEAD")
 		if err != nil {
 			continue
 		}
@@ -206,12 +198,6 @@ func DevStatus(projectDir, _ string, w io.Writer) error {
 	return nil
 }
 
-// unitSrcDir is kept as a small helper for callers that already know
-// the unit's distro and scope.
-func unitSrcDir(projectDir, scopeDir, unitName, distro string) string {
-	return filepath.Join(projectDir, "build", distro, unitName+"."+scopeDir, "src")
-}
-
 // findUnitSrcDir locates a unit's src/ directory under build/<distro>/
 // without requiring the caller to know which distro or scope the unit
 // landed under. If the unit has built under multiple distros, it
@@ -230,25 +216,15 @@ func findUnitSrcDir(projectDir, unitName string) (string, error) {
 	return matches[0], nil
 }
 
-func gitCmd(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("%s: %s", err, strings.TrimSpace(string(out)))
-	}
-	return string(out), nil
-}
-
-// devSrcDir returns the src/ path for a unit's build dir. Mirrors
-// build.UnitBuildDir without importing the build package (which
-// imports this package). distro is the consuming image's effective
-// distro per R14a; an empty distro is a programmer error and panics.
+// devSrcDir returns the src/ path inside a unit's build dir. An empty
+// distro is a programmer error and panics — every dev-mode entry point
+// resolves the consuming image's effective distro before it gets here,
+// and a build dir without one would silently point somewhere else.
 func devSrcDir(projectDir, scopeDir, unitName, distro string) string {
 	if distro == "" {
-		panic("devSrcDir: distro must not be empty (R14a)")
+		panic("devSrcDir: distro must not be empty")
 	}
-	return filepath.Join(projectDir, "build", distro, unitName+"."+scopeDir, "src")
+	return filepath.Join(build.UnitBuildDir(projectDir, scopeDir, unitName, distro), "src")
 }
 
 // DevUpstreamOpts configures the upstream-fetch performed when a unit
@@ -293,7 +269,7 @@ func DevToUpstream(projectDir, scopeDir, distro string, unit *yoestar.Unit, opts
 	if _, err := os.Stat(filepath.Join(srcDir, ".git")); err != nil {
 		return fmt.Errorf("DevToUpstream: %s is not a git repo — build the unit first", srcDir)
 	}
-	if !devIsGitURL(unit.Source) {
+	if !source.IsGitURL(unit.Source) {
 		return fmt.Errorf("DevToUpstream: %s has a non-git source (%s); only git-based units support dev mode", unit.Name, unit.Source)
 	}
 	if unit.Branch != "" && unit.Tag == "" {
@@ -302,7 +278,7 @@ func DevToUpstream(projectDir, scopeDir, distro string, unit *yoestar.Unit, opts
 
 	target := unit.Source
 	if opts.SSH {
-		if rewrote, ok := httpsToSSH(unit.Source); ok {
+		if rewrote, ok := gitutil.HTTPSToSSH(unit.Source); ok {
 			target = rewrote
 		}
 	}
@@ -310,8 +286,8 @@ func DevToUpstream(projectDir, scopeDir, distro string, unit *yoestar.Unit, opts
 	// `git remote remove origin` exits non-zero if origin doesn't
 	// exist; treat that as success since the next `add` will install
 	// the right one.
-	_, _ = gitCmd(srcDir, "remote", "remove", "origin")
-	if _, err := gitCmd(srcDir, "remote", "add", "origin", target); err != nil {
+	_, _ = gitutil.Run(srcDir, "remote", "remove", "origin")
+	if _, err := gitutil.Run(srcDir, "remote", "add", "origin", target); err != nil {
 		return fmt.Errorf("DevToUpstream: setting origin: %w", err)
 	}
 
@@ -333,13 +309,13 @@ func DevToUpstream(projectDir, scopeDir, distro string, unit *yoestar.Unit, opts
 	// commits), or create it from FETCH_HEAD if missing. Either way,
 	// configure it to track origin/<branch>.
 	if unit.Branch != "" {
-		if _, err := gitCmd(srcDir, "fetch", "--depth=2147483647", "origin", unit.Branch); err != nil {
+		if _, err := gitutil.Run(srcDir, "fetch", "--depth=2147483647", "origin", unit.Branch); err != nil {
 			return fmt.Errorf("DevToUpstream: fetching origin %s: %w", unit.Branch, err)
 		}
 		// Update the remote-tracking ref so `git log origin/<branch>`
 		// works from $-shell without re-fetching, and the local-branch
 		// upstream setup below has something to point at.
-		_, _ = gitCmd(srcDir, "update-ref", "refs/remotes/origin/"+unit.Branch, "FETCH_HEAD")
+		_, _ = gitutil.Run(srcDir, "update-ref", "refs/remotes/origin/"+unit.Branch, "FETCH_HEAD")
 		// If a local branch with this name already exists, just check
 		// it out — the user may have local commits on it from a prior
 		// dev session that we must NOT squash. Only create (from
@@ -349,23 +325,23 @@ func DevToUpstream(projectDir, scopeDir, distro string, unit *yoestar.Unit, opts
 		// is the safe behavior here — pin → dev starts from a clean
 		// pin tree so it won't trip, and a dirty tree means the user
 		// has work to deal with first.
-		if _, err := gitCmd(srcDir, "rev-parse", "--verify", "refs/heads/"+unit.Branch); err == nil {
-			if _, err := gitCmd(srcDir, "checkout", unit.Branch); err != nil {
+		if _, err := gitutil.Run(srcDir, "rev-parse", "--verify", "refs/heads/"+unit.Branch); err == nil {
+			if _, err := gitutil.Run(srcDir, "checkout", unit.Branch); err != nil {
 				return fmt.Errorf("DevToUpstream: checking out existing local branch %s (commit/stash local edits first?): %w", unit.Branch, err)
 			}
-		} else if _, err := gitCmd(srcDir, "checkout", "-B", unit.Branch, "FETCH_HEAD"); err != nil {
+		} else if _, err := gitutil.Run(srcDir, "checkout", "-B", unit.Branch, "FETCH_HEAD"); err != nil {
 			return fmt.Errorf("DevToUpstream: creating local branch %s: %w", unit.Branch, err)
 		}
 		// Set the local branch's upstream so plain `git pull` /
 		// `git push` work. Best-effort — the checkout above is the
 		// load-bearing step.
-		_, _ = gitCmd(srcDir, "branch", "--set-upstream-to=origin/"+unit.Branch, unit.Branch)
+		_, _ = gitutil.Run(srcDir, "branch", "--set-upstream-to=origin/"+unit.Branch, unit.Branch)
 		// Anchor the local `upstream` git tag at the pin commit, not
 		// at branch HEAD. dev-mod then counts commits past the pin —
 		// answering "would a build here produce different output than
 		// pin mode?" at a glance. A branch that's advanced past the
 		// pin tag flips the unit to dev-mod immediately on toggle.
-		if _, err := gitCmd(srcDir, "tag", "-f", source.PinTag, unit.Tag); err != nil {
+		if _, err := gitutil.Run(srcDir, "tag", "-f", source.PinTag, unit.Tag); err != nil {
 			return fmt.Errorf("DevToUpstream: anchoring upstream tag at %s: %w", unit.Tag, err)
 		}
 	}
@@ -376,51 +352,15 @@ func DevToUpstream(projectDir, scopeDir, distro string, unit *yoestar.Unit, opts
 	return nil
 }
 
-// devFetchOrigin runs the upstream fetch with the depth strategy
-// chosen in opts. Picks one of:
-//   - --depth=N    when FetchDepth > 0
-//   - --unshallow  when the clone is currently shallow (default)
-//   - plain fetch  when the clone is already full history
-//
-// Depth fetches narrow the refspec to the unit's pinned ref so we
-// get N commits leading up to the pin (passing the broad refspec
-// would fan out to every tracked branch — Linux: 100 commits × N
-// branches). They also pass `--filter=blob:none` so the transfer
-// is commits + trees only; file content is fetched on demand when
-// something actually reads it. The full-unshallow path skips both
-// — the user explicitly asked for everything.
-//
-// The `--unshallow` branch errors on a non-shallow repo, so we probe
-// is-shallow-repository first instead of paying the round-trip on the
-// failing path.
+// devFetchOrigin brings origin up to date in a unit's source tree,
+// honoring the caller's depth preference. A tree that is already
+// complete still gets a plain fetch: the user may be about to work
+// against commits landed upstream since the clone.
 func devFetchOrigin(srcDir string, opts DevUpstreamOpts, pinnedRef string) error {
-	shallow, _ := gitCmd(srcDir, "rev-parse", "--is-shallow-repository")
-	isShallow := strings.TrimSpace(shallow) == "true"
-
-	var args []string
-	var refspec string
-	useFilter := false
-	switch {
-	case opts.FetchDepth > 0:
-		args = []string{"fetch", fmt.Sprintf("--depth=%d", opts.FetchDepth)}
-		refspec = pinnedRef
-		useFilter = true
-	case isShallow:
-		args = []string{"fetch", "--unshallow"}
-	default:
-		args = []string{"fetch"}
-	}
-	if useFilter {
-		args = append(args, "--filter=blob:none")
-	}
-	args = append(args, "origin")
-	if refspec != "" {
-		args = append(args, refspec)
-	}
-	if _, err := gitCmd(srcDir, args...); err != nil {
-		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
-	}
-	return nil
+	return gitutil.FetchOrigin(srcDir, gitutil.FetchOptions{
+		Depth:     opts.FetchDepth,
+		PinnedRef: pinnedRef,
+	})
 }
 
 // devPinnedRef returns the ref the unit is pinned to (tag, then
@@ -478,7 +418,7 @@ func DevToPin(projectDir, scopeDir, distro string, unit *yoestar.Unit, force boo
 	// unit's src dir. Untracked files that survive the checkout (build
 	// output, editor swap files) are tolerable as a pin-mode soft
 	// edge; correctness trumps tidiness.
-	if _, err := gitCmd(srcDir, "checkout", "--detach", "--force", unit.Tag); err != nil {
+	if _, err := gitutil.Run(srcDir, "checkout", "--detach", "--force", unit.Tag); err != nil {
 		return fmt.Errorf("DevToPin: checking out %s: %w", unit.Tag, err)
 	}
 	// Re-apply patches on top of the pin tag. They were committed in the
@@ -494,7 +434,7 @@ func DevToPin(projectDir, scopeDir, distro string, unit *yoestar.Unit, force boo
 	// Reset the local `upstream` git tag back to the pin commit (the
 	// commit pre-patches), matching what source.Prepare leaves behind
 	// for a fresh pin clone.
-	if _, err := gitCmd(srcDir, "tag", "-f", source.PinTag, unit.Tag); err != nil {
+	if _, err := gitutil.Run(srcDir, "tag", "-f", source.PinTag, unit.Tag); err != nil {
 		return fmt.Errorf("DevToPin: resetting upstream tag: %w", err)
 	}
 	if err := writeUnitSourceState(projectDir, scopeDir, unit.Name, distro, source.StatePin); err != nil {
@@ -503,40 +443,13 @@ func DevToPin(projectDir, scopeDir, distro string, unit *yoestar.Unit, force boo
 	return nil
 }
 
-// httpsToSSH rewrites a github/gitlab-style HTTPS git URL into the
-// equivalent SSH form. Returns (rewritten, true) on a recognized
-// host; (original, false) otherwise so the caller can fall through
-// to HTTPS without a separate error path.
-//
-//	https://github.com/foo/bar.git → git@github.com:foo/bar.git
-//	https://gitlab.com/foo/bar.git → git@gitlab.com:foo/bar.git
-func httpsToSSH(httpsURL string) (string, bool) {
-	u, err := url.Parse(httpsURL)
-	if err != nil || u.Scheme != "https" {
-		return httpsURL, false
-	}
-	// Path always starts with /; strip it.
-	path := strings.TrimPrefix(u.Path, "/")
-	if path == "" {
-		return httpsURL, false
-	}
-	return "git@" + u.Host + ":" + path, true
-}
-
 // readUnitSourceState reads the cached BuildMeta.SourceState for a
 // unit. Returns StateEmpty when the meta file is missing or
 // unreadable — the caller passes that to DetectState, which falls
 // back to the origin-remote heuristic.
 func readUnitSourceState(projectDir, scopeDir, unitName, distro string) source.State {
-	buildDir := filepath.Join(projectDir, "build", distro, unitName+"."+scopeDir)
-	data, err := os.ReadFile(filepath.Join(buildDir, "build.json"))
-	if err != nil {
-		return source.StateEmpty
-	}
-	var meta struct {
-		SourceState string `json:"source_state,omitempty"`
-	}
-	if err := json.Unmarshal(data, &meta); err != nil {
+	meta := build.ReadMeta(build.UnitBuildDir(projectDir, scopeDir, unitName, distro))
+	if meta == nil {
 		return source.StateEmpty
 	}
 	return source.State(meta.SourceState)
@@ -547,37 +460,19 @@ func readUnitSourceState(projectDir, scopeDir, unitName, distro string) source.S
 // to mark a unit as dev or clear it back to pin without re-running
 // the executor's full meta finalize.
 func writeUnitSourceState(projectDir, scopeDir, unitName, distro string, state source.State) error {
-	buildDir := filepath.Join(projectDir, "build", distro, unitName+"."+scopeDir)
+	buildDir := build.UnitBuildDir(projectDir, scopeDir, unitName, distro)
 	if err := os.MkdirAll(buildDir, 0o755); err != nil {
 		return err
 	}
-	metaPath := filepath.Join(buildDir, "build.json")
-	// Read whatever's there (or start with an empty struct).
-	type metaShape struct {
-		Status         string  `json:"status,omitempty"`
-		Started        any     `json:"started,omitempty"`
-		Finished       any     `json:"finished,omitempty"`
-		Duration       float64 `json:"duration_seconds,omitempty"`
-		DiskBytes      int64   `json:"disk_bytes,omitempty"`
-		InstalledBytes int64   `json:"installed_bytes,omitempty"`
-		Hash           string  `json:"hash,omitempty"`
-		Error          string  `json:"error,omitempty"`
-		SourceState    string  `json:"source_state,omitempty"`
-		SourceDescribe string  `json:"source_describe,omitempty"`
-	}
-	var meta metaShape
-	if data, err := os.ReadFile(metaPath); err == nil {
-		_ = json.Unmarshal(data, &meta)
+	meta := build.ReadMeta(buildDir)
+	if meta == nil {
+		meta = &build.BuildMeta{}
 	}
 	meta.SourceState = string(state)
 	if state == source.StateEmpty {
 		meta.SourceDescribe = ""
 	}
-	out, err := json.MarshalIndent(meta, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(metaPath, out, 0o644)
+	return build.WriteMeta(buildDir, meta)
 }
 
 // DevPromoteToPin captures the dev-mode checkout's current HEAD into
@@ -624,7 +519,7 @@ func DevPromoteToPin(projectDir, scopeDir, distro string, unit *yoestar.Unit) er
 	// references. If HEAD has no real tag, fall back to the 40-char
 	// SHA, which is always unambiguous.
 	var value string
-	if out, err := gitCmd(srcDir, "tag", "--points-at", "HEAD"); err == nil {
+	if out, err := gitutil.Run(srcDir, "tag", "--points-at", "HEAD"); err == nil {
 		for _, t := range strings.Fields(out) {
 			if strings.HasPrefix(t, "yoe/") {
 				continue
@@ -634,7 +529,7 @@ func DevPromoteToPin(projectDir, scopeDir, distro string, unit *yoestar.Unit) er
 		}
 	}
 	if value == "" {
-		out, err := gitCmd(srcDir, "rev-parse", "HEAD")
+		out, err := gitutil.Run(srcDir, "rev-parse", "HEAD")
 		if err != nil {
 			return fmt.Errorf("DevPromoteToPin: %w", err)
 		}
@@ -648,7 +543,7 @@ func DevPromoteToPin(projectDir, scopeDir, distro string, unit *yoestar.Unit) er
 	// Move upstream tag forward so rev-list upstream..HEAD returns 0
 	// and DetectState reports pin (matching the new .star). -f
 	// overwrites the existing upstream tag.
-	if _, err := gitCmd(srcDir, "tag", "-f", source.PinTag, "HEAD"); err != nil {
+	if _, err := gitutil.Run(srcDir, "tag", "-f", source.PinTag, "HEAD"); err != nil {
 		return fmt.Errorf("DevPromoteToPin: advancing %s tag: %w", source.PinTag, err)
 	}
 

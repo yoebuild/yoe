@@ -7,12 +7,7 @@ import (
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
-func ListModules(dir string, w io.Writer) error {
-	proj, err := yoestar.LoadProject(dir)
-	if err != nil {
-		return err
-	}
-
+func ListModules(proj *yoestar.Project, w io.Writer) error {
 	if len(proj.Modules) == 0 {
 		fmt.Fprintln(w, "No modules declared in PROJECT.star")
 		return nil

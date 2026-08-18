@@ -11,9 +11,9 @@ import (
 
 // fakeExecer records calls and returns a configurable result.
 type fakeExecer struct {
-	calls   []string
-	result  ExecResult
-	err     error
+	calls  []string
+	result ExecResult
+	err    error
 }
 
 func (f *fakeExecer) Run(_ context.Context, _ *SandboxConfig, command string, _ bool) (ExecResult, error) {

@@ -108,7 +108,7 @@ func Prepare(projectDir, scopeDir, distro string, unit *yoestar.Unit, cachedSour
 	}
 
 	// Extract or checkout
-	if isGitURL(unit.Source) {
+	if IsGitURL(unit.Source) {
 		if err := checkoutGit(cachedPath, srcDir, unit); err != nil {
 			return "", err
 		}

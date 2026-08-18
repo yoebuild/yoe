@@ -22,8 +22,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	yoe "github.com/yoebuild/yoe/internal"
 	"github.com/yoebuild/yoe/internal/build"
+	"github.com/yoebuild/yoe/internal/container"
 	"github.com/yoebuild/yoe/internal/device"
 	"github.com/yoebuild/yoe/internal/module"
 	"github.com/yoebuild/yoe/internal/resolve"
@@ -425,9 +425,9 @@ type deployDoneMsg struct {
 
 // model is the Bubble Tea model for the yoe TUI.
 type model struct {
-	proj              *yoestar.Project
-	projectDir        string
-	arch              string
+	proj       *yoestar.Project
+	projectDir string
+	arch       string
 	// distro is the project's effective distro at TUI startup. Drives
 	// every UnitBuildDir / IsBuildCached lookup so the TUI inspects
 	// the right per-distro subtree under build/<distro>/.
@@ -507,7 +507,6 @@ type model struct {
 	flashCursor     int
 	flashStage      flashStage
 	flashImagePath  string
-	flashImageSize  int64
 	flashWritten    int64
 	flashTotal      int64
 	flashErr        error
@@ -595,15 +594,24 @@ type Config struct {
 	GlobalFlagArgs []string
 }
 
-// Run launches the TUI.
-func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
+// newModel builds the TUI's model from a loaded project: resolves the
+// arch and effective distro, builds the DAG, computes hashes, reads the
+// per-developer overrides, and initialises every map the update loop
+// assumes is non-nil.
+//
+// Run used to do this inline. Splitting it out gives the initialisation
+// a name to point at — several methods guard against a nil map with a
+// comment saying "newModel always initialises this" — and keeps Run to
+// what it is actually about: starting the program and wiring up the
+// watcher, notifications and teardown.
+func newModel(proj *yoestar.Project, projectDir string, cfg Config) (model, error) {
 	arch := build.Arch()
 	if m, ok := proj.Machines[proj.Defaults.Machine]; ok {
 		arch = m.Arch
 	}
 	distro, err := proj.EffectiveDistro()
 	if err != nil {
-		return fmt.Errorf("resolving effective distro: %w", err)
+		return model{}, fmt.Errorf("resolving effective distro: %w", err)
 	}
 
 	// Build the DAG against the effective distro's view, matching the
@@ -615,29 +623,15 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	// recomputed them.
 	dag, err := resolve.BuildDAG(proj, distro)
 	if err != nil {
-		return fmt.Errorf("building DAG: %w", err)
+		return model{}, fmt.Errorf("building DAG: %w", err)
 	}
 	hashes, err := resolve.ComputeAllHashes(dag, arch, proj.Defaults.Machine, build.SrcInputsFn(projectDir, arch, proj.Defaults.Machine, distro), distro)
 	if err != nil {
-		return fmt.Errorf("computing hashes: %w", err)
+		return model{}, fmt.Errorf("computing hashes: %w", err)
 	}
 
 	units := allUnits(proj)
-	statuses := make(map[string]unitStatus, len(units))
-	for _, name := range units {
-		hash := hashes[name]
-		sd := arch
-		if u := proj.LookupUnit(distro, name); u != nil {
-			sd = build.ScopeDir(u, arch, proj.Defaults.Machine)
-		}
-		if build.IsBuildCached(projectDir, sd, name, hash, distro) {
-			statuses[name] = statusCached
-		} else if build.IsBuildInProgress(projectDir, sd, name, distro) {
-			statuses[name] = statusBuilding
-		} else if meta := build.ReadMeta(build.UnitBuildDir(projectDir, sd, name, distro)); meta != nil && meta.Hash == hash && meta.Status == "failed" {
-			statuses[name] = statusFailed
-		}
-	}
+	statuses := scanStatuses(proj, projectDir, arch, proj.Defaults.Machine, distro, units, hashes)
 
 	machines := sortedKeys(proj.Machines)
 
@@ -696,6 +690,16 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 		m.scrollUnitIntoView(proj.Defaults.Image)
 	}
 
+	return m, nil
+}
+
+// Run launches the TUI.
+func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
+	m, err := newModel(proj, projectDir, cfg)
+	if err != nil {
+		return err
+	}
+
 	m.checkBinfmtWarning()
 
 	stopFeed, feedStatus := startProjectFeed(proj, projectDir)
@@ -716,12 +720,12 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	})
 	defer m.srcWatcher.Stop()
 
-	yoe.OnNotify = func(msg string) {
+	container.OnNotify = func(msg string) {
 		if tuiProgram != nil {
 			tuiProgram.Send(notifyMsg(msg))
 		}
 	}
-	defer func() { yoe.OnNotify = nil }()
+	defer func() { container.OnNotify = nil }()
 
 	_, err = p.Run()
 	return err
@@ -787,7 +791,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// state; toggling pin↔dev (or P-pinning) invalidates that
 			// — clear the cached/built status so the row doesn't
 			// misleadingly show a green check for the old build.
-			delete(m.statuses, msg.name)
+			m.clearStatus(msg.name)
 		case targetModule:
 			m.invalidateModuleState(msg.name)
 		}
@@ -811,7 +815,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// folds HEAD sha + diff sha for dev-dirty), so the next
 			// build correctly cache-misses; this just makes the row
 			// reflect that immediately.
-			delete(m.statuses, msg.name)
+			m.clearStatus(msg.name)
 		case targetModule:
 			if m.moduleSrcStates != nil {
 				m.moduleSrcStates[msg.name] = msg.state
@@ -822,9 +826,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case buildEventMsg:
 		switch msg.status {
 		case "cached":
-			m.statuses[msg.unit] = statusCached
+			m.setStatus(msg.unit, statusCached)
 		case "done":
-			m.statuses[msg.unit] = statusCached
+			m.setStatus(msg.unit, statusCached)
 			// Build just finished writing this unit's build.json (or
 			// destdir/<name>.img for images), so refresh the SIZE column
 			// now instead of waiting for the parent build's final
@@ -839,10 +843,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := m.markBuildUnitFinished(msg.unit)
 			return m, cmd
 		case "waiting":
-			m.statuses[msg.unit] = statusWaiting
+			m.setStatus(msg.unit, statusWaiting)
 			m.markBuildUnitWaiting(msg.unit)
 		case "building":
-			m.statuses[msg.unit] = statusBuilding
+			m.setStatus(msg.unit, statusBuilding)
 			// When a build starts (often a transitive dep of the unit
 			// the user invoked), scroll its row into view so the user
 			// can see what's happening. Suppressed while the user is
@@ -852,7 +856,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.scrollUnitIntoView(msg.unit)
 			}
 		case "failed":
-			m.statuses[msg.unit] = statusFailed
+			m.setStatus(msg.unit, statusFailed)
 			cmd := m.markBuildUnitFinished(msg.unit)
 			return m, cmd
 		}
@@ -863,14 +867,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		delete(m.cancels, msg.unit)
 		if msg.err != nil {
 			if msg.err.Error() == "build cancelled" || strings.Contains(msg.err.Error(), "signal: killed") {
-				m.statuses[msg.unit] = statusNone
+				m.setStatus(msg.unit, statusNone)
 				m.message = fmt.Sprintf("Build cancelled: %s", msg.unit)
 			} else {
-				m.statuses[msg.unit] = statusFailed
+				m.setStatus(msg.unit, statusFailed)
 				m.message = fmt.Sprintf("Build failed: %s", msg.unit)
 			}
 		} else {
-			m.statuses[msg.unit] = statusCached
+			m.setStatus(msg.unit, statusCached)
 			m.message = fmt.Sprintf("Build complete: %s", msg.unit)
 			m.recomputeMetrics()
 			// Re-sort so newly-known size/deps land in the right place
@@ -954,12 +958,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.deployStage = deployDone
 			// Persist the host so next time the field is pre-filled.
-			ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
-			if ov.Machine == "" {
-				ov.Machine = m.proj.Defaults.Machine
+			if warn := m.mutateOverrides(func(ov *yoestar.LocalOverrides) {
+				if ov.Machine == "" {
+					ov.Machine = m.proj.Defaults.Machine
+				}
+				ov.DeployHost = strings.TrimSpace(m.deployHost)
+			}); warn != "" {
+				m.message = warn
 			}
-			ov.DeployHost = strings.TrimSpace(m.deployHost)
-			_ = yoestar.WriteLocalOverrides(m.projectDir, ov)
 		}
 		return m, nil
 
@@ -1311,8 +1317,8 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "f":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
-			u := m.proj.LookupUnit(m.distro, name); ok := u != nil
-			if !ok || u.Class != "image" {
+			u := m.proj.LookupUnit(m.distro, name)
+			if u == nil || u.Class != "image" {
 				m.message = fmt.Sprintf("%s is not an image unit", name)
 				return m, nil
 			}
@@ -1351,8 +1357,8 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "D":
 		if m.cursor < len(m.units) {
 			name := m.units[m.cursor]
-			u := m.proj.LookupUnit(m.distro, name); ok := u != nil
-			if !ok || u.Class == "image" {
+			u := m.proj.LookupUnit(m.distro, name)
+			if u == nil || u.Class == "image" {
 				m.message = fmt.Sprintf("%s is an image unit; use `f` to flash, not deploy", name)
 				return m, nil
 			}
@@ -1411,10 +1417,10 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "S":
 		// Save the current active query to local.star as the new default.
-		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
-		ov.Query = m.query.String()
-		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
-			m.message = fmt.Sprintf("save query failed: %v", err)
+		if warn := m.mutateOverrides(func(ov *yoestar.LocalOverrides) {
+			ov.Query = m.query.String()
+		}); warn != "" {
+			m.message = fmt.Sprintf("save query failed: %s", warn)
 			return m, nil
 		}
 		m.savedQuery = m.query.String()
@@ -1527,11 +1533,7 @@ func (m model) modulesViewportHeight() int {
 	chrome++ // blank before bottom row
 	chrome++ // help / message
 	chrome += m.syntheticModulesSectionLines()
-	h := m.height - chrome
-	if h < 3 {
-		h = 3
-	}
-	return h
+	return m.paneHeight(chrome, 3)
 }
 
 // syntheticModulesSectionLines returns the vertical footprint of the
@@ -1556,11 +1558,7 @@ func (m model) diagnosticsViewportHeight() int {
 	chrome++ // ↓ more (always reserved)
 	chrome++ // blank before bottom row
 	chrome++ // help / message
-	h := m.height - chrome
-	if h < 3 {
-		h = 3
-	}
-	return h
+	return m.paneHeight(chrome, 3)
 }
 
 // updateDiagnosticsTab handles keys when the Diagnostics tab is active.
@@ -1705,7 +1703,7 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			Modules: m.moduleNames(),
 			Units:   m.units, // already sorted
 		}
-		start, end, cands := query.Complete(m.queryInput, len(m.queryInput), ctx)
+		start, end, cands := query.Complete(m.queryInput, ctx)
 		switch len(cands) {
 		case 0:
 			m.message = "no completions"
@@ -1772,6 +1770,16 @@ func (m *model) reparse() {
 // the new visible set; otherwise it is left alone (so live filtering
 // while typing doesn't yank the cursor).
 func (m *model) applyQuery() {
+	m.refreshVisible()
+	m.listOffset = 0
+	m.adjustListOffset()
+}
+
+// refreshVisible recomputes m.inSet and m.visible from the current query,
+// statuses and sort order, keeping the cursor on a visible row. Unlike
+// applyQuery it leaves the scroll offset where the user put it, so it is
+// safe to call while a build is running.
+func (m *model) refreshVisible() {
 	m.inSet = nil
 	if root := m.query.InRoot(); root != "" {
 		m.inSet = query.BuildInClosure(m.proj, root)
@@ -1801,8 +1809,53 @@ func (m *model) applyQuery() {
 			m.cursor = m.visible[0]
 		}
 	}
-	m.listOffset = 0
-	m.adjustListOffset()
+}
+
+// setStatus records a unit's build status and keeps the filtered row set in
+// agreement with it. Every status write goes through here: a live build
+// mutates statuses continuously, and a query like `status:building` has to
+// track those mutations or it shows whatever matched when the query was
+// last typed. The filter is only re-applied when the query actually
+// constrains status, so the common unfiltered case stays O(1).
+func (m *model) setStatus(name string, st unitStatus) {
+	if m.statuses == nil {
+		m.statuses = map[string]unitStatus{}
+	}
+	if m.statuses[name] == st {
+		return
+	}
+	m.statuses[name] = st
+	if m.query.FiltersStatus() {
+		m.refreshVisible()
+	}
+}
+
+// mutateOverrides loads local.star, hands it to edit, and writes it
+// back. Returns an error message for the status line, or "" on success.
+//
+// The load-modify-write sequence appeared at every place the TUI
+// persists a per-developer setting, and two of those places discarded
+// the write error — so a preference the user had just set could silently
+// fail to stick, with the UI showing it as applied.
+func (m *model) mutateOverrides(edit func(*yoestar.LocalOverrides)) string {
+	ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+	edit(&ov)
+	if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
+		return fmt.Sprintf("could not save to local.star: %v", err)
+	}
+	return ""
+}
+
+// clearStatus drops a unit's recorded build status, keeping the filtered
+// row set in agreement the same way setStatus does.
+func (m *model) clearStatus(name string) {
+	if _, ok := m.statuses[name]; !ok {
+		return
+	}
+	delete(m.statuses, name)
+	if m.query.FiltersStatus() {
+		m.refreshVisible()
+	}
 }
 
 // moduleNames returns the sorted set of module names in the project,
@@ -1907,10 +1960,10 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else if strings.HasPrefix(action, "clean:") {
 			name := strings.TrimPrefix(action, "clean:")
 			buildDir := build.UnitBuildDir(m.projectDir, m.unitScopeDir(name), name, m.distro)
-			if err := yoe.RemoveDirAnyOwner(buildDir, m.projectDir); err != nil {
+			if err := container.RemoveDir(context.Background(), buildDir, m.projectDir, ""); err != nil {
 				m.message = fmt.Sprintf("Clean failed: %v", err)
 			} else {
-				m.statuses[name] = statusNone
+				m.setStatus(name, statusNone)
 				// Drop the cached source state and disarm the watcher
 				// — BuildMeta.SourceState is gone, the next render
 				// shows the SRC column as blank (empty state).
@@ -1925,11 +1978,11 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		} else if action == "clean-all" {
 			buildDir := filepath.Join(m.projectDir, "build")
-			if err := yoe.RemoveDirAnyOwner(buildDir, m.projectDir); err != nil {
+			if err := container.RemoveDir(context.Background(), buildDir, m.projectDir, ""); err != nil {
 				m.message = fmt.Sprintf("Clean failed: %v", err)
 			} else {
 				for _, name := range m.units {
-					m.statuses[name] = statusNone
+					m.setStatus(name, statusNone)
 					m.invalidateUnitState(name)
 				}
 				m.message = "Cleaned all build artifacts"
@@ -2086,10 +2139,10 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				m.parallelBuilds++
 			}
-			ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
-			ov.ParallelBuilds = m.parallelBuilds
-			if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
-				m.message = fmt.Sprintf("Parallel builds set to %d (warning: failed to save local.star: %v)", m.parallelBuilds, err)
+			if warn := m.mutateOverrides(func(ov *yoestar.LocalOverrides) {
+				ov.ParallelBuilds = m.parallelBuilds
+			}); warn != "" {
+				m.message = fmt.Sprintf("Parallel builds set to %d (warning: %s)", m.parallelBuilds, warn)
 			} else {
 				m.message = fmt.Sprintf("Parallel builds set to %d (saved to local.star)", m.parallelBuilds)
 			}
@@ -2397,16 +2450,16 @@ func (m *model) deleteEffectivePort(idx int) {
 // state to local.star and updates the status line with the user-facing
 // label of what just changed.
 func (m *model) saveQEMUSettings(label string) {
-	ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
-	ov.QEMUMemory = m.qemuMemory
-	ov.QEMUDisplay = m.qemuDisplay
-	if len(m.qemuPorts) == 0 {
-		ov.QEMUPorts = nil
-	} else {
-		ov.QEMUPorts = append([]string(nil), m.qemuPorts...)
-	}
-	if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
-		m.message = fmt.Sprintf("%s (warning: failed to save local.star: %v)", label, err)
+	if warn := m.mutateOverrides(func(ov *yoestar.LocalOverrides) {
+		ov.QEMUMemory = m.qemuMemory
+		ov.QEMUDisplay = m.qemuDisplay
+		if len(m.qemuPorts) == 0 {
+			ov.QEMUPorts = nil
+		} else {
+			ov.QEMUPorts = append([]string(nil), m.qemuPorts...)
+		}
+	}); warn != "" {
+		m.message = fmt.Sprintf("%s (warning: %s)", label, warn)
 		return
 	}
 	m.message = fmt.Sprintf("%s (saved to local.star)", label)
@@ -2464,11 +2517,11 @@ func (m model) updateSetupImage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.queryError = ""
 			m.savedQuery = m.query.String()
 		}
-		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
-		ov.Image = picked
-		ov.Query = newQ
-		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
-			m.message = fmt.Sprintf("Image set to %s (warning: failed to save local.star: %v)", picked, err)
+		if warn := m.mutateOverrides(func(ov *yoestar.LocalOverrides) {
+			ov.Image = picked
+			ov.Query = newQ
+		}); warn != "" {
+			m.message = fmt.Sprintf("Image set to %s (warning: %s)", picked, warn)
 		} else {
 			m.message = fmt.Sprintf("Image set to %s (saved to local.star)", picked)
 		}
@@ -2507,10 +2560,10 @@ func (m model) updateSetupMachine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.recomputeStatuses()
 		m.checkBinfmtWarning()
-		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
-		ov.Machine = picked
-		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
-			m.message = fmt.Sprintf("Machine set to %s (warning: failed to save local.star: %v)", picked, err)
+		if warn := m.mutateOverrides(func(ov *yoestar.LocalOverrides) {
+			ov.Machine = picked
+		}); warn != "" {
+			m.message = fmt.Sprintf("Machine set to %s (warning: %s)", picked, warn)
 		} else {
 			m.message = fmt.Sprintf("Machine set to %s (saved to local.star)", picked)
 		}
@@ -2595,27 +2648,25 @@ func (m model) updateSetupDistro(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		picked := choices[m.distroCursor]
-		ov, _ := yoestar.LoadLocalOverrides(m.projectDir)
+		override := picked
 		if picked == "(none)" {
-			ov.DefaultDistroOverride = ""
-			m.proj.DefaultDistroOverride = ""
-		} else {
-			ov.DefaultDistroOverride = picked
-			m.proj.DefaultDistroOverride = picked
+			override = ""
 		}
+		m.proj.DefaultDistroOverride = override
+		saveWarn := m.mutateOverrides(func(ov *yoestar.LocalOverrides) {
+			ov.DefaultDistroOverride = override
+		})
 		// Effective distro changes ripple into the build/<distro>/
 		// and repo/<project>/<distro>/ subtrees the TUI inspects,
 		// so refresh the cached distro and re-walk statuses.
 		if d, derr := m.proj.EffectiveDistro(); derr == nil {
 			m.distro = d
 		}
-		var msgText string
-		if err := yoestar.WriteLocalOverrides(m.projectDir, ov); err != nil {
-			msgText = fmt.Sprintf("Default Distro set to %s (warning: failed to save local.star: %v)", picked, err)
+		if saveWarn != "" {
+			m.message = fmt.Sprintf("Default Distro set to %s (warning: %s)", picked, saveWarn)
 		} else {
-			msgText = fmt.Sprintf("Default Distro set to %s (saved to local.star)", picked)
+			m.message = fmt.Sprintf("Default Distro set to %s (saved to local.star)", picked)
 		}
-		m.message = msgText
 		m.recomputeStatuses()
 		m.setupField = ""
 		return m, nil
@@ -2743,8 +2794,8 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		})
 
 	case "D":
-		u := m.proj.LookupUnit(m.distro, m.detailUnit); ok := u != nil
-		if !ok || u.Class == "image" {
+		u := m.proj.LookupUnit(m.distro, m.detailUnit)
+		if u == nil || u.Class == "image" {
 			m.message = fmt.Sprintf("%s is an image unit; use `f` to flash, not deploy", m.detailUnit)
 			return m, nil
 		}
@@ -3442,7 +3493,19 @@ func (m model) helpSections() (string, []helpSection) {
 			helpGeneral(false),
 		}
 
-	default: // viewUnits — Units / Modules / Diagnostics tabs
+	case viewSourceProgress:
+		// A blocking git fetch or checkout. Nothing here responds to a
+		// keypress, which is exactly why the answer has to say so —
+		// falling through to the Units keys (as this did) offered a
+		// list of actions none of which would do anything.
+		return "Working — a source operation is in progress", []helpSection{
+			{title: "Keys", entries: []helpEntry{
+				{"", "none — this finishes on its own"},
+			}},
+			helpGeneral(false),
+		}
+
+	case viewUnits:
 		switch m.activeTab {
 		case tabModules:
 			return "Modules — external git modules and dev mode", []helpSection{
@@ -3495,6 +3558,12 @@ func (m model) helpSections() (string, []helpSection) {
 			}
 		}
 	}
+
+	// Every view above is named explicitly rather than sharing a default
+	// branch, so adding one and forgetting its keys lands here instead
+	// of quietly offering the Units keys — which is how the source
+	// progress screen came to answer with actions that did nothing.
+	return "Help", []helpSection{helpGeneral(true)}
 }
 
 // helpBodyLines formats the sections (the scrollable region between the
@@ -3533,11 +3602,8 @@ func (m model) helpViewportHeight() int {
 	if m.height <= 0 {
 		return 0
 	}
-	vp := m.height - 8
-	if vp < 1 {
-		vp = 1
-	}
-	return vp
+	const chrome = 8 // border 2 + padding 2 + title 2 + blank + footer
+	return m.paneHeight(chrome, 1)
 }
 
 // helpMaxScroll is the largest valid scroll offset for the current page and
@@ -4313,8 +4379,8 @@ func (m model) upstreamLines() []string {
 	if imgName == "" {
 		return []string{dimStyle.Render("    (no default image set)")}
 	}
-	img := m.proj.LookupUnit(m.distro, imgName); ok := img != nil
-	if !ok || img.Class != "image" {
+	img := m.proj.LookupUnit(m.distro, imgName)
+	if img == nil || img.Class != "image" {
 		return []string{dimStyle.Render("    (default image " + imgName + " not found)")}
 	}
 	if len(img.ArtifactsExplicit) == 0 {
@@ -4380,8 +4446,8 @@ func (m model) findRuntimePath(from, to string) []string {
 	for len(queue) > 0 {
 		cur := queue[0]
 		queue = queue[1:]
-		u := m.proj.LookupUnit(m.distro, cur.name); ok := u != nil
-		if !ok {
+		u := m.proj.LookupUnit(m.distro, cur.name)
+		if u == nil {
 			continue
 		}
 		for _, dep := range u.RuntimeDeps {
@@ -4410,8 +4476,8 @@ func (m model) findRuntimePath(from, to string) []string {
 // matches what the user actually wrote in image() rather than the
 // fully flattened runtime closure.
 func (m model) downstreamChildren(name string) []string {
-	u := m.proj.LookupUnit(m.distro, name); ok := u != nil
-	if !ok {
+	u := m.proj.LookupUnit(m.distro, name)
+	if u == nil {
 		return nil
 	}
 	deps := u.RuntimeDeps
@@ -4495,17 +4561,31 @@ func (m model) wrapLine(line string) []string {
 		return []string{line}
 	}
 	const contIndent = "    "
-	// First chunk fits the full width.
-	first := ansi.Truncate(line, w, "")
-	out := []string{first}
-	rest := line[len(first):]
-	for rest != "" {
-		chunk := ansi.Truncate(rest, w-len(contIndent), "")
-		if chunk == "" {
-			break
+
+	// ansi.Hardwrap splits on display width while carrying style across
+	// the break. Slicing the original string by the byte length of a
+	// truncated copy — the previous approach — assumed truncation
+	// returns a prefix of its input. It does not when the line contains
+	// escape sequences, so continuation lines lost their color and a
+	// break could land inside an escape sequence.
+	chunks := strings.Split(ansi.Hardwrap(line, w, false), "\n")
+	if len(chunks) == 0 {
+		return []string{line}
+	}
+	out := make([]string, 0, len(chunks))
+	out = append(out, chunks[0])
+	// Continuation lines are indented, so they have less room; re-wrap
+	// the remainder at the narrower width rather than letting an
+	// indented chunk overrun.
+	rest := strings.Join(chunks[1:], "")
+	if rest == "" {
+		return out
+	}
+	for _, c := range strings.Split(ansi.Hardwrap(rest, w-len(contIndent), false), "\n") {
+		if c == "" {
+			continue
 		}
-		out = append(out, contIndent+chunk)
-		rest = rest[len(chunk):]
+		out = append(out, contIndent+c)
 	}
 	return out
 }
@@ -4529,7 +4609,6 @@ func (m model) viewDetail() string {
 		buildDir := build.UnitBuildDir(m.projectDir, sd, m.detailUnit, m.distro)
 		currentHash := m.hashes[m.detailUnit]
 		if meta := build.ReadMeta(buildDir); meta != nil && meta.Hash == currentHash {
-			dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 			info := fmt.Sprintf("  %s", meta.Status)
 			if meta.Duration > 0 {
 				if meta.Duration < 60 {
@@ -4777,6 +4856,11 @@ func (m model) viewDetailFilesBody() string {
 	return b.String()
 }
 
+// buildingLabel is the status cell for a unit currently building. It
+// flashes on and off, so its width sets the width of the blank it
+// alternates with.
+const buildingLabel = "▌building..."
+
 func (m model) renderStatus(name string) string {
 	// An image the selected machine's kernel can't boot never builds, so
 	// it has no build status to report — say why instead of leaving the
@@ -4790,10 +4874,14 @@ func (m model) renderStatus(name string) string {
 	case statusWaiting:
 		return waitingStyle.Render("● waiting")
 	case statusBuilding:
+		// The building label flashes: it alternates with blanks of the
+		// same width so the columns after it don't jitter. Deriving the
+		// blank from the label keeps the two the same width; they were
+		// a string and a hand-counted run of twelve spaces.
 		if m.tick {
-			return buildingStyle.Render("▌building...")
+			return buildingStyle.Render(buildingLabel)
 		}
-		return "            " // blank when flashing off
+		return strings.Repeat(" ", ansi.StringWidth(buildingLabel))
 	case statusFailed:
 		return failedStyle.Render("● failed")
 	default:
@@ -4902,7 +4990,7 @@ func (m *model) startBuild(name string) tea.Cmd {
 	if m.statuses[name] == statusBuilding || m.statuses[name] == statusWaiting {
 		return nil
 	}
-	m.statuses[name] = statusWaiting
+	m.setStatus(name, statusWaiting)
 	m.building[name] = true
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -4943,23 +5031,12 @@ func (m *model) startBuild(name string) tea.Cmd {
 			return buildDoneMsg{unit: unitName, err: fmt.Errorf("resolve effective distro: %w", derr)}
 		}
 
-		// Write executor output under the same per-distro build dir the
-		// executor will use, so the detail view's log tail and the
-		// build's own destdir/cache land next to each other.
-		sd := arch
-		if u := freshProj.LookupUnit(distro, unitName); u != nil {
-			sd = build.ScopeDir(u, arch, machine)
-		}
-		outputPath := filepath.Join(build.UnitBuildDir(projectDir, sd, unitName, distro), "executor.log")
-		if err := build.EnsureDir(filepath.Dir(outputPath)); err != nil {
-			return buildDoneMsg{unit: unitName, err: err}
-		}
-		f, err := os.Create(outputPath)
-		if err != nil {
-			return buildDoneMsg{unit: unitName, err: err}
-		}
-		defer f.Close()
-
+		// The executor writes each unit's own executor.log under that
+		// unit's build dir, which is what the detail view reads back —
+		// so this build's aggregate progress stream has no file of its
+		// own to write to. The TUI renders that same progress live in
+		// the units list from OnEvent, so it is discarded here rather
+		// than teed into some unit's log.
 		err = build.BuildUnits(freshProj, []string{unitName}, build.Options{
 			Ctx:             ctx,
 			Force:           true,
@@ -4975,7 +5052,7 @@ func (m *model) startBuild(name string) tea.Cmd {
 					})
 				}
 			},
-		}, f)
+		}, io.Discard)
 		return buildDoneMsg{unit: unitName, err: err}
 	}
 }
@@ -5203,11 +5280,7 @@ func (m model) detailViewportHeight() int {
 		chrome++ // search bar
 	}
 	chrome++ // bottom row (help or message, single line)
-	h := m.height - chrome
-	if h < 5 {
-		h = 5
-	}
-	return h
+	return m.paneHeight(chrome, 5)
 }
 
 // detailFilesViewportHeight returns the number of file rows visible in
@@ -5220,11 +5293,21 @@ func (m model) detailFilesViewportHeight() int {
 	chrome++    // ↑ more (always reserved)
 	chrome++    // ↓ more (always reserved)
 	chrome++    // bottom row
-	h := m.height - chrome
-	if h < 3 {
-		h = 3
+	return m.paneHeight(chrome, 3)
+}
+
+// paneHeight returns how many content rows fit below `chrome` lines of
+// fixed decoration at the current terminal height, never less than min.
+//
+// Each pane declares its own chrome as a list of named lines, because
+// what sits above and below a pane genuinely differs. What was repeated
+// was this arithmetic and the clamp, spelled out at every pane with its
+// own minimum buried in it.
+func (m model) paneHeight(chrome, min int) int {
+	if h := m.height - chrome; h > min {
+		return h
 	}
-	return h
+	return min
 }
 
 // detailFilesMaxScroll returns the maximum scroll offset for the Files
@@ -5497,8 +5580,8 @@ func (m *model) recomputeMetrics() {
 // final recomputeMetrics. Skips the runtime-closure walk because deps
 // don't change just because the unit got built.
 func (m *model) refreshUnitSize(name string) {
-	u := m.proj.LookupUnit(m.distro, name); ok := u != nil
-	if !ok {
+	u := m.proj.LookupUnit(m.distro, name)
+	if u == nil {
 		return
 	}
 	sd := build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
@@ -5527,10 +5610,26 @@ func installedSize(buildDir string) int64 {
 // row off-screen. Assumes ASCII input — fine for unit/class/module
 // names today.
 func clipFixed(s string, w int) string {
-	if len(s) > w {
-		return s[:w-1] + "…"
+	if w <= 0 {
+		return ""
 	}
-	return fmt.Sprintf("%-*s", w, s)
+	// Measure and cut by display width, not bytes. Unit names, module
+	// paths and versions come from feeds and the filesystem, so a
+	// byte-indexed cut both mis-measured multi-byte text and could slice
+	// a rune in half — which renders as a replacement character and
+	// pushes every column after it out of alignment.
+	if n := ansi.StringWidth(s); n <= w {
+		return s + strings.Repeat(" ", w-n)
+	}
+	// Truncating to w-1 and appending the ellipsis can still come up
+	// short: a double-width character cannot straddle the boundary, so
+	// the cut lands a column early. Pad back out, or the columns after
+	// this one shift left by one for that row only.
+	out := ansi.Truncate(s, w-1, "") + "…"
+	if n := ansi.StringWidth(out); n < w {
+		out += strings.Repeat(" ", w-n)
+	}
+	return out
 }
 
 // detailSourceLine renders the SOURCE strip on the unit detail page:
@@ -5538,8 +5637,8 @@ func clipFixed(s string, w int) string {
 // "v3.4.1-3-gabc1234-dirty"). Returns "" when the unit has no source
 // dir (image/container) so the caller can skip the line entirely.
 func (m model) detailSourceLine() string {
-	u := m.proj.LookupUnit(m.distro, m.detailUnit); ok := u != nil
-	if !ok || u.Class == "image" || u.Class == "container" {
+	u := m.proj.LookupUnit(m.distro, m.detailUnit)
+	if u == nil || u.Class == "image" || u.Class == "container" {
 		return ""
 	}
 	state := m.unitSourceState(m.detailUnit)
@@ -5674,8 +5773,8 @@ func srcStateStyle(s source.State) lipgloss.Style {
 // is assumed pin (it has never been toggled to dev).
 func (m model) renderSrcCell(name string) string {
 	const w = 9
-	u := m.proj.LookupUnit(m.distro, name); ok := u != nil
-	if !ok || u.Class == "image" || u.Class == "container" {
+	u := m.proj.LookupUnit(m.distro, name)
+	if u == nil || u.Class == "image" || u.Class == "container" {
 		return clipFixed("", w)
 	}
 	state := m.unitSourceState(name)
@@ -5799,24 +5898,12 @@ func (m *model) recomputeStatuses() {
 		return
 	}
 	m.hashes = hashes
+	fresh := scanStatuses(m.proj, m.projectDir, m.arch, m.proj.Defaults.Machine, m.distro, m.units, hashes)
 	for _, name := range m.units {
 		if m.building[name] {
 			continue // don't override in-progress builds
 		}
-		hash := hashes[name]
-		sd := m.arch
-		if u := m.proj.LookupUnit(m.distro, name); u != nil {
-			sd = build.ScopeDir(u, m.arch, m.proj.Defaults.Machine)
-		}
-		if build.IsBuildCached(m.projectDir, sd, name, hash, m.distro) {
-			m.statuses[name] = statusCached
-		} else if build.IsBuildInProgress(m.projectDir, sd, name, m.distro) {
-			m.statuses[name] = statusBuilding
-		} else if meta := build.ReadMeta(build.UnitBuildDir(m.projectDir, sd, name, m.distro)); meta != nil && meta.Hash == hash && meta.Status == "failed" {
-			m.statuses[name] = statusFailed
-		} else {
-			m.statuses[name] = statusNone
-		}
+		m.setStatus(name, fresh[name])
 	}
 	m.recomputeMetrics()
 	// Project actually reloaded — DAG, arch, machine may all be
@@ -5829,7 +5916,7 @@ func (m *model) recomputeStatuses() {
 // checkBinfmtWarning sets or clears the warning banner based on whether
 // binfmt_misc is registered for the current target arch.
 func (m *model) checkBinfmtWarning() {
-	if err := yoe.CheckBinfmt(m.arch); err != nil {
+	if err := container.CheckBinfmt(m.arch); err != nil {
 		m.warning = "⚠ Cross-arch build: run 'yoe container binfmt' to register QEMU emulation for " + m.arch
 	} else {
 		m.warning = ""
@@ -5930,8 +6017,8 @@ func (m model) unitFromFeed(name string) bool {
 	if m.proj == nil {
 		return false
 	}
-	u := m.proj.LookupUnit(m.distro, name); ok := u != nil
-	if !ok || u == nil || u.Module == "" {
+	u := m.proj.LookupUnit(m.distro, name)
+	if u == nil || u.Module == "" {
 		return false
 	}
 	for _, sm := range m.proj.SyntheticModules {
@@ -6075,6 +6162,45 @@ func readFileAll(path string) []string {
 	return lines
 }
 
+// scanStatuses derives each unit's build status from what is on disk, given
+// the hashes the build path would compute. Both the initial model build and
+// every project reload go through here, so the two can't drift apart.
+//
+// The cached test is build.CacheValid rather than the cheaper marker-only
+// build.IsBuildCached: CacheValid is what the executor rebuilds on, and a
+// marker can outlive the package it stands for. Reporting "cached" for a
+// unit the next build rebuilds is the kind of disagreement that sends
+// people looking for a caching bug that isn't there.
+func scanStatuses(proj *yoestar.Project, projectDir, arch, machine, distro string, units []string, hashes map[string]string) map[string]unitStatus {
+	statuses := make(map[string]unitStatus, len(units))
+	for _, name := range units {
+		hash := hashes[name]
+		u := proj.LookupUnit(distro, name)
+		sd := arch
+		if u != nil {
+			sd = build.ScopeDir(u, arch, machine)
+		}
+		switch {
+		case u != nil && build.CacheValid(proj, projectDir, u, sd, arch, hash, distro):
+			statuses[name] = statusCached
+		case u == nil && build.IsBuildCached(projectDir, sd, name, hash, distro):
+			// No unit for this distro view — the marker is all there is
+			// to go on, and there's no artifact path to confirm against.
+			statuses[name] = statusCached
+		case build.IsBuildInProgress(projectDir, sd, name, distro):
+			statuses[name] = statusBuilding
+		default:
+			meta := build.ReadMeta(build.UnitBuildDir(projectDir, sd, name, distro))
+			if meta != nil && meta.Hash == hash && meta.Status == "failed" {
+				statuses[name] = statusFailed
+			} else {
+				statuses[name] = statusNone
+			}
+		}
+	}
+	return statuses
+}
+
 // allUnits returns sorted unit names from the project. Dedupes
 // across modules so cross-distro siblings (alpine.main + debian.main
 // both registering libssl3) yield a single entry rather than two.
@@ -6138,12 +6264,10 @@ func (m model) updateFlash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			// Remember this device for next time. Best-effort: a write
 			// failure doesn't block the flash (the user is mid-action).
-			if ov, lerr := yoestar.LoadLocalOverrides(m.projectDir); lerr == nil {
+			_ = m.mutateOverrides(func(ov *yoestar.LocalOverrides) {
 				ov.FlashDevice = cand.Path
-				_ = yoestar.WriteLocalOverrides(m.projectDir, ov)
-			}
+			})
 			m.flashImagePath = imgPath
-			m.flashImageSize = imgSize
 			m.flashTotal = imgSize
 			m.flashWritten = 0
 			m.flashStage = flashWriting

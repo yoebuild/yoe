@@ -204,21 +204,21 @@ Describes a target board or platform.
 
 ```python
 machine(
-    name = "beaglebone-black",
+    name = "beagleplay",
     arch = "arm64",
-    description = "BeagleBone Black (AM3358)",
+    description = "BeaglePlay (AM625)",
     kernel = kernel(
-        repo = "https://github.com/beagleboard/linux.git",
-        branch = "6.6",
+        unit = "linux-beagleplay",
+        provides = "linux",
         defconfig = "bb.org_defconfig",
-        device_trees = ["am335x-boneblack.dtb"],
+        cmdline = "console=ttyS2,115200 root=/dev/mmcblk1p2 rootwait rw",
     ),
-    bootloader = uboot(
-        repo = "https://github.com/beagleboard/u-boot.git",
-        branch = "v2024.01",
-        defconfig = "am335x_evm_defconfig",
-    ),
+    packages = ["u-boot-beagleplay"],
 )
+
+The kernel and bootloader are ordinary units, named here rather than
+described inline: the unit owns the source, the patches, and the build
+steps, and the machine only says which one to use.
 ```
 
 QEMU machines include emulation configuration:
@@ -582,19 +582,6 @@ project(
     ),
     cache = cache(
         path = "/var/cache/yoe/build",
-        remote = [
-            s3_cache(
-                name = "team",
-                bucket = "yoe-cache",
-                endpoint = "https://minio.internal:9000",
-                region = "us-east-1",
-            ),
-        ],
-        retention_days = 90,
-        signing = "keys/cache.pub",
-    ),
-    sources = sources(
-        go_proxy = "https://proxy.golang.org",
     ),
     modules = [
         # Module in a subdirectory of a repo — path specifies where MODULE.star is

@@ -9,15 +9,26 @@ import (
 )
 
 // DAG represents the dependency graph of all units in a project.
+//
+// A DAG is immutable once BuildDAG returns it, so the topological order
+// is computed at most once and reused. Callers ask for it repeatedly —
+// the executor to schedule, the hasher to walk deps before dependents,
+// the TUI to render — and on a Debian-scale project that walk is not
+// free. Not safe for concurrent first use; every caller sorts before
+// starting workers.
 type DAG struct {
 	Nodes map[string]*Node
+
+	order    []string
+	orderErr error
+	sorted   bool
 }
 
 // Node represents a unit in the dependency graph.
 type Node struct {
-	Unit *yoestar.Unit
-	Deps   []string // build-time dependency names
-	Rdeps  []string // reverse dependencies (computed)
+	Unit  *yoestar.Unit
+	Deps  []string // build-time dependency names
+	Rdeps []string // reverse dependencies (computed)
 }
 
 // BuildDAG constructs a dependency graph from a loaded project. When
@@ -214,70 +225,49 @@ func appendRuntimeClosureOfDeps(deps []string, units map[string]*yoestar.Unit, s
 	return deps
 }
 
-// appendContainerDeps adds the unit's container (and any per-task container
-// overrides) to deps when the container names a container *unit* in the
-// project. External image references (containing ":" or "/", e.g.
-// "golang:1.24") and self-references are ignored, and existing entries are
-// not duplicated — TopologicalSort's in-degree bookkeeping counts
-// len(node.Deps), so a duplicate edge would corrupt ordering.
+// appendContainerDeps adds a build edge for each container unit the
+// unit's tasks run inside — the container image has to exist before any
+// task can run in it. Resolution goes through resolve.ContainerRef so
+// what gets scheduled here is exactly what the executor later runs.
 //
-// `units` is the per-distro view BuildDAG selected (or proj.Units for
-// distro-less callers); container deps are validated against this same
-// view so the dep edges match the graph nodes.
+// External images and names that resolve to nothing this project defines
+// are skipped: neither is something yoe builds, and adding an edge to a
+// name with no unit would only create a dangling dep.
 func appendContainerDeps(deps []string, proj *yoestar.Project, units map[string]*yoestar.Unit, unit *yoestar.Unit, distro string) []string {
 	seen := make(map[string]bool, len(deps))
 	for _, d := range deps {
 		seen[d] = true
 	}
-	add := func(container string) {
-		if container == "" || container == unit.Name {
-			return
+	for _, ref := range ContainerRefsOf(proj, unit, distro) {
+		// A container unit that builds inside itself must not depend on
+		// itself, which would be a cycle in the build order.
+		if ref.External || ref.Name == unit.Name || seen[ref.Name] {
+			continue
 		}
-		if strings.Contains(container, ":") || strings.Contains(container, "/") {
-			return // external image reference, not a project unit
+		if _, ok := units[ref.Name]; !ok {
+			continue
 		}
-		// A virtual container name (e.g. "toolchain") is not itself a unit;
-		// resolve it through the provides table to the concrete per-distro
-		// container unit (toolchain-debian-13, toolchain-ubuntu-26.04, …)
-		// before checking membership, so the container is scheduled as a
-		// build dep. resolveDeps dedupes by resolved name, so a source unit
-		// that also lists "toolchain" in its deps collapses to one edge.
-		if resolved := proj.ResolveProvidesForDistro(container, distro); resolved != "" {
-			container = resolved
-		}
-		if _, ok := units[container]; !ok {
-			return // not a known unit; leave dep validation untouched
-		}
-		if seen[container] {
-			return
-		}
-		seen[container] = true
-		deps = append(deps, container)
-	}
-	add(unit.Container)
-	for _, t := range unit.Tasks {
-		add(t.Container)
+		seen[ref.Name] = true
+		deps = append(deps, ref.Name)
 	}
 	return deps
 }
 
-// TopologicalSort returns units in build order (dependencies before dependents).
-// Returns an error if the graph contains a cycle.
+// TopologicalSort returns units in build order (dependencies before
+// dependents), or an error if the graph contains a cycle. The result is
+// memoized; callers must not modify the returned slice.
 func (d *DAG) TopologicalSort() ([]string, error) {
-	// Kahn's algorithm
-	inDegree := make(map[string]int)
-	for name := range d.Nodes {
-		inDegree[name] = 0
+	if !d.sorted {
+		d.order, d.orderErr = d.topologicalSort()
+		d.sorted = true
 	}
-	for _, node := range d.Nodes {
-		for _, dep := range node.Deps {
-			inDegree[dep]++ // note: reversed — dep must come first
-		}
-	}
+	return d.order, d.orderErr
+}
 
-	// Actually we want: inDegree[x] = number of deps x has (not rdeps)
-	// Kahn's: start with nodes that have no dependencies
-	inDegree = make(map[string]int)
+func (d *DAG) topologicalSort() ([]string, error) {
+	// Kahn's algorithm. inDegree[x] is how many deps x is waiting on, so a
+	// unit becomes schedulable when it reaches zero.
+	inDegree := make(map[string]int, len(d.Nodes))
 	for name, node := range d.Nodes {
 		inDegree[name] = len(node.Deps)
 	}

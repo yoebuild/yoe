@@ -189,7 +189,7 @@ func TestDescribe_UnbuildableImage(t *testing.T) {
 	}
 
 	var buf strings.Builder
-	if err := Describe(&buf, proj, "bun-image", "arm64"); err != nil {
+	if err := Describe(&buf, proj, "bun-image", DescribeOptions{Arch: "arm64", Distro: "alpine"}); err != nil {
 		t.Fatalf("Describe: %v", err)
 	}
 	out := buf.String()
