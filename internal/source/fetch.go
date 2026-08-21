@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/yoebuild/yoe/internal/apkindex"
 	"github.com/yoebuild/yoe/internal/gzipframe"
@@ -76,6 +78,91 @@ func Fetch(unit *yoestar.Unit, w io.Writer) (string, error) {
 	return fetchHTTP(cacheDir, unit, w)
 }
 
+// downloadRetries is how many times a transient download failure is retried
+// before the build gives up. Source archives come from volunteer mirror pools
+// (savannah, sourceforge, GNU) where a redirect can land on a mirror that is
+// briefly unavailable; a single 502 from one mirror should not fail an
+// otherwise healthy build, since the next attempt usually lands elsewhere.
+const downloadRetries = 4
+
+// retryDelay is the backoff before attempt n (1-based). Linear rather than
+// exponential: mirror outages are usually resolved by re-rolling the redirect,
+// not by waiting longer.
+func retryDelay(attempt int) time.Duration {
+	return time.Duration(attempt) * 2 * time.Second
+}
+
+// transientStatus reports whether an HTTP status is worth retrying. 5xx and
+// the two rate-limit/timeout codes are mirror-side conditions that commonly
+// clear on a retry; a 404 means the URL is wrong and retrying only wastes time.
+func transientStatus(code int) bool {
+	return code >= 500 || code == http.StatusRequestTimeout || code == http.StatusTooManyRequests
+}
+
+// downloadWithRetry streams url into a temp file inside cacheDir, retrying
+// transient failures. Returns the temp file path and the sha256 of its
+// contents; the caller owns the temp file and must rename or remove it.
+func downloadWithRetry(cacheDir, url string, w io.Writer) (string, []byte, error) {
+	var lastErr error
+	for attempt := 1; attempt <= downloadRetries; attempt++ {
+		if attempt > 1 {
+			delay := retryDelay(attempt - 1)
+			fmt.Fprintf(w, "  retrying %s in %s (attempt %d/%d): %v\n",
+				url, delay, attempt, downloadRetries, lastErr)
+			time.Sleep(delay)
+		}
+
+		tmpPath, sum, err := downloadOnce(cacheDir, url)
+		if err == nil {
+			return tmpPath, sum, nil
+		}
+		lastErr = err
+
+		var se statusError
+		if errors.As(err, &se) && !transientStatus(se.code) {
+			return "", nil, fmt.Errorf("downloading %s: %w", url, err)
+		}
+	}
+	return "", nil, fmt.Errorf("downloading %s: %w (after %d attempts)", url, lastErr, downloadRetries)
+}
+
+// statusError carries the HTTP status so the retry loop can tell a mirror
+// hiccup from a genuinely wrong URL.
+type statusError struct{ code int }
+
+func (e statusError) Error() string { return fmt.Sprintf("HTTP %d", e.code) }
+
+// downloadOnce performs a single GET and streams the body to a fresh temp
+// file, returning its path and the sha256 of the bytes written. A sha256 is
+// always computed — it is cheap, and provides a fingerprint regardless of
+// which integrity mode the unit declares.
+func downloadOnce(cacheDir, url string) (string, []byte, error) {
+	resp, err := httpClient.Get(url)
+	if err != nil {
+		return "", nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", nil, statusError{code: resp.StatusCode}
+	}
+
+	tmp, err := os.CreateTemp(cacheDir, "download-*")
+	if err != nil {
+		return "", nil, err
+	}
+	tmpPath := tmp.Name()
+	h256 := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(tmp, h256), resp.Body); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return "", nil, err
+	}
+	tmp.Close()
+
+	return tmpPath, h256.Sum(nil), nil
+}
+
 // fetchHTTP downloads a tarball and caches it by URL hash.
 func fetchHTTP(cacheDir string, unit *yoestar.Unit, w io.Writer) (string, error) {
 	// Cache key: sha256 of URL
@@ -90,16 +177,6 @@ func fetchHTTP(cacheDir string, unit *yoestar.Unit, w io.Writer) (string, error)
 
 	fmt.Fprintf(w, "Fetching %s...\n", unit.Source)
 
-	resp, err := httpClient.Get(unit.Source)
-	if err != nil {
-		return "", fmt.Errorf("downloading %s: %w", unit.Source, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("downloading %s: HTTP %d", unit.Source, resp.StatusCode)
-	}
-
 	// Pre-validate apk_checksum format before paying the download cost.
 	var apkExpected []byte
 	if unit.APKChecksum != "" {
@@ -110,25 +187,14 @@ func fetchHTTP(cacheDir string, unit *yoestar.Unit, w io.Writer) (string, error)
 		apkExpected = raw
 	}
 
-	// Always stream a sha256 during download — cheap, and provides a
-	// fingerprint regardless of which integrity mode applies. We only
-	// *check* it when SHA256 is the declared format.
-	tmp, err := os.CreateTemp(cacheDir, "download-*")
+	tmpPath, sum256, err := downloadWithRetry(cacheDir, unit.Source, w)
 	if err != nil {
 		return "", err
 	}
-	tmpPath := tmp.Name()
-	h256 := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(tmp, h256), resp.Body); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return "", fmt.Errorf("downloading %s: %w", unit.Source, err)
-	}
-	tmp.Close()
 
 	switch {
 	case unit.SHA256 != "":
-		actual := fmt.Sprintf("%x", h256.Sum(nil))
+		actual := fmt.Sprintf("%x", sum256)
 		if actual != unit.SHA256 {
 			os.Remove(tmpPath)
 			return "", fmt.Errorf("SHA256 mismatch:\n  expected %s\n  got      %s",

@@ -207,6 +207,13 @@ $YOE_CACHE/
 - **Sources are keyed by content hash** — the SHA256 of the actual file, which
   units already declare in their `sha256` field. Two different URLs serving
   identical tarballs share one cache entry.
+- **Tarball downloads retry transient mirror failures.** Many upstream archives
+  are served by volunteer mirror pools that redirect each request to a different
+  host, so an individual host returning a server error, a timeout, or a
+  rate-limit response is a routine occurrence rather than a real problem with
+  the source. A download that fails that way is retried a few times with a short
+  delay between attempts; a response that indicates the URL itself is wrong (for
+  example a 404) fails immediately instead of waiting through retries.
 - **Git sources are keyed by `sha256(url + "#" + ref)`** — since a git repo is a
   directory (not a single file), content-addressing isn't practical. The URL+ref
   key ensures different tags/branches get separate clones.
