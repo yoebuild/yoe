@@ -88,7 +88,9 @@ const downloadRetries = 4
 // retryDelay is the backoff before attempt n (1-based). Linear rather than
 // exponential: mirror outages are usually resolved by re-rolling the redirect,
 // not by waiting longer.
-func retryDelay(attempt int) time.Duration {
+// It is a var so tests can shrink it rather than sleeping through the real
+// backoff.
+var retryDelay = func(attempt int) time.Duration {
 	return time.Duration(attempt) * 2 * time.Second
 }
 
@@ -163,6 +165,30 @@ func downloadOnce(cacheDir, url string) (string, []byte, error) {
 	return tmpPath, h256.Sum(nil), nil
 }
 
+// fetchFromAny downloads the unit's source, falling back to each mirror in
+// turn when the primary URL cannot serve it. Each URL gets the full retry
+// budget before the next one is tried, so a mirror that is merely slow to
+// recover is still given a fair chance. A unit that declares mirrors should
+// also declare sha256; verification happens in the caller and applies
+// identically whichever host answered.
+func fetchFromAny(cacheDir string, unit *yoestar.Unit, w io.Writer) (string, []byte, error) {
+	urls := append([]string{unit.Source}, unit.Mirrors...)
+	var firstErr error
+	for i, url := range urls {
+		if i > 0 {
+			fmt.Fprintf(w, "  trying mirror %s\n", url)
+		}
+		tmpPath, sum, err := downloadWithRetry(cacheDir, url, w)
+		if err == nil {
+			return tmpPath, sum, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	return "", nil, firstErr
+}
+
 // fetchHTTP downloads a tarball and caches it by URL hash.
 func fetchHTTP(cacheDir string, unit *yoestar.Unit, w io.Writer) (string, error) {
 	// Cache key: sha256 of URL
@@ -187,7 +213,7 @@ func fetchHTTP(cacheDir string, unit *yoestar.Unit, w io.Writer) (string, error)
 		apkExpected = raw
 	}
 
-	tmpPath, sum256, err := downloadWithRetry(cacheDir, unit.Source, w)
+	tmpPath, sum256, err := fetchFromAny(cacheDir, unit, w)
 	if err != nil {
 		return "", err
 	}

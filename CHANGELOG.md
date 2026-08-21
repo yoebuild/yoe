@@ -11,9 +11,10 @@ and this project adheres to
 ## [0.14.2] - 2026-08-21
 
 - **A single mirror outage no longer fails a build.** Source archive downloads
-  now retry when a mirror returns a server error or times out, so a build that
-  happened to land on a briefly unavailable mirror recovers on its own instead
-  of stopping.
+  retry when a host returns a server error or times out, and units can list
+  alternate download locations that are tried when the main one stays
+  unreachable, so a build no longer depends on one mirror being healthy at the
+  moment it runs.
 - **Nightly board builds now cover Debian and Ubuntu.** Raspberry Pi 5 and
   BeaglePlay images are built for all three distros each night, so a glibc-only
   break in a board's kernel, bootloader, or partition layout shows up without

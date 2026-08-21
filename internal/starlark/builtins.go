@@ -265,6 +265,7 @@ var unitFields = []struct {
 	{"license", func(u *Unit, kw []starlark.Tuple) { u.License = kwString(kw, "license") }},
 	{"distro", func(u *Unit, kw []starlark.Tuple) { u.Distro = kwString(kw, "distro") }},
 	{"source", func(u *Unit, kw []starlark.Tuple) { u.Source = kwString(kw, "source") }},
+	{"mirrors", func(u *Unit, kw []starlark.Tuple) { u.Mirrors = kwStringList(kw, "mirrors") }},
 	{"sha256", func(u *Unit, kw []starlark.Tuple) { u.SHA256 = kwString(kw, "sha256") }},
 	{"apk_checksum", func(u *Unit, kw []starlark.Tuple) { u.APKChecksum = kwString(kw, "apk_checksum") }},
 	{"passthrough_apk", func(u *Unit, kw []starlark.Tuple) { u.PassthroughAPK = kwString(kw, "passthrough_apk") }},

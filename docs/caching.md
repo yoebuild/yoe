@@ -213,7 +213,11 @@ $YOE_CACHE/
   rate-limit response is a routine occurrence rather than a real problem with
   the source. A download that fails that way is retried a few times with a short
   delay between attempts; a response that indicates the URL itself is wrong (for
-  example a 404) fails immediately instead of waiting through retries.
+  example a 404) fails immediately instead of waiting through retries. A unit
+  that lists `mirrors` gets a second layer of protection: when the main URL is
+  still failing after its retries, each mirror is tried in turn. Because the
+  cache is keyed by content, whichever host answers produces the same cache
+  entry.
 - **Git sources are keyed by `sha256(url + "#" + ref)`** — since a git repo is a
   directory (not a single file), content-addressing isn't practical. The URL+ref
   key ensures different tags/branches get separate clones.
