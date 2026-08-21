@@ -592,7 +592,17 @@ type Unit struct {
 
 	// Source
 	Source string // URL or git repo
-	SHA256 string
+	// Mirrors are alternate URLs serving the same archive as Source, tried
+	// in order when Source fails. Many upstreams publish through a
+	// redirector that round-robins across volunteer mirrors, so a fetch can
+	// fail for reasons that have nothing to do with the project being
+	// reachable. Mirrors deliberately do NOT participate in the unit input
+	// hash: they name other places to obtain identical bytes, not a
+	// different build input, so adding one must not invalidate the cache.
+	// Declare `sha256` alongside mirrors so every source is verified no
+	// matter which host answered.
+	Mirrors []string
+	SHA256  string
 	// APKChecksum is Alpine's APKINDEX `C:` field — "Q1<base64-sha1>=".
 	// Mutually exclusive with SHA256: a unit declares one or the other.
 	// Used by module-alpine to verify against the hash Alpine itself

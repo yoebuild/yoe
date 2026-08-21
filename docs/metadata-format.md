@@ -371,6 +371,37 @@ unit(
 )
 ```
 
+### Source mirrors
+
+Some upstreams publish through a redirector that forwards each request to one
+of several volunteer mirrors. Whether a download succeeds then depends on which
+mirror happened to answer, which can fail a build for reasons unrelated to the
+project being reachable. A unit can list alternate locations for the same
+archive:
+
+```python
+unit(
+    name = "attr",
+    version = "2.5.2",
+    source = "https://download.savannah.nongnu.org/releases/attr/attr-2.5.2.tar.gz",
+    mirrors = [
+        "https://mirrors.ocf.berkeley.edu/nongnu/attr/attr-2.5.2.tar.gz",
+        "https://mirror.csclub.uwaterloo.ca/nongnu/attr/attr-2.5.2.tar.gz",
+    ],
+    sha256 = "39bf67452fa41d0948c2197601053f48b3d78a029389734332a6309a680c6c87",
+    ...
+)
+```
+
+`source` is always tried first, and only after it exhausts its retries does
+each mirror get a turn. Declare `sha256` whenever you declare `mirrors`: the
+checksum is what makes the fallback safe, since it holds every host to the same
+bytes regardless of which one answered.
+
+Mirrors do not participate in a unit's input hash. They name other places to
+obtain identical content rather than a different build input, so adding or
+removing one leaves cached builds valid.
+
 ### Patches
 
 Units can apply patches to upstream source after fetching and before building.

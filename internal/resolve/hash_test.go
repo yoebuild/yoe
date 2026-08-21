@@ -21,6 +21,7 @@ var hashSkipFields = map[string]string{
 	"Module":               "registration provenance — same unit from different modules must hash identically",
 	"ModuleIndex":          "registration order — informational, no output impact",
 	"CacheDirs":            "host-side mount points; doesn't affect built artifact contents",
+	"Mirrors":              "alternate URLs for identical bytes; SHA256 (which IS hashed) pins the content, so which host served it has no output impact",
 	"ArtifactsExplicit":    "UX-only metadata; the resolved Artifacts list (which IS hashed) drives the actual rootfs",
 	"Distro":               "visibility-only tag; the consuming image's effective_distro IS hashed (separately) — the per-unit tag has no output impact",
 	"PassthroughDeb":       "transport metadata for mirror-verbatim deb publish; the bytes themselves are hashed via SHA256 (which IS in the hash), so this filename doesn't add information",

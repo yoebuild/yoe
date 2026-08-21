@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.14.3] - 2026-08-21
+
+- **Units can list alternate download locations.** When the usual URL for a
+  package's source stays unreachable, the build now falls back to the mirrors
+  the unit names instead of stopping, so an outage at a single host no longer
+  decides whether a build gets its source.
+
 ## [0.14.2] - 2026-08-21
 
 - **A single mirror outage no longer fails a build.** Source archive downloads

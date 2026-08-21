@@ -6,6 +6,17 @@ unit(
     # autopoint/gettext just to bootstrap. The tarball carries a working
     # configure, so we build it directly — the same choice coreutils makes.
     source = "https://download.savannah.nongnu.org/releases/attr/attr-2.5.2.tar.gz",
+    # download.savannah.nongnu.org is a redirector that hands each request to
+    # a volunteer mirror, so whether a fetch succeeds depends on which mirror
+    # answered — one returning 502 has failed builds that were otherwise
+    # healthy. These two mirrors carry the same pool content and are stable
+    # enough to fall back to; sha256 below means it does not matter which of
+    # the three actually serves the bytes.
+    mirrors = [
+        "https://mirrors.ocf.berkeley.edu/nongnu/attr/attr-2.5.2.tar.gz",
+        "https://mirror.csclub.uwaterloo.ca/nongnu/attr/attr-2.5.2.tar.gz",
+    ],
+    sha256 = "39bf67452fa41d0948c2197601053f48b3d78a029389734332a6309a680c6c87",
     license = "LGPL-2.1-or-later",
     description = "Extended attribute (xattr) library — libattr + getfattr/setfattr",
     deps = ["toolchain"],
