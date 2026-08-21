@@ -8,13 +8,17 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Units can list alternate download locations.** When the usual URL for a
+  package's source stays unreachable, the build now falls back to the mirrors
+  the unit names instead of stopping, so an outage at a single host no longer
+  decides whether a build gets its source.
+
 ## [0.14.2] - 2026-08-21
 
 - **A single mirror outage no longer fails a build.** Source archive downloads
-  retry when a host returns a server error or times out, and units can list
-  alternate download locations that are tried when the main one stays
-  unreachable, so a build no longer depends on one mirror being healthy at the
-  moment it runs.
+  now retry when a mirror returns a server error or times out, so a build that
+  happened to land on a briefly unavailable mirror recovers on its own instead
+  of stopping.
 - **Nightly board builds now cover Debian and Ubuntu.** Raspberry Pi 5 and
   BeaglePlay images are built for all three distros each night, so a glibc-only
   break in a board's kernel, bootloader, or partition layout shows up without
