@@ -139,6 +139,36 @@ superseded, mark it and link to the replacement. Before starting work on a
 topic, check the index for the prior spec/plan and its status — that's faster
 than scanning the directories.
 
+## Work tracking
+
+Planned work lives in GitHub issues, not in a markdown list. `docs/roadmap.md`
+used to carry ~130 TODO bullets; those are now issues labeled `roadmap`, and the
+page keeps only theme framing and a record of what has landed.
+
+- **Never add a TODO bullet to `docs/roadmap.md`.** File a GitHub issue instead,
+  label it `roadmap` plus `bug` / `enhancement` / `documentation`, and add it to
+  the project board. The roadmap page is for the "why this theme matters" prose
+  and the "already landed" record, both of which outlive any single item.
+- **The [Yoe project board](https://github.com/orgs/yoebuild/projects/1) is the
+  prioritization surface** — it answers "what is next," which labels and issue
+  search cannot. Its `Status` field runs Backlog → Ready → In progress → Done;
+  `Ready` is the queue worth pulling from. Release milestones are deliberately
+  not used: yoe ships every few days, so a per-release milestone would churn
+  faster than issues get picked up. New issues should land on the board so the
+  backlog stays visible in one place.
+- **Every issue carries an `area:*` label** — `units`, `device`, `cli`, `build`,
+  `dev-loop`, `alpine`, `tui`, `testing`, `cache`, `debian`, `docs` — at most
+  two per issue. This is how to find related work:
+  `gh issue list --label area:tui` answers "what is outstanding in the TUI,"
+  which the flat roadmap never could. Apply one when filing.
+- **Check for an existing issue before proposing work.** With a large backlog,
+  the thing being suggested has often already been filed. Search the relevant
+  `area:*` label first, and link the issue rather than restating it.
+- **Board access needs the `project` token scope**, which plain `repo` does not
+  grant. If `gh project` or a `projectsV2` GraphQL field returns
+  `INSUFFICIENT_SCOPES`, run `gh auth refresh -s project`. Issues and labels
+  work regardless.
+
 ## Working on This Codebase
 
 - **No shortcuts.** Build systems are fragile. Always implement the correct fix,

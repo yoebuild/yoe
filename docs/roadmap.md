@@ -1,140 +1,23 @@
 # Roadmap
 
-> **About this document:** the roadmap is a list of pointers, not a design spec.
-> Each item should be a one-line "we want to do this" with a link to the design
-> doc that owns the detail. Keep design discussion in the relevant `docs/*.md`
-> and link from here. If a topic doesn't have a design doc yet, leave the entry
-> brief — write the design doc when the work is actually picked up.
-
-## Next video/blog posts
-
-- debugging the zstd issue
-- self-hosting on rPI
-
-## Next Features
-
-- Distributed cache with different permissions, etc.
-- Enable scratchpad overlay for upstream packages, so you can throw it away when
-  done.
-- Research how does Nix hydra work.
-- Serial terminal and SSH terminals running through TUI so you can look at it
-  after the fact or in real-time.
-- Install Claude on target to watch what you do, and translate that into yoe
-  units/.etc. Quick way to capture what anyone does on the target.
-- Tools to automatically boot-test real hardware, similar to who we do QEMU.
-- Can we watch the unit state files and automatically update the TUI if
-  something changes? The idea is you could be building in two different TUIs and
-  both TUIs would show current status of the other.
-- Be able to specify distro deps by version if necessary (another optional
-  nested level).
-- Update landing page to include reflect latest developments.
-- Test deploy with Debian
-- Rust support, put cargo packages in cache dir.
-- Update Alpine to v3.23
-- Should image settings only show images for configured distro?
-- Can we start yoe without a distro setting and select distro based on image
-  distro field?
-- Switch Alpine module to versioned branches.
-- Script on both Alpine and Debian to add upstream feeds for runtime
-  development.
-- Custom Linux kernel in Debian. The stock Debian kernel is dragging in 1/2G of
-  kernel modules.
-- Build container packages and deploy to target.
-- vcpkg (seems popular, Rustdesk uses it)
-- Building from console is now confusing with parallel build as to what is
-  happening [1/1] task: build (should also include unit)
-- Option to ignore certain flash devices, save in local.star, and then they are
-  not presented in the flash list again. This helps prevent accidental writes to
-  media.
-- yoe kiosk browser support
-- Lock all writes to build.json files, local.star, etc
-- create patches for src trees
-- Odroid C4
-- Built-in serial terminal.
-- Use a generic container for alpine repackaing, so a container bump does not
-  cause all alpine packages to rebuild.
-- Yoe unit that builds in place
-- Record tasks that succeed in build.json, and build starts with the first
-  uncompleted task. This eliminates re-running configure steps when doing
-  incremental development.
-- On unit detail, list tasks and allow restarting the build at a certain task.
-  Useful for incremental development.
-- Allow running yoe build/deploy in a unit build src dir. We walk up the
-  directory to learn what unit it is, and load the project.
-- module dev status should update
-- Block diagram on src modifications (needs some work)
-- mDNS on rPI does not work
-- Units output multiple packages. Seems like this will be required for
-  compatibility with Alpine and other distros.
-- Weight units by how much time they take to build for displaying accurate build
-  progress
-- Why does simpleiot list musl as dep?
-- Should we pin modules in default projects? Seems like we should
-- Warn if units or modules specify Git branches. These are not deterministic.
-- Use alpine docker-init. Had some problems with consuming packages with
-  multiple outputs.
-- Is there any advantage in sources to storing filename as a hash? What is this
-  a hash of?
-- On unit detail page, provide a way to switch the Git URL to the upstream
-  source and record this in the unit build state file. Display this state on
-  main unit and unit detail page. Thinking several states: nothing, up,
-  modified, etc.
-- Alpine should have unit deps, not just runtime deps
-- Alpine packages like gvim provides vim. This could be a source of pain.
-- Document BSP and package moat
-- mDNS on target (we have a mdns component, why is it not working?)
-- base-files is modified by machine
-  - machine package feed?
-  - this needs to be solve before start building multiple machines in one tree.
-- e2e testing
-- Data partition for rPI targets
-  - Fill/format data partition
-- rPI updater
-- Flash progress bar rewinds before display if there has been a previous flash
-- Multiple projects
-  - add example to e2e
-  - Support selecting and saving to local.star
-- Open to unit source on web.
-- yoe self build/install. Easily for anyone to modify yoe, build/install to
-  ~/bin
-- yoe chain commands
-- Can we limit random starlark commands in privledged containers? Saved the
-  privileged stuff for image building, etc. that is all controlled Go code?
-- [Closure as a first-class output](https://docs.yoebuild.org/nix.html#whats-worth-borrowing-regardless).
-  Nix records a build’s runtime closure explicitly; yoe resolves the closure at
-  assembly time from declared runtime dependencies. Nix’s model catches
-  under-declared dependencies that yoe’s can miss. A verification pass that pins
-  down the realized closure is worth a look independent of any Nix integration.
-
-## Bugs / Improvements
-
-- Retry source downloads, and allow a unit to list mirrors. A single transient
-  upstream error fails the entire build today: `fetchHTTP` makes one request
-  with no retry, and `source =` accepts exactly one URL, so a Savannah 502 on
-  `attr` took down three of the five nightly e2e jobs.
-- `apk help` — hard to use right now.
-- Helix prebuilt is glibc-only and won't run on yoe's musl rootfs. Needs a
-  cargo-from-source build (or a third-party musl tarball) to actually work.
-- modprobe from busybox and kmod both in image at different locations.
-- kmod: `Error loading shared library liblzma.so.5: No such file or directory`
-  (needed by `/usr/sbin/modprobe`).
-- Rename rpi machines to simple rpi names.
+> **About this document:** the individual roadmap items now live as GitHub
+> issues labeled
+> [`roadmap`](https://github.com/yoebuild/yoe/issues?q=is%3Aissue+is%3Aopen+label%3Aroadmap).
+> That is the list to browse, search, claim, and close. This page keeps only the
+> framing that does not belong to any single item: why a theme matters, and what
+> has already landed. Design discussion belongs in the relevant `docs/*.md` —
+> link to it from the issue.
 
 ## Developer Experience
 
 The biggest leverage area: making yoe pleasant for the developer writing apps
 that run on yoe-built devices, not just for the author of a distro.
 
-- Plugins to create custom commands and TUI features
-  - Need to make it easy to extend the automation for custom needs.
-
 ### Source can directly embed units
 
-- star file directly in source code
-- declares dependencies (modules, containers)
-- can be directly included in a PROJECT.star
-
-This allows yoe to be an application build tool as well as a system build tool.
+A `.star` file living in the application's own source tree, declaring its
+dependencies and included directly from a `PROJECT.star`. This is what lets yoe
+serve as an application build tool as well as a system build tool.
 
 ### Build & Deploy Loop
 
@@ -142,123 +25,10 @@ Goal: app developers work directly in their app's git repo, not against an
 extracted SDK. The build container _is_ the SDK. See [dev-env.md](dev-env.md)
 for the design.
 
-- Local-path unit sources: `source = path("./")` so a unit builds from a working
-  tree without a clone-tag cycle. Foundation for everything below.
-- `yoe dev` watch mode — rebuild (and optionally redeploy) on save.
-- Language and build-system classes beyond `go_binary`: `rust_binary` (Cargo),
-  `python_unit`, `node_unit`, `meson`, `zig_binary`. See the class table in
-  [metadata-format.md](metadata-format.md#built-in-classes).
-- App project scaffolding: `yoe new app --lang go` style generator that creates
-  a standalone project with `PROJECT.star`, a unit pinning the language, and a
-  happy path.
-- Software update — Yoe updater or SWUpdate. Rewrite in Zig?
-- Anything we can learn from https://docs.ruuda.nl/deptool/?
-
-### On-Device App UX
-
-- `yoe svc start|stop|restart|status <unit> <host>` over SSH.
-- `yoe logs <unit> -f` — tail service logs from the host.
-- Persistent `/data` partition pattern so app state survives image updates.
-- Health-check / watchdog conventions readable by both OpenRC and a future
-  container runtime.
-
-### Diagnostics
-
-- Profilers: `perf`, `bpftrace`, language-specific (`py-spy`, `delve`).
-- Metrics agent: `node_exporter` or similar.
-- Crash backtrace shipper: capture coredumps to a known path, optionally upload.
-
-### Wireless / Remote
-
-- Wifi setup workflow: `wpa_supplicant` unit + a first-boot configurator.
-- Reverse tunnel for remote dev: `yoe tunnel`, or ship `tailscale` /
-  `headscale`.
-
-## Hardware Access
-
-- GPIO / I²C / SPI userspace: `libgpiod`, smbus userspace tools.
-- Audio: ALSA, PipeWire.
-- Camera: `libcamera`.
-- GUI stack: minimal Wayland compositor (cage / wlroots) for kiosk apps.
-
 ## Needed Units
 
 Existing units can be found via `yoe list` or by browsing
-`modules/units-core/units/`.
-
-### Networking and Security
-
-- `nftables` — modern firewall (preferred over legacy iptables). Requires new
-  dep units `libmnl`, `libnftnl`, and `gmp` before it can be written.
-- `wpa_supplicant` — wifi.
-
-### Diagnostics
-
-- `perf`, `bpftrace`, `py-spy`, `delve`.
-- `node_exporter` (or similar metrics agent).
-
-### Hardware
-
-- `libgpiod`, smbus userspace tools.
-- ALSA, PipeWire.
-- `libcamera`.
-
-### Container Stack
-
-- `runc`, `containerd`, `nerdctl` — first milestone for on-device containers.
-- Follow-on: `podman`, then `docker-ce`.
-
-### Nice to Have
-
-- `dbus` — IPC message bus; dependency for many higher-level services. Pulls in
-  expat (already present) plus a service supervisor — non-trivial, defer until a
-  unit needs it.
-- `ripgrep`, `fd`.
-- `tailscale` (or `headscale`) — remote-dev tunnel.
-
-## Image Assembly on Host
-
-Move image assembly (`mkfs.ext4`, bootloader install) from the build container
-to the host via `bwrap` user namespaces. Design in
-[build-environment.md](build-environment.md#reducing-dependence-on-dockers-dev-planned).
-
-## Auto-depend from ELF DT_NEEDED
-
-Counterpart to the auto-`provides` SONAME scan that already runs in
-`internal/artifact/apk.go`. Walk every executable and shared library in the
-unit's destdir, read each binary's `DT_NEEDED` entries, and emit
-`depend = so:<soname>` lines in PKGINFO — same convention Alpine's abuild uses.
-Skip sonames the unit provides itself, plus a small platform-baseline allowlist
-(`libc.musl-*.so.1` from `musl`, `ld-musl-*.so.1`, etc.) that's guaranteed
-present in any yoe rootfs.
-
-Catches the class of bug where a `.star` declares a `runtime_deps` list that
-silently misses a transitive shared-lib dependency: today the unit installs fine
-but fails at runtime; with auto-depend, apk refuses the install with a clear
-`so:libfoo.so.N (no such package)` message.
-
-## `module-alpine` units as deltas over upstream PKGINFO
-
-Today every cached `alpine_pkg` unit duplicates upstream metadata
-(`runtime_deps`, `provides`, `replaces`, …) inline in the `.star`, and yoe's apk
-pipeline regenerates PKGINFO from those declarations — silently dropping fields
-the generator missed (e.g. `replaces = busybox` on openrc). Now that
-`alpine_pkg` re-signs upstream apks instead of rebuilding them, the on-target
-PKGINFO comes from upstream verbatim. Next step: turn the `.star` fields into
-explicit deltas over that upstream metadata so cached units stay tiny and only
-record yoe-specific changes. Proposed shape:
-
-```
-provides_extra      / provides_drop      / provides_override
-replaces_extra      / replaces_drop      / replaces_override
-runtime_deps_extra  / runtime_deps_drop  / runtime_deps_override
-triggers_extra      / triggers_drop      / triggers_override
-```
-
-`_extra` adds, `_drop` removes, `_override` replaces wholesale. 90% of edits
-will be `_extra` / `_drop`; `_override` is the escape hatch. Plain
-`runtime_deps` / `provides` / `replaces` (no suffix) stay reserved for
-source-built `module-core` units where there's no upstream to merge with.
+`modules/units-core/units/`. Units still wanted are filed individually.
 
 ## Testing
 
@@ -266,79 +36,6 @@ Today: Go unit tests under `internal/*` and a single dry-run e2e test. No
 on-device tests, no image smoke tests, no build-time package QA, no CI workflow
 that runs builds. Design and intended shape in [testing.md](testing.md), which
 also compares to Yocto's `oeqa` / `INSANE.bbclass` / `ptest` / `buildhistory`.
-
-- Build-time package QA (Yocto's `INSANE.bbclass` analog): file ownership, ELF
-  stripping, RPATH leaks, missing SONAMEs, host-path contamination. Always-on;
-  failures fail the build.
-- `yoe test <unit>` — drive per-unit, image, and HIL tests behind one command.
-- Per-unit functional tests (destdir assertions in the build sandbox).
-- On-device upstream tests (`make check` / `cargo test` shipped as a test
-  subpackage; Yocto's `ptest` analog).
-- Image-level smoke tests that boot in QEMU (or attach over SSH to a real
-  device) and check network, services, basic flows.
-- Build-history / regression tracking (Yocto's `buildhistory` analog) for size,
-  RDEPENDS, and file-list diffs per PR.
-- CI workflows: `go test`, dry-run image build per PR; full build + smoke tests
-  on a schedule.
-- Kernel QA: run upstream `check-config.sh` against the kernel `.config` for
-  container-host images.
-
-## A/B Updates
-
-A/B partitions and signed update bundles for atomic updates with rollback. The
-Home Assistant OS reference architecture in
-[containers.md](containers.md#reference-point-home-assistant-os) pairs this with
-a read-only rootfs; whether yoe adopts an immutable root is undecided. The
-Software update item under Developer Experience evolves toward this once a
-runtime ships.
-
-## CLI Surface
-
-- `yoe serve` / `yoe deploy <unit> <host>` / `yoe device repo {add,remove,list}`
-  — shipped. See [feed-server.md](feed-server.md).
-- `yoe svc start|stop|restart|status <unit> <host>`.
-- `yoe logs <unit> -f`.
-- `yoe dev <unit>` — watch the source tree and rebuild (optionally redeploy) on
-  save.
-- `yoe test <unit>` — run tests in QEMU or against a real device. See
-  [testing.md](testing.md).
-- `yoe tunnel` — reverse tunnel for remote dev (or rely on a `tailscale` unit).
-- `yoe new app --lang go` — application project scaffolding.
-- `yoe cache` — query and prune the build cache (local + future remote/S3).
-- `yoe shell` — drop into the build container interactively.
-- `yoe bundle` — package modules into a single distributable.
-- `yoe module list|info|check-updates` — inspect and update external modules.
-- `yoe repo push|pull` — sync the local package repo to a remote (S3 / HTTP).
-- `yoe build` query flags: `--class <type>`, `--with-deps`, `--list-targets`,
-  `--no-remote-cache`.
-- Config propagation across modules.
-
-See [yoe-tool.md](yoe-tool.md) for design notes on existing `(planned)`
-sections.
-
-## Format / Modules
-
-- Sub-packages — one unit producing multiple packages (`.apk` or `.deb`).
-- `MODULE.star` manifests for module versioning and inter-module deps.
-- Per-task container overrides.
-- Track the Starlark class function used to define each unit on the resolved
-  `Unit` (e.g., `Unit.BuiltVia = "autotools"`, `"cmake"`, `"alpine_pkg"`,
-  `"go_binary"`). Today `Unit.Class` only carries the unit's _type_ (`image` /
-  `container` / `unit`); the build-pattern function that wrapped the `unit()`
-  call leaves no fingerprint on the resolved data. With a separate field, the
-  TUI query language (and `yoe build` flags) can distinguish `type:autotools` —
-  meaningless today — from `type:image`, and we can answer questions like "what
-  alpine_pkg units are in this image" without scraping `.star` files.
-
-See [metadata-format.md](metadata-format.md).
-
-## Distribution Variants
-
-- **glibc target — landed.** yoe now builds glibc/`.deb` images via the Debian
-  and Ubuntu backends (`apt_feed`), in addition to the musl/`.apk` Alpine path.
-  Both Debian and Ubuntu are CI boot- and SSH-verified on arm64 and x86_64. This
-  enables workloads whose binaries require glibc (some cgo, prebuilt vendor
-  SDKs, the upstream Helix release, etc.). Still planned: Jetson / L4T.
 
 ## Self-Hosting
 
@@ -348,15 +45,24 @@ surfaces gaps in container hosting, editor experience, and the build cache all
 at once.
 
 The first cut shipped as `selfhost-image` for the Raspberry Pi 5 — see
-[selfhost-rpi5.md](selfhost-rpi5.md). It bundles yoe, Go, Docker, git,
-bubblewrap, and the dev-image tool set. What's still open:
+[selfhost.md](selfhost.md). It bundles yoe, Go, Docker, git, bubblewrap, and the
+dev-image tool set.
 
-- **CI gate** that builds yoe from source on a yoe-built image and runs the test
-  suite, so toolchain or libc-compatibility regressions break the build instead
-  of being discovered later.
-- **Backport `selfhost-image` to other boards** — RPi4 first (mostly mechanical;
-  swap `linux-rpi5` → `linux-rpi4` in the manifest), then BeaglePlay, then
-  Jetson once the Tegra kernel carries the container CONFIG fragment.
-- **Cross-arch builds from the RPi5** — install `qemu-user-static` and register
-  binfmt handlers in the image so the device can also build x86_64 / RISC-V
-  packages.
+## Already landed
+
+Kept here because the roadmap is where these were last tracked; the detail lives
+in the linked docs.
+
+- **glibc target.** yoe builds glibc/`.deb` images via the Debian and Ubuntu
+  backends (`apt_feed`), in addition to the musl/`.apk` Alpine path. Both Debian
+  and Ubuntu are CI boot- and SSH-verified on arm64 and x86_64. This enables
+  workloads whose binaries require glibc (some cgo, prebuilt vendor SDKs, the
+  upstream Helix release, etc.).
+- **`yoe serve` / `yoe deploy <unit> <host>` /
+  `yoe device repo {add,remove,list}`.** See [feed-server.md](feed-server.md).
+- **Source download retries and mirrors.** A transient upstream failure is
+  retried, and a unit that lists `mirrors` falls back to them once the primary
+  URL is exhausted. See [caching.md](caching.md).
+
+See [yoe-tool.md](yoe-tool.md) for design notes on `(planned)` CLI sections, and
+[metadata-format.md](metadata-format.md) for the unit and configuration format.

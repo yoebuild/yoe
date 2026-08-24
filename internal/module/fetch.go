@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/yoebuild/yoe/internal/gitutil"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -55,7 +55,7 @@ func Sync(modules []yoestar.ModuleRef, w io.Writer) (map[string]string, error) {
 		if _, err := os.Stat(filepath.Join(moduleDir, ".git")); os.IsNotExist(err) {
 			// Clone
 			fmt.Fprintf(w, "  %-20s cloning %s (ref: %s)...\n", name, m.URL, ref)
-			cmd := exec.Command("git", "clone", "--depth", "1", "--branch", ref, m.URL, moduleDir)
+			cmd := gitutil.Command("", "clone", "--depth", "1", "--branch", ref, m.URL, moduleDir)
 			cmd.Stdout = w
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {
@@ -64,15 +64,13 @@ func Sync(modules []yoestar.ModuleRef, w io.Writer) (map[string]string, error) {
 		} else {
 			// Fetch and checkout the right ref
 			fmt.Fprintf(w, "  %-20s fetching %s...\n", name, ref)
-			cmd := exec.Command("git", "fetch", "origin", ref)
-			cmd.Dir = moduleDir
+			cmd := gitutil.Command(moduleDir, "fetch", "origin", ref)
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {
 				return nil, fmt.Errorf("fetching module %s: %w", name, err)
 			}
 
-			cmd = exec.Command("git", "checkout", "FETCH_HEAD")
-			cmd.Dir = moduleDir
+			cmd = gitutil.Command(moduleDir, "checkout", "FETCH_HEAD")
 			cmd.Stderr = os.Stderr
 			cmd.Run() // best effort
 		}
@@ -117,7 +115,7 @@ func SyncIfNeeded(modules []yoestar.ModuleRef, w io.Writer) error {
 		}
 
 		fmt.Fprintf(w, "[yoe] cloning module %s (ref: %s)...\n", name, ref)
-		cmd := exec.Command("git", "clone", "--depth", "1", "--branch", ref, m.URL, moduleDir)
+		cmd := gitutil.Command("", "clone", "--depth", "1", "--branch", ref, m.URL, moduleDir)
 		cmd.Stdout = w
 		cmd.Stderr = w
 		if err := cmd.Run(); err != nil {

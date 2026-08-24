@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -11,6 +10,7 @@ import (
 
 	yoe "github.com/yoebuild/yoe/internal"
 	"github.com/yoebuild/yoe/internal/build"
+	"github.com/yoebuild/yoe/internal/gitutil"
 	"github.com/yoebuild/yoe/internal/module"
 	"github.com/yoebuild/yoe/internal/source"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
@@ -715,9 +715,7 @@ func (m model) modifiedCount(unitName string) int {
 // internal/dev.go's gitCmd shape; kept private to this file so we
 // don't need to widen yoe's API surface.
 func runGit(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
+	out, err := gitutil.Command(dir, args...).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("%s: %s", err, strings.TrimSpace(string(out)))
 	}

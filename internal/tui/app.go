@@ -25,6 +25,7 @@ import (
 	"github.com/yoebuild/yoe/internal/build"
 	"github.com/yoebuild/yoe/internal/container"
 	"github.com/yoebuild/yoe/internal/device"
+	"github.com/yoebuild/yoe/internal/gitutil"
 	"github.com/yoebuild/yoe/internal/module"
 	"github.com/yoebuild/yoe/internal/resolve"
 	"github.com/yoebuild/yoe/internal/source"
@@ -1627,7 +1628,7 @@ func (m *model) refreshModuleStatus() {
 			m.moduleStatus[rm.Name] = "missing"
 			continue
 		}
-		out, err := exec.Command("git", "-C", rm.CloneDir, "status", "--porcelain").Output()
+		out, err := gitutil.Command(rm.CloneDir, "status", "--porcelain").Output()
 		if err != nil {
 			m.moduleStatus[rm.Name] = "no-git"
 			continue
@@ -5731,8 +5732,7 @@ func (m model) detailSourceLine() string {
 // the hint is purely informational, so silently dropping it is the
 // right failure mode.
 func commitsPast(srcDir, ref string) int {
-	cmd := exec.Command("git", "rev-list", "--count", ref+"..HEAD")
-	cmd.Dir = srcDir
+	cmd := gitutil.Command(srcDir, "rev-list", "--count", ref+"..HEAD")
 	out, err := cmd.Output()
 	if err != nil {
 		return 0
@@ -5749,8 +5749,7 @@ func commitsPast(srcDir, ref string) int {
 // remote of a dev clone (which may differ from the .star-declared
 // source if the user rewrote it to SSH).
 func remoteOriginURL(srcDir string) string {
-	cmd := exec.Command("git", "remote", "get-url", "origin")
-	cmd.Dir = srcDir
+	cmd := gitutil.Command(srcDir, "remote", "get-url", "origin")
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
