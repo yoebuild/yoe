@@ -16,6 +16,7 @@ import (
 	"github.com/yoebuild/yoe/internal/dpkg"
 	"github.com/yoebuild/yoe/internal/feeds/feedcore"
 	"github.com/yoebuild/yoe/internal/fsutil"
+	"github.com/yoebuild/yoe/internal/httputil"
 )
 
 // UpdateOptions tunes the `yoe update-feeds` behavior for Debian feeds.
@@ -35,7 +36,9 @@ type UpdateOptions struct {
 	Arches []string
 
 	// HTTPClient is the client used for downloads. nil means use
-	// http.DefaultClient.
+	// httputil.Client, which fetches feed indexes as opaque bytes over
+	// HTTP/1.1 — see that package for why. Tests override it to point at
+	// a local server.
 	HTTPClient *http.Client
 
 	// Out is where per-feed/per-arch progress is written. nil means
@@ -64,7 +67,7 @@ func UpdateFeeds(opts UpdateOptions) error {
 		return fmt.Errorf("update-feeds: ModuleDir is required")
 	}
 	if opts.HTTPClient == nil {
-		opts.HTTPClient = http.DefaultClient
+		opts.HTTPClient = httputil.Client
 	}
 	if opts.Out == nil {
 		opts.Out = os.Stdout

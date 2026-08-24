@@ -17,21 +17,9 @@ import (
 
 	"github.com/yoebuild/yoe/internal/apkindex"
 	"github.com/yoebuild/yoe/internal/gzipframe"
+	"github.com/yoebuild/yoe/internal/httputil"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
-
-// httpClient downloads source archives as opaque bytes. DisableCompression
-// stops Go's default transport from advertising `Accept-Encoding: gzip` and
-// then transparently inflating the response — savannah and other mirrors
-// (e.g. nongnu.askapache.com) serve a `.tar.gz` with `Content-Encoding: gzip`,
-// which the default client would decode, leaving a bare tar on disk under a
-// `.tar.gz` name. extractTarball later picks gzip by extension and fails with
-// "gzip: invalid header". Whether the bug bites depends on which mirror the
-// 302 redirect lands on, so it is intermittent. Keeping the bytes raw makes
-// the cached archive match its filename regardless of mirror.
-var httpClient = &http.Client{
-	Transport: &http.Transport{DisableCompression: true},
-}
 
 // apkControlSegment returns the raw bytes of the control segment (the
 // second gzip stream) in an apk file. APKINDEX `C:` is sha1 of this
@@ -139,7 +127,7 @@ func (e statusError) Error() string { return fmt.Sprintf("HTTP %d", e.code) }
 // always computed — it is cheap, and provides a fingerprint regardless of
 // which integrity mode the unit declares.
 func downloadOnce(cacheDir, url string) (string, []byte, error) {
-	resp, err := httpClient.Get(url)
+	resp, err := httputil.Client.Get(url)
 	if err != nil {
 		return "", nil, err
 	}
