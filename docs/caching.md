@@ -275,6 +275,14 @@ a single byte arriving. A download that keeps making progress runs as long as it
 needs to, and a dead one fails soon enough to be retried or to fall through to a
 mirror.
 
+The same guard applies to git. Since units prefer git sources over tarballs,
+clones and fetches carry much of yoe's network traffic, and git hangs on a
+silent remote exactly the way an HTTP download does — it ships the mechanism but
+leaves it off by default. Every git command yoe runs now sets a floor
+(`http.lowSpeedLimit` / `http.lowSpeedTime`), so a transfer averaging under 1
+KB/s for a full minute is abandoned rather than waited on forever. This covers
+git's HTTP transport; clones over SSH rely on the user's own ssh configuration.
+
 Other build systems land in the same place by a different route. BitBake and
 Buildroot both shell out to `wget`, which speaks only HTTP/1.1 and so has never
 negotiated HTTP/2 for a download. Tools built on libcurl do negotiate it, and

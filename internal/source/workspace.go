@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/yoebuild/yoe/internal/gitutil"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -143,11 +144,11 @@ func Prepare(projectDir, scopeDir, distro string, unit *yoestar.Unit, cachedSour
 // the freshly-cloned path below). Both refs must resolve cleanly; any
 // git error returns false so the caller falls through to clean+clone.
 func upstreamMatchesTag(srcDir, tag string) bool {
-	upstream, err := exec.Command("git", "-C", srcDir, "rev-parse", PinTag+"^{commit}").Output()
+	upstream, err := gitutil.Command(srcDir, "rev-parse", PinTag+"^{commit}").Output()
 	if err != nil {
 		return false
 	}
-	pin, err := exec.Command("git", "-C", srcDir, "rev-parse", tag+"^{commit}").Output()
+	pin, err := gitutil.Command(srcDir, "rev-parse", tag+"^{commit}").Output()
 	if err != nil {
 		return false
 	}
@@ -184,8 +185,7 @@ func hasLocalCommits(srcDir string) bool {
 		return false
 	}
 
-	cmd := exec.Command("git", "rev-list", "--count", PinTag+"..HEAD")
-	cmd.Dir = srcDir
+	cmd := gitutil.Command(srcDir, "rev-list", "--count", PinTag+"..HEAD")
 	out, err := cmd.Output()
 	if err != nil {
 		return false
@@ -205,14 +205,13 @@ func checkoutGit(barePath, srcDir string, unit *yoestar.Unit) error {
 	}
 
 	// Clone from bare cache into srcDir
-	cmd := exec.Command("git", "clone", "--shared", barePath, srcDir)
+	cmd := gitutil.Command("", "clone", "--shared", barePath, srcDir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git clone: %s\n%s", err, out)
 	}
 
 	// Checkout the right ref
-	cmd = exec.Command("git", "checkout", ref)
-	cmd.Dir = srcDir
+	cmd = gitutil.Command(srcDir, "checkout", ref)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git checkout %s: %s\n%s", ref, err, out)
 	}
@@ -478,11 +477,9 @@ func extractWithTar(tarPath, destDir string) error {
 // DevPromoteToPin's "pick a tag pointing at HEAD" logic.
 func tagUpstream(srcDir string) error {
 	// Ensure we're on a branch (shallow clones may be detached)
-	branchCmd := exec.Command("git", "checkout", "-b", "yoe-work")
-	branchCmd.Dir = srcDir
+	branchCmd := gitutil.Command(srcDir, "checkout", "-b", "yoe-work")
 	branchCmd.Run() // ignore error if branch already exists
-	cmd := exec.Command("git", "tag", "-f", PinTag)
-	cmd.Dir = srcDir
+	cmd := gitutil.Command(srcDir, "tag", "-f", PinTag)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git tag %s: %s\n%s", PinTag, err, out)
 	}
@@ -557,13 +554,11 @@ func applyPatches(projectDir, srcDir string, unit *yoestar.Unit) error {
 		// Apply with git am (preserves commit message from patch). git am
 		// writes a commit, so it needs a committer identity even though the
 		// author comes from the patch header.
-		cmd := exec.Command("git", "am", "--3way", patchPath)
-		cmd.Dir = srcDir
+		cmd := gitutil.Command(srcDir, "am", "--3way", patchPath)
 		cmd.Env = gitCommitEnv()
 		if out, err := cmd.CombinedOutput(); err != nil {
 			// Fallback to git apply
-			cmd = exec.Command("git", "apply", patchPath)
-			cmd.Dir = srcDir
+			cmd = gitutil.Command(srcDir, "apply", patchPath)
 			if out2, err2 := cmd.CombinedOutput(); err2 != nil {
 				return fmt.Errorf("applying %s: git am: %s\ngit apply: %s\n%s\n%s",
 					patchFile, err, err2, out, out2)

@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/yoebuild/yoe/internal/gitutil"
 )
 
 // State classifies the source state of a unit's build/<name>/src/ checkout
@@ -130,9 +132,7 @@ func DetectState(srcDir string, cached State) (State, error) {
 // the trimmed stderr as the error message — easier to surface in logs
 // than the raw exec.ExitError.
 func stateGit(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
+	out, err := gitutil.Command(dir, args...).Output()
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {

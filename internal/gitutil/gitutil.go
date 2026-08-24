@@ -15,8 +15,41 @@ import (
 	"fmt"
 	"net/url"
 	"os/exec"
+	"slices"
 	"strings"
 )
+
+// stallGuard bounds git's transfers the way internal/httputil bounds yoe's
+// own downloads, and for the same reason: a remote that accepts the
+// connection and then stops sending leaves git waiting forever, which hangs
+// the build with no retry ever running. Git ships the mechanism but leaves it
+// off by default.
+//
+// The threshold is a floor, not a deadline. Git aborts only when the transfer
+// averages under 1 KB/s for a full minute, so a large clone from a slow mirror
+// still completes however long it takes — a total timeout would abandon it.
+// At under 1 KB/s sustained, a source archive would need days, so the transfer
+// is dead rather than slow.
+//
+// This governs git's HTTP transport. Clones over SSH are not covered: the
+// equivalent knobs live in core.sshCommand, and overriding that would discard
+// whatever ssh configuration the user has set for their own remotes.
+var stallGuard = []string{
+	"-c", "http.lowSpeedLimit=1000",
+	"-c", "http.lowSpeedTime=60",
+}
+
+// Command returns a git command running in dir, configured so a transfer that
+// stops making progress fails instead of hanging.
+//
+// Every git invocation that may reach the network must be built here rather
+// than with exec.Command directly. The configuration is inert for purely
+// local commands, so there is no reason for a caller to opt out.
+func Command(dir string, args ...string) *exec.Cmd {
+	cmd := exec.Command("git", append(slices.Clone(stallGuard), args...)...)
+	cmd.Dir = dir
+	return cmd
+}
 
 // Run executes git in dir and returns its standard output.
 //
@@ -26,9 +59,7 @@ import (
 // values used as data. On failure, the error carries git's stderr, which
 // is where the explanation actually is.
 func Run(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
+	out, err := Command(dir, args...).Output()
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {

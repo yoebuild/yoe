@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -18,6 +17,7 @@ import (
 	"github.com/yoebuild/yoe/internal/container"
 	"github.com/yoebuild/yoe/internal/deb"
 	"github.com/yoebuild/yoe/internal/fsutil"
+	"github.com/yoebuild/yoe/internal/gitutil"
 	"github.com/yoebuild/yoe/internal/repo"
 	"github.com/yoebuild/yoe/internal/resolve"
 	"github.com/yoebuild/yoe/internal/source"
@@ -1326,8 +1326,7 @@ func readProjectCommit(projectDir string) string {
 	if projectDir == "" {
 		return ""
 	}
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	cmd.Dir = projectDir
+	cmd := gitutil.Command(projectDir, "rev-parse", "HEAD")
 	out, err := cmd.Output()
 	if err != nil {
 		return ""

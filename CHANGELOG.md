@@ -10,10 +10,10 @@ and this project adheres to
 
 ## [0.14.4] - 2026-08-24
 
-- **A download that stops responding no longer hangs the build.** When a mirror
-  accepted a connection and then went silent, the build would wait forever with
-  no way to recover. Such a transfer is now abandoned and retried, while
-  downloads that are merely slow continue as before.
+- **A download or clone that stops responding no longer hangs the build.** When
+  a server accepted a connection and then went silent, the build would wait
+  forever with no way to recover. Such a transfer is now abandoned and retried,
+  while downloads that are merely slow continue as before.
 - **Downloads work on networks where HTTP/2 is unreliable.** Some content
   delivery endpoints reset the connection partway through serving a file instead
   of delivering it, which stopped builds that were otherwise fine. Everything

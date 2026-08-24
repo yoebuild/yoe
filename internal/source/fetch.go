@@ -10,12 +10,12 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/yoebuild/yoe/internal/apkindex"
+	"github.com/yoebuild/yoe/internal/gitutil"
 	"github.com/yoebuild/yoe/internal/gzipframe"
 	"github.com/yoebuild/yoe/internal/httputil"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
@@ -275,7 +275,7 @@ func fetchGit(cacheDir string, unit *yoestar.Unit, w io.Writer) (string, error) 
 		}
 		args = append(args, unit.Source, barePath)
 
-		cmd := exec.Command("git", args...)
+		cmd := gitutil.Command("", args...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return "", fmt.Errorf("git clone %s: %s\n%s", unit.Source, err, out)
 		}
