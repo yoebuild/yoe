@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/yoebuild/yoe/internal/httputil"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -65,7 +66,7 @@ func Update(currentVersion string) error {
 
 // getLatestVersion fetches the latest release version from GitHub
 func getLatestVersion() (string, error) {
-	resp, err := http.Get(githubAPIURL)
+	resp, err := httputil.Client.Get(githubAPIURL)
 	if err != nil {
 		return "", err
 	}
@@ -90,7 +91,7 @@ func downloadAndInstall() error {
 
 	fmt.Printf("Downloading %s...\n", downloadURL)
 
-	resp, err := http.Get(downloadURL)
+	resp, err := httputil.Client.Get(downloadURL)
 	if err != nil {
 		return fmt.Errorf("failed to download: %w", err)
 	}

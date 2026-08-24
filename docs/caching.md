@@ -218,6 +218,9 @@ $YOE_CACHE/
   still failing after its retries, each mirror is tried in turn. Because the
   cache is keyed by content, whichever host answers produces the same cache
   entry.
+- **Downloads arrive as the bytes the server stored**, over HTTP/1.1 and without
+  transparent decompression, which is what lets a content hash mean anything.
+  See [How yoe downloads](#how-yoe-downloads) below.
 - **Git sources are keyed by `sha256(url + "#" + ref)`** — since a git repo is a
   directory (not a single file), content-addressing isn't practical. The URL+ref
   key ensures different tags/branches get separate clones.
@@ -228,6 +231,43 @@ $YOE_CACHE/
 - **Index files** provide human-readable reverse lookups (hash → name) for
   debugging and `yoe cache list`. They are not authoritative — the object store
   is the source of truth.
+
+### How yoe downloads
+
+Everything yoe fetches over the network goes through one shared HTTP client:
+source archives, prebuilt packages, feed indexes read by `yoe update-feeds`, and
+the release binary `yoe update` installs. It is configured for whole-file
+transfers rather than general web traffic, and two settings differ from Go's
+default.
+
+**HTTP/1.1 only.** Some content delivery endpoints reset the HTTP/2 stream
+instead of serving the file, and retrying cannot recover — every attempt opens a
+fresh connection and negotiates the same protocol. Avoiding the protocol is the
+only fix available to the client. Nothing is given up: one large file per
+request gains nothing from multiplexing, and sometimes transfers more slowly
+under it.
+
+**No transparent decompression.** Go's default client advertises
+`Accept-Encoding: gzip` and inflates the response before the caller sees it.
+That silently breaks yoe, because a decoded body is no longer the bytes upstream
+published — a unit's `sha256` stops matching, a `.tar.gz` lands on disk as a
+bare tar and fails extraction, and the alpine feed's signature check runs
+against the wrong bytes. This is not hypothetical: Savannah's mirrors set
+`Content-Encoding: gzip` on `.tar.gz` files, and its redirector chooses per
+request which mirror answers, so the failure is intermittent.
+
+Neither setting costs bandwidth in practice. Archives, packages, and feed
+indexes are already compressed, so gzip transfer encoding has nothing left to
+remove, and GitHub serves release assets uncompressed no matter what the client
+asks for. Compression is still available per request where it would help, since
+suppressing the automatic header does not prevent a caller from setting
+`Accept-Encoding` and decoding the body itself.
+
+Other build systems land in the same place by a different route. BitBake and
+Buildroot both shell out to `wget`, which speaks only HTTP/1.1 and so has never
+negotiated HTTP/2 for a download. Tools built on libcurl do negotiate it, and
+Nix exposes an `http2` setting to turn it off for exactly the failure described
+above.
 
 ### Build flow with cache
 

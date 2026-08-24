@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Downloads work on networks where HTTP/2 is unreliable.** Some content
+  delivery endpoints reset the connection partway through serving a file instead
+  of delivering it, which stopped builds that were otherwise fine. Everything
+  yoe downloads now uses HTTP/1.1, which those endpoints serve normally.
+
 ## [0.14.3] - 2026-08-21
 
 - **Units can list alternate download locations.** When the usual URL for a

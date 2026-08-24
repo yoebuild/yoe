@@ -373,8 +373,8 @@ unit(
 
 ### Source mirrors
 
-Some upstreams publish through a redirector that forwards each request to one
-of several volunteer mirrors. Whether a download succeeds then depends on which
+Some upstreams publish through a redirector that forwards each request to one of
+several volunteer mirrors. Whether a download succeeds then depends on which
 mirror happened to answer, which can fail a build for reasons unrelated to the
 project being reachable. A unit can list alternate locations for the same
 archive:
@@ -393,10 +393,10 @@ unit(
 )
 ```
 
-`source` is always tried first, and only after it exhausts its retries does
-each mirror get a turn. Declare `sha256` whenever you declare `mirrors`: the
-checksum is what makes the fallback safe, since it holds every host to the same
-bytes regardless of which one answered.
+`source` is always tried first, and only after it exhausts its retries does each
+mirror get a turn. Declare `sha256` whenever you declare `mirrors`: the checksum
+is what makes the fallback safe, since it holds every host to the same bytes
+regardless of which one answered.
 
 Mirrors do not participate in a unit's input hash. They name other places to
 obtain identical content rather than a different build input, so adding or
