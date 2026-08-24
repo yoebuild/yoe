@@ -139,6 +139,30 @@ superseded, mark it and link to the replacement. Before starting work on a
 topic, check the index for the prior spec/plan and its status — that's faster
 than scanning the directories.
 
+## Work tracking
+
+Planned work lives in GitHub issues, not in a markdown list. `docs/roadmap.md`
+used to carry ~130 TODO bullets; those are now issues labeled `roadmap`, and the
+page keeps only theme framing and a record of what has landed.
+
+- **Never add a TODO bullet to `docs/roadmap.md`.** File a GitHub issue instead,
+  label it `roadmap` plus `bug` / `enhancement` / `documentation`, and add it to
+  the project board. The roadmap page is for the "why this theme matters" prose
+  and the "already landed" record, both of which outlive any single item.
+- **A GitHub Project board is the prioritization surface** — it answers "what is
+  next," which labels and issue search cannot. Release milestones are
+  deliberately not used: yoe ships every few days, so a per-release milestone
+  would churn faster than issues get picked up. New issues should land on the
+  board so the backlog stays visible in one place.
+- **Check for an existing issue before proposing work.** With a large backlog,
+  the thing being suggested has often already been filed. Search first, and link
+  the issue rather than restating it.
+- **Reading or writing the project board needs an extra token scope.** The
+  default `gh` token here carries `repo`, which covers issues but not
+  `projectsV2`. Run `gh auth refresh -s project` to enable board access; without
+  it, `gh project` and any `projectsV2` GraphQL field fail with
+  `INSUFFICIENT_SCOPES`. Issues, labels, and milestones work regardless.
+
 ## Working on This Codebase
 
 - **No shortcuts.** Build systems are fragile. Always implement the correct fix,
