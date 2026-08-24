@@ -70,6 +70,91 @@ yoe_e2e_arm64() {
 	(cd "${OE_BASE}/testdata/e2e-project" && "${OE_BASE}/yoe" build --machine qemu-arm64 base-image) || return 1
 }
 
+# --- Release -------------------------------------------------------------------
+
+# Read the version to release out of CHANGELOG.md.
+#
+# The version is the first numbered section. Entries still sitting under
+# [Unreleased] mean the release commit that moves them under a version heading
+# has not been written yet, so there is nothing to tag.
+_yoe_release_version() {
+	local changelog pending version
+	changelog="${OE_BASE}/CHANGELOG.md"
+
+	if ! grep -q '^## \[Unreleased\]' "${changelog}"; then
+		echo "no [Unreleased] section in CHANGELOG.md" >&2
+		return 1
+	fi
+
+	pending=$(sed -n '/^## \[Unreleased\]/,/^## \[/p' "${changelog}" |
+		sed '1d;$d' | tr -d '[:space:]')
+	if [ -n "${pending}" ]; then
+		echo "CHANGELOG.md has entries under [Unreleased]; give them a version heading first" >&2
+		return 1
+	fi
+
+	version=$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' "${changelog}" | tr -d '#[] ')
+	if [ -z "${version}" ]; then
+		echo "no released version section in CHANGELOG.md" >&2
+		return 1
+	fi
+
+	printf '%s\n' "${version}"
+}
+
+# Everything yoe_tag_release does while sitting on main. Split out so the
+# caller restores the original branch on every exit path, success or not.
+_yoe_tag_release_on_main() {
+	local version tag
+
+	(cd "${OE_BASE}" && git merge --ff-only origin/main) || return 1
+
+	version=$(_yoe_release_version) || return 1
+	tag="v${version}"
+
+	if (cd "${OE_BASE}" && git rev-parse -q --verify "refs/tags/${tag}" >/dev/null); then
+		echo "tag ${tag} already exists locally" >&2
+		return 1
+	fi
+	if (cd "${OE_BASE}" && git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1); then
+		echo "tag ${tag} already exists on origin" >&2
+		return 1
+	fi
+
+	(cd "${OE_BASE}" && git tag "${tag}") || return 1
+	if ! (cd "${OE_BASE}" && git push origin "${tag}"); then
+		(cd "${OE_BASE}" && git tag -d "${tag}")
+		return 1
+	fi
+
+	echo "=== tagged and pushed ${tag} ==="
+}
+
+# Tag the version named at the top of CHANGELOG.md on main and push the tag.
+yoe_tag_release() {
+	local branch rc
+
+	if ! (cd "${OE_BASE}" && git diff --quiet && git diff --cached --quiet); then
+		echo "yoe_tag_release: uncommitted changes; commit or stash them first" >&2
+		return 1
+	fi
+
+	branch=$(cd "${OE_BASE}" && git symbolic-ref --quiet --short HEAD)
+	if [ -z "${branch}" ]; then
+		echo "yoe_tag_release: HEAD is detached; check out a branch first" >&2
+		return 1
+	fi
+
+	(cd "${OE_BASE}" && git fetch --tags origin) || return 1
+	(cd "${OE_BASE}" && git checkout main) || return 1
+
+	_yoe_tag_release_on_main
+	rc=$?
+
+	(cd "${OE_BASE}" && git checkout "${branch}") || return 1
+	return ${rc}
+}
+
 # --- Documentation site (mdBook) ----------------------------------------------
 # Requires: cargo install mdbook mdbook-toc
 
