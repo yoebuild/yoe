@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.14.5] - 2026-08-24
+
 - **A download or clone that stops responding no longer hangs the build.** When
   a server accepted a connection and then went silent, the build would wait
   forever with no way to recover. Such a transfer is now abandoned and retried,
