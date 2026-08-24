@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.14.4] - 2026-08-24
+
 - **Downloads work on networks where HTTP/2 is unreliable.** Some content
   delivery endpoints reset the connection partway through serving a file instead
   of delivering it, which stopped builds that were otherwise fine. Everything
