@@ -23,6 +23,13 @@ Environment=LOG_DIR=/var/log/grafana
 # which is what both OpenRC and systemd expect.
 EnvironmentFile=/etc/default/grafana
 WorkingDirectory=/usr/share/grafana
+# The configuration file carries the admin password and any data source
+# credentials, so it is mode 0640 and the server has to be in its group to
+# read it. The package cannot ship it that way: the account does not exist
+# until systemd-sysusers runs at boot, and its GID is allocated then, so
+# there is no numeric owner to bake in. Fix it here instead, the same thing
+# the OpenRC script does with checkpath. The "+" runs these as root and
+# outside the sandbox below, which makes /etc read-only.
 # systemd creates and owns these for the service account: /var/lib/grafana
 # for the database and plugins, /var/log/grafana for the log, and
 # /run/grafana for the pid file.
@@ -30,6 +37,8 @@ StateDirectory=grafana
 LogsDirectory=grafana
 RuntimeDirectory=grafana
 RuntimeDirectoryMode=0750
+ExecStartPre=+/bin/chown root:grafana ${CONF_FILE}
+ExecStartPre=+/bin/chmod 0640 ${CONF_FILE}
 ExecStart=/usr/share/grafana/bin/grafana server \
     --config=${CONF_FILE} \
     --pidfile=/run/grafana/grafana.pid \

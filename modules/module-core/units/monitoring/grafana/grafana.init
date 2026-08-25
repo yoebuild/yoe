@@ -28,8 +28,14 @@ command_background="yes"
 # its working directory as well as --homepath, so start it there.
 directory="$GRAFANA_HOME"
 pidfile="/run/grafana.pid"
-output_log="$LOG_DIR/grafana.log"
-error_log="$LOG_DIR/grafana.log"
+# Grafana keeps its own log at $LOG_DIR/grafana.log — its shipped defaults.ini
+# sets `mode = console file`, so it writes there and to the console both.
+# Capture the console stream under a separate name: pointing it at the same
+# file would give that file two writers and every line twice. What lands here
+# is what Grafana produces before its own logger is up, which is where a
+# start-up failure shows.
+output_log="$LOG_DIR/console.log"
+error_log="$LOG_DIR/console.log"
 rc_ulimit="-n $MAX_OPEN_FILES"
 
 depend() {
