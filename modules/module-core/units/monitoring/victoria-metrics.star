@@ -1,5 +1,4 @@
 load("//classes/binary.star", "binary")
-load("//classes/services.star", "service_gate")
 
 # VictoriaMetrics — a time series database that speaks the Prometheus remote
 # write and query protocols, which makes it a convenient metrics store for a
@@ -36,23 +35,28 @@ binary(
     distro_runtime_deps = {"alpine": ["openrc"]},
     conffiles = ["/etc/default/victoria-metrics"],
     tasks = [
-        # A unit is built once per distro but cannot know at Starlark time
-        # which one, so it writes both descriptions of the service and
-        # service_gate() below drops the set the target init does not read.
-        # That is what lets `services` above enable the database on an OpenRC
-        # rootfs and a systemd one alike.
-        task("service", steps = [
-            "mkdir -p $DESTDIR/etc/init.d $DESTDIR/etc/conf.d" +
-            " $DESTDIR/lib/systemd/system $DESTDIR$PREFIX/lib/sysusers.d",
+        # The service, described once per init system. A unit is built once
+        # per distro but evaluated once for all of them, so `distros` is what
+        # picks the right one; the package that reaches a device carries only
+        # the description its init reads. The settings file is the same either
+        # way -- plain KEY=VALUE lines, which OpenRC sources directly and
+        # systemd reads through EnvironmentFile -- and only its path differs.
+        task("service-openrc", distros = ["alpine"], steps = [
+            "mkdir -p $DESTDIR/etc/init.d $DESTDIR/etc/conf.d",
             install_file("victoria-metrics.init",
                          "$DESTDIR/etc/init.d/victoria-metrics", mode = 0o755),
             install_file("victoria-metrics.confd",
                          "$DESTDIR/etc/conf.d/victoria-metrics", mode = 0o644),
+        ]),
+        task("service-systemd", distros = ["debian", "ubuntu"], steps = [
+            "mkdir -p $DESTDIR/lib/systemd/system $DESTDIR/etc/default",
             install_file("victoria-metrics.service",
                          "$DESTDIR/lib/systemd/system/victoria-metrics.service", mode = 0o644),
+            install_file("victoria-metrics.confd",
+                         "$DESTDIR/etc/default/victoria-metrics", mode = 0o644),
+            "mkdir -p $DESTDIR$PREFIX/lib/sysusers.d",
             install_file("victoria-metrics.sysusers",
                          "$DESTDIR$PREFIX/lib/sysusers.d/victoria-metrics.conf", mode = 0o644),
-            service_gate("victoria-metrics", sysusers = True),
         ]),
     ],
 )

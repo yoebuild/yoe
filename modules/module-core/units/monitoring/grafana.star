@@ -1,5 +1,4 @@
 load("//classes/binary.star", "binary")
-load("//classes/services.star", "service_gate")
 
 # Grafana — dashboards and alerting over the metrics a gateway collects.
 # Pairs with the `victoria-metrics` unit next to it: VictoriaMetrics answers
@@ -63,33 +62,40 @@ binary(
             # section, so panic traces survive this.
             "strip $DESTDIR$PREFIX/share/grafana/bin/grafana",
         ]),
-        # A unit is built once per distro but cannot know at Starlark time
-        # which one, so it writes both descriptions of the service and
-        # service_gate() below drops the set the target init does not read.
-        # That is what lets `services` above enable the server on an OpenRC
-        # rootfs and a systemd one alike.
-        task("service", steps = [
-            "mkdir -p $DESTDIR/etc/init.d $DESTDIR/etc/conf.d" +
-            " $DESTDIR/lib/systemd/system $DESTDIR$PREFIX/lib/sysusers.d",
-            install_file("grafana.init",
-                         "$DESTDIR/etc/init.d/grafana", mode = 0o755),
-            install_file("grafana.confd",
-                         "$DESTDIR/etc/conf.d/grafana", mode = 0o644),
-            install_file("grafana.service",
-                         "$DESTDIR/lib/systemd/system/grafana.service", mode = 0o644),
-            install_file("grafana.sysusers",
-                         "$DESTDIR$PREFIX/lib/sysusers.d/grafana.conf", mode = 0o644),
-            # Provisioning drop-in directories. Data sources and
-            # dashboards described by files here are applied at start-up,
-            # which is how an image ships a working dashboard set without
-            # anyone clicking through the UI.
+        # Provisioning drop-in directories. Data sources and dashboards
+        # described by files here are applied at start-up, which is how an
+        # image ships a working dashboard set without anyone clicking
+        # through the UI. Both bases read them, so this task is untagged.
+        task("provisioning", steps = [
             "mkdir -p $DESTDIR/etc/grafana/provisioning/datasources" +
             " $DESTDIR/etc/grafana/provisioning/dashboards" +
             " $DESTDIR/etc/grafana/provisioning/plugins" +
             " $DESTDIR/etc/grafana/provisioning/alerting" +
             " $DESTDIR/etc/grafana/provisioning/notifiers" +
             " $DESTDIR/etc/grafana/provisioning/access-control",
-            service_gate("grafana", sysusers = True),
+        ]),
+        # The service, described once per init system. A unit is built once
+        # per distro but evaluated once for all of them, so `distros` is what
+        # picks the right one; the package that reaches a device carries only
+        # the description its init reads. The settings file is the same either
+        # way -- plain KEY=VALUE lines, which OpenRC sources directly and
+        # systemd reads through EnvironmentFile -- and only its path differs.
+        task("service-openrc", distros = ["alpine"], steps = [
+            "mkdir -p $DESTDIR/etc/init.d $DESTDIR/etc/conf.d",
+            install_file("grafana.init",
+                         "$DESTDIR/etc/init.d/grafana", mode = 0o755),
+            install_file("grafana.confd",
+                         "$DESTDIR/etc/conf.d/grafana", mode = 0o644),
+        ]),
+        task("service-systemd", distros = ["debian", "ubuntu"], steps = [
+            "mkdir -p $DESTDIR/lib/systemd/system $DESTDIR/etc/default",
+            install_file("grafana.service",
+                         "$DESTDIR/lib/systemd/system/grafana.service", mode = 0o644),
+            install_file("grafana.confd",
+                         "$DESTDIR/etc/default/grafana", mode = 0o644),
+            "mkdir -p $DESTDIR$PREFIX/lib/sysusers.d",
+            install_file("grafana.sysusers",
+                         "$DESTDIR$PREFIX/lib/sysusers.d/grafana.conf", mode = 0o644),
         ]),
     ],
 )

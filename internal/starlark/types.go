@@ -736,7 +736,30 @@ type InstallStep struct {
 type Task struct {
 	Name      string
 	Container string // optional container image override
-	Steps     []Step
+	// Distros restricts the task to the named distros. Empty means the
+	// task runs for every distro, which is the common case. A unit is
+	// built once per distro but evaluated once for all of them, so this
+	// is how a unit says "these steps only apply on an apt base" —
+	// notably a service description, where the OpenRC script and the
+	// systemd unit belong to different bases and neither belongs in the
+	// other's package.
+	Distros []string
+	Steps   []Step
+}
+
+// AppliesToDistro reports whether the task runs for the given effective
+// distro. An untagged task applies everywhere; a tagged one only to the
+// distros it names.
+func (t Task) AppliesToDistro(distro string) bool {
+	if len(t.Distros) == 0 {
+		return true
+	}
+	for _, d := range t.Distros {
+		if d == distro {
+			return true
+		}
+	}
+	return false
 }
 
 // Command represents a user-defined CLI command from commands/*.star.

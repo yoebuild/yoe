@@ -51,13 +51,20 @@ distro model, and [module-debian.md](module-debian.md) /
 
 ## Shipping a service on both bases
 
-A unit is evaluated once and built once per distro, and nothing at Starlark time
-tells it which base it is packaging for. A unit with a service therefore writes
-both descriptions — an OpenRC script plus its `/etc/conf.d` settings, and a
-systemd unit plus any `sysusers.d` account it needs — and then calls
-`service_gate()` from `classes/services.star` as its last install step. That
-step branches on `$DISTRO`, which the executor exports to every build step and
-which is already part of the unit hash, so the choice is cache-correct:
+A unit is evaluated once for every distro but built once per distro, so it
+cannot decide in Starlark which base it is packaging for. It describes the
+service for both and tags each task with the distros it applies to:
+
+```python
+task("service-openrc", distros = ["alpine"], steps = [...]),
+task("service-systemd", distros = ["debian", "ubuntu"], steps = [...]),
+```
+
+A task with no `distros` runs everywhere, which is the common case. The executor
+skips the tasks that do not apply to the build's effective distro, so only the
+matching steps run and the package carries only what its init reads. The
+effective distro is already part of the unit hash, so the two builds are
+distinct cache entries and the choice is cache-correct:
 
 |                              | Alpine                              | Debian / Ubuntu                          |
 | ---------------------------- | ----------------------------------- | ---------------------------------------- |
@@ -66,12 +73,12 @@ which is already part of the unit hash, so the choice is cache-correct:
 | enablement (from `services`) | `/etc/runlevels/default/<name>`     | `multi-user.target.wants/<name>.service` |
 | service account              | created by the script's `start_pre` | `/usr/lib/sysusers.d/<name>.conf`        |
 
-The package that lands on a device carries only the half its init reads. The
-settings file is authored once — plain `KEY=VALUE` lines, which OpenRC sources
-directly and systemd reads through `EnvironmentFile` — and only its path
-differs, so a service behaves the same whichever init starts it. A unit using
-the gate declares `conffiles = ["/etc/default/<name>"]`; `conffiles` is read
-only when building a `.deb`, so the Alpine path ignores it.
+The settings file is authored once — plain `KEY=VALUE` lines, which OpenRC
+sources directly and systemd reads through `EnvironmentFile` — and each task
+installs it to the path its base expects, so a service behaves the same
+whichever init starts it. Such a unit declares
+`conffiles = ["/etc/default/<name>"]`; `conffiles` is read only when building a
+`.deb`, so the Alpine path ignores it.
 
 Both enablement checks refuse to write a symlink whose target is missing, so a
 unit that declares `services = [...]` without shipping the matching description

@@ -110,6 +110,7 @@ func ParseTaskList(list *starlark.List) []Task {
 		t := Task{
 			Name:      structString(s, "name"),
 			Container: structString(s, "container"),
+			Distros:   structStringList(s, "distros"),
 		}
 		if rv, err := s.Attr("run"); err == nil {
 			if cmd, ok := rv.(starlark.String); ok {

@@ -24,6 +24,11 @@ and this project adheres to
   for this one there used to fail partway through the build with a message about
   a missing service file, and now says plainly that the package is not part of
   that base.
+- **A unit's task can name the distros it applies to.** Writing
+  `task(..., distros = ["alpine"])` runs that task only for those builds, which
+  is how a package describes its service to OpenRC and to systemd without
+  carrying both descriptions everywhere. A task that names no distro runs for
+  every build, as before.
 - **Service files land where each base expects them.** A package carrying a
   service now ships only the description its init reads — an OpenRC script with
   its settings in `/etc/conf.d` on Alpine, a systemd unit with its settings in

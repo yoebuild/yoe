@@ -1,5 +1,4 @@
 load("//classes/go.star", "go_binary")
-load("//classes/services.star", "service_gate")
 
 go_binary(
     name = "simpleiot",
@@ -18,20 +17,25 @@ go_binary(
     distro_runtime_deps = {"alpine": ["openrc"]},
     conffiles = ["/etc/default/simpleiot"],
     tasks = [
-        # A unit is built once per distro but cannot know at Starlark time
-        # which one, so it writes both descriptions of the service and
-        # service_gate() below drops the set the target init does not read.
-        # That is what lets `services` above enable the daemon on an OpenRC
-        # rootfs and a systemd one alike.
-        task("init-script", steps = [
-            "mkdir -p $DESTDIR/etc/init.d $DESTDIR/etc/conf.d $DESTDIR/lib/systemd/system",
+        # The service, described once per init system. A unit is built once
+        # per distro but evaluated once for all of them, so `distros` is what
+        # picks the right one; the package that reaches a device carries only
+        # the description its init reads. The settings file is the same either
+        # way -- plain KEY=VALUE lines, which OpenRC sources directly and
+        # systemd reads through EnvironmentFile -- and only its path differs.
+        task("service-openrc", distros = ["alpine"], steps = [
+            "mkdir -p $DESTDIR/etc/init.d $DESTDIR/etc/conf.d",
             install_file("simpleiot.init",
                          "$DESTDIR/etc/init.d/simpleiot", mode = 0o755),
             install_file("simpleiot.confd",
                          "$DESTDIR/etc/conf.d/simpleiot", mode = 0o644),
+        ]),
+        task("service-systemd", distros = ["debian", "ubuntu"], steps = [
+            "mkdir -p $DESTDIR/lib/systemd/system $DESTDIR/etc/default",
             install_file("simpleiot.service",
                          "$DESTDIR/lib/systemd/system/simpleiot.service", mode = 0o644),
-            service_gate("simpleiot"),
+            install_file("simpleiot.confd",
+                         "$DESTDIR/etc/default/simpleiot", mode = 0o644),
         ]),
     ],
 )
