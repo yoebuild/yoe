@@ -7,6 +7,7 @@ autotools(
     tag = "V_9_9_P1",
     license = "BSD-2-Clause",
     description = "OpenSSH secure shell client and server",
+    distro = "alpine",
     deps = ["openssl", "zlib"],
     runtime_deps = ["openssl", "zlib", "openrc"],
     configure_args = [
