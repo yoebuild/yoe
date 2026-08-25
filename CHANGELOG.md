@@ -35,13 +35,13 @@ and this project adheres to
   on their base rather than a copy of everything.
 - **Downloads published without a file extension now install.** A program
   offered as a plain release asset, which is how many projects ship, was read as
-  a compressed archive and stopped the build with an "invalid header" error.
-  yoe now identifies a download by its contents.
-- **Prebuilt bundles no longer carry yoe's own bookkeeping into the package.**
-  A unit that installs an unpacked release tree was shipping the version-control
-  directory yoe creates alongside it, which on a large bundle was bigger than the
-  release itself. The Grafana package is a third of its former size and the Go
-  toolchain package is smaller as well.
+  a compressed archive and stopped the build with an "invalid header" error. yoe
+  now identifies a download by its contents.
+- **Prebuilt bundles no longer carry yoe's own bookkeeping into the package.** A
+  unit that installs an unpacked release tree was shipping the version-control
+  directory yoe creates alongside it, which on a large bundle was bigger than
+  the release itself. The Grafana package is a third of its former size and the
+  Go toolchain package is smaller as well.
 
 ## [0.14.5] - 2026-08-24
 

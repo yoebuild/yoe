@@ -559,9 +559,9 @@ Both `deps` and `runtime_deps` name the package holding the init script, and
 both are load-bearing. Before writing the symlink, the executor checks that
 `/etc/init.d/docker` exists in this unit's destdir or its sysroot, and refuses
 to ship a dangling symlink otherwise. Only `deps` puts a package in the sysroot
-— `runtime_deps` describes what the device needs, not what the build stages —
-so a companion declaring only `runtime_deps` fails with `service "docker"
-declared but /etc/init.d/docker missing in destdir or sysroot`.
+— `runtime_deps` describes what the device needs, not what the build stages — so
+a companion declaring only `runtime_deps` fails with
+`service "docker" declared but /etc/init.d/docker missing in destdir or sysroot`.
 
 The companion has no tasks. The build executor falls through to the apk-build
 path when `services = [...]` is non-empty so the runlevel symlink lands in the

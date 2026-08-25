@@ -4,15 +4,15 @@ Three units in `module-core` cover the common shape of a connected-product
 gateway: something that collects and manages device data, something that stores
 the time series it produces, and something that draws them.
 
-| Unit            | Provides                                  | Default port | Data directory            |
-| --------------- | ----------------------------------------- | ------------ | ------------------------- |
-| `simpleiot-bin` | [Simple IoT](https://simpleiot.org)       | 8118         | `/var/lib/simpleiot`      |
-| `victoria-metrics` | [VictoriaMetrics](https://victoriametrics.com) | 8428  | `/var/lib/victoria-metrics` |
-| `grafana`       | [Grafana](https://grafana.com)            | 3000         | `/var/lib/grafana`        |
+| Unit               | Provides                                       | Default port | Data directory              |
+| ------------------ | ---------------------------------------------- | ------------ | --------------------------- |
+| `simpleiot-bin`    | [Simple IoT](https://simpleiot.org)            | 8118         | `/var/lib/simpleiot`        |
+| `victoria-metrics` | [VictoriaMetrics](https://victoriametrics.com) | 8428         | `/var/lib/victoria-metrics` |
+| `grafana`          | [Grafana](https://grafana.com)                 | 3000         | `/var/lib/grafana`          |
 
 All three install a program that upstream publishes as a release asset rather
-than building it from source, so adding them to an image costs a download
-rather than a compile.
+than building it from source, so adding them to an image costs a download rather
+than a compile.
 
 Add them to an image the same way as anything else:
 
@@ -29,15 +29,15 @@ image(
 
 ## Services
 
-Each unit declares its own service, so installing the package is what enables
-it — there is no separate step to run at image-assembly time. Each works on the
+Each unit declares its own service, so installing the package is what enables it
+— there is no separate step to run at image-assembly time. Each works on the
 Alpine base and on the Debian and Ubuntu bases, and the package that reaches a
 device carries only the half its init reads:
 
-| | Alpine | Debian / Ubuntu |
-| --- | --- | --- |
-| service | `/etc/init.d/<name>` | `/lib/systemd/system/<name>.service` |
-| settings | `/etc/conf.d/<name>` | `/etc/default/<name>` |
+|          | Alpine               | Debian / Ubuntu                      |
+| -------- | -------------------- | ------------------------------------ |
+| service  | `/etc/init.d/<name>` | `/lib/systemd/system/<name>.service` |
+| settings | `/etc/conf.d/<name>` | `/etc/default/<name>`                |
 
 The settings file is the same either way — plain `KEY=VALUE` lines, only the
 path differs — so a device behaves the same whichever init is running it. It is
@@ -103,6 +103,6 @@ packaging and container helper scripts.
 
 If that is still too much for the device, the next place to look is
 `/usr/share/grafana/data/plugins-bundled`, where each data source you never
-query costs 25–50 MB. Removing some of them is a per-image decision, which
-means the resulting package is no longer the one every other image shares —
-worth it on a space-constrained board, not worth it by default.
+query costs 25–50 MB. Removing some of them is a per-image decision, which means
+the resulting package is no longer the one every other image shares — worth it
+on a space-constrained board, not worth it by default.
