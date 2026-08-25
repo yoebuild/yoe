@@ -19,6 +19,11 @@ and this project adheres to
   described its service only in the form the Alpine base reads, so an image on
   either of the other bases stopped during the build. It now carries both
   descriptions, and its settings live in one file that either init reads.
+- **module-core's OpenSSH is now marked as belonging to the Alpine base.**
+  Debian and Ubuntu images have always taken SSH from their own archive; asking
+  for this one there used to fail partway through the build with a message about
+  a missing service file, and now says plainly that the package is not part of
+  that base.
 - **Service files land where each base expects them.** A package carrying a
   service now ships only the description its init reads — an OpenRC script with
   its settings in `/etc/conf.d` on Alpine, a systemd unit with its settings in
