@@ -30,7 +30,10 @@ binary(
     license = "Apache-2.0",
     description = "Fast, cost effective and scalable time series database",
     services = ["victoria-metrics"],
-    runtime_deps = ["openrc"],
+    # openrc is the Alpine service manager; naming it unconditionally pulls
+    # Debian's openrc package into an apt image, where it conflicts with
+    # systemd-sysv and the rootfs solve fails.
+    distro_runtime_deps = {"alpine": ["openrc"]},
     conffiles = ["/etc/default/victoria-metrics"],
     tasks = [
         # A unit is built once per distro but cannot know at Starlark time

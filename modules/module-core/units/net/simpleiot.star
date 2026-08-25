@@ -12,7 +12,10 @@ go_binary(
     license = "Apache-2.0",
     description = "IoT application for sensor data, telemetry, configuration, and device management",
     services = ["simpleiot"],
-    runtime_deps = ["openrc"],
+    # openrc is the Alpine service manager; naming it unconditionally pulls
+    # Debian's openrc package into an apt image, where it conflicts with
+    # systemd-sysv and the rootfs solve fails.
+    distro_runtime_deps = {"alpine": ["openrc"]},
     conffiles = ["/etc/default/simpleiot"],
     tasks = [
         # A unit is built once per distro but cannot know at Starlark time

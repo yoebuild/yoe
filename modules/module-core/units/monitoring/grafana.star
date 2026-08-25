@@ -44,7 +44,11 @@ binary(
     license = "AGPL-3.0-only",
     description = "Observability and data visualization platform",
     services = ["grafana"],
-    runtime_deps = ["openrc", "ca-certificates"],
+    runtime_deps = ["ca-certificates"],
+    # openrc is the Alpine service manager; naming it unconditionally pulls
+    # Debian's openrc package into an apt image, where it conflicts with
+    # systemd-sysv and the rootfs solve fails.
+    distro_runtime_deps = {"alpine": ["openrc"]},
     conffiles = [
         "/etc/grafana/grafana.ini",
         "/etc/default/grafana",
