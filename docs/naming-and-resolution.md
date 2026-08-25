@@ -358,8 +358,20 @@ distro shares.** When two images need different behavior from the same package,
 the answer is almost never "fork the package." It's "resolve the difference at
 runtime, in a component that's allowed to vary."
 
-Concretely, when you reach for a per-project or per-machine variant of a generic
-unit, prefer instead:
+**This is about variation the artifact key does not already capture.** A unit's
+output is keyed by `(distro/libc, arch, machine scope)`, so a unit consumed by
+both an Alpine and a Debian image already builds twice and already produces two
+packages. Branching inside the build on `$DISTRO` or `$ARCH` — which the
+executor exports to every build step, and which are already part of the unit
+hash — forks nothing: it only decides what goes into artifacts that exist
+separately either way. Prefer that to shipping every variant's files into every
+package and leaving the running system to ignore what does not apply. Service
+files are the worked example — see
+[Shipping a service on both bases](libc-and-init.md#shipping-a-service-on-both-bases).
+
+The rest of this section is about the other case: two projects or two machines
+wanting different behavior from one artifact. Concretely, when you reach for a
+per-project or per-machine variant of a generic unit, prefer instead:
 
 - **Init scripts that detect what's installed.** The `network` OpenRC service
   checks `command -v dhcpcd` and falls back to busybox `udhcpc` when it's
@@ -374,10 +386,11 @@ unit, prefer instead:
 - **Runtime alternative selection at boot** — install both candidates, start one
   from an init script.
 
-Reach for build-flag forking only when runtime resolution is genuinely
-impossible: kernel `defconfig` (the kernel binary literally varies by machine),
-bootloader target, machine-specific firmware blobs. Everything else — busybox
-config knobs, library build flags, optional features — has to stay one package
+Some axes leave no choice: kernel `defconfig` (the kernel binary literally
+varies by machine), bootloader target, machine-specific firmware blobs. For
+everything else — busybox config knobs, library build flags, optional features —
+the bar is that the build-time split is the cleaner design, not that runtime
+resolution is impossible. It rarely is, so in practice these stay one package
 for every consumer.
 
 The cost of forking generic units is real: build cache surface multiplies,
@@ -534,10 +547,21 @@ per service the maintainer wants to expose:
 unit(
     name = "docker-enable",
     version = "0.1.0",
-    runtime_deps = ["docker-openrc"],   # ships /etc/init.d/docker
+    deps = ["docker-openrc"],           # stages the init script
+    runtime_deps = ["docker-openrc"],   # ships /etc/init.d/docker on the device
     services = ["docker"],              # → /etc/runlevels/default/docker
+    container = "toolchain-musl",
+    container_arch = "target",
 )
 ```
+
+Both `deps` and `runtime_deps` name the package holding the init script, and
+both are load-bearing. Before writing the symlink, the executor checks that
+`/etc/init.d/docker` exists in this unit's destdir or its sysroot, and refuses
+to ship a dangling symlink otherwise. Only `deps` puts a package in the sysroot
+— `runtime_deps` describes what the device needs, not what the build stages —
+so a companion declaring only `runtime_deps` fails with `service "docker"
+declared but /etc/init.d/docker missing in destdir or sysroot`.
 
 The companion has no tasks. The build executor falls through to the apk-build
 path when `services = [...]` is non-empty so the runlevel symlink lands in the

@@ -53,12 +53,23 @@ architecture description live under `docs/` (start with `docs/intro.md` and
   out. So "one .apk" is the common case, not an invariant — the invariant is
   that the unit is the single source of truth for the build. Within a given key,
   the goal is still one shared artifact rather than per-project or per-machine
-  forks. When two images need different behavior from the same package, reach
-  for runtime mechanisms first — init scripts that detect what's installed,
-  conditional config files, alternative selection at boot, `replaces:`
-  annotations that declare ownership of shared paths — before forking build
-  configuration. Forking a unit's build flags into machine- or project-scoped
-  variants is the most expensive option: it multiplies the cache surface, breaks
+  forks. Note what this rule is *not* about: varying along an axis the key
+  already splits on. A build step that branches on `$DISTRO` or `$ARCH` — both
+  exported to every step, both already unit-hash inputs — forks nothing,
+  because those artifacts exist separately either way; the branch only decides
+  what goes into each. There is no reuse to weigh and nothing to deliberate.
+  Prefer it to shipping every variant's files into every artifact and leaving
+  the running system to ignore what does not apply — that is dead weight, not
+  runtime resolution. Service files are the worked example: the OpenRC script
+  belongs in the Alpine package and the systemd unit in the Debian one, gated
+  on `$DISTRO`, rather than both landing in both. What follows is about the
+  other case — variation the key does *not* capture, where two projects or two
+  machines want different behavior from one artifact. There, reach for runtime
+  mechanisms first — init scripts that detect what's installed, conditional
+  config files, alternative selection at boot, `replaces:` annotations that
+  declare ownership of shared paths — before forking build configuration.
+  Forking a unit's build flags into machine- or project-scoped variants is the
+  most expensive option: it multiplies the cache surface, breaks
   binary reuse across projects, and pushes complexity from a few clean
   conditionals into N parallel build configurations. Some axes can only be
   resolved at build time — kernel defconfig, bootloader target, libc family —
@@ -66,7 +77,8 @@ architecture description live under `docs/` (start with `docs/intro.md` and
   and more robust than the runtime path and the reuse cost is acceptable. The
   bar is "the build-time split is the cleaner design," not "runtime resolution
   is impossible." Default to reuse and runtime resolution; fork deliberately,
-  not reflexively.
+  not reflexively — and keep in mind that branching along an axis the key
+  already carries is neither.
 - **Explicit over implicit.** Values in Starlark units and configuration should
   not have hidden defaults. Require fields to be set explicitly — this makes it
   easier for AI to reason about the system and for humans to understand what a

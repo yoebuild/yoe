@@ -23,6 +23,11 @@ and this project adheres to
   service now ships only the description its init reads — an OpenRC script with
   its settings in `/etc/conf.d` on Alpine, a systemd unit with its settings in
   `/etc/default` on Debian and Ubuntu — instead of carrying both everywhere.
+- **Guidance on when a unit may vary by distro is clearer.** The "resolve
+  variation at runtime" rule was read as discouraging any build-time branch,
+  including along the distro axis where a unit already builds separately. It now
+  says plainly that such a branch costs nothing, so packages carry what belongs
+  on their base rather than a copy of everything.
 - **Downloads published without a file extension now install.** A program
   offered as a plain release asset, which is how many projects ship, was read as
   a compressed archive and stopped the build with an "invalid header" error.
