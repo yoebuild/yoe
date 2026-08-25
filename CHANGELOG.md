@@ -8,6 +8,14 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Simple IoT starts at boot on Debian and Ubuntu images.** The package
+  described its service only in the form the Alpine base reads, so an image on
+  either of the other bases stopped during the build. It now carries both
+  descriptions, and its settings live in one file that either init reads.
+- **Service files land where each base expects them.** A package carrying a
+  service now ships only the description its init reads — an OpenRC script with
+  its settings in `/etc/conf.d` on Alpine, a systemd unit with its settings in
+  `/etc/default` on Debian and Ubuntu — instead of carrying both everywhere.
 - **Downloads published without a file extension now install.** A program
   offered as a plain release asset, which is how many projects ship, was read as
   a compressed archive and stopped the build with an "invalid header" error.
