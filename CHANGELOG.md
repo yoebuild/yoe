@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Downloads published without a file extension now install.** A program
+  offered as a plain release asset, which is how many projects ship, was read as
+  a compressed archive and stopped the build with an "invalid header" error.
+  yoe now identifies a download by its contents.
+
 ## [0.14.5] - 2026-08-24
 
 - **A download or clone that stops responding no longer hangs the build.** When

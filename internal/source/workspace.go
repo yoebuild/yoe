@@ -254,22 +254,70 @@ func prepareNonGitSource(cachedPath, destDir, sourceURL string) error {
 		return copyBareSource(cachedPath, destDir, urlBasename(sourceURL))
 	}
 
-	// No recognised extension — sniff the first 4 bytes.
-	f, err := os.Open(cachedPath)
+	// No recognised extension — identify the file by its magic bytes.
+	// Release assets are routinely published without one, either as a
+	// compressed archive or as a bare executable.
+	kind, err := sniffCompression(cachedPath)
 	if err != nil {
 		return err
 	}
-	var magic [4]byte
-	n, _ := io.ReadFull(f, magic[:])
-	f.Close()
-
-	if n >= 2 && magic[0] == 0x1f && magic[1] == 0x8b {
+	switch kind {
+	case compressionGzip, compressionBzip2, compressionXz:
 		return extractTarball(cachedPath, destDir)
-	}
-	if n == 4 && magic[0] == 0x50 && magic[1] == 0x4b && magic[2] == 0x03 && magic[3] == 0x04 {
+	case compressionZip:
 		return extractZip(cachedPath, destDir)
 	}
 	return copyBareSource(cachedPath, destDir, urlBasename(sourceURL))
+}
+
+// compression identifies the container a downloaded source file is wrapped
+// in. compressionNone covers both an uncompressed tar and a bare file; the
+// caller decides which by context.
+type compression int
+
+const (
+	compressionNone compression = iota
+	compressionGzip
+	compressionBzip2
+	compressionXz
+	compressionZip
+)
+
+// sniffCompression reads the leading bytes of a file and reports the
+// container format they identify. This is the single place yoe decides what
+// a downloaded source file actually is — filenames are unreliable, since a
+// cached download is named after the hash of its URL and that URL need not
+// carry an extension at all.
+func sniffCompression(path string) (compression, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return compressionNone, err
+	}
+	defer f.Close()
+
+	var magic [6]byte
+	n, err := io.ReadFull(f, magic[:])
+	if err != nil && n == 0 {
+		// A short read is not an error here: a file too small to hold any
+		// of these signatures simply matches none of them. Only a file we
+		// could not read at all is a real failure.
+		if err != io.EOF && err != io.ErrUnexpectedEOF {
+			return compressionNone, err
+		}
+	}
+	switch {
+	case n >= 2 && magic[0] == 0x1f && magic[1] == 0x8b:
+		return compressionGzip, nil
+	case n >= 3 && magic[0] == 'B' && magic[1] == 'Z' && magic[2] == 'h':
+		return compressionBzip2, nil
+	case n >= 6 && magic[0] == 0xfd && magic[1] == '7' && magic[2] == 'z' &&
+		magic[3] == 'X' && magic[4] == 'Z' && magic[5] == 0x00:
+		return compressionXz, nil
+	case n >= 4 && magic[0] == 'P' && magic[1] == 'K' &&
+		magic[2] == 0x03 && magic[3] == 0x04:
+		return compressionZip, nil
+	}
+	return compressionNone, nil
 }
 
 // urlBasename returns the filename portion of a URL — the segment after the
@@ -294,18 +342,25 @@ func extractTarball(tarPath, destDir string) error {
 
 	var reader io.Reader = f
 
-	// Detect compression
-	switch {
-	case strings.HasSuffix(tarPath, ".gz") || strings.HasSuffix(tarPath, ".tgz"):
+	// Detect compression from the file's own magic bytes rather than its
+	// name. A download whose URL carries no extension is cached under its
+	// URL hash alone, so there is no suffix to read the format from, and a
+	// misnamed file would otherwise be handed to the wrong decompressor.
+	kind, err := sniffCompression(tarPath)
+	if err != nil {
+		return err
+	}
+	switch kind {
+	case compressionGzip:
 		gz, err := gzip.NewReader(f)
 		if err != nil {
 			return fmt.Errorf("gzip: %w", err)
 		}
 		defer gz.Close()
 		reader = gz
-	case strings.HasSuffix(tarPath, ".bz2"):
+	case compressionBzip2:
 		reader = bzip2.NewReader(f)
-	case strings.HasSuffix(tarPath, ".xz"):
+	case compressionXz:
 		// Go stdlib doesn't have xz; shell out
 		return extractWithTar(tarPath, destDir)
 	}
