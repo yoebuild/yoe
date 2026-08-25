@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Grafana, VictoriaMetrics, and Simple IoT are available as units.** Adding
+  `grafana`, `victoria-metrics`, and `simpleiot-bin` to an image gives a gateway
+  a metrics store, dashboards, and device management, each installed from the
+  release its authors publish rather than compiled from source. All three work
+  on the Alpine base and on the Debian and Ubuntu bases, and each enables its
+  own service and keeps its settings in one file under `/etc/conf.d`. See
+  [Monitoring and Telemetry](docs/monitoring.md).
 - **Simple IoT starts at boot on Debian and Ubuntu images.** The package
   described its service only in the form the Alpine base reads, so an image on
   either of the other bases stopped during the build. It now carries both

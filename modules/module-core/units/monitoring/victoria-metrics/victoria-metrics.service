@@ -1,0 +1,46 @@
+[Unit]
+Description=VictoriaMetrics time series database
+Documentation=https://docs.victoriametrics.com
+# Ordered after the network stack is up, but deliberately not after
+# network-online.target: the listen address is a wildcard, so the database
+# should come up with or without a link.
+After=network.target
+
+[Service]
+Type=simple
+User=victoriametrics
+Group=victoriametrics
+# Defaults for a device whose settings file predates any of these values.
+# Listed before EnvironmentFile so the file wins wherever it defines one.
+Environment=VM_STORAGE_DATA_PATH=/var/lib/victoria-metrics
+Environment=VM_HTTP_LISTEN_ADDR=:8428
+Environment=VM_RETENTION_PERIOD=1
+Environment=VM_SEARCH_LATENCY_OFFSET=0s
+# The same settings file the OpenRC script reads, so a device behaves the
+# same whichever init runs it. Its contents are plain KEY=VALUE lines,
+# which is what both OpenRC and systemd expect.
+EnvironmentFile=/etc/default/victoria-metrics
+# Creates /var/lib/victoria-metrics owned by the service account, which
+# VM_STORAGE_DATA_PATH points at.
+StateDirectory=victoria-metrics
+ExecStart=/usr/bin/victoria-metrics-prod \
+    -storageDataPath=${VM_STORAGE_DATA_PATH} \
+    -httpListenAddr=${VM_HTTP_LISTEN_ADDR} \
+    -retentionPeriod=${VM_RETENTION_PERIOD} \
+    -search.latencyOffset=${VM_SEARCH_LATENCY_OFFSET} \
+    $VM_OPTS
+Restart=on-failure
+RestartSec=5
+# The database keeps many data part files open
+LimitNOFILE=65536
+# Give it time to flush in-memory parts to disk; SIGINT is the signal it
+# shuts down cleanly on.
+TimeoutStopSec=60
+KillSignal=SIGINT
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

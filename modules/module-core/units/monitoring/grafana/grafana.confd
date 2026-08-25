@@ -1,0 +1,29 @@
+# Runtime configuration for the grafana service.
+# Settings reference:
+# https://grafana.com/docs/grafana/latest/setup-grafana/configure-grafana/
+
+# Account the server runs as. The init script creates it on first start.
+GRAFANA_USER=grafana
+GRAFANA_GROUP=grafana
+
+# Where the release was installed. The server reads its web assets and
+# bundled data sources from here.
+GRAFANA_HOME=/usr/share/grafana
+
+# Site configuration. grafana.ini overrides the shipped
+# /usr/share/grafana/conf/defaults.ini, which is left as upstream wrote it.
+CONF_FILE=/etc/grafana/grafana.ini
+
+# Data sources, dashboards, and alert rules described by files in this
+# directory are applied at start-up.
+PROVISIONING_CFG_DIR=/etc/grafana/provisioning
+
+# The database and any plugins installed later are runtime data. They sit
+# under /var/lib so they survive across reboots; point them at a separate
+# data partition if you have one and want them to outlive a rootfs update.
+DATA_DIR=/var/lib/grafana
+PLUGINS_DIR=/var/lib/grafana/plugins
+
+LOG_DIR=/var/log/grafana
+
+MAX_OPEN_FILES=10000

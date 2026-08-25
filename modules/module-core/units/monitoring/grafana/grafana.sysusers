@@ -1,0 +1,4 @@
+# Account the server runs as, created by systemd-sysusers at boot. The
+# OpenRC script creates the same account itself, since OpenRC has no
+# equivalent declarative mechanism.
+u grafana - "Grafana server" /usr/share/grafana /sbin/nologin

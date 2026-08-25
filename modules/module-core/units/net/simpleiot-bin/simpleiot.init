@@ -1,0 +1,35 @@
+#!/sbin/openrc-run
+
+description="Simple IoT — sensor data, telemetry, configuration, device management"
+
+# Settings live in /etc/conf.d/simpleiot, which OpenRC sources before this
+# script runs. The defaults below apply when that file leaves a value out.
+: ${SIOT_DATA:=/var/lib/simpleiot}
+
+command="/usr/bin/siot"
+command_args="serve"
+command_background="yes"
+pidfile="/run/simpleiot.pid"
+output_log="/var/log/simpleiot.log"
+error_log="/var/log/simpleiot.log"
+
+depend() {
+    need net
+}
+
+start_pre() {
+    checkpath -d -m 0750 -o root:root "$SIOT_DATA"
+    checkpath -f -m 0644 -o root:root "$output_log"
+    # Simple IoT reads its configuration from the environment. OpenRC
+    # sources /etc/conf.d/simpleiot into this shell but does not export
+    # what it finds, so read the file again with allexport on and every
+    # setting reaches the daemon without this script naming them one by
+    # one.
+    set -a
+    export SIOT_DATA
+    if [ -f /etc/conf.d/simpleiot ]; then
+        . /etc/conf.d/simpleiot
+    fi
+    set +a
+    return 0
+}

@@ -1,0 +1,4 @@
+# Account the database runs as, created by systemd-sysusers at boot. The
+# OpenRC script creates the same account itself, since OpenRC has no
+# equivalent declarative mechanism.
+u victoriametrics - "VictoriaMetrics" /var/lib/victoria-metrics /sbin/nologin
