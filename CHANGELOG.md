@@ -24,6 +24,10 @@ and this project adheres to
   for this one there used to fail partway through the build with a message about
   a missing service file, and now says plainly that the package is not part of
   that base.
+- **The monitoring units can now wire themselves together.** Adding
+  `simpleiot-config` and `grafana-config` to an image gives a device that comes
+  up already collecting metrics, storing them in VictoriaMetrics, and able to
+  draw them in Grafana, with nothing to configure by hand first.
 - **A unit's task can name the distros it applies to.** Writing
   `task(..., distros = ["alpine"])` runs that task only for those builds, which
   is how a package describes its service to OpenRC and to systemd without

@@ -1,0 +1,6 @@
+# Point Simple IoT at the provisioning directory this package ships.
+#
+# The OpenRC counterpart of the systemd drop-in beside it: the init script
+# reads /etc/conf.d/simpleiot.d/*.conf after the main settings file, so a
+# package can add a setting without owning the file the operator edits.
+SIOT_PROVISIONING_DIR=/etc/simpleiot/provisioning

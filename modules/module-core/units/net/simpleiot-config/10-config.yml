@@ -1,0 +1,48 @@
+# Simple IoT provisioning file.
+#
+# Simple IoT applies this at start-up and whenever it changes, matching nodes
+# by description: it creates what is missing, updates what has drifted, and
+# does nothing when the tree already agrees.
+#
+# A description is how this file finds a node, so renaming one in the portal
+# detaches it from the entry here and the next apply creates a second node
+# beside it. Rename in two steps: delete the old description in the same file
+# that introduces the new one.
+#
+# Reference: https://docs.simpleiot.org/docs/user/configuration.html
+
+apiVersion: 1
+
+nodes:
+  - user:
+      firstName: admin
+      lastName: user
+      email: admin
+      pass: admin
+
+  - metrics:
+      description: Metrics System
+      type: system
+      period: 60
+
+  - db:
+      description: Victoria Metrics
+      uri: http://localhost:8428
+      tagPointType: tag
+
+  - metrics:
+      description: Metrics SIOT
+      type: app
+      period: 60
+
+  - metrics:
+      description: Metrics grafana
+      type: process
+      name: grafana
+      period: 60
+
+  - metrics:
+      description: Metrics Victoria Metrics
+      type: process
+      name: victoria-metrics-prod
+      period: 60

@@ -30,6 +30,13 @@ start_pre() {
     if [ -f /etc/conf.d/simpleiot ]; then
         . /etc/conf.d/simpleiot
     fi
+    # Drop-ins, read after the main file so a package can add a setting
+    # without owning the file an operator edits. simpleiot-config uses this
+    # to name its provisioning directory. The systemd side has the same
+    # arrangement through simpleiot.service.d.
+    for f in /etc/conf.d/simpleiot.d/*.conf; do
+        [ -f "$f" ] && . "$f"
+    done
     set +a
     return 0
 }
