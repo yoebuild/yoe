@@ -17,6 +17,17 @@ unit(
     name = "e2fsprogs",
     version = "1.47.2",
     source = "https://www.kernel.org/pub/linux/kernel/people/tytso/e2fsprogs/v1.47.2/e2fsprogs-1.47.2.tar.xz",
+    # www.kernel.org is fronted by a CDN that has returned HTTP/2 stream
+    # errors mid-transfer, failing builds that were otherwise healthy and
+    # outlasting the download retries. mirrors.kernel.org serves the same
+    # pool from separate infrastructure, and the Princeton mirror is
+    # independent of kernel.org entirely, so the two together cover both a
+    # CDN fault and a kernel.org outage. sha256 below means it does not
+    # matter which of the three serves the bytes.
+    mirrors = [
+        "https://mirrors.kernel.org/pub/linux/kernel/people/tytso/e2fsprogs/v1.47.2/e2fsprogs-1.47.2.tar.xz",
+        "https://mirror.math.princeton.edu/pub/kernel/linux/kernel/people/tytso/e2fsprogs/v1.47.2/e2fsprogs-1.47.2.tar.xz",
+    ],
     sha256 = "08242e64ca0e8194d9c1caad49762b19209a06318199b63ce74ae4ef2d74e63c",
     license = "GPL-2.0-only AND LGPL-2.0-only AND BSD-3-Clause AND MIT",
     description = "ext2/ext3/ext4 filesystem utilities (mkfs, fsck, tune2fs)",
