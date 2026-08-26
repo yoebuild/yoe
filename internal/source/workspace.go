@@ -29,13 +29,15 @@ import (
 // patches). Must be non-empty — the executor always knows the distro by
 // the time it calls Prepare.
 //
+// mirrors is the project's source-mirror table, passed through to Fetch.
+//
 // cachedSourceState is the unit's BuildMeta.SourceState from the previous
 // build (empty for first-time builds). When it's in the dev* family, the
 // existing src dir is the user's working tree — Prepare returns it
 // untouched and logs a warning so .star edits surface explicitly. The
 // "commits beyond upstream" fallback covers manually-committed src dirs
 // from before the dev-mode toggle existed.
-func Prepare(projectDir, scopeDir, distro string, unit *yoestar.Unit, cachedSourceState string, w io.Writer) (string, error) {
+func Prepare(projectDir, scopeDir, distro string, unit *yoestar.Unit, cachedSourceState string, mirrors []yoestar.MirrorRule, w io.Writer) (string, error) {
 	if distro == "" {
 		return "", fmt.Errorf("source.Prepare: distro must not be empty (unit %q)", unit.Name)
 	}
@@ -89,7 +91,7 @@ func Prepare(projectDir, scopeDir, distro string, unit *yoestar.Unit, cachedSour
 	}
 
 	// Fetch source into cache
-	cachedPath, err := Fetch(unit, w)
+	cachedPath, err := Fetch(unit, mirrors, w)
 	if err != nil {
 		return "", err
 	}

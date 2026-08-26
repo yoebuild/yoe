@@ -31,7 +31,7 @@ func TestFetchHTTP(t *testing.T) {
 		Source: srv.URL + "/test-1.0.tar.gz",
 	}
 
-	path, err := Fetch(unit, os.Stdout)
+	path, err := Fetch(unit, nil, os.Stdout)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestFetchHTTP(t *testing.T) {
 
 	// Second fetch should use cache (no network)
 	srv.Close()
-	path2, err := Fetch(unit, os.Stdout)
+	path2, err := Fetch(unit, nil, os.Stdout)
 	if err != nil {
 		t.Fatalf("second Fetch (cached): %v", err)
 	}
@@ -65,7 +65,7 @@ func TestFetchHTTP_SHA256Mismatch(t *testing.T) {
 		SHA256: "0000000000000000000000000000000000000000000000000000000000000000",
 	}
 
-	_, err := Fetch(unit, os.Stdout)
+	_, err := Fetch(unit, nil, os.Stdout)
 	if err == nil {
 		t.Fatal("expected SHA256 mismatch error, got nil")
 	}
@@ -91,7 +91,7 @@ func TestPrepare(t *testing.T) {
 		Source:  srv.URL + "/test-1.0.tar.gz",
 	}
 
-	srcDir, err := Prepare(projectDir, "x86_64", "alpine", unit, "", os.Stdout)
+	srcDir, err := Prepare(projectDir, "x86_64", "alpine", unit, "", nil, os.Stdout)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestPrepare_WithPatches(t *testing.T) {
 		Patches: []string{"test-pkg/fix.patch"},
 	}
 
-	srcDir, err := Prepare(projectDir, "x86_64", "alpine", unit, "", os.Stdout)
+	srcDir, err := Prepare(projectDir, "x86_64", "alpine", unit, "", nil, os.Stdout)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestPrepare_PatchesRelativeToDefinedIn(t *testing.T) {
 		DefinedIn: unitDir,
 	}
 
-	srcDir, err := Prepare(projectDir, "x86_64", "alpine", unit, "", os.Stdout)
+	srcDir, err := Prepare(projectDir, "x86_64", "alpine", unit, "", nil, os.Stdout)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestPrepare_DevMode(t *testing.T) {
 		Source: "https://example.com/should-not-fetch.tar.gz",
 	}
 
-	result, err := Prepare(projectDir, "x86_64", "alpine", unit, "", os.Stdout)
+	result, err := Prepare(projectDir, "x86_64", "alpine", unit, "", nil, os.Stdout)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestPrepare_CachedDevSkipsFetch(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	result, err := Prepare(projectDir, "x86_64", "alpine", unit, "dev", &buf)
+	result, err := Prepare(projectDir, "x86_64", "alpine", unit, "dev", nil, &buf)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestPrepare_StaleCacheFallsThrough(t *testing.T) {
 
 	// Cache says "dev" but no src dir exists — Prepare should still
 	// run a fresh prep instead of returning the missing dir.
-	srcDir, err := Prepare(projectDir, "x86_64", "alpine", unit, "dev", os.Stdout)
+	srcDir, err := Prepare(projectDir, "x86_64", "alpine", unit, "dev", nil, os.Stdout)
 	if err != nil {
 		t.Fatalf("Prepare with stale dev cache: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestVerify(t *testing.T) {
 		Name:   "verify-test",
 		Source: srv.URL + "/test.tar.gz",
 	}
-	Fetch(unit, os.Stdout)
+	Fetch(unit, nil, os.Stdout)
 
 	// Verify with correct hash should pass
 	unit.SHA256 = "24c52016db81c44a26cd82cef57be29e7e547e2b0e8a72e6e2d4ee28b tried0"
@@ -574,7 +574,7 @@ func TestAPKChecksumVerify(t *testing.T) {
 			APKChecksum: goodCsum,
 		}
 		var buf bytes.Buffer
-		if _, err := Fetch(u, &buf); err != nil {
+		if _, err := Fetch(u, nil, &buf); err != nil {
 			t.Fatalf("fetch failed for valid apk_checksum: %v", err)
 		}
 	})
@@ -585,7 +585,7 @@ func TestAPKChecksumVerify(t *testing.T) {
 			APKChecksum: "Q1AAAAAAAAAAAAAAAAAAAAAAAAAAA=",
 		}
 		var buf bytes.Buffer
-		_, err := Fetch(u, &buf)
+		_, err := Fetch(u, nil, &buf)
 		if err == nil {
 			t.Fatal("expected mismatch error, got nil")
 		}
@@ -600,7 +600,7 @@ func TestAPKChecksumVerify(t *testing.T) {
 			APKChecksum: "X1somethingnotsha1=",
 		}
 		var buf bytes.Buffer
-		_, err := Fetch(u, &buf)
+		_, err := Fetch(u, nil, &buf)
 		if err == nil || !strings.Contains(err.Error(), "Q1") {
 			t.Fatalf("expected Q1 prefix error, got: %v", err)
 		}

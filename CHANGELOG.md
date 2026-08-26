@@ -8,6 +8,19 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Two packages built from the same repository no longer fail intermittently.**
+  When a build reached two packages that share a source repository at the same
+  time, the second could try to use the download while the first was still
+  fetching it and stop with a message about a missing tag. The second now waits
+  for the first to finish, and the build log says so while it waits.
+- **A project can name backup download locations for a whole site.** A single
+  entry in `PROJECT.star` covers every package fetched from that site, so an
+  outage at one host no longer has to be worked around package by package. See
+  [Source mirrors](docs/metadata-format.md#source-mirrors).
+- **The ext filesystem tools download more reliably.** `e2fsprogs` now falls
+  back to two alternate hosts when kernel.org drops the connection partway
+  through, which had been failing otherwise healthy nightly builds.
+
 ## [0.14.6] - 2026-08-26
 
 - **Grafana, VictoriaMetrics, and Simple IoT are available as units.** Adding

@@ -691,7 +691,7 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		if meta := ReadMeta(buildDir); meta != nil {
 			cachedSourceState = meta.SourceState
 		}
-		if _, err := source.Prepare(opts.ProjectDir, sd, opts.EffectiveDistro, unit, cachedSourceState, w); err != nil {
+		if _, err := source.Prepare(opts.ProjectDir, sd, opts.EffectiveDistro, unit, cachedSourceState, proj.SourceMirrors, w); err != nil {
 			return fmt.Errorf("preparing source: %w", err)
 		}
 	} else {

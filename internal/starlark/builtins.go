@@ -658,6 +658,40 @@ func (e *Engine) fnProject(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.T
 		}
 	}
 
+	// Parse source_mirrors: list of (prefix, replacement) pairs applied to
+	// every unit's source URL. Project-wide rather than per unit so one
+	// entry covers every unit pulling from the same host.
+	for _, kv := range kwargs {
+		if string(kv[0].(starlark.String)) != "source_mirrors" {
+			continue
+		}
+		list, ok := kv[1].(*starlark.List)
+		if !ok {
+			return nil, fmt.Errorf("project: source_mirrors must be a list of (prefix, replacement) pairs")
+		}
+		iter := list.Iterate()
+		defer iter.Done()
+		var v starlark.Value
+		for iter.Next(&v) {
+			pair, ok := v.(starlark.Tuple)
+			if !ok || pair.Len() != 2 {
+				return nil, fmt.Errorf("project: source_mirrors entries must be (prefix, replacement) pairs")
+			}
+			prefix, pok := pair.Index(0).(starlark.String)
+			repl, rok := pair.Index(1).(starlark.String)
+			if !pok || !rok {
+				return nil, fmt.Errorf("project: source_mirrors prefix and replacement must be strings")
+			}
+			if prefix == "" || repl == "" {
+				return nil, fmt.Errorf("project: source_mirrors prefix and replacement must be non-empty")
+			}
+			p.SourceMirrors = append(p.SourceMirrors, MirrorRule{
+				Prefix:      string(prefix),
+				Replacement: string(repl),
+			})
+		}
+	}
+
 	e.project = p
 	return starlark.None, nil
 }

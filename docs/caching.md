@@ -217,13 +217,23 @@ $YOE_CACHE/
   that lists `mirrors` gets a second layer of protection: when the main URL is
   still failing after its retries, each mirror is tried in turn. Because the
   cache is keyed by content, whichever host answers produces the same cache
-  entry.
+  entry. A project can also declare `source_mirrors` in `PROJECT.star` to give
+  every unit fetching from one host the same fallback — see
+  [Project-wide mirrors](metadata-format.md#project-wide-mirrors).
 - **Downloads arrive as the bytes the server stored**, over HTTP/1.1 and without
   transparent decompression, which is what lets a content hash mean anything.
   See [How yoe downloads](#how-yoe-downloads) below.
 - **Git sources are keyed by `sha256(url + "#" + ref)`** — since a git repo is a
   directory (not a single file), content-addressing isn't practical. The URL+ref
   key ensures different tags/branches get separate clones.
+- **A cache entry is only reused once it is complete.** Two units can name the
+  same repo at the same ref, and yoe builds them at the same time. A clone is
+  published by landing it from a temporary directory, the fetch itself is
+  serialized so the second unit waits rather than reading a half-populated
+  entry, and a clone counts as complete only when the ref is actually present
+  in it. An entry left behind by an interrupted run is re-fetched instead of
+  trusted. The wait is reported in the build log, so a unit pausing on another
+  unit'"'"'s clone is visible rather than looking stalled.
 - **Packages are keyed by unit input hash** — the same hash computed by
   `internal/resolve/hash.go` from unit fields, source hash, dependency hashes,
   and architecture. This is the Nix-like property: if the inputs haven't
