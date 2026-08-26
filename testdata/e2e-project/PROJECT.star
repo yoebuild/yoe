@@ -32,6 +32,15 @@ project(
               local = "../..",
               path = "modules/module-core"),
     ],
+    # Alternate hosts for source archives, applied to every unit whose
+    # source URL starts with the prefix. One entry covers every unit
+    # fetching from that host, so a GNU outage does not fail the build
+    # for each GNU package in turn. Tried after the unit's own
+    # `mirrors` list.
+    source_mirrors = [
+        ("https://ftp.gnu.org/gnu", "https://mirrors.kernel.org/gnu"),
+        ("https://ftp.gnu.org/pub/gnu", "https://mirrors.kernel.org/gnu"),
+    ],
     # Per-unit pins that override the default last-module-wins
     # shadowing, scoped per distro. The outer key is the consuming
     # image's effective distro, so an `alpine` pin has no effect on a

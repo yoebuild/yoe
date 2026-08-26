@@ -80,6 +80,20 @@ type Project struct {
 	// default module-priority order.
 	PreferModules map[string]map[string]string
 
+	// SourceMirrors rewrites source URLs into alternate hosts serving the
+	// same bytes. Each rule replaces a matching URL prefix; every rule that
+	// matches a unit's source contributes one more URL to try. Declared
+	// once for the project rather than per unit, so a single entry covers
+	// every unit pulling from a host:
+	//
+	//	source_mirrors = [
+	//	    ("https://ftp.gnu.org/gnu", "https://mirrors.kernel.org/gnu"),
+	//	]
+	//
+	// Applied at load time by expanding each unit's Mirrors list, and so
+	// cache-neutral for the same reason Mirrors is.
+	SourceMirrors []MirrorRule
+
 	// Provides maps a virtual package name (e.g. "linux") to the concrete
 	// unit name that provides it after override resolution. Populated by
 	// the loader after all units and the active machine's kernel have been
@@ -878,4 +892,19 @@ func (u *Unit) RuntimeDepsForDistro(distro string) []string {
 	out = append(out, u.RuntimeDeps...)
 	out = append(out, extra...)
 	return out
+}
+
+// MirrorRule rewrites a source URL prefix to an alternate host. See
+// Project.SourceMirrors.
+type MirrorRule struct {
+	Prefix      string
+	Replacement string
+}
+
+// Apply returns the rewritten URL and whether the rule matched.
+func (r MirrorRule) Apply(url string) (string, bool) {
+	if !strings.HasPrefix(url, r.Prefix) {
+		return "", false
+	}
+	return r.Replacement + strings.TrimPrefix(url, r.Prefix), true
 }

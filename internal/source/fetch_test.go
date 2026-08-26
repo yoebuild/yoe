@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -51,7 +52,7 @@ func serveAfter(fail int, code int) (*httptest.Server, *atomic.Int32) {
 func fetchURL(t *testing.T, src string, mirrors ...string) (string, string, error) {
 	t.Helper()
 	var log strings.Builder
-	p, err := Fetch(&yoestar.Unit{Name: "t", Source: src, Mirrors: mirrors}, &log)
+	p, err := Fetch(&yoestar.Unit{Name: "t", Source: src, Mirrors: mirrors}, nil, &log)
 	return p, log.String(), err
 }
 
@@ -153,7 +154,7 @@ func TestFetchAcceptsVerifiedMirror(t *testing.T) {
 		Source:  down.URL + "/a.tar.gz",
 		Mirrors: []string{up.URL + "/a.tar.gz"},
 		SHA256:  payloadSHA,
-	}, &log)
+	}, nil, &log)
 	if err != nil {
 		t.Fatalf("fetch: %v\nlog:\n%s", err, log.String())
 	}
@@ -181,11 +182,78 @@ func TestFetchVerifiesSHA256FromMirror(t *testing.T) {
 		Source:  down.URL + "/a.tar.gz",
 		Mirrors: []string{bad.URL + "/a.tar.gz"},
 		SHA256:  payloadSHA,
-	}, &log)
+	}, nil, &log)
 	if err == nil {
 		t.Fatal("expected SHA256 mismatch")
 	}
 	if !strings.Contains(err.Error(), "SHA256 mismatch") {
 		t.Errorf("error = %v, want SHA256 mismatch", err)
+	}
+}
+
+// The project mirror table rewrites a source URL into another host, so one
+// entry covers every unit fetching from that host — no per-unit mirror
+// list required.
+func TestFetchUsesProjectMirrorTable(t *testing.T) {
+	cacheIn(t)
+	fastRetries(t)
+
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer down.Close()
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(payload)
+	}))
+	defer up.Close()
+
+	var log strings.Builder
+	_, err := Fetch(&yoestar.Unit{
+		Name:   "t",
+		Source: down.URL + "/gnu/bash/bash-5.2.37.tar.gz",
+		SHA256: payloadSHA,
+	}, []yoestar.MirrorRule{
+		{Prefix: down.URL + "/gnu", Replacement: up.URL + "/gnu"},
+	}, &log)
+	if err != nil {
+		t.Fatalf("fetch: %v\nlog:\n%s", err, log.String())
+	}
+}
+
+// The table preserves the path below the rewritten prefix, and orders
+// unit-declared mirrors ahead of table-derived ones.
+func TestSourceURLOrdering(t *testing.T) {
+	unit := &yoestar.Unit{
+		Source:  "https://ftp.gnu.org/gnu/bash/bash-5.2.37.tar.gz",
+		Mirrors: []string{"https://example.com/bash-5.2.37.tar.gz"},
+	}
+	rules := []yoestar.MirrorRule{
+		{Prefix: "https://ftp.gnu.org/gnu", Replacement: "https://mirrors.kernel.org/gnu"},
+		{Prefix: "https://nomatch.example", Replacement: "https://never.example"},
+	}
+
+	got := sourceURLs(unit, rules)
+	want := []string{
+		"https://ftp.gnu.org/gnu/bash/bash-5.2.37.tar.gz",
+		"https://example.com/bash-5.2.37.tar.gz",
+		"https://mirrors.kernel.org/gnu/bash/bash-5.2.37.tar.gz",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v\nwant %v", got, want)
+	}
+}
+
+// A rule that rewrites to a URL the unit already lists must not add a
+// duplicate fetch attempt.
+func TestSourceURLDedupes(t *testing.T) {
+	unit := &yoestar.Unit{
+		Source:  "https://ftp.gnu.org/gnu/bash.tar.gz",
+		Mirrors: []string{"https://mirrors.kernel.org/gnu/bash.tar.gz"},
+	}
+	rules := []yoestar.MirrorRule{
+		{Prefix: "https://ftp.gnu.org/gnu", Replacement: "https://mirrors.kernel.org/gnu"},
+	}
+	if got := sourceURLs(unit, rules); len(got) != 2 {
+		t.Errorf("got %v, want the duplicate rewrite dropped", got)
 	}
 }

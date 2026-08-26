@@ -402,6 +402,38 @@ Mirrors do not participate in a unit's input hash. They name other places to
 obtain identical content rather than a different build input, so adding or
 removing one leaves cached builds valid.
 
+#### Project-wide mirrors
+
+A `mirrors` list covers one unit. When a whole host is worth a fallback, the
+project declares the rule once in `PROJECT.star` and every unit fetching from
+that host picks it up:
+
+```python
+project(
+    name = "my-project",
+    source_mirrors = [
+        ("https://ftp.gnu.org/gnu", "https://mirrors.kernel.org/gnu"),
+        ("https://ftp.gnu.org/pub/gnu", "https://mirrors.kernel.org/gnu"),
+    ],
+    ...
+)
+```
+
+Each entry is a `(prefix, replacement)` pair. A unit whose `source` starts with
+the prefix gains one more URL to try, with the rest of the path carried over
+unchanged, so the rule above turns
+`https://ftp.gnu.org/gnu/bash/bash-5.2.37.tar.gz` into
+`https://mirrors.kernel.org/gnu/bash/bash-5.2.37.tar.gz`. Rules apply to archive
+downloads; git sources are unaffected.
+
+The full order a fetch tries is `source`, then the unit's own `mirrors`, then
+whatever the table rewrites `source` into. The unit author's list comes first
+because it names hosts chosen for that specific archive, while the table is a
+blanket statement about a host. A rewrite that duplicates a URL already in the
+list is dropped rather than retried twice.
+
+Like per-unit mirrors, the table does not participate in any unit's input hash.
+
 ### Patches
 
 Units can apply patches to upstream source after fetching and before building.

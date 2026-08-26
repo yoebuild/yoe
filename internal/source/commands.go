@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
@@ -17,7 +18,7 @@ func FetchAll(proj *yoestar.Project, unitNames []string, w io.Writer) error {
 		if unit.Source == "" {
 			continue
 		}
-		if _, err := Fetch(unit, w); err != nil {
+		if _, err := Fetch(unit, proj.SourceMirrors, w); err != nil {
 			return fmt.Errorf("fetching %s: %w", unit.Name, err)
 		}
 	}
@@ -100,7 +101,11 @@ func CleanSources(w io.Writer) error {
 	for _, e := range entries {
 		path := filepath.Join(cacheDir, e.Name())
 		os.RemoveAll(path)
-		count++
+		// Lockfiles sit alongside the entries they guard; removing them
+		// is right, counting them as sources is not.
+		if !strings.HasSuffix(e.Name(), ".lock") {
+			count++
+		}
 	}
 
 	fmt.Fprintf(w, "Removed %d cached source(s)\n", count)

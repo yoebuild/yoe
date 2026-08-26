@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -50,7 +51,10 @@ func CacheDir() (string, error) {
 
 // Fetch downloads the source for a unit into the cache.
 // Returns the path to the cached source (tarball or bare git repo).
-func Fetch(unit *yoestar.Unit, w io.Writer) (string, error) {
+//
+// mirrors is the project's source-mirror table, expanding the set of hosts
+// an archive may be fetched from beyond the unit's own `mirrors` list.
+func Fetch(unit *yoestar.Unit, mirrors []yoestar.MirrorRule, w io.Writer) (string, error) {
 	cacheDir, err := CacheDir()
 	if err != nil {
 		return "", err
@@ -63,7 +67,24 @@ func Fetch(unit *yoestar.Unit, w io.Writer) (string, error) {
 	if IsGitURL(unit.Source) {
 		return fetchGit(cacheDir, unit, w)
 	}
-	return fetchHTTP(cacheDir, unit, w)
+	return fetchHTTP(cacheDir, unit, mirrors, w)
+}
+
+// sourceURLs is the ordered list of places a unit's archive may be fetched
+// from: the declared source, then the unit's own mirrors, then whatever the
+// project's mirror table rewrites the source into. Unit-level mirrors come
+// first because the unit author picked them for that specific archive,
+// while the table is a blanket rule about a host.
+func sourceURLs(unit *yoestar.Unit, rules []yoestar.MirrorRule) []string {
+	urls := append([]string{unit.Source}, unit.Mirrors...)
+	for _, r := range rules {
+		rewritten, ok := r.Apply(unit.Source)
+		if !ok || slices.Contains(urls, rewritten) {
+			continue
+		}
+		urls = append(urls, rewritten)
+	}
+	return urls
 }
 
 // downloadRetries is how many times a transient download failure is retried
@@ -159,8 +180,8 @@ func downloadOnce(cacheDir, url string) (string, []byte, error) {
 // recover is still given a fair chance. A unit that declares mirrors should
 // also declare sha256; verification happens in the caller and applies
 // identically whichever host answered.
-func fetchFromAny(cacheDir string, unit *yoestar.Unit, w io.Writer) (string, []byte, error) {
-	urls := append([]string{unit.Source}, unit.Mirrors...)
+func fetchFromAny(cacheDir string, unit *yoestar.Unit, rules []yoestar.MirrorRule, w io.Writer) (string, []byte, error) {
+	urls := sourceURLs(unit, rules)
 	var firstErr error
 	for i, url := range urls {
 		if i > 0 {
@@ -178,7 +199,7 @@ func fetchFromAny(cacheDir string, unit *yoestar.Unit, w io.Writer) (string, []b
 }
 
 // fetchHTTP downloads a tarball and caches it by URL hash.
-func fetchHTTP(cacheDir string, unit *yoestar.Unit, w io.Writer) (string, error) {
+func fetchHTTP(cacheDir string, unit *yoestar.Unit, mirrors []yoestar.MirrorRule, w io.Writer) (string, error) {
 	// Cache key: sha256 of URL
 	urlHash := fmt.Sprintf("%x", sha256.Sum256([]byte(unit.Source)))
 	ext := guessExt(unit.Source)
@@ -201,7 +222,7 @@ func fetchHTTP(cacheDir string, unit *yoestar.Unit, w io.Writer) (string, error)
 		apkExpected = raw
 	}
 
-	tmpPath, sum256, err := fetchFromAny(cacheDir, unit, w)
+	tmpPath, sum256, err := fetchFromAny(cacheDir, unit, mirrors, w)
 	if err != nil {
 		return "", err
 	}
@@ -247,9 +268,15 @@ func fetchHTTP(cacheDir string, unit *yoestar.Unit, w io.Writer) (string, error)
 	return cachedPath, nil
 }
 
-// fetchGit clones or updates a bare git repo in the cache.
+// fetchGit clones a bare git repo into the cache.
 // Uses shallow clone by default (only the pinned tag/branch) to avoid
 // downloading full history. For the Linux kernel this is ~4GB vs ~200MB.
+//
+// Units sharing a (source, ref) share one cache entry and build
+// concurrently, so the whole fetch runs under a lock and the clone lands
+// via a temp directory. Completeness is decided by asking git whether the
+// ref is present, not by the entry's existence: `git clone` creates the
+// destination before it has fetched anything into it.
 func fetchGit(cacheDir string, unit *yoestar.Unit, w io.Writer) (string, error) {
 	// Cache key: sha256 of repo URL + ref (different tags get different clones)
 	ref := unit.Tag
@@ -263,28 +290,84 @@ func fetchGit(cacheDir string, unit *yoestar.Unit, w io.Writer) (string, error) 
 	urlHash := fmt.Sprintf("%x", sha256.Sum256([]byte(cacheKey)))
 	barePath := filepath.Join(cacheDir, urlHash+".git")
 
-	if _, err := os.Stat(barePath); os.IsNotExist(err) {
-		fmt.Fprintf(w, "Cloning %s (ref: %s)...\n", unit.Source, ref)
+	lock, err := acquireCacheLock(barePath+".lock", w,
+		fmt.Sprintf("Waiting for another unit to clone %s (ref: %s)...", unit.Source, ref))
+	if err != nil {
+		return "", err
+	}
+	defer lock.release()
 
-		// Shallow clone of just the ref we need
-		args := []string{"clone", "--bare", "--depth", "1"}
-		if unit.Tag != "" {
-			args = append(args, "--branch", unit.Tag)
-		} else if unit.Branch != "" {
-			args = append(args, "--branch", unit.Branch)
-		}
-		args = append(args, unit.Source, barePath)
-
-		cmd := gitutil.Command("", args...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return "", fmt.Errorf("git clone %s: %s\n%s", unit.Source, err, out)
-		}
-	} else {
-		// Repo already cached — fetch the specific ref if needed
+	if gitHasRef(barePath, ref) {
 		fmt.Fprintf(w, "Using cached %s (ref: %s)\n", unit.Source, ref)
+		return barePath, nil
+	}
+
+	// Either nothing is cached or a previous run left a clone behind that
+	// never got the ref. Both are handled by cloning afresh; say so when
+	// an entry is being discarded, since that is otherwise invisible.
+	if _, err := os.Stat(barePath); err == nil {
+		fmt.Fprintf(w, "Discarding incomplete clone of %s (ref: %s)\n", unit.Source, ref)
+		if err := os.RemoveAll(barePath); err != nil {
+			return "", fmt.Errorf("clearing incomplete clone %s: %w", barePath, err)
+		}
+	}
+
+	fmt.Fprintf(w, "Cloning %s (ref: %s)...\n", unit.Source, ref)
+
+	// Temp dirs for this key are guarded by the lock we hold, so any that
+	// survive are debris from a run that was killed mid-clone.
+	if stale, err := filepath.Glob(filepath.Join(cacheDir, urlHash+".tmp-*")); err == nil {
+		for _, d := range stale {
+			os.RemoveAll(d)
+		}
+	}
+
+	tmpPath, err := os.MkdirTemp(cacheDir, urlHash+".tmp-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tmpPath)
+
+	// Shallow clone of just the ref we need
+	args := []string{"clone", "--bare", "--depth", "1"}
+	if unit.Tag != "" {
+		args = append(args, "--branch", unit.Tag)
+	} else if unit.Branch != "" {
+		args = append(args, "--branch", unit.Branch)
+	}
+	args = append(args, unit.Source, tmpPath)
+
+	cmd := gitutil.Command("", args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("git clone %s: %s\n%s", unit.Source, err, out)
+	}
+
+	if !gitHasRef(tmpPath, ref) {
+		return "", fmt.Errorf("git clone %s: ref %q missing from the clone", unit.Source, ref)
+	}
+
+	// MkdirTemp is 0700; the cache is shared with builds running as other
+	// users, so restore the 0755 a plain clone would have produced.
+	if err := os.Chmod(tmpPath, 0755); err != nil {
+		return "", err
+	}
+
+	if err := os.Rename(tmpPath, barePath); err != nil {
+		return "", fmt.Errorf("publishing clone to %s: %w", barePath, err)
 	}
 
 	return barePath, nil
+}
+
+// gitHasRef reports whether dir is a git repo holding ref. This is what
+// makes a cache entry complete: a clone that exists but does not yet carry
+// the ref is a clone still in flight or one interrupted partway.
+func gitHasRef(dir, ref string) bool {
+	if _, err := os.Stat(dir); err != nil {
+		return false
+	}
+	_, err := gitutil.Run(dir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	return err == nil
 }
 
 // Verify checks the SHA256 of a cached source file.
