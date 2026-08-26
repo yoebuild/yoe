@@ -1,0 +1,60 @@
+#!/sbin/openrc-run
+
+description="Grafana observability and data visualization platform"
+
+# Settings live in /etc/conf.d/grafana, which OpenRC sources before this
+# script runs. The defaults below apply when that file leaves a value out.
+: ${GRAFANA_USER:=grafana}
+: ${GRAFANA_GROUP:=grafana}
+: ${GRAFANA_HOME:=/usr/share/grafana}
+: ${CONF_FILE:=/etc/grafana/grafana.ini}
+: ${PROVISIONING_CFG_DIR:=/etc/grafana/provisioning}
+: ${DATA_DIR:=/var/lib/grafana}
+: ${PLUGINS_DIR:=/var/lib/grafana/plugins}
+: ${LOG_DIR:=/var/log/grafana}
+: ${MAX_OPEN_FILES:=10000}
+
+command="$GRAFANA_HOME/bin/grafana"
+command_args="server
+    --config=$CONF_FILE
+    --homepath=$GRAFANA_HOME
+    cfg:default.paths.logs=$LOG_DIR
+    cfg:default.paths.data=$DATA_DIR
+    cfg:default.paths.plugins=$PLUGINS_DIR
+    cfg:default.paths.provisioning=$PROVISIONING_CFG_DIR"
+command_user="$GRAFANA_USER:$GRAFANA_GROUP"
+command_background="yes"
+# The server resolves its web assets and bundled data sources relative to
+# its working directory as well as --homepath, so start it there.
+directory="$GRAFANA_HOME"
+pidfile="/run/grafana.pid"
+# Grafana keeps its own log at $LOG_DIR/grafana.log — its shipped defaults.ini
+# sets `mode = console file`, so it writes there and to the console both.
+# Capture the console stream under a separate name: pointing it at the same
+# file would give that file two writers and every line twice. What lands here
+# is what Grafana produces before its own logger is up, which is where a
+# start-up failure shows.
+output_log="$LOG_DIR/console.log"
+error_log="$LOG_DIR/console.log"
+rc_ulimit="-n $MAX_OPEN_FILES"
+
+depend() {
+    need net
+}
+
+start_pre() {
+    # The service account is created here rather than shipped in the
+    # package: an image writes /etc/passwd as a whole from its users list,
+    # so a package cannot contribute a line to it. Both commands are
+    # no-ops once the account exists.
+    addgroup -S "$GRAFANA_GROUP" 2>/dev/null
+    adduser -S -D -H -h "$GRAFANA_HOME" -s /sbin/nologin \
+        -G "$GRAFANA_GROUP" "$GRAFANA_USER" 2>/dev/null
+    checkpath -d -m 0750 -o "$GRAFANA_USER:$GRAFANA_GROUP" \
+        "$DATA_DIR" "$PLUGINS_DIR" "$LOG_DIR"
+    checkpath -f -m 0644 -o "$GRAFANA_USER:$GRAFANA_GROUP" "$output_log"
+    # The configuration file carries the admin password and any data
+    # source credentials, so the server reads it and nobody else does.
+    checkpath -f -m 0640 -o "root:$GRAFANA_GROUP" "$CONF_FILE"
+    return 0
+}

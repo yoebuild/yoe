@@ -1,0 +1,65 @@
+[Unit]
+Description=Grafana observability and data visualization platform
+Documentation=https://grafana.com/docs/
+# Ordered after the network stack is up, but deliberately not after
+# network-online.target: Grafana binds to all interfaces and retries its
+# data source connections, so it should come up with or without a link.
+After=network.target
+
+[Service]
+Type=simple
+User=grafana
+Group=grafana
+# Defaults for a device whose settings file predates any of these values.
+# Listed before EnvironmentFile so the file wins wherever it defines one.
+Environment=GRAFANA_HOME=/usr/share/grafana
+Environment=CONF_FILE=/etc/grafana/grafana.ini
+Environment=PROVISIONING_CFG_DIR=/etc/grafana/provisioning
+Environment=DATA_DIR=/var/lib/grafana
+Environment=PLUGINS_DIR=/var/lib/grafana/plugins
+Environment=LOG_DIR=/var/log/grafana
+# The same settings file the OpenRC script reads, so a device behaves the
+# same whichever init runs it. Its contents are plain KEY=VALUE lines,
+# which is what both OpenRC and systemd expect.
+EnvironmentFile=/etc/default/grafana
+WorkingDirectory=/usr/share/grafana
+# The configuration file carries the admin password and any data source
+# credentials, so it is mode 0640 and the server has to be in its group to
+# read it. The package cannot ship it that way: the account does not exist
+# until systemd-sysusers runs at boot, and its GID is allocated then, so
+# there is no numeric owner to bake in. Fix it here instead, the same thing
+# the OpenRC script does with checkpath. The "+" runs these as root and
+# outside the sandbox below, which makes /etc read-only.
+# systemd creates and owns these for the service account: /var/lib/grafana
+# for the database and plugins, /var/log/grafana for the log, and
+# /run/grafana for the pid file.
+StateDirectory=grafana
+LogsDirectory=grafana
+RuntimeDirectory=grafana
+RuntimeDirectoryMode=0750
+ExecStartPre=+/bin/chown root:grafana ${CONF_FILE}
+ExecStartPre=+/bin/chmod 0640 ${CONF_FILE}
+ExecStart=/usr/share/grafana/bin/grafana server \
+    --config=${CONF_FILE} \
+    --pidfile=/run/grafana/grafana.pid \
+    --homepath=${GRAFANA_HOME} \
+    cfg:default.paths.logs=${LOG_DIR} \
+    cfg:default.paths.data=${DATA_DIR} \
+    cfg:default.paths.plugins=${PLUGINS_DIR} \
+    cfg:default.paths.provisioning=${PROVISIONING_CFG_DIR}
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=10000
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

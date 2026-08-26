@@ -22,8 +22,13 @@ The default and most mature configuration is:
   (`#!/sbin/openrc-run`) under `/etc/init.d/<name>`, and the `services = [...]`
   declaration in a unit becomes a runlevel symlink at
   `/etc/runlevels/default/<name>`. busybox init remains PID 1; `/etc/inittab`
-  triggers OpenRC's `sysinit`, `boot`, and `default` runlevels in order. There
-  is no systemd integration and no plan to add one inside `module-core`.
+  triggers OpenRC's `sysinit`, `boot`, and `default` runlevels in order.
+
+  A unit that also targets the Debian or Ubuntu bases writes a systemd unit
+  alongside its OpenRC script; there `services = [...]` becomes a
+  `multi-user.target.wants` symlink instead. See
+  [Shipping a service on both bases](#shipping-a-service-on-both-bases).
+
 - **apk packaging.** On the Alpine base, all yoe units produce signed `.apk`
   artifacts, installed with apk-tools at image-assembly time. (On the Debian and
   Ubuntu bases, units produce signed `.deb`s installed with dpkg/apt instead —
@@ -43,6 +48,41 @@ crossed today; the rest of this document explains why that boundary exists and
 what the glibc path unlocks. See [Yoe and distributions](distro.md) for the full
 distro model, and [module-debian.md](module-debian.md) /
 [module-ubuntu.md](module-ubuntu.md) for the per-base specifics.
+
+## Shipping a service on both bases
+
+A unit is evaluated once for every distro but built once per distro, so it
+cannot decide in Starlark which base it is packaging for. It describes the
+service for both and tags each task with the distros it applies to:
+
+```python
+task("service-openrc", distros = ["alpine"], steps = [...]),
+task("service-systemd", distros = ["debian", "ubuntu"], steps = [...]),
+```
+
+A task with no `distros` runs everywhere, which is the common case. The executor
+skips the tasks that do not apply to the build's effective distro, so only the
+matching steps run and the package carries only what its init reads. The
+effective distro is already part of the unit hash, so the two builds are
+distinct cache entries and the choice is cache-correct:
+
+|                              | Alpine                              | Debian / Ubuntu                          |
+| ---------------------------- | ----------------------------------- | ---------------------------------------- |
+| service description          | `/etc/init.d/<name>`                | `/lib/systemd/system/<name>.service`     |
+| settings                     | `/etc/conf.d/<name>`                | `/etc/default/<name>`                    |
+| enablement (from `services`) | `/etc/runlevels/default/<name>`     | `multi-user.target.wants/<name>.service` |
+| service account              | created by the script's `start_pre` | `/usr/lib/sysusers.d/<name>.conf`        |
+
+The settings file is authored once — plain `KEY=VALUE` lines, which OpenRC
+sources directly and systemd reads through `EnvironmentFile` — and each task
+installs it to the path its base expects, so a service behaves the same
+whichever init starts it. Such a unit declares
+`conffiles = ["/etc/default/<name>"]`; `conffiles` is read only when building a
+`.deb`, so the Alpine path ignores it.
+
+Both enablement checks refuse to write a symlink whose target is missing, so a
+unit that declares `services = [...]` without shipping the matching description
+fails the build rather than shipping a service that silently never starts.
 
 ## Where this stack works well
 

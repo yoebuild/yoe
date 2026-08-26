@@ -8,6 +8,52 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.14.6] - 2026-08-26
+
+- **Grafana, VictoriaMetrics, and Simple IoT are available as units.** Adding
+  `grafana`, `victoria-metrics`, and `simpleiot-bin` to an image gives a gateway
+  a metrics store, dashboards, and device management, each installed from the
+  release its authors publish rather than compiled from source. All three work
+  on the Alpine base and on the Debian and Ubuntu bases, and each enables its
+  own service and keeps its settings in one file under `/etc/conf.d`. See
+  [Monitoring and Telemetry](docs/monitoring.md).
+- **Simple IoT starts at boot on Debian and Ubuntu images.** The package
+  described its service only in the form the Alpine base reads, so an image on
+  either of the other bases stopped during the build. It now carries both
+  descriptions, and its settings live in one file that either init reads.
+- **module-core's OpenSSH is now marked as belonging to the Alpine base.**
+  Debian and Ubuntu images have always taken SSH from their own archive; asking
+  for this one there used to fail partway through the build with a message about
+  a missing service file, and now says plainly that the package is not part of
+  that base.
+- **The monitoring units can now wire themselves together.** Adding
+  `simpleiot-config` and `grafana-config` to an image gives a device that comes
+  up already collecting metrics, storing them in VictoriaMetrics, and able to
+  draw them in Grafana, with nothing to configure by hand first.
+- **A unit's task can name the distros it applies to.** Writing
+  `task(..., distros = ["alpine"])` runs that task only for those builds, which
+  is how a package describes its service to OpenRC and to systemd without
+  carrying both descriptions everywhere. A task that names no distro runs for
+  every build, as before.
+- **Service files land where each base expects them.** A package carrying a
+  service now ships only the description its init reads — an OpenRC script with
+  its settings in `/etc/conf.d` on Alpine, a systemd unit with its settings in
+  `/etc/default` on Debian and Ubuntu — instead of carrying both everywhere.
+- **Guidance on when a unit may vary by distro is clearer.** The "resolve
+  variation at runtime" rule was read as discouraging any build-time branch,
+  including along the distro axis where a unit already builds separately. It now
+  says plainly that such a branch costs nothing, so packages carry what belongs
+  on their base rather than a copy of everything.
+- **Downloads published without a file extension now install.** A program
+  offered as a plain release asset, which is how many projects ship, was read as
+  a compressed archive and stopped the build with an "invalid header" error. yoe
+  now identifies a download by its contents.
+- **Prebuilt bundles no longer carry yoe's own bookkeeping into the package.** A
+  unit that installs an unpacked release tree was shipping the version-control
+  directory yoe creates alongside it, which on a large bundle was bigger than
+  the release itself. The Grafana package is a third of its former size and the
+  Go toolchain package is smaller as well.
+
 ## [0.14.5] - 2026-08-24
 
 - **A download or clone that stops responding no longer hangs the build.** When

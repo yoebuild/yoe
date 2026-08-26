@@ -145,7 +145,10 @@ yoe_tag_release() {
 		return 1
 	fi
 
-	(cd "${OE_BASE}" && git fetch --tags origin) || return 1
+	# Not --tags: a stale local tag that disagrees with origin makes git exit
+	# nonzero even though the fetch did its job. Nothing here reads local tag
+	# refs for the origin-side check, so only origin/main needs updating.
+	(cd "${OE_BASE}" && git fetch origin) || return 1
 	(cd "${OE_BASE}" && git checkout main) || return 1
 
 	_yoe_tag_release_on_main

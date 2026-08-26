@@ -606,3 +606,89 @@ func TestAPKChecksumVerify(t *testing.T) {
 		}
 	})
 }
+
+// A release asset published without a file extension — a bare executable is
+// the common case — must be recognised by its contents. Before the cache
+// stopped fabricating a ".tar.gz" suffix for such URLs, the extension won
+// over the magic bytes and the download was handed to the gzip reader,
+// failing with "invalid header" instead of installing.
+func TestGuessExtLeavesUnknownURLsUnlabelled(t *testing.T) {
+	cases := map[string]string{
+		"https://example.com/releases/simpleiot-v1.2.3-linux-x86_64": "",
+		"https://example.com/releases/tool":                          "",
+		"https://example.com/x.tar.gz":                               ".tar.gz",
+		"https://example.com/x.tgz":                                  ".tgz",
+		"https://example.com/x.tar.xz":                               ".tar.xz",
+		"https://example.com/x.tbz2":                                 ".tbz2",
+		"https://example.com/x.tar":                                  ".tar",
+		"https://example.com/x.zip":                                  ".zip",
+		"https://example.com/x.apk":                                  ".apk",
+		"https://example.com/x.deb":                                  ".deb",
+	}
+	for url, want := range cases {
+		if got := guessExt(url); got != want {
+			t.Errorf("guessExt(%q) = %q, want %q", url, got, want)
+		}
+	}
+}
+
+func TestSniffCompression(t *testing.T) {
+	cases := []struct {
+		name string
+		body []byte
+		want compression
+	}{
+		{"gzip", []byte{0x1f, 0x8b, 0x08, 0, 0, 0}, compressionGzip},
+		{"bzip2", []byte{'B', 'Z', 'h', '9', 0, 0}, compressionBzip2},
+		{"xz", []byte{0xfd, '7', 'z', 'X', 'Z', 0x00}, compressionXz},
+		{"zip", []byte{'P', 'K', 0x03, 0x04, 0, 0}, compressionZip},
+		{"elf", []byte{0x7f, 'E', 'L', 'F', 0, 0}, compressionNone},
+		{"short", []byte{0x7f}, compressionNone},
+		{"empty", nil, compressionNone},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := filepath.Join(t.TempDir(), "asset")
+			if err := os.WriteFile(p, c.body, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			got, err := sniffCompression(p)
+			if err != nil {
+				t.Fatalf("sniffCompression: %v", err)
+			}
+			if got != c.want {
+				t.Errorf("sniffCompression(%s) = %v, want %v", c.name, got, c.want)
+			}
+		})
+	}
+}
+
+// The whole path together: a cached bare executable whose URL carries no
+// extension lands in the build tree as an executable file, not an extraction
+// error.
+func TestPrepareNonGitSourceBareExecutable(t *testing.T) {
+	tmp := t.TempDir()
+	cached := filepath.Join(tmp, "b4d0000000000000")
+	body := append([]byte{0x7f, 'E', 'L', 'F'}, bytes.Repeat([]byte{0}, 60)...)
+	if err := os.WriteFile(cached, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(tmp, "src")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	url := "https://example.com/releases/download/v1.2.3/simpleiot-v1.2.3-linux-x86_64"
+	if err := prepareNonGitSource(cached, dest, url); err != nil {
+		t.Fatalf("prepareNonGitSource: %v", err)
+	}
+
+	target := filepath.Join(dest, "simpleiot-v1.2.3-linux-x86_64")
+	st, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("expected %s: %v", target, err)
+	}
+	if st.Mode().Perm()&0o100 == 0 {
+		t.Errorf("expected executable bit, got %v", st.Mode())
+	}
+}

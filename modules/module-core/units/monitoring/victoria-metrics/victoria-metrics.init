@@ -1,0 +1,48 @@
+#!/sbin/openrc-run
+
+description="VictoriaMetrics time series database"
+
+# Settings live in /etc/conf.d/victoria-metrics, which OpenRC sources before
+# this script runs. The defaults below apply when that file leaves a value
+# out.
+: ${VM_USER:=victoriametrics}
+: ${VM_GROUP:=victoriametrics}
+: ${VM_STORAGE_DATA_PATH:=/var/lib/victoria-metrics}
+: ${VM_HTTP_LISTEN_ADDR:=:8428}
+: ${VM_RETENTION_PERIOD:=1}
+: ${VM_SEARCH_LATENCY_OFFSET:=0s}
+
+command="/usr/bin/victoria-metrics-prod"
+command_args="-storageDataPath=$VM_STORAGE_DATA_PATH
+    -httpListenAddr=$VM_HTTP_LISTEN_ADDR
+    -retentionPeriod=$VM_RETENTION_PERIOD
+    -search.latencyOffset=$VM_SEARCH_LATENCY_OFFSET
+    $VM_OPTS"
+command_user="$VM_USER:$VM_GROUP"
+command_background="yes"
+pidfile="/run/victoria-metrics.pid"
+output_log="/var/log/victoria-metrics.log"
+error_log="/var/log/victoria-metrics.log"
+
+# The database keeps many data part files open, and it needs time to flush
+# in-memory parts on the way down. SIGINT is the signal it shuts down
+# cleanly on.
+rc_ulimit="-n 65536"
+retry="SIGINT/60"
+
+depend() {
+    need net
+}
+
+start_pre() {
+    # The service account is created here rather than shipped in the
+    # package: an image writes /etc/passwd as a whole from its users list,
+    # so a package cannot contribute a line to it. Both commands are
+    # no-ops once the account exists.
+    addgroup -S "$VM_GROUP" 2>/dev/null
+    adduser -S -D -H -h /var/lib/victoria-metrics -s /sbin/nologin \
+        -G "$VM_GROUP" "$VM_USER" 2>/dev/null
+    checkpath -d -m 0750 -o "$VM_USER:$VM_GROUP" "$VM_STORAGE_DATA_PATH"
+    checkpath -f -m 0644 -o "$VM_USER:$VM_GROUP" "$output_log"
+    return 0
+}

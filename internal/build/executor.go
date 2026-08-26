@@ -850,13 +850,22 @@ func buildOne(ctx context.Context, proj *yoestar.Project, dag *resolve.DAG, unit
 		sandboxArch = Arch()
 	}
 
+	// Tasks tagged for other distros are not this build's work. Filter
+	// first so the "[n/N] task:" counter reflects what actually runs.
+	tasks := make([]yoestar.Task, 0, len(unit.Tasks))
+	for _, t := range unit.Tasks {
+		if t.AppliesToDistro(opts.EffectiveDistro) {
+			tasks = append(tasks, t)
+		}
+	}
+
 	// Execute tasks
-	for ti, t := range unit.Tasks {
+	for ti, t := range tasks {
 		// Lead with the unit name (same column as the [building]/[done]
 		// status lines): parallel builds interleave these task lines from
 		// several units on the shared writer, so the name is what tells you
 		// which unit a given task line belongs to.
-		fmt.Fprintf(w, "%-20s [%d/%d] task: %s\n", unit.Name, ti+1, len(unit.Tasks), t.Name)
+		fmt.Fprintf(w, "%-20s [%d/%d] task: %s\n", unit.Name, ti+1, len(tasks), t.Name)
 		fmt.Fprintf(logW, "  task: %s (%d steps)\n", t.Name, len(t.Steps))
 
 		// Per-task container override

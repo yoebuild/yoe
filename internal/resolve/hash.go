@@ -101,6 +101,15 @@ func UnitHash(unit *yoestar.Unit, arch string, depHashes map[string]string, srcI
 	// any change to a build step invalidates the cache.
 	for _, t := range unit.Tasks {
 		fmt.Fprintf(h, "task:%s:%s\n", t.Name, t.Container)
+		// Distro-tagged tasks. Gated on non-empty so a unit whose tasks
+		// all run everywhere stays cache-neutral. The tag needs no
+		// effectiveDistro comparison here: every task the unit declares
+		// is hashed whether or not this build runs it, and the builds
+		// that run different subsets are already distinguished by the
+		// effective_distro line above.
+		if len(t.Distros) > 0 {
+			fmt.Fprintf(h, "task_distros:%s\n", strings.Join(t.Distros, ","))
+		}
 		for _, s := range t.Steps {
 			if s.Command != "" {
 				fmt.Fprintf(h, "step:cmd:%s\n", s.Command)

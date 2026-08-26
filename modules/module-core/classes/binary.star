@@ -96,7 +96,15 @@ def _install_steps(name, binaries_pairs, install_tree, extras, symlinks):
     steps = []
     if install_tree:
         steps.append("mkdir -p $DESTDIR%s" % install_tree)
-        steps.append("cp -aT . $DESTDIR%s" % install_tree)
+        # Copy the extracted tree entry by entry, skipping .git. yoe puts
+        # every non-git source under version control after extracting it so
+        # that `yoe dev` can diff local edits, which leaves a .git directory
+        # in the build tree that has no business in the package — on a large
+        # bundle it is bigger than everything else combined.
+        steps.append(
+            "find . -mindepth 1 -maxdepth 1 -name .git -prune -o" +
+            " -exec cp -a {} $DESTDIR%s/ \\;" % install_tree,
+        )
 
     # Primary binaries — symlinks into $PREFIX/bin when install_tree is
     # set, direct install -m0755 copies otherwise.

@@ -341,11 +341,23 @@ func IsGitURL(url string) bool {
 		(strings.Contains(url, "github.com/") && !strings.Contains(url, "/archive/") && !strings.Contains(url, "/releases/"))
 }
 
+// guessExt returns the archive extension the URL carries, so a cached
+// download keeps a filename the extractor can dispatch on. A URL with no
+// recognised extension gets no extension: the file is cached under its URL
+// hash alone and prepareNonGitSource identifies it by its magic bytes.
+//
+// Returning a fabricated ".tar.gz" here instead would hide the real format
+// behind a wrong name — a bare executable published as a release asset
+// (the binary class's case) would be handed to the gzip reader and fail
+// with "invalid header" before the magic-byte fallback ever ran.
 func guessExt(url string) string {
-	for _, ext := range []string{".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".zip", ".apk", ".deb"} {
+	for _, ext := range []string{
+		".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".tbz2", ".tar",
+		".zip", ".apk", ".deb",
+	} {
 		if strings.HasSuffix(url, ext) {
 			return ext
 		}
 	}
-	return ".tar.gz"
+	return ""
 }

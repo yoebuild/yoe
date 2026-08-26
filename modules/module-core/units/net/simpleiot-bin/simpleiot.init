@@ -3,7 +3,7 @@
 description="Simple IoT — sensor data, telemetry, configuration, device management"
 
 # Settings live in /etc/conf.d/simpleiot, which OpenRC sources before this
-# script runs. The default below applies when that file leaves it out.
+# script runs. The defaults below apply when that file leaves a value out.
 : ${SIOT_DATA:=/var/lib/simpleiot}
 
 command="/usr/bin/siot"

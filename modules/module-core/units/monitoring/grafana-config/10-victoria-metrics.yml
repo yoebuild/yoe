@@ -1,0 +1,28 @@
+# Grafana data source for the VictoriaMetrics instance on this device.
+#
+# Grafana applies the files under its provisioning directory at start-up.
+# VictoriaMetrics answers the Prometheus query API, so the bundled Prometheus
+# data source reads it with no extra plugin.
+#
+# `editable: false` keeps the portal from saving changes that the next
+# start-up would overwrite from this file anyway. To point Grafana somewhere
+# else, edit this file rather than the copy in the UI.
+#
+# Reference:
+# https://grafana.com/docs/grafana/latest/administration/provisioning/#data-sources
+
+apiVersion: 1
+
+datasources:
+  - name: VictoriaMetrics
+    type: prometheus
+    access: proxy
+    url: http://localhost:8428
+    isDefault: true
+    editable: false
+    jsonData:
+      # VictoriaMetrics accepts the Prometheus query API but is not
+      # Prometheus; naming it here keeps Grafana from probing for a
+      # Prometheus version it will not find.
+      prometheusType: Prometheus
+      timeInterval: 60s

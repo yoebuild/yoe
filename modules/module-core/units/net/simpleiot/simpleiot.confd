@@ -1,0 +1,24 @@
+# Runtime configuration for the simpleiot service.
+# Settings reference: https://docs.simpleiot.org
+#
+# These are the settings this version of Simple IoT reads. Newer releases
+# add more; see the simpleiot-bin unit, which tracks the current release.
+
+# Directory holding the Simple IoT store. It sits under /var/lib so it
+# survives a reboot; point it at a separate data partition if you have one
+# and want it to outlive a rootfs update.
+SIOT_DATA=/var/lib/simpleiot
+
+# Port the built-in web portal listens on
+SIOT_HTTP_PORT=8118
+
+# Ports used by the embedded NATS server
+SIOT_NATS_PORT=4222
+SIOT_NATS_HTTP_PORT=8222
+SIOT_NATS_WS_PORT=9222
+
+# Set to require a token for NATS connections
+#SIOT_AUTH_TOKEN=
+
+# Set to connect this instance upstream to another Simple IoT instance
+#SIOT_NATS_SERVER=nats://example.com:4222

@@ -1,0 +1,29 @@
+# Runtime configuration for the victoria-metrics service.
+# Full flag reference: https://docs.victoriametrics.com/#list-of-command-line-flags
+
+# Where the time series data is kept. It sits under /var/lib so it survives
+# across reboots; point it at a separate data partition if you have one and
+# want it to outlive a rootfs update.
+VM_STORAGE_DATA_PATH=/var/lib/victoria-metrics
+
+# Address the HTTP API and web UI listen on
+VM_HTTP_LISTEN_ADDR=:8428
+
+# How long samples are kept, e.g. 1 (month), 3d, 6w, 2y
+VM_RETENTION_PERIOD=1
+
+# How far back the end of every query range is shifted. Upstream defaults
+# this to 30s so that slow Prometheus scrapes are still counted, which also
+# means a freshly written sample is not visible to a query for 30 seconds.
+# Data on a gateway usually arrives by push rather than by scrape, so 0s
+# lets dashboards show a value as soon as it is written. Raise it to a
+# second or two if the clocks on the writing devices and this one may
+# differ.
+VM_SEARCH_LATENCY_OFFSET=0s
+
+# Account the database runs as. The init script creates it on first start.
+VM_USER=victoriametrics
+VM_GROUP=victoriametrics
+
+# Any additional flags to append to the command line
+VM_OPTS=

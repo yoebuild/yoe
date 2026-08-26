@@ -1,0 +1,23 @@
+[Unit]
+Description=Simple IoT — sensor data, telemetry, configuration, device management
+Documentation=https://docs.simpleiot.org
+# Ordered after the network stack is up, but deliberately not after
+# network-online.target: siot binds to wildcard addresses and reconnects
+# upstream on its own, so it should come up with or without a link.
+After=network.target
+
+[Service]
+Type=simple
+# The same settings file the OpenRC script reads, so a device behaves the
+# same whichever init runs it. Its contents are plain KEY=VALUE lines,
+# which is what both OpenRC and systemd expect.
+EnvironmentFile=/etc/default/simpleiot
+# Creates and owns /var/lib/simpleiot, which SIOT_DATA points at.
+StateDirectory=simpleiot
+ExecStart=/usr/bin/siot serve
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
