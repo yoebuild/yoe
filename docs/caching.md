@@ -230,8 +230,8 @@ $YOE_CACHE/
   same repo at the same ref, and yoe builds them at the same time. A clone is
   published by landing it from a temporary directory, the fetch itself is
   serialized so the second unit waits rather than reading a half-populated
-  entry, and a clone counts as complete only when the ref is actually present
-  in it. An entry left behind by an interrupted run is re-fetched instead of
+  entry, and a clone counts as complete only when the ref is actually present in
+  it. An entry left behind by an interrupted run is re-fetched instead of
   trusted. The wait is reported in the build log, so a unit pausing on another
   unit'"'"'s clone is visible rather than looking stalled.
 - **Packages are keyed by unit input hash** — the same hash computed by

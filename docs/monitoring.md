@@ -98,18 +98,18 @@ otherwise let you save a change that the next start-up overwrites from the file
 anyway — edit the file to point somewhere else.
 
 The image must carry exactly one of `simpleiot` or `simpleiot-bin` alongside
-`simpleiot-config`. The config unit names neither, because naming one would
-drag it into the closure of a project that chose the other, and both own
+`simpleiot-config`. The config unit names neither, because naming one would drag
+it into the closure of a project that chose the other, and both own
 `/usr/bin/siot`.
 
 ## Connecting the three
 
 VictoriaMetrics answers Prometheus queries, so Grafana reads it through the
-bundled Prometheus data source with no extra plugin. `grafana-config` above
-does this wiring for you; to do it by hand instead, point a data source at
+bundled Prometheus data source with no extra plugin. `grafana-config` above does
+this wiring for you; to do it by hand instead, point a data source at
 `http://localhost:8428` through the Grafana UI, or drop your own YAML into
-`/etc/grafana/provisioning/datasources/`, which Grafana applies at start-up.
-The provisioning tree ships with the package:
+`/etc/grafana/provisioning/datasources/`, which Grafana applies at start-up. The
+provisioning tree ships with the package:
 
 ```
 /etc/grafana/provisioning/
