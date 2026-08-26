@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.14.6] - 2026-08-26
+
 - **Grafana, VictoriaMetrics, and Simple IoT are available as units.** Adding
   `grafana`, `victoria-metrics`, and `simpleiot-bin` to an image gives a gateway
   a metrics store, dashboards, and device management, each installed from the
