@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.14.7] - 2026-08-26
+
 - **Two packages built from the same repository no longer fail intermittently.**
   When a build reached two packages that share a source repository at the same
   time, the second could try to use the download while the first was still
