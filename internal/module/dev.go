@@ -143,6 +143,13 @@ func moduleFetchOrigin(dir string, opts ModuleUpstreamOpts, pinnedRef string) er
 		Depth:        opts.FetchDepth,
 		PinnedRef:    pinnedRef,
 		SkipWhenFull: true,
+		// Sync clones modules with --depth 1 --branch <ref>, which
+		// narrows the refspec to that one branch. Units don't need this
+		// — their dev path re-adds origin and gets the default refspec
+		// — but a module clone keeps the remote it was born with, so
+		// without widening, no other branch the user pushes can ever
+		// appear as origin/<branch>.
+		WidenRefspec: true,
 	})
 }
 

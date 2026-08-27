@@ -95,6 +95,16 @@ type FetchOptions struct {
 	// trees without file contents.
 	Depth int
 
+	// WidenRefspec resets remote.origin.fetch to git's default
+	// all-branches form before fetching. A clone made with --branch (or
+	// any --depth clone, which implies --single-branch) carries a
+	// refspec naming one branch, so every later fetch — including an
+	// --unshallow — can only ever produce that one remote-tracking ref.
+	// Deepening such a clone yields full history of a single branch and
+	// no way to see the others, which is not what a user entering dev
+	// mode is asking for.
+	WidenRefspec bool
+
 	// PinnedRef narrows a depth fetch to a single tag or branch. Ignored
 	// unless Depth is positive.
 	PinnedRef string
@@ -112,6 +122,12 @@ type FetchOptions struct {
 // opts. A shallow repository with no requested depth is unshallowed, so
 // the caller ends up with the history that dev-mode work needs.
 func FetchOrigin(dir string, opts FetchOptions) error {
+	if opts.WidenRefspec {
+		if err := widenRefspec(dir); err != nil {
+			return err
+		}
+	}
+
 	shallow, _ := Run(dir, "rev-parse", "--is-shallow-repository")
 	isShallow := strings.TrimSpace(shallow) == "true"
 
@@ -139,6 +155,26 @@ func FetchOrigin(dir string, opts FetchOptions) error {
 	}
 	if _, err := Run(dir, args...); err != nil {
 		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return nil
+}
+
+// widenRefspec points remote.origin.fetch at every branch, undoing the
+// single-branch narrowing a --depth or --branch clone leaves behind.
+// Idempotent: a remote already configured this way is left alone, so a
+// repeated dev-mode toggle does no work.
+func widenRefspec(dir string) error {
+	const all = "+refs/heads/*:refs/remotes/origin/*"
+	current, err := Run(dir, "config", "--get-all", "remote.origin.fetch")
+	if err == nil {
+		for line := range strings.SplitSeq(current, "\n") {
+			if strings.TrimSpace(line) == all {
+				return nil
+			}
+		}
+	}
+	if _, err := Run(dir, "config", "--replace-all", "remote.origin.fetch", all); err != nil {
+		return fmt.Errorf("widening origin refspec: %w", err)
 	}
 	return nil
 }
