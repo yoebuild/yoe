@@ -539,6 +539,13 @@ performs incremental fetches — only downloading new objects.
 missing or if `PROJECT.star` has changed since the last sync. You rarely need to
 run `yoe module sync` manually.
 
+**Dev mode:** Switching a module to dev mode turns its cache clone into one you
+can work in directly. yoe points `origin` at the SSH URL when you ask for it,
+downloads the history `git log` and `git blame` need, and configures the clone to
+track every branch on the remote rather than only the pinned one — so a branch
+you push shows up as `origin/<branch>` on the next fetch. From there the clone is
+yours: yoe sets up the connectivity and leaves your working tree alone.
+
 **Local overrides:** Modules with `local = "..."` in PROJECT.star skip fetching
 entirely and use the local directory. `yoe module list` shows these as
 `(local: ../path)`.

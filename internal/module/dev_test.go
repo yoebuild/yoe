@@ -163,3 +163,27 @@ func TestModuleToPin_LocalRefuses(t *testing.T) {
 		t.Fatal("expected error for local module")
 	}
 }
+
+// The sync-time clone is `--depth 1 --branch <ref>`, which narrows
+// remote.origin.fetch to that one branch. Dev mode has to widen it, or
+// the deepened clone still cannot see any branch the user pushes.
+func TestModuleToUpstream_WidensRefspec(t *testing.T) {
+	dir := t.TempDir()
+	moduleDir, _ := setupModuleClone(t, dir, "foo", true)
+
+	// A second branch appears upstream after the module was synced.
+	upstream := filepath.Join(dir, "_upstream", "foo.git")
+	run(t, upstream, "git", "checkout", "-q", "-b", "topic")
+	run(t, upstream, "git", "commit", "-q", "--allow-empty", "-m", "topic work")
+	run(t, upstream, "git", "checkout", "-q", "main")
+
+	m := yoestar.ResolvedModule{Name: "foo", Dir: moduleDir, Ref: "main"}
+	if err := ModuleToUpstream(m, ModuleUpstreamOpts{}); err != nil {
+		t.Fatalf("ModuleToUpstream: %v", err)
+	}
+
+	if _, err := gitutil.Run(moduleDir, "rev-parse", "--verify", "refs/remotes/origin/topic"); err != nil {
+		refspec, _ := gitutil.Run(moduleDir, "config", "--get-all", "remote.origin.fetch")
+		t.Errorf("origin/topic missing after dev-mode switch; refspec = %q", strings.TrimSpace(refspec))
+	}
+}
