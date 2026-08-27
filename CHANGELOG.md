@@ -8,15 +8,14 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.14.8] - 2026-08-27
+
 - **A module in dev mode now sees every branch on its remote.** Switching a
   module to dev mode previously left the clone able to fetch only the branch the
   project pins, so a branch you pushed never appeared as `origin/<branch>` and
   `git log origin/<branch>` had nothing to show. Dev mode now tracks the whole
   remote. Modules already in dev mode pick this up the next time you toggle
   them. See [`yoe module`](docs/yoe-tool.md#yoe-module).
-
-## [0.14.8] - 2026-08-27
-
 - **Debian is now pinned by version number, matching Alpine and Ubuntu.** New
   projects reference `module-debian` with `ref = "13"` rather than
   `ref = "trixie"`; existing projects should update their pin. See
