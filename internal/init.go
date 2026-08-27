@@ -46,7 +46,7 @@ func RunInit(projectDir string, machine string) error {
         module("https://github.com/yoebuild/module-alpine.git",
               ref = "3.21"),
         module("https://github.com/yoebuild/module-debian.git",
-              ref = "trixie"),
+              ref = "13"),
         module("https://github.com/yoebuild/module-ubuntu.git",
               ref = "26.04"),
         module("https://github.com/yoebuild/module-jetson.git",
