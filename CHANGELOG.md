@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.14.8] - 2026-08-27
+
 - **Debian is now pinned by version number, matching Alpine and Ubuntu.** New
   projects reference `module-debian` with `ref = "13"` rather than
   `ref = "trixie"`; existing projects should update their pin. See

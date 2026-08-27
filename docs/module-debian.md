@@ -51,13 +51,12 @@ module("https://github.com/yoebuild/module-debian.git", ref = "13"),
 | `13`   | Debian 13      | `trixie`   |
 | `12`   | Debian 12      | `bookworm` |
 
-Version-named branches keep the Debian pin in the same shape as
-`module-alpine` (`ref = "3.21"`) and `module-ubuntu` (`ref = "26.04"`), so a
-project's module list reads as a set of release pins rather than a mix of
-versions and branch names. Inside the module, the codename stays wherever
-Debian's archive expects it: the `codename` kwarg on each feed, the
-`dists/<codename>/` paths the feeds fetch from, and the `FROM debian:<codename>`
-line in the toolchain container.
+Version-named branches keep the Debian pin in the same shape as `module-alpine`
+(`ref = "3.21"`) and `module-ubuntu` (`ref = "26.04"`), so a project's module
+list reads as a set of release pins rather than a mix of versions and branch
+names. Inside the module, the codename stays wherever Debian's archive expects
+it: the `codename` kwarg on each feed, the `dists/<codename>/` paths the feeds
+fetch from, and the `FROM debian:<codename>` line in the toolchain container.
 
 A branch tracks a release, not a point release — `13` follows Debian 13.1, 13.2,
 and so on, the same way `module-alpine`'s `3.21` follows Alpine's patch
