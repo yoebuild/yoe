@@ -14,6 +14,12 @@ and this project adheres to
   names it as a dev module. When your own commits or uncommitted edits mean the
   pull cannot fast-forward, yoe says so and leaves the clone alone instead of
   moving it. See [`yoe module`](docs/yoe-tool.md#yoe-module).
+- **The HTTPS and SSH choices now describe the right URLs.** A module whose
+  clone was already using SSH offered an HTTPS option showing the SSH address
+  and an SSH option greyed out as unavailable, which is the state a module lands
+  in after switching to dev mode and back. Each option now shows its own
+  address, marks the one in use, and picking HTTPS moves the clone back to
+  HTTPS. See [`yoe module`](docs/yoe-tool.md#yoe-module).
 
 ## [0.14.8] - 2026-08-27
 

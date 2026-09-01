@@ -187,3 +187,42 @@ func TestModuleToUpstream_WidensRefspec(t *testing.T) {
 		t.Errorf("origin/topic missing after dev-mode switch; refspec = %q", strings.TrimSpace(refspec))
 	}
 }
+
+// Picking HTTPS moves an origin left on SSH by an earlier dev session
+// back to https, rather than accepting the choice and leaving the
+// remote where it was. The clone's origin is a local file:// URL here,
+// so the test sets an SSH remote explicitly to model the real state.
+func TestModuleToUpstream_HTTPSRewritesSSHOrigin(t *testing.T) {
+	dir := t.TempDir()
+	moduleDir, _ := setupModuleClone(t, dir, "foo", false)
+	run(t, moduleDir, "git", "remote", "set-url", "origin", "git@github.com:yoebuild/foo.git")
+	m := yoestar.ResolvedModule{Name: "foo", Dir: moduleDir, Ref: "main"}
+
+	// Fetching from a remote that does not resolve is expected to fail;
+	// the remote rewrite happens first and is what this asserts.
+	_ = ModuleToUpstream(m, ModuleUpstreamOpts{SSH: false})
+
+	got, err := gitutil.Run(moduleDir, "remote", "get-url", "origin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "https://github.com/yoebuild/foo.git"; strings.TrimSpace(got) != want {
+		t.Errorf("origin = %q, want %q", strings.TrimSpace(got), want)
+	}
+}
+
+// The SSH direction still applies, and an origin already on SSH is
+// left alone rather than mangled.
+func TestModuleToUpstream_SSHKeepsSSHOrigin(t *testing.T) {
+	dir := t.TempDir()
+	moduleDir, _ := setupModuleClone(t, dir, "foo", false)
+	run(t, moduleDir, "git", "remote", "set-url", "origin", "git@github.com:yoebuild/foo.git")
+	m := yoestar.ResolvedModule{Name: "foo", Dir: moduleDir, Ref: "main"}
+
+	_ = ModuleToUpstream(m, ModuleUpstreamOpts{SSH: true})
+
+	got, _ := gitutil.Run(moduleDir, "remote", "get-url", "origin")
+	if want := "git@github.com:yoebuild/foo.git"; strings.TrimSpace(got) != want {
+		t.Errorf("origin = %q, want %q", strings.TrimSpace(got), want)
+	}
+}

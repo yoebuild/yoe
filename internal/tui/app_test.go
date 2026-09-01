@@ -786,53 +786,52 @@ func TestUpdateSourcePrompt_Esc_RestoresPrevView(t *testing.T) {
 // TestApplySourcePromptChoice_SSHOpensDepthStage verifies the
 // two-stage flow: picking https/ssh in stage 1 doesn't fire the
 // toggle, it opens the fetch-depth picker as stage 2.
-func TestPreviewHTTPSToSSH(t *testing.T) {
-	cases := []struct {
-		in     string
-		wantOK bool
-		want   string
-	}{
-		{"https://github.com/foo/bar.git", true, "git@github.com:foo/bar.git"},
-		{"https://gitlab.com/foo/bar.git", true, "git@gitlab.com:foo/bar.git"},
-		{"https://example.com/", false, ""},
-		{"git@github.com:foo/bar.git", false, ""},
-		{"http://github.com/foo/bar.git", false, ""},
-	}
-	for _, c := range cases {
-		got, ok := previewHTTPSToSSH(c.in)
-		if ok != c.wantOK {
-			t.Errorf("previewHTTPSToSSH(%q) ok=%v, want %v", c.in, ok, c.wantOK)
-		}
-		if c.wantOK && got != c.want {
-			t.Errorf("previewHTTPSToSSH(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
-func TestSchemePromptOptions_ShowsURLs(t *testing.T) {
+func TestSchemePromptOptions_FromHTTPSRemote(t *testing.T) {
 	opts := schemePromptOptions("https://github.com/openssl/openssl.git")
 	if len(opts) != 3 {
 		t.Fatalf("expected 3 options, got %d", len(opts))
 	}
-	// HTTPS option should show the original URL.
 	if !strings.Contains(opts[0].desc, "https://github.com/openssl/openssl.git") {
 		t.Errorf("HTTPS desc missing URL: %q", opts[0].desc)
 	}
-	// SSH option should show the rewritten URL.
+	if !strings.Contains(opts[0].desc, "(current)") {
+		t.Errorf("HTTPS should be marked current: %q", opts[0].desc)
+	}
 	if !strings.Contains(opts[1].desc, "git@github.com:openssl/openssl.git") {
 		t.Errorf("SSH desc missing rewritten URL: %q", opts[1].desc)
 	}
-	if opts[1].disabled {
-		t.Errorf("SSH should be enabled for github URLs")
+	if opts[0].disabled || opts[1].disabled {
+		t.Errorf("both schemes should be available: %+v", opts[:2])
 	}
 }
 
-func TestSchemePromptOptions_DisablesSSHForUnmappable(t *testing.T) {
-	// http:// (not https) — no rewrite available.
+// A clone whose origin is already SSH — the state a module lands in
+// after a dev → pin → dev cycle. Each option must name its own scheme's
+// URL rather than describing the SSH remote as the HTTPS one.
+func TestSchemePromptOptions_FromSSHRemote(t *testing.T) {
+	opts := schemePromptOptions("git@github.com:yoebuild/module-alpine.git")
+	if !strings.Contains(opts[0].desc, "https://github.com/yoebuild/module-alpine.git") {
+		t.Errorf("HTTPS desc should show the https URL, got %q", opts[0].desc)
+	}
+	if strings.Contains(opts[0].desc, "git@") {
+		t.Errorf("HTTPS desc should not show an SSH URL: %q", opts[0].desc)
+	}
+	if !strings.Contains(opts[1].desc, "git@github.com:yoebuild/module-alpine.git") {
+		t.Errorf("SSH desc missing URL: %q", opts[1].desc)
+	}
+	if !strings.Contains(opts[1].desc, "(current)") {
+		t.Errorf("SSH should be marked current: %q", opts[1].desc)
+	}
+	if opts[0].disabled || opts[1].disabled {
+		t.Errorf("both schemes should be available from an SSH remote: %+v", opts[:2])
+	}
+}
+
+func TestSchemePromptOptions_DisablesUnmappable(t *testing.T) {
+	// http:// (not https) — neither rewrite applies.
 	opts := schemePromptOptions("http://example.com/foo.git")
-	sshOpt := opts[1]
-	if !sshOpt.disabled {
-		t.Errorf("SSH should be disabled for non-https URL, got enabled: %+v", sshOpt)
+	if !opts[1].disabled {
+		t.Errorf("SSH should be disabled for non-https URL, got %+v", opts[1])
 	}
 }
 
