@@ -554,9 +554,9 @@ the branch it is on — the equivalent of `git pull --ff-only` — instead of be
 checked out onto the declared ref, and the sync listing names each module it
 handled this way. When the pull cannot fast-forward because you have commits of
 your own or edits in the tree, yoe reports the reason and leaves the clone
-untouched; sync continues with the remaining modules. To go back to the
-declared ref, switch the module out of dev mode, which prompts before
-discarding anything.
+untouched; sync continues with the remaining modules. To go back to the declared
+ref, switch the module out of dev mode, which prompts before discarding
+anything.
 
 **Local overrides:** Modules with `local = "..."` in PROJECT.star skip fetching
 entirely and use the local directory. `yoe module list` shows these as
