@@ -1,0 +1,27 @@
+#!/sbin/openrc-run
+
+description="Load kernel modules for devices already present at boot"
+
+depend() {
+	need sysfs
+	after devfs
+	before checkfs fsck
+	keyword -docker -podman -prefix -systemd-nspawn -vserver
+}
+
+start() {
+	if get_bootparam noautodetect; then
+		ewarn "Hardware autodetection disabled from boot cmdline"
+		return 0
+	fi
+
+	ebegin "Loading drivers for detected hardware"
+	# Two passes: the first can bind a bus controller whose children only
+	# then appear and publish modaliases of their own.
+	for pass in 1 2; do
+		find /sys -name modalias -type f -print0 2>/dev/null \
+			| xargs -0 sort -u 2>/dev/null \
+			| xargs modprobe -b -a 2>/dev/null
+	done
+	eend 0
+}

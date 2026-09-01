@@ -12,6 +12,12 @@ and this project adheres to
   under `/sys/bus/iio/devices`, so you can read the mikroBUS `AN` pin and the
   Grove connector's analog pin from a running image. See
   [Analog input](docs/machine-beagleplay.md#analog-input).
+- **Alpine images now load drivers for hardware that is present at boot.** A
+  new `coldplug` package sweeps `/sys` early in boot and loads the matching
+  modules, so onboard sensors and other built-in peripherals show up without
+  anyone running `modprobe`. The development image includes it; the Debian and
+  Ubuntu images already did this through udev. See
+  [Coldplug](docs/libc-and-init.md#coldplug-modules-for-hardware-already-present-at-boot).
 
 ## [0.14.8] - 2026-08-27
 

@@ -69,6 +69,10 @@ image(
         "alpine": [
             "base-files-dev", "busybox", "busybox-binsh", "musl", "kmod",
             "util-linux", "e2fsprogs", "eudev", "openrc",
+            # Loads modules for hardware already present at boot. Alpine only:
+            # systemd's udev replays those uevents itself, so the apt images
+            # need no equivalent. See docs/libc-and-init.md.
+            "coldplug",
             "network-config", "dhcpcd", "ntp-client", "mdnsd",
             "openssh", "simpleiot", "procps-ng", "apk-tools",
             "yazi", "zellij", "helix",

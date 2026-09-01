@@ -202,11 +202,14 @@ reading zero — expect noise on a channel with nothing wired to it.
 
 The driver is a module, and the SPI controller it hangs off is built into the
 kernel — the controller registers the ADC during early boot, before any
-userspace exists to see the uevent, and nothing coldplugs it afterwards. So
+userspace exists to see the uevent. Two things make it load anyway.
 `beagleplay-config` ships `/usr/lib/modules-load.d/beagleplay-adc.conf` naming
-`ti-adc128s052`, which OpenRC's `modules` service (and systemd's
-`systemd-modules-load` on the Debian and Ubuntu images) processes at boot. That
-is what makes `/sys/bus/iio` appear without anyone running `modprobe`.
+`ti-adc128s052`, which OpenRC's `modules` service (and `systemd-modules-load` on
+the Debian and Ubuntu images) processes at boot; the ADC is soldered to the
+board, so naming it outright is the most direct thing to do and it holds even in
+an image that carries no coldplug. Separately, the general mechanism described
+under [Coldplug](libc-and-init.md#coldplug-modules-for-hardware-already-present-at-boot)
+would find this chip too, along with anything else plugged in.
 
 The device tree names the part `ti,adc122s051` rather than `ti,adc102s051`. The
 driver (`drivers/iio/adc/ti-adc128s052.c`) carries only the 12-bit variants —

@@ -84,6 +84,44 @@ Both enablement checks refuse to write a symlink whose target is missing, so a
 unit that declares `services = [...]` without shipping the matching description
 fails the build rather than shipping a service that silently never starts.
 
+## Coldplug: modules for hardware already present at boot
+
+A modular driver is normally loaded when the kernel registers its device and a
+device manager turns the resulting uevent into a `modprobe`. That breaks for
+anything sitting behind a controller built into the kernel: the child device is
+registered during early boot, long before userspace exists to hear about it, so
+the uevent is gone by the time anything could act on it. The driver never loads
+and the hardware silently does not appear — no error, just a missing
+`/sys/bus/<bus>` tree. The fix is a boot-time sweep of `/sys` for `modalias`
+files, feeding each one to `modprobe`.
+
+The two bases differ in whether they already do this:
+
+|                | How coldplug happens                                                  |
+| -------------- | --------------------------------------------------------------------- |
+| Debian, Ubuntu | `systemd-udev-trigger.service`, enabled by udev itself — nothing to do |
+| Alpine         | the `coldplug` unit, enabled into the `sysinit` runlevel               |
+
+Alpine's `openrc` package ships `hwdrivers`, which performs exactly this sweep,
+but it cannot be used as-is: its `depend()` declares `need dev`, and nothing in
+a yoe image provides `dev`. `devfs` provides `dev-mount` and orders itself
+*before* `dev`, and yoe builds eudev from source without the OpenRC scripts
+Alpine keeps in its separate `udev-init-scripts` package. `rc_need` in
+`/etc/conf.d` only ever adds dependencies, so the `need dev` cannot be relaxed
+from outside the script. Rather than pull a whole device manager into every
+image's boot to satisfy one dependency, the `coldplug` unit ships an equivalent
+sweep whose dependencies a yoe image actually satisfies.
+
+`coldplug` runs in `sysinit` rather than the `default` runlevel that
+`services = [...]` writes to, because storage and network drivers have to be
+loaded before the services that need them start. That is why the unit lays down
+its own runlevel symlink, the way `base-files` does, instead of declaring
+`services`. Boot with `noautodetect` on the kernel command line to skip the
+sweep.
+
+Add `coldplug` to an image's Alpine artifact list to get this behavior; the
+`dev-image` already carries it.
+
 ## Where this stack works well
 
 The musl/OpenRC/Alpine foundation is a fine choice — often the better choice —
