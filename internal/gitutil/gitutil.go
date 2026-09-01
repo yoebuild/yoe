@@ -88,6 +88,53 @@ func HTTPSToSSH(httpsURL string) (string, bool) {
 	return "git@" + u.Host + ":" + path, true
 }
 
+// SSHToHTTPS rewrites an SSH clone URL to its https form, reporting
+// whether it did. It accepts both shapes git produces — the scp-like
+// `git@host:path` and the explicit `ssh://git@host/path` — and returns
+// anything else unchanged.
+//
+// This is the inverse of HTTPSToSSH, and exists for the same reason
+// read in the other direction: a clone whose origin was switched to SSH
+// for pushing still has to offer a way back, and a caller that can only
+// convert one way ends up describing an SSH remote as an https one.
+func SSHToHTTPS(sshURL string) (string, bool) {
+	if rest, ok := strings.CutPrefix(sshURL, "ssh://"); ok {
+		if _, path, found := strings.Cut(rest, "/"); found && path != "" {
+			host := rest[:len(rest)-len(path)-1]
+			if _, h, ok := strings.Cut(host, "@"); ok {
+				host = h
+			}
+			if host != "" {
+				return "https://" + host + "/" + path, true
+			}
+		}
+		return sshURL, false
+	}
+	// Any other explicit scheme (https://, git://, file://) is not an
+	// SSH remote — leave it alone rather than reading its "//" as a
+	// scp-like path.
+	if strings.Contains(sshURL, "://") {
+		return sshURL, false
+	}
+	// scp-like: [user@]host:path — the colon must precede any slash,
+	// otherwise this is a plain path rather than a remote.
+	colon := strings.IndexByte(sshURL, ':')
+	if colon < 0 {
+		return sshURL, false
+	}
+	if slash := strings.IndexByte(sshURL, '/'); slash >= 0 && slash < colon {
+		return sshURL, false
+	}
+	host, path := sshURL[:colon], sshURL[colon+1:]
+	if _, h, ok := strings.Cut(host, "@"); ok {
+		host = h
+	}
+	if host == "" || path == "" {
+		return sshURL, false
+	}
+	return "https://" + host + "/" + path, true
+}
+
 // FetchOptions controls FetchOrigin.
 type FetchOptions struct {
 	// Depth, when positive, fetches only that many commits of PinnedRef
