@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **`yoe module sync` no longer overwrites work in a dev-mode module.** A module
+  you have switched to dev mode is now pulled forward along the branch it is on
+  rather than checked out onto the project's declared ref, and the sync listing
+  names it as a dev module. When your own commits or uncommitted edits mean the
+  pull cannot fast-forward, yoe says so and leaves the clone alone instead of
+  moving it. See [`yoe module`](docs/yoe-tool.md#yoe-module).
+
 ## [0.14.8] - 2026-08-27
 
 - **A module in dev mode now sees every branch on its remote.** Switching a

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/yoebuild/yoe/internal/gitutil"
+	"github.com/yoebuild/yoe/internal/source"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -61,8 +62,13 @@ func Sync(modules []yoestar.ModuleRef, w io.Writer) (map[string]string, error) {
 			if err := cmd.Run(); err != nil {
 				return nil, fmt.Errorf("cloning module %s: %w", name, err)
 			}
+		} else if state := moduleState(moduleDir); source.IsDev(state) {
+			// A module the user switched to dev mode is theirs. Bring
+			// it up to date the way they would by hand and leave the
+			// working tree alone if that is not possible.
+			pullDevModule(moduleDir, name, state, w)
 		} else {
-			// Fetch and checkout the right ref
+			// Pin mode: yoe owns this tree, so put it on the declared ref.
 			fmt.Fprintf(w, "  %-20s fetching %s...\n", name, ref)
 			cmd := gitutil.Command(moduleDir, "fetch", "origin", ref)
 			cmd.Stderr = os.Stderr
@@ -72,7 +78,9 @@ func Sync(modules []yoestar.ModuleRef, w io.Writer) (map[string]string, error) {
 
 			cmd = gitutil.Command(moduleDir, "checkout", "FETCH_HEAD")
 			cmd.Stderr = os.Stderr
-			cmd.Run() // best effort
+			if err := cmd.Run(); err != nil {
+				return nil, fmt.Errorf("checking out %s in module %s: %w", ref, name, err)
+			}
 		}
 
 		// If module specifies a subdirectory path, use that
@@ -86,6 +94,67 @@ func Sync(modules []yoestar.ModuleRef, w io.Writer) (map[string]string, error) {
 	}
 
 	return result, nil
+}
+
+// moduleState reports the source state of an existing module clone,
+// combining the persisted toggle decision with observed git state.
+//
+// When the git probe fails, a clone the user has recorded as dev still
+// counts as dev: an unclassifiable tree the user has claimed is exactly
+// the one to leave alone. Anything else reads as StateEmpty and takes
+// the pin path, where yoe-managed trees belong.
+func moduleState(moduleDir string) source.State {
+	cached := ReadState(moduleDir)
+	state, err := source.DetectState(moduleDir, cached)
+	if err != nil {
+		if source.IsDev(cached) {
+			return cached
+		}
+		return source.StateEmpty
+	}
+	return state
+}
+
+// pullDevModule fast-forwards a dev-mode module clone onto its tracking
+// branch, the same `git pull --ff-only` the user would run themselves.
+// The clone comes off `git clone --branch <ref>` already on a local
+// branch tracking origin/<ref>, so the configured upstream is there to
+// pull from — and following the branch the user is actually on, rather
+// than the project's declared ref, is the point of dev mode.
+//
+// A pull that cannot fast-forward is the expected outcome whenever the
+// user has commits of their own or edits in the tree. That is not a
+// sync failure: leaving the work untouched is the correct result, so
+// this reports what happened and returns. Only the pin path, where yoe
+// owns the tree, treats a checkout failure as fatal.
+func pullDevModule(moduleDir, name string, state source.State, w io.Writer) {
+	fmt.Fprintf(w, "  %-20s dev mode — pulling instead of checking out\n", name)
+	out, err := gitutil.Run(moduleDir, "pull", "--ff-only")
+	if err != nil {
+		fmt.Fprintf(w, "  %-20s dev mode — left as-is: %s\n", name, firstLine(err.Error()))
+		return
+	}
+	fmt.Fprintf(w, "  %-20s %s\n", name, firstLine(out))
+
+	// Re-anchor the dev tag on a clone that had no local work, so a
+	// module merely following upstream keeps reporting `dev` rather
+	// than looking like it carries commits of its own. A clone that
+	// was already dev-mod or dev-dirty keeps its original anchor —
+	// the commits it counts are still the user's.
+	if state == source.StateDev {
+		_, _ = gitutil.Run(moduleDir, "tag", "-f", source.PinTag, "HEAD")
+	}
+}
+
+// firstLine trims git output down to its headline so the sync listing
+// stays one line per module. Git's own detail still reaches the user
+// through the error text when a pull is refused.
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return s
 }
 
 // SyncIfNeeded clones any modules that are not already cached. Unlike Sync,

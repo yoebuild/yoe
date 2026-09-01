@@ -527,7 +527,8 @@ yoe module check-updates      # planned
 3. **Resolve versions** — PROJECT.star versions override transitive deps. If a
    required transitive dep is missing, error with an actionable message.
 4. **Fetch/update** — clone or update each module's Git repo into
-   `$YOE_CACHE/modules/`. Checkout the declared ref.
+   `$YOE_CACHE/modules/`. Checkout the declared ref, or fast-forward the
+   module's own branch when it is in dev mode (see below).
 5. **Verify** — confirm that each module's `MODULE.star` (if present) is valid
    Starlark.
 
@@ -545,6 +546,15 @@ downloads the history `git log` and `git blame` need, and configures the clone
 to track every branch on the remote rather than only the pinned one — so a
 branch you push shows up as `origin/<branch>` on the next fetch. From there the
 clone is yours: yoe sets up the connectivity and leaves your working tree alone.
+
+`yoe module sync` respects that. A module in dev mode is fast-forwarded along
+the branch it is on — the equivalent of `git pull --ff-only` — instead of being
+checked out onto the declared ref, and the sync listing names each module it
+handled this way. When the pull cannot fast-forward because you have commits of
+your own or edits in the tree, yoe reports the reason and leaves the clone
+untouched; sync continues with the remaining modules. To go back to the
+declared ref, switch the module out of dev mode, which prompts before
+discarding anything.
 
 **Local overrides:** Modules with `local = "..."` in PROJECT.star skip fetching
 entirely and use the local directory. `yoe module list` shows these as
