@@ -18,6 +18,16 @@ and this project adheres to
   anyone running `modprobe`. The development image includes it; the Debian and
   Ubuntu images already did this through udev. See
   [Coldplug](docs/libc-and-init.md#coldplug-modules-for-hardware-already-present-at-boot).
+- **New `libiio` package for working with IIO sensors.** `iio_info` lists every
+  sensor, channel and attribute on a board, `iio_attr` reads and writes them,
+  and `iio_readdev` / `iio_writedev` stream sample buffers. The development
+  image now includes it. See
+  [Analog input](docs/machine-beagleplay.md#analog-input).
+- **New `iiod-init` package serves a board's sensors over the network.** Add it
+  to an image to run `iiod`, which lets a development host work with the
+  board's sensors remotely. It is a separate package because the daemon has no
+  authentication and lets any client on the network read and write those
+  devices — including driving outputs — so only add it on a network you trust.
 
 ## [0.14.8] - 2026-08-27
 

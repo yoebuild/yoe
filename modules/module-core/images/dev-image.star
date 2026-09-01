@@ -59,6 +59,11 @@ image(
     artifacts = [
         "linux", "bash",
         "ca-certificates", "curl", "less", "file", "htop", "strace", "iproute2",
+        # iio_info and friends: the "what sensors does this board have" answer,
+        # the same class of diagnostic as strace and file. This is the library
+        # and tools only — `iiod-init` is what would start the network daemon,
+        # and it is deliberately not here.
+        "libiio",
         # Dormant on-device upstream-feed enabler (run
         # yoe-enable-upstream-feeds to opt in). Distro-neutral: each distro
         # module ships its own "upstream-feeds" companion, so the resolver

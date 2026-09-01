@@ -211,6 +211,14 @@ an image that carries no coldplug. Separately, the general mechanism described
 under [Coldplug](libc-and-init.md#coldplug-modules-for-hardware-already-present-at-boot)
 would find this chip too, along with anything else plugged in.
 
+For anything beyond reading raw counts, use `libiio`, which the development
+image already carries: `iio_info` enumerates every device, channel and
+attribute in one shot, `iio_attr` reads and writes them by name, and
+`iio_readdev` streams sample buffers. To work with the board's sensors from a
+development host instead, add the `iiod-init` package — it runs the IIO network
+daemon, and it is a separate package because that daemon has no authentication
+and grants any client on the network read and write access to these channels.
+
 The device tree names the part `ti,adc122s051` rather than `ti,adc102s051`. The
 driver (`drivers/iio/adc/ti-adc128s052.c`) carries only the 12-bit variants —
 the 10-bit compatible strings that older kernels listed were removed upstream.
