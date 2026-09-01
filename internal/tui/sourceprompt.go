@@ -263,46 +263,52 @@ func (m model) applySourcePromptChoice(value string) (tea.Model, tea.Cmd) {
 }
 
 // schemePromptOptions builds the HTTPS / SSH / cancel option list,
-// embedding the URL each choice would set as `origin` so the user
-// can verify the destination before committing.
+// embedding the URL each choice would set as `origin` so the user can
+// verify the destination before committing.
 //
-// SSH is greyed out when the upstream URL doesn't admit a sensible
-// rewrite (non-https scheme, empty path) — picking it would still
-// "work" by leaving the URL as-is, but the choice is misleading.
+// The URL passed in is wherever origin points now, which is not always
+// https: a clone switched to SSH in an earlier dev session keeps that
+// remote when it goes back to pin. So both forms are derived from it in
+// whichever direction applies, and the one already in use is marked
+// rather than being described as the other scheme. An option is greyed
+// out only when its form genuinely cannot be derived — an http:// or
+// git:// remote admits neither rewrite.
 func schemePromptOptions(upstreamURL string) []sourcePromptOption {
-	httpsURL := upstreamURL
-	sshURL, sshOK := previewHTTPSToSSH(upstreamURL)
-	sshOpt := sourcePromptOption{label: "SSH", value: "ssh"}
-	if sshOK {
-		sshOpt.desc = "use " + sshURL
-	} else {
-		sshOpt.desc = "(no SSH mapping for this URL — pick HTTPS)"
-		sshOpt.disabled = true
+	httpsURL, httpsOK := gitutil.SSHToHTTPS(upstreamURL)
+	sshURL, sshOK := gitutil.HTTPSToSSH(upstreamURL)
+	// Exactly one rewrite fires for a well-formed remote; the other
+	// scheme is the URL we were handed.
+	switch {
+	case httpsOK:
+		sshURL, sshOK = upstreamURL, true
+	case sshOK:
+		httpsURL, httpsOK = upstreamURL, true
 	}
+
 	return []sourcePromptOption{
-		{label: "HTTPS", desc: "use " + httpsURL, value: "https"},
-		sshOpt,
+		schemeOption("HTTPS", "https", httpsURL, httpsOK, upstreamURL),
+		schemeOption("SSH", "ssh", sshURL, sshOK, upstreamURL),
 		{label: "cancel", desc: "stay pinned", value: "cancel"},
 	}
 }
 
-// previewHTTPSToSSH mirrors the rewrite in internal/dev.go's
-// httpsToSSH so the prompt can show what origin will be set to
-// without going through the actual toggle. Kept here (rather than
-// exported from internal/dev.go) so the TUI doesn't need write
-// access for read-only previews.
-func previewHTTPSToSSH(httpsURL string) (string, bool) {
-	if !strings.HasPrefix(httpsURL, "https://") {
-		return httpsURL, false
+// schemeOption renders one scheme choice, noting when it is the remote
+// the clone already uses so the user can tell which way the toggle
+// would move them.
+func schemeOption(label, value, url string, ok bool, current string) sourcePromptOption {
+	if !ok {
+		return sourcePromptOption{
+			label:    label,
+			value:    value,
+			desc:     "(no " + label + " mapping for " + current + ")",
+			disabled: true,
+		}
 	}
-	rest := strings.TrimPrefix(httpsURL, "https://")
-	slash := strings.IndexByte(rest, '/')
-	if slash < 0 || slash == len(rest)-1 {
-		return httpsURL, false
+	desc := "use " + url
+	if url == current {
+		desc += "  (current)"
 	}
-	host := rest[:slash]
-	path := rest[slash+1:]
-	return "git@" + host + ":" + path, true
+	return sourcePromptOption{label: label, value: value, desc: desc}
 }
 
 // liveRemoteURL returns `git remote get-url origin` for a module dir.
@@ -463,6 +469,43 @@ func (m model) runModuleToUpstream(rmName string, ssh bool, depth depthFetchSpec
 			name:       rmName,
 			err:        wrapDevErr(err, "module dev"),
 			successMsg: fmt.Sprintf("module %s switched to dev mode", rmName),
+		}
+	}
+	return m, tea.Batch(m.sourceOp.spinner.Tick, cmd)
+}
+
+// runModulePull fast-forwards a dev-mode module along the branch it is
+// on, the `p` key on the modules tab. Pin-mode and locally-overridden
+// modules are refused with a message rather than a progress view, so a
+// keypress on the wrong row costs nothing.
+//
+// The pull reaches the network, so it runs through the same background
+// path as the pin/dev toggles instead of blocking the render loop.
+func (m model) runModulePull(rmName string) (tea.Model, tea.Cmd) {
+	rm, ok := m.findModule(rmName)
+	if !ok {
+		m.message = fmt.Sprintf("module %s not found", rmName)
+		return m, nil
+	}
+	switch state := m.moduleSourceState(rm); {
+	case state == source.StateLocal:
+		m.message = fmt.Sprintf("module %s is local — yoe doesn't manage its source", rmName)
+		return m, nil
+	case !source.IsDev(state):
+		m.message = fmt.Sprintf("module %s is pinned — press u to switch it to dev mode first", rmName)
+		return m, nil
+	}
+	prevView := m.view
+	m.view = viewSourceProgress
+	m.sourceOp = newSourceOp(targetModule, rmName,
+		fmt.Sprintf("Pulling module %s", rmName), prevView)
+	cmd := func() tea.Msg {
+		summary, err := module.PullDev(rm)
+		return sourceOpDoneMsg{
+			target:     targetModule,
+			name:       rmName,
+			err:        wrapDevErr(err, "module pull"),
+			successMsg: fmt.Sprintf("module %s: %s", rmName, summary),
 		}
 	}
 	return m, tea.Batch(m.sourceOp.spinner.Tick, cmd)

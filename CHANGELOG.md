@@ -12,11 +12,11 @@ and this project adheres to
   under `/sys/bus/iio/devices`, so you can read the mikroBUS `AN` pin and the
   Grove connector's analog pin from a running image. See
   [Analog input](docs/machine-beagleplay.md#analog-input).
-- **Alpine images now load drivers for hardware that is present at boot.** A
-  new `coldplug` package sweeps `/sys` early in boot and loads the matching
-  modules, so onboard sensors and other built-in peripherals show up without
-  anyone running `modprobe`. The development image includes it; the Debian and
-  Ubuntu images already did this through udev. See
+- **Alpine images now load drivers for hardware that is present at boot.** A new
+  `coldplug` package sweeps `/sys` early in boot and loads the matching modules,
+  so onboard sensors and other built-in peripherals show up without anyone
+  running `modprobe`. The development image includes it; the Debian and Ubuntu
+  images already did this through udev. See
   [Coldplug](docs/libc-and-init.md#coldplug-modules-for-hardware-already-present-at-boot).
 - **New `libiio` package for working with IIO sensors.** `iio_info` lists every
   sensor, channel and attribute on a board, `iio_attr` reads and writes them,
@@ -24,10 +24,31 @@ and this project adheres to
   image now includes it. See
   [Analog input](docs/machine-beagleplay.md#analog-input).
 - **New `iiod-init` package serves a board's sensors over the network.** Add it
-  to an image to run `iiod`, which lets a development host work with the
-  board's sensors remotely. It is a separate package because the daemon has no
-  authentication and lets any client on the network read and write those
-  devices — including driving outputs — so only add it on a network you trust.
+  to an image to run `iiod`, which lets a development host work with the board's
+  sensors remotely. It is a separate package because the daemon has no
+  authentication and lets any client on the network read and write those devices
+  — including driving outputs — so only add it on a network you trust.
+
+## [0.14.9] - 2026-09-01
+
+- **`yoe module sync` no longer overwrites work in a dev-mode module.** A module
+  you have switched to dev mode is now pulled forward along the branch it is on
+  rather than checked out onto the project's declared ref, and the sync listing
+  names it as a dev module. When your own commits or uncommitted edits mean the
+  pull cannot fast-forward, yoe says so and leaves the clone alone instead of
+  moving it. See [`yoe module`](docs/yoe-tool.md#yoe-module).
+- **The HTTPS and SSH choices now describe the right URLs.** A module whose
+  clone was already using SSH offered an HTTPS option showing the SSH address
+  and an SSH option greyed out as unavailable, which is the state a module lands
+  in after switching to dev mode and back. Each option now shows its own
+  address, marks the one in use, and picking HTTPS moves the clone back to
+  HTTPS. See [`yoe module`](docs/yoe-tool.md#yoe-module).
+- **Press `p` to pull a module you are working in.** The modules tab picks up a
+  pull key that fast-forwards the module under the cursor along the branch its
+  clone is on, so picking up upstream changes no longer means leaving the TUI.
+  It applies to modules in dev mode, and leaves the clone untouched when your
+  own commits or edits mean the pull cannot fast-forward. See
+  [source state](docs/yoe-tool.md#source-state-src-column).
 
 ## [0.14.8] - 2026-08-27
 

@@ -1513,6 +1513,12 @@ func (m model) updateModulesTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.openSourcePromptForModule(mods[m.modulesCursor].Name)
+	case "p":
+		mods := m.proj.ResolvedModules
+		if m.modulesCursor < 0 || m.modulesCursor >= len(mods) {
+			return m, nil
+		}
+		return m.runModulePull(mods[m.modulesCursor].Name)
 	}
 	return m, nil
 }
@@ -3518,6 +3524,7 @@ func (m model) helpSections() (string, []helpSection) {
 				{title: "Actions", entries: []helpEntry{
 					{"$", "open a shell in the module's clone dir"},
 					{"u", "toggle source between pin and dev mode"},
+					{"p", "pull a dev-mode module along its branch"},
 					{"r", "refresh the module's git status"},
 				}},
 				helpGeneral(true),
@@ -3816,7 +3823,8 @@ func (m model) viewModulesTab() string {
 	} else {
 		b.WriteString(renderHelp([]helpItem{
 			{"tab", "next tab"}, {"j/k", "move"}, {"g/G", "top/bottom"},
-			{"$", "shell"}, {"u", "src"}, {"r", "refresh"}, {"?", "help"}, {"q", "quit"},
+			{"$", "shell"}, {"u", "src"}, {"p", "pull"}, {"r", "refresh"},
+			{"?", "help"}, {"q", "quit"},
 		}))
 	}
 	return b.String()

@@ -527,7 +527,8 @@ yoe module check-updates      # planned
 3. **Resolve versions** — PROJECT.star versions override transitive deps. If a
    required transitive dep is missing, error with an actionable message.
 4. **Fetch/update** — clone or update each module's Git repo into
-   `$YOE_CACHE/modules/`. Checkout the declared ref.
+   `$YOE_CACHE/modules/`. Checkout the declared ref, or fast-forward the
+   module's own branch when it is in dev mode (see below).
 5. **Verify** — confirm that each module's `MODULE.star` (if present) is valid
    Starlark.
 
@@ -540,11 +541,22 @@ missing or if `PROJECT.star` has changed since the last sync. You rarely need to
 run `yoe module sync` manually.
 
 **Dev mode:** Switching a module to dev mode turns its cache clone into one you
-can work in directly. yoe points `origin` at the SSH URL when you ask for it,
-downloads the history `git log` and `git blame` need, and configures the clone
-to track every branch on the remote rather than only the pinned one — so a
-branch you push shows up as `origin/<branch>` on the next fetch. From there the
-clone is yours: yoe sets up the connectivity and leaves your working tree alone.
+can work in directly. yoe sets `origin` to whichever of HTTPS or SSH you pick,
+converting from whichever the clone uses now, so a clone left on SSH by an
+earlier session returns to HTTPS when you ask for it. It also downloads the
+history `git log` and `git blame` need, and configures the clone to track every
+branch on the remote rather than only the pinned one, so a branch you push shows
+up as `origin/<branch>` on the next fetch. From there the clone is yours: yoe
+sets up the connectivity and leaves your working tree alone.
+
+`yoe module sync` respects that. A module in dev mode is fast-forwarded along
+the branch it is on — the equivalent of `git pull --ff-only` — instead of being
+checked out onto the declared ref, and the sync listing names each module it
+handled this way. When the pull cannot fast-forward because you have commits of
+your own or edits in the tree, yoe reports the reason and leaves the clone
+untouched; sync continues with the remaining modules. To go back to the declared
+ref, switch the module out of dev mode, which prompts before discarding
+anything.
 
 **Local overrides:** Modules with `local = "..."` in PROJECT.star skip fetching
 entirely and use the local directory. `yoe module list` shows these as
@@ -857,6 +869,12 @@ ready to ship, `P` rewrites the unit's `.star` `tag` field — to HEAD's tag nam
 when one exists, otherwise to the 40-char SHA. `P` never writes the `branch`
 field; branch tracking is declared by the unit author. The SRC column flips back
 to `dev` the next time the row renders.
+
+On the modules tab, `p` pulls the module under the cursor forward along the
+branch its clone is on, the same fast-forward `yoe module sync` performs. It
+applies to modules in a `dev` state only; a pinned module says so and points you
+at `u`. When your own commits or uncommitted edits mean the pull cannot
+fast-forward, yoe reports why and leaves the clone untouched.
 
 While a unit is in any `dev*` state, `yoe build` reuses your working tree
 without re-fetching, re-extracting, or re-applying patches. A warning is logged

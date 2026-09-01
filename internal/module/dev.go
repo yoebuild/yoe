@@ -49,13 +49,25 @@ func ModuleToUpstream(m yoestar.ResolvedModule, opts ModuleUpstreamOpts) error {
 		return fmt.Errorf("ModuleToUpstream: %s is not a git repo", repo)
 	}
 
-	if opts.SSH {
-		current, err := gitutil.Run(repo, "remote", "get-url", "origin")
-		if err == nil {
-			if rewrote, ok := gitutil.HTTPSToSSH(strings.TrimSpace(current)); ok {
-				if _, err := gitutil.Run(repo, "remote", "set-url", "origin", rewrote); err != nil {
-					return fmt.Errorf("ModuleToUpstream: switching origin to SSH: %w", err)
-				}
+	// Apply the scheme the user picked in both directions. A clone
+	// switched to SSH in an earlier dev session keeps that remote when
+	// it returns to pin, so choosing HTTPS on the next toggle has to
+	// move it back — otherwise the choice reads as accepted and
+	// silently leaves origin where it was. Units get this for free by
+	// rebuilding origin from the unit's declared source.
+	if current, err := gitutil.Run(repo, "remote", "get-url", "origin"); err == nil {
+		current = strings.TrimSpace(current)
+		rewrote, ok := current, false
+		scheme := "HTTPS"
+		if opts.SSH {
+			scheme = "SSH"
+			rewrote, ok = gitutil.HTTPSToSSH(current)
+		} else {
+			rewrote, ok = gitutil.SSHToHTTPS(current)
+		}
+		if ok {
+			if _, err := gitutil.Run(repo, "remote", "set-url", "origin", rewrote); err != nil {
+				return fmt.Errorf("ModuleToUpstream: switching origin to %s: %w", scheme, err)
 			}
 		}
 	}
