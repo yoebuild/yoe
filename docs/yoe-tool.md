@@ -870,6 +870,12 @@ when one exists, otherwise to the 40-char SHA. `P` never writes the `branch`
 field; branch tracking is declared by the unit author. The SRC column flips back
 to `dev` the next time the row renders.
 
+On the modules tab, `p` pulls the module under the cursor forward along the
+branch its clone is on, the same fast-forward `yoe module sync` performs. It
+applies to modules in a `dev` state only; a pinned module says so and points you
+at `u`. When your own commits or uncommitted edits mean the pull cannot
+fast-forward, yoe reports why and leaves the clone untouched.
+
 While a unit is in any `dev*` state, `yoe build` reuses your working tree
 without re-fetching, re-extracting, or re-applying patches. A warning is logged
 so you know `.star` source/tag/patches edits won't apply until you toggle the

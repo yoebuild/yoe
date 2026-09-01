@@ -1652,3 +1652,84 @@ func TestUpdateSetup_ExitFocusesTargetImage(t *testing.T) {
 		}
 	}
 }
+
+// modelWithModule builds a model whose modules tab holds one module in
+// the given source state, enough to exercise the `p` key's guards
+// without touching a real clone.
+func modelWithModule(rm yoestar.ResolvedModule, state source.State) model {
+	return model{
+		view: viewUnits,
+		proj: &yoestar.Project{ResolvedModules: []yoestar.ResolvedModule{rm}},
+		moduleSrcStates: map[string]source.State{
+			rm.Name: state,
+		},
+	}
+}
+
+// A pinned module refuses the pull with a message pointing at `u`,
+// rather than opening a progress view for work it will not do.
+func TestRunModulePull_RefusesPinned(t *testing.T) {
+	m := modelWithModule(yoestar.ResolvedModule{Name: "module-alpine", CloneDir: "/nonexistent"}, source.StatePin)
+	updated, cmd := m.runModulePull("module-alpine")
+	got := updated.(model)
+	if cmd != nil {
+		t.Errorf("expected no background command for a pinned module")
+	}
+	if got.view == viewSourceProgress {
+		t.Errorf("should not open the progress view for a pinned module")
+	}
+	if !strings.Contains(got.message, "press u") {
+		t.Errorf("message should point at the toggle, got %q", got.message)
+	}
+}
+
+// A locally-overridden module is the user's checkout; yoe does not pull it.
+func TestRunModulePull_RefusesLocal(t *testing.T) {
+	m := modelWithModule(yoestar.ResolvedModule{Name: "mine", Local: "../mine"}, source.StateLocal)
+	updated, cmd := m.runModulePull("mine")
+	got := updated.(model)
+	if cmd != nil {
+		t.Errorf("expected no background command for a local module")
+	}
+	if !strings.Contains(got.message, "local") {
+		t.Errorf("message should say the module is local, got %q", got.message)
+	}
+}
+
+// A dev-mode module runs the pull in the background, showing the
+// progress view rather than blocking the render loop.
+func TestRunModulePull_DevRunsInBackground(t *testing.T) {
+	for _, state := range []source.State{source.StateDev, source.StateDevMod, source.StateDevDirty} {
+		m := modelWithModule(yoestar.ResolvedModule{Name: "module-alpine", CloneDir: "/nonexistent"}, state)
+		updated, cmd := m.runModulePull("module-alpine")
+		got := updated.(model)
+		if cmd == nil {
+			t.Errorf("state %q: expected a background command", state)
+		}
+		if got.view != viewSourceProgress {
+			t.Errorf("state %q: view = %v, want viewSourceProgress", state, got.view)
+		}
+		if got.sourceOp == nil {
+			t.Errorf("state %q: expected a source op to be recorded", state)
+		}
+	}
+}
+
+func TestRunModulePull_UnknownModule(t *testing.T) {
+	m := modelWithModule(yoestar.ResolvedModule{Name: "module-alpine"}, source.StateDev)
+	updated, _ := m.runModulePull("nope")
+	if got := updated.(model); !strings.Contains(got.message, "not found") {
+		t.Errorf("message = %q, want a not-found message", got.message)
+	}
+}
+
+// The modules tab routes `p` to the pull action for the row under the
+// cursor, so the binding is reachable and not shadowed.
+func TestModulesTab_PKeyDispatchesPull(t *testing.T) {
+	m := modelWithModule(yoestar.ResolvedModule{Name: "module-alpine", CloneDir: "/nonexistent"}, source.StatePin)
+	updated, _ := m.updateModulesTab(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	// Pinned, so the guard fires — which is proof the key reached it.
+	if got := updated.(model); !strings.Contains(got.message, "press u") {
+		t.Errorf("p did not reach runModulePull; message = %q", got.message)
+	}
+}

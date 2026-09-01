@@ -1,6 +1,7 @@
 package module
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -115,12 +116,8 @@ func moduleState(moduleDir string) source.State {
 	return state
 }
 
-// pullDevModule fast-forwards a dev-mode module clone onto its tracking
-// branch, the same `git pull --ff-only` the user would run themselves.
-// The clone comes off `git clone --branch <ref>` already on a local
-// branch tracking origin/<ref>, so the configured upstream is there to
-// pull from — and following the branch the user is actually on, rather
-// than the project's declared ref, is the point of dev mode.
+// pullDevModule reports a dev-mode module and fast-forwards it, keeping
+// the sync listing's one-line-per-module shape.
 //
 // A pull that cannot fast-forward is the expected outcome whenever the
 // user has commits of their own or edits in the tree. That is not a
@@ -129,12 +126,59 @@ func moduleState(moduleDir string) source.State {
 // owns the tree, treats a checkout failure as fatal.
 func pullDevModule(moduleDir, name string, state source.State, w io.Writer) {
 	fmt.Fprintf(w, "  %-20s dev mode — pulling instead of checking out\n", name)
-	out, err := gitutil.Run(moduleDir, "pull", "--ff-only")
+	summary, err := pullDevClone(moduleDir, state)
 	if err != nil {
-		fmt.Fprintf(w, "  %-20s dev mode — left as-is: %s\n", name, firstLine(err.Error()))
+		fmt.Fprintf(w, "  %-20s dev mode — left as-is: %s\n", name, err)
 		return
 	}
-	fmt.Fprintf(w, "  %-20s %s\n", name, firstLine(out))
+	fmt.Fprintf(w, "  %-20s %s\n", name, summary)
+}
+
+// PullDev fast-forwards a module's clone along the branch it is on,
+// the same `git pull --ff-only` the user would run themselves, and
+// returns git's headline ("Fast-forward", "Already up to date.").
+//
+// Only dev-mode clones are pulled. A pin-mode clone is yoe's to place
+// on the declared ref, and a locally-overridden module is the user's
+// checkout entirely; both refuse rather than moving someone's tree on
+// a keypress.
+func PullDev(m yoestar.ResolvedModule) (string, error) {
+	if m.Local != "" {
+		return "", fmt.Errorf("module %s is locally overridden; yoe doesn't manage its source", m.Name)
+	}
+	repo := m.CloneDir
+	if repo == "" {
+		repo = m.Dir
+	}
+	if repo == "" {
+		return "", fmt.Errorf("module %s has no clone dir — run `yoe module sync`", m.Name)
+	}
+	state := moduleState(repo)
+	if !source.IsDev(state) {
+		return "", fmt.Errorf("module %s is not in dev mode; press u to switch it", m.Name)
+	}
+	return pullDevClone(repo, state)
+}
+
+// pullDevClone is the fast-forward itself. The clone comes off `git
+// clone --branch <ref>` already on a local branch tracking
+// origin/<ref>, so the configured upstream is there to pull from, and
+// following the branch the user is actually on rather than the
+// project's declared ref is the point of dev mode.
+func pullDevClone(repo string, state source.State) (string, error) {
+	out, err := gitutil.Run(repo, "pull", "--ff-only")
+	if err != nil {
+		// Git says the fast-forward was refused; the state says why,
+		// which is the part that tells the user what to do next.
+		msg := firstLine(err.Error())
+		switch state {
+		case source.StateDevDirty:
+			return "", fmt.Errorf("%s — commit or stash your edits first", msg)
+		case source.StateDevMod:
+			return "", fmt.Errorf("%s — your commits are still here; rebase them onto the remote, or reset the module to its declared ref", msg)
+		}
+		return "", errors.New(msg)
+	}
 
 	// Re-anchor the dev tag on a clone that had no local work, so a
 	// module merely following upstream keeps reporting `dev` rather
@@ -142,8 +186,9 @@ func pullDevModule(moduleDir, name string, state source.State, w io.Writer) {
 	// was already dev-mod or dev-dirty keeps its original anchor —
 	// the commits it counts are still the user's.
 	if state == source.StateDev {
-		_, _ = gitutil.Run(moduleDir, "tag", "-f", source.PinTag, "HEAD")
+		_, _ = gitutil.Run(repo, "tag", "-f", source.PinTag, "HEAD")
 	}
+	return firstLine(out), nil
 }
 
 // firstLine trims git output down to its headline so the sync listing

@@ -20,6 +20,12 @@ and this project adheres to
   in after switching to dev mode and back. Each option now shows its own
   address, marks the one in use, and picking HTTPS moves the clone back to
   HTTPS. See [`yoe module`](docs/yoe-tool.md#yoe-module).
+- **Press `p` to pull a module you are working in.** The modules tab picks up a
+  pull key that fast-forwards the module under the cursor along the branch its
+  clone is on, so picking up upstream changes no longer means leaving the TUI.
+  It applies to modules in dev mode, and leaves the clone untouched when your
+  own commits or edits mean the pull cannot fast-forward. See
+  [source state](docs/yoe-tool.md#source-state-src-column).
 
 ## [0.14.8] - 2026-08-27
 

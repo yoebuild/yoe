@@ -474,6 +474,43 @@ func (m model) runModuleToUpstream(rmName string, ssh bool, depth depthFetchSpec
 	return m, tea.Batch(m.sourceOp.spinner.Tick, cmd)
 }
 
+// runModulePull fast-forwards a dev-mode module along the branch it is
+// on, the `p` key on the modules tab. Pin-mode and locally-overridden
+// modules are refused with a message rather than a progress view, so a
+// keypress on the wrong row costs nothing.
+//
+// The pull reaches the network, so it runs through the same background
+// path as the pin/dev toggles instead of blocking the render loop.
+func (m model) runModulePull(rmName string) (tea.Model, tea.Cmd) {
+	rm, ok := m.findModule(rmName)
+	if !ok {
+		m.message = fmt.Sprintf("module %s not found", rmName)
+		return m, nil
+	}
+	switch state := m.moduleSourceState(rm); {
+	case state == source.StateLocal:
+		m.message = fmt.Sprintf("module %s is local — yoe doesn't manage its source", rmName)
+		return m, nil
+	case !source.IsDev(state):
+		m.message = fmt.Sprintf("module %s is pinned — press u to switch it to dev mode first", rmName)
+		return m, nil
+	}
+	prevView := m.view
+	m.view = viewSourceProgress
+	m.sourceOp = newSourceOp(targetModule, rmName,
+		fmt.Sprintf("Pulling module %s", rmName), prevView)
+	cmd := func() tea.Msg {
+		summary, err := module.PullDev(rm)
+		return sourceOpDoneMsg{
+			target:     targetModule,
+			name:       rmName,
+			err:        wrapDevErr(err, "module pull"),
+			successMsg: fmt.Sprintf("module %s: %s", rmName, summary),
+		}
+	}
+	return m, tea.Batch(m.sourceOp.spinner.Tick, cmd)
+}
+
 func (m model) runModuleToPin(rmName string, force bool) (tea.Model, tea.Cmd) {
 	rm, ok := m.findModule(rmName)
 	if !ok {
