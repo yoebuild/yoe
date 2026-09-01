@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.14.9] - 2026-09-01
+
 - **`yoe module sync` no longer overwrites work in a dev-mode module.** A module
   you have switched to dev mode is now pulled forward along the branch it is on
   rather than checked out onto the project's declared ref, and the sync listing
