@@ -1,0 +1,84 @@
+From 1fbbf35f0e3ddc15a28fab9c4e40766e491673ec Mon Sep 17 00:00:00 2001
+From: yoe build <yoe@build>
+Date: Tue, 1 Sep 2026 12:00:00 -0400
+Subject: [PATCH] arm64: dts: ti: k3-am625-beagleplay: enable the on-board
+ ADC102S051
+
+BeaglePlay carries an ADC102S051 -- a two-channel 10-bit SPI ADC -- on
+MCU_SPI1 chip select 1. Channel 0 reaches the mikroBUS AN pin and channel
+1 the Grove connector's analog pin; they are the board's only analog
+inputs. Both are 0-3.3 V referenced to vdd_3v3.
+
+The node is absent from this tree, so mcu_spi1 stays disabled with no
+child, nothing claims industrialio, and /sys/bus/iio never appears. It
+did exist in BeagleBoard's 5.10 TI kernel and was dropped on the way to
+6.x; carry it here.
+
+The pinmux matches the 5.10 tree and the board schematic: CLK on ball D4,
+CS1 on E5, D0 on A6, D1 on B6. No other node in the BeaglePlay device
+tree claims those pads.
+
+Bind ti,adc122s051 rather than ti,adc102s051 because the driver
+(drivers/iio/adc/ti-adc128s052.c) carries only the 12-bit variants -- the
+10-bit compatibles the 5.10 driver listed are gone. The parts are
+protocol compatible and the 10-bit result is left-aligned in the 12-bit
+frame, so the reported scale of 0.805664 mV/count is correct; only the
+low two bits read as zero.
+
+Signed-off-by: yoe build <yoe@build>
+---
+ .../arm64/boot/dts/ti/k3-am625-beagleplay.dts | 34 +++++++++++++++++++
+ 1 file changed, 34 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/ti/k3-am625-beagleplay.dts b/arch/arm64/boot/dts/ti/k3-am625-beagleplay.dts
+index 4970d039c..e9a9efb0a 100644
+--- a/arch/arm64/boot/dts/ti/k3-am625-beagleplay.dts
++++ b/arch/arm64/boot/dts/ti/k3-am625-beagleplay.dts
+@@ -553,6 +553,16 @@ wifi_32k_clk: mcu-clk-out-default-pins {
+ 			AM62X_MCU_IOPAD(0x0084, PIN_OUTPUT, 0) /* (A12) WKUP_CLKOUT0 */
+ 		>;
+ 	};
++
++	adc_spi_pins_default: adc-spi-default-pins {
++		pinctrl-single,pins = <
++			AM62X_MCU_IOPAD(0x0040, PIN_INPUT, 4) /* (D4) MCU_MCAN1_RX.MCU_SPI1_CLK */
++			/* TI's pinmux tool warns about an invalid IOSET for CS1; the board wires it this way. */
++			AM62X_MCU_IOPAD(0x003c, PIN_INPUT, 3) /* (E5) MCU_MCAN1_TX.MCU_SPI1_CS1 */
++			AM62X_MCU_IOPAD(0x001c, PIN_INPUT, 3) /* (A6) MCU_UART0_CTSn.MCU_SPI1_D0 */
++			AM62X_MCU_IOPAD(0x0020, PIN_INPUT, 3) /* (B6) MCU_UART0_RTSn.MCU_SPI1_D1 */
++		>;
++	};
+ };
+ 
+ &a53_opp_table {
+@@ -577,6 +587,30 @@ &mcu_i2c0 {
+ 	status = "okay";
+ };
+ 
++/*
++ * On-board ADC102S051: a two-channel 10-bit SPI ADC on MCU_SPI1 chip select 1.
++ * in_voltage0 reaches the mikroBUS AN pin, in_voltage1 the Grove analog pin.
++ *
++ * The driver (drivers/iio/adc/ti-adc128s052.c) only carries the 12-bit parts,
++ * so bind the protocol-compatible ti,adc122s051. The 10-bit result is
++ * left-aligned in the 12-bit frame, which makes the reported scale correct;
++ * only the low two bits are always zero.
++ */
++&mcu_spi1 {
++	pinctrl-names = "default";
++	pinctrl-0 = <&adc_spi_pins_default>;
++	ti,spi-num-cs = <2>;
++	status = "okay";
++
++	adc@1 {
++		compatible = "ti,adc122s051";
++		reg = <1>;
++		vref-supply = <&vdd_3v3>;
++		spi-max-frequency = <4000000>;
++		#io-channel-cells = <1>;
++	};
++};
++
+ &usbss0 {
+ 	bootph-all;
+ 	ti,vbus-divider;

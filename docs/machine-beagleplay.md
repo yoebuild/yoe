@@ -170,6 +170,50 @@ If the boot stops at U-Boot's `Hit any key` prompt and never autoboots, either
 to the U-Boot shell, `ls mmc 1:1` to see what's on the FAT partition, and re-run
 the load commands one by one to see which one errors.
 
+## Analog input
+
+BeaglePlay's only analog inputs come from an on-board ADC102S051 — a two-channel
+10-bit SPI ADC sitting on the SoC's `MCU_SPI1` bus at chip select 1. Channel 0
+reaches the mikroBUS **AN** pin; channel 1 reaches the Grove connector's analog
+pin. Both accept 0–3.3 V, referenced to the board's `vdd_3v3` rail. **Do not
+exceed 3.3 V** — there is no series protection between the connector pin and the
+ADC input.
+
+The kernel exposes it through the industrial I/O (IIO) subsystem:
+
+```
+# cat /sys/bus/iio/devices/iio:device0/name
+adc122s051
+# cat /sys/bus/iio/devices/iio:device0/in_voltage_scale
+0.805664062
+# cat /sys/bus/iio/devices/iio:device0/in_voltage0_raw
+2380
+```
+
+Multiply a channel's `_raw` by the scale to get millivolts, so the reading above
+is 1917 mV. Note that the scale attribute is `in_voltage_scale`, without a
+channel index — the driver shares one scale across both channels rather than
+publishing `in_voltage0_scale` and `in_voltage1_scale` separately.
+
+The scale is a 12-bit figure because the driver binds the part as its 12-bit
+sibling (see below); the hardware really is 10-bit, so the two low bits of every
+reading come back zero. Note also that an unconnected input floats rather than
+reading zero — expect noise on a channel with nothing wired to it.
+
+The driver is a module, and the SPI controller it hangs off is built into the
+kernel — the controller registers the ADC during early boot, before any
+userspace exists to see the uevent, and nothing coldplugs it afterwards. So
+`beagleplay-config` ships `/usr/lib/modules-load.d/beagleplay-adc.conf` naming
+`ti-adc128s052`, which OpenRC's `modules` service (and systemd's
+`systemd-modules-load` on the Debian and Ubuntu images) processes at boot. That
+is what makes `/sys/bus/iio` appear without anyone running `modprobe`.
+
+The device tree names the part `ti,adc122s051` rather than `ti,adc102s051`. The
+driver (`drivers/iio/adc/ti-adc128s052.c`) carries only the 12-bit variants —
+the 10-bit compatible strings that older kernels listed were removed upstream.
+The parts are protocol compatible and the 10-bit result arrives left-aligned in
+the 12-bit frame, which is why the 12-bit scale is the correct one to apply.
+
 ## Boot chain at a glance
 
 The AM625 boot ROM expects a multi-stage handoff. Each blob feeds the next, and
@@ -424,6 +468,12 @@ A few things are non-obvious and worth knowing if you go to change a unit:
   `libcrypto.pc` reports `prefix=/usr`, so pkg-config alone misses the sysroot.
   The kheaders archive (`CONFIG_IKHEADERS`) also needs `cpio`, which the unit
   pulls in as a dep.
+- **The kernel carries a device tree patch for the ADC.** BeagleBoard's 6.12
+  tree ships `mcu_spi1` disabled with no child node, so the on-board ADC102S051
+  is invisible and `/sys/bus/iio` never appears. `linux-beagleplay` applies a
+  patch that enables the bus, sets the MCU pinmux (CLK on ball D4, CS1 on E5,
+  D0 on A6, D1 on B6), and adds the ADC as its only child. The node came from
+  BeagleBoard's 5.10 TI kernel, which had it and lost it on the way to 6.x.
 
 ## When something fails
 

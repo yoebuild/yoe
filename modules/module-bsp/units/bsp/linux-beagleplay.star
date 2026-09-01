@@ -20,6 +20,12 @@ unit(
         "debian": ["libssl-dev"],
         "ubuntu": ["libssl-dev"],
     },
+    # BeaglePlay's on-board ADC102S051 (two-channel 10-bit SPI ADC, the only
+    # analog input on the board) has no node in this tree: mcu_spi1 ships
+    # disabled with no child, so nothing claims industrialio and
+    # /sys/bus/iio never appears. The node existed in BeagleBoard's 5.10 TI
+    # kernel and was dropped on the way to 6.x, so we carry it ourselves.
+    patches = ["linux-beagleplay/0001-arm64-dts-ti-k3-am625-beagleplay-enable-the-on-board-ADC.patch"],
     container = "toolchain",
     container_arch = "target",
     tasks = [

@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **BeaglePlay's analog inputs now work.** The board's on-board ADC appears
+  under `/sys/bus/iio/devices`, so you can read the mikroBUS `AN` pin and the
+  Grove connector's analog pin from a running image. See
+  [Analog input](docs/machine-beagleplay.md#analog-input).
+
 ## [0.14.8] - 2026-08-27
 
 - **A module in dev mode now sees every branch on its remote.** Switching a
