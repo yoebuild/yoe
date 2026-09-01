@@ -97,15 +97,15 @@ files, feeding each one to `modprobe`.
 
 The two bases differ in whether they already do this:
 
-|                | How coldplug happens                                                  |
-| -------------- | --------------------------------------------------------------------- |
+|                | How coldplug happens                                                   |
+| -------------- | ---------------------------------------------------------------------- |
 | Debian, Ubuntu | `systemd-udev-trigger.service`, enabled by udev itself — nothing to do |
 | Alpine         | the `coldplug` unit, enabled into the `sysinit` runlevel               |
 
 Alpine's `openrc` package ships `hwdrivers`, which performs exactly this sweep,
 but it cannot be used as-is: its `depend()` declares `need dev`, and nothing in
 a yoe image provides `dev`. `devfs` provides `dev-mount` and orders itself
-*before* `dev`, and yoe builds eudev from source without the OpenRC scripts
+_before_ `dev`, and yoe builds eudev from source without the OpenRC scripts
 Alpine keeps in its separate `udev-init-scripts` package. `rc_need` in
 `/etc/conf.d` only ever adds dependencies, so the `need dev` cannot be relaxed
 from outside the script. Rather than pull a whole device manager into every

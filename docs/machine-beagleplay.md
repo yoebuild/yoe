@@ -208,16 +208,17 @@ userspace exists to see the uevent. Two things make it load anyway.
 the Debian and Ubuntu images) processes at boot; the ADC is soldered to the
 board, so naming it outright is the most direct thing to do and it holds even in
 an image that carries no coldplug. Separately, the general mechanism described
-under [Coldplug](libc-and-init.md#coldplug-modules-for-hardware-already-present-at-boot)
+under
+[Coldplug](libc-and-init.md#coldplug-modules-for-hardware-already-present-at-boot)
 would find this chip too, along with anything else plugged in.
 
 For anything beyond reading raw counts, use `libiio`, which the development
-image already carries: `iio_info` enumerates every device, channel and
-attribute in one shot, `iio_attr` reads and writes them by name, and
-`iio_readdev` streams sample buffers. To work with the board's sensors from a
-development host instead, add the `iiod-init` package — it runs the IIO network
-daemon, and it is a separate package because that daemon has no authentication
-and grants any client on the network read and write access to these channels.
+image already carries: `iio_info` enumerates every device, channel and attribute
+in one shot, `iio_attr` reads and writes them by name, and `iio_readdev` streams
+sample buffers. To work with the board's sensors from a development host
+instead, add the `iiod-init` package — it runs the IIO network daemon, and it is
+a separate package because that daemon has no authentication and grants any
+client on the network read and write access to these channels.
 
 The device tree names the part `ti,adc122s051` rather than `ti,adc102s051`. The
 driver (`drivers/iio/adc/ti-adc128s052.c`) carries only the 12-bit variants —
@@ -482,8 +483,8 @@ A few things are non-obvious and worth knowing if you go to change a unit:
 - **The kernel carries a device tree patch for the ADC.** BeagleBoard's 6.12
   tree ships `mcu_spi1` disabled with no child node, so the on-board ADC102S051
   is invisible and `/sys/bus/iio` never appears. `linux-beagleplay` applies a
-  patch that enables the bus, sets the MCU pinmux (CLK on ball D4, CS1 on E5,
-  D0 on A6, D1 on B6), and adds the ADC as its only child. The node came from
+  patch that enables the bus, sets the MCU pinmux (CLK on ball D4, CS1 on E5, D0
+  on A6, D1 on B6), and adds the ADC as its only child. The node came from
   BeagleBoard's 5.10 TI kernel, which had it and lost it on the way to 6.x.
 
 ## When something fails
