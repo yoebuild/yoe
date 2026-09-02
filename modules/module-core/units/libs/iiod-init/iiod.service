@@ -1,0 +1,14 @@
+[Unit]
+Description=IIO Daemon
+After=network.target systemd-udev-trigger.service
+
+[Service]
+# Optional flags (e.g. -d for debug, -p for a non-default port) come from
+# /etc/default/iiod when present; the leading - makes the file optional.
+EnvironmentFile=-/etc/default/iiod
+ExecStart=/usr/sbin/iiod $IIOD_OPTS
+KillMode=process
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

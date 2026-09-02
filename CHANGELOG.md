@@ -8,6 +8,35 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.14.10] - 2026-09-02
+
+- **Mark a disk as do-not-use in the flash page.** Press `i` on a device to
+  exclude it from flashing. It stays in the list, greyed out and not selectable,
+  so an internal eMMC or a backup drive cannot be picked by accident. Press `i`
+  again to allow it. A mark follows the physical device, so it still applies
+  after a reboot renames the disk or you move it to another port. The marks are
+  saved per developer. See [Flash page](docs/yoe-tool.md#flash-page).
+- **BeaglePlay's analog inputs now work.** The board's on-board ADC appears
+  under `/sys/bus/iio/devices`, so you can read the mikroBUS `AN` pin and the
+  Grove connector's analog pin from a running image. See
+  [Analog input](docs/machine-beagleplay.md#analog-input).
+- **Alpine images now load drivers for hardware that is present at boot.** A new
+  `coldplug` package sweeps `/sys` early in boot and loads the matching modules,
+  so onboard sensors and other built-in peripherals show up without anyone
+  running `modprobe`. The development image includes it; the Debian and Ubuntu
+  images already did this through udev. See
+  [Coldplug](docs/libc-and-init.md#coldplug-modules-for-hardware-already-present-at-boot).
+- **New `libiio` package for working with IIO sensors.** `iio_info` lists every
+  sensor, channel and attribute on a board, `iio_attr` reads and writes them,
+  and `iio_readdev` / `iio_writedev` stream sample buffers. The development
+  image now includes it. See
+  [Analog input](docs/machine-beagleplay.md#analog-input).
+- **New `iiod-init` package serves a board's sensors over the network.** Add it
+  to an image to run `iiod`, which lets a development host work with the board's
+  sensors remotely. It is a separate package because the daemon has no
+  authentication and lets any client on the network read and write those devices
+  — including driving outputs — so only add it on a network you trust.
+
 ## [0.14.9] - 2026-09-01
 
 - **`yoe module sync` no longer overwrites work in a dev-mode module.** A module

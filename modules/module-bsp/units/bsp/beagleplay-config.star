@@ -3,7 +3,7 @@ unit(
     version = "1.0.0",
     scope = "machine",
     license = "MIT",
-    description = "BeaglePlay U-Boot environment (uEnv.txt) — bootargs + load/booti for Image + DTB",
+    description = "BeaglePlay board configuration — U-Boot environment (uEnv.txt) and kernel module autoload",
     deps = ["toolchain"],
     container = "toolchain",
     container_arch = "target",
@@ -30,6 +30,26 @@ bootargs=console=ttyS2,115200 earlycon=ns16550a,mmio32,0x02800000 root=/dev/mmcb
 loadaddr=0x82000000
 fdt_addr_r=0x88000000
 uenvcmd=load mmc 1:1 ${loadaddr} Image; load mmc 1:1 ${fdt_addr_r} k3-am625-beagleplay.dtb; booti ${loadaddr} - ${fdt_addr_r}
+EOF
+""",
+            # The on-board ADC102S051 hangs off mcu_spi1, whose controller is
+            # built into the kernel: it registers the SPI child during early
+            # boot, long before userspace exists, so the device's uevent is
+            # gone by the time anything could act on it. Nothing coldplugs it
+            # afterwards either — Alpine's `hwdrivers` service ships in the
+            # image but is enabled in no runlevel — so CONFIG_TI_ADC128S052=m
+            # would never load and /sys/bus/iio would stay empty.
+            #
+            # OpenRC's `modules` service (enabled in the `boot` runlevel) reads
+            # /usr/lib/modules-load.d/*.conf and modprobes each entry, which
+            # gets the driver bound on every boot. The ADC is soldered to the
+            # board, so naming it here — in the machine's own config package —
+            # is the honest place for that policy.
+            """
+mkdir -p $DESTDIR/usr/lib/modules-load.d
+cat > $DESTDIR/usr/lib/modules-load.d/beagleplay-adc.conf << 'EOF'
+# BeaglePlay's on-board ADC102S051 (mikroBUS AN + Grove analog pins).
+ti-adc128s052
 EOF
 """,
         ]),

@@ -1,0 +1,19 @@
+#!/sbin/openrc-run
+
+description="IIO Daemon — serves this board's IIO devices over the network"
+
+# iiod reads no configuration of its own; /etc/conf.d/iiod is honoured so a
+# project can pass flags (e.g. -d for debug, -p for a non-default port)
+# without forking this script.
+command="/usr/sbin/iiod"
+command_args="${IIOD_OPTS}"
+command_background="yes"
+pidfile="/run/$RC_SVCNAME.pid"
+
+depend() {
+	need net
+	# Sensors reached through modular drivers only exist once the coldplug
+	# sweep has bound them; ordering after it keeps iiod from starting with
+	# an empty device list. Soft — harmless if coldplug is not installed.
+	after coldplug
+}

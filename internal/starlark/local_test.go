@@ -17,6 +17,8 @@ func TestLocalOverrides_RoundTrip(t *testing.T) {
 		QEMUMemory:  "8G",
 		QEMUDisplay: "on",
 		QEMUPorts:   []string{"5901:5900", "10022:22"},
+
+		IgnoredFlashDevices: []string{"/dev/mmcblk0", "/dev/sda"},
 	}
 	if err := WriteLocalOverrides(dir, in); err != nil {
 		t.Fatalf("write: %v", err)
@@ -87,3 +89,14 @@ func TestLocalOverrides_QEMUDisplayInvalid(t *testing.T) {
 }
 
 func writeFile(p, s string) error { return os.WriteFile(p, []byte(s), 0o644) }
+
+func TestLocalOverrides_IgnoredFlashDevicesMustBeStrings(t *testing.T) {
+	dir := t.TempDir()
+	body := "local(\n    ignored_flash_devices = [1, 2],\n)\n"
+	if err := os.WriteFile(filepath.Join(dir, "local.star"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := LoadLocalOverrides(dir); err == nil {
+		t.Fatal("expected an error for non-string ignored_flash_devices entries")
+	}
+}

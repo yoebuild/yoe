@@ -24,7 +24,15 @@ type LocalOverrides struct {
 	Image       string // overrides PROJECT.star defaults.image (e.g. for `yoe run` and TUI bootstrap)
 	DeployHost  string // last-used target for `yoe deploy` from the TUI
 	FlashDevice string // last-used flash target (e.g. /dev/sdb) for the TUI flash view
-	Query       string // last-saved TUI search query (in:base-image, etc.)
+	// IgnoredFlashDevices lists the devices the developer has marked as
+	// never-flash. Entries identify the physical device rather than the
+	// path it landed on this boot — "wwid:naa.5000c500b07a66d1",
+	// "serial:0x1234abcd", "usb:0781:5575:0401771110" — falling back to
+	// the path for devices that expose no stable identity. The TUI still
+	// shows them, greyed out and not selectable, so an internal disk
+	// cannot be picked by accident. Empty means "no device is ignored".
+	IgnoredFlashDevices []string
+	Query               string // last-saved TUI search query (in:base-image, etc.)
 	// QEMUMemory overrides the RAM `yoe run` gives the QEMU guest (e.g.
 	// "8G"). Empty means "not set" — the machine's own qemu memory is used.
 	QEMUMemory string
@@ -79,10 +87,11 @@ func LoadLocalOverrides(projectDir string) (LocalOverrides, error) {
 				captured.ParallelBuilds = int(i)
 				continue
 			}
-			if string(key) == "qemu_ports" {
+			if string(key) == "qemu_ports" || string(key) == "ignored_flash_devices" {
+				name := string(key)
 				list, ok := kv[1].(*starlark.List)
 				if !ok {
-					return nil, fmt.Errorf("local: qemu_ports must be a list of strings")
+					return nil, fmt.Errorf("local: %s must be a list of strings", name)
 				}
 				iter := list.Iterate()
 				defer iter.Done()
@@ -90,9 +99,13 @@ func LoadLocalOverrides(projectDir string) (LocalOverrides, error) {
 				for iter.Next(&elem) {
 					s, ok := elem.(starlark.String)
 					if !ok {
-						return nil, fmt.Errorf("local: qemu_ports entries must be strings")
+						return nil, fmt.Errorf("local: %s entries must be strings", name)
 					}
-					captured.QEMUPorts = append(captured.QEMUPorts, string(s))
+					if name == "qemu_ports" {
+						captured.QEMUPorts = append(captured.QEMUPorts, string(s))
+					} else {
+						captured.IgnoredFlashDevices = append(captured.IgnoredFlashDevices, string(s))
+					}
 				}
 				continue
 			}
@@ -177,6 +190,16 @@ func WriteLocalOverrides(projectDir string, ov LocalOverrides) error {
 				b.WriteString(", ")
 			}
 			fmt.Fprintf(&b, "%q", p)
+		}
+		b.WriteString("],\n")
+	}
+	if len(ov.IgnoredFlashDevices) > 0 {
+		b.WriteString("    ignored_flash_devices = [")
+		for i, d := range ov.IgnoredFlashDevices {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", d)
 		}
 		b.WriteString("],\n")
 	}

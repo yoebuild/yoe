@@ -512,6 +512,13 @@ type model struct {
 	flashTotal      int64
 	flashErr        error
 	flashProgress   progress.Model
+	// flashIgnored holds the devices marked "do not use", keyed by
+	// device.Candidate.IgnoreKey so a mark follows the physical disk rather
+	// than the path it landed on this boot (saved as ignored_flash_devices
+	// in local.star). Ignored devices stay in the list, greyed out and not
+	// selectable, so an internal disk is visibly excluded rather than
+	// silently missing.
+	flashIgnored map[string]bool
 
 	// Deploy view
 	deployUnit   string
@@ -1331,14 +1338,23 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.flashUnit = name
 			m.flashCandidates = cands
-			m.flashCursor = 0
+			m.flashIgnored = map[string]bool{}
+			lastDevice := ""
+			if ov, err := yoestar.LoadLocalOverrides(m.projectDir); err == nil {
+				for _, d := range ov.IgnoredFlashDevices {
+					m.flashIgnored[d] = true
+				}
+				lastDevice = ov.FlashDevice
+			}
 			// Pre-position the cursor on the device the user picked last
 			// time (saved as `flash_device` in local.star), so reflashing
 			// the same SD card / USB stick is one keypress (`f`, `Enter`)
-			// instead of a fresh hunt through the candidate list.
-			if ov, err := yoestar.LoadLocalOverrides(m.projectDir); err == nil && ov.FlashDevice != "" {
+			// instead of a fresh hunt through the candidate list. Fall back
+			// to the first device that is not marked "do not use".
+			m.flashCursor = firstSelectableFlash(cands, m.flashIgnored)
+			if lastDevice != "" {
 				for i, c := range cands {
-					if c.Path == ov.FlashDevice {
+					if c.Path == lastDevice && !m.flashIgnored[c.IgnoreKey()] {
 						m.flashCursor = i
 						break
 					}
@@ -3463,6 +3479,7 @@ func (m model) helpSections() (string, []helpSection) {
 			{title: "Select device", entries: []helpEntry{
 				{"↑  ·  ↓", "choose a removable device"},
 				{"Enter", "continue to the confirm step"},
+				{"i", "mark the device do-not-use, or allow it again"},
 				{"Esc  ·  q", "back to the unit list"},
 			}},
 			{title: "Confirm / permissions", entries: []helpEntry{
@@ -6269,6 +6286,19 @@ func sortedKeys[V any](m map[string]V) []string {
 
 // ----- Flash view -----
 
+// firstSelectableFlash returns the index of the first candidate not marked
+// do-not-use, so opening the flash view never lands the cursor on an
+// excluded disk. Returns 0 when every candidate is ignored — the row is
+// still visible, and Enter on it explains why it cannot be used.
+func firstSelectableFlash(cands []device.Candidate, ignored map[string]bool) int {
+	for i, c := range cands {
+		if !ignored[c.IgnoreKey()] {
+			return i
+		}
+	}
+	return 0
+}
+
 func (m model) updateFlash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.flashStage {
 	case flashSelect:
@@ -6286,8 +6316,46 @@ func (m model) updateFlash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.flashCursor++
 			}
 			return m, nil
+		case "i":
+			if len(m.flashCandidates) == 0 {
+				return m, nil
+			}
+			cand := m.flashCandidates[m.flashCursor]
+			if m.flashIgnored == nil {
+				m.flashIgnored = map[string]bool{}
+			}
+			key := cand.IgnoreKey()
+			nowIgnored := !m.flashIgnored[key]
+			if nowIgnored {
+				m.flashIgnored[key] = true
+			} else {
+				delete(m.flashIgnored, key)
+			}
+			if msg := m.mutateOverrides(func(ov *yoestar.LocalOverrides) {
+				ov.IgnoredFlashDevices = sortedKeys(m.flashIgnored)
+				// The remembered target must never point at a device the
+				// user just excluded, or the next flash would reopen with
+				// the cursor on it.
+				if nowIgnored && ov.FlashDevice == cand.Path {
+					ov.FlashDevice = ""
+				}
+			}); msg != "" {
+				m.message = msg
+				return m, nil
+			}
+			if nowIgnored {
+				m.message = fmt.Sprintf("%s marked do-not-use; press i again to allow it", cand.Path)
+			} else {
+				m.message = fmt.Sprintf("%s can be flashed again", cand.Path)
+			}
+			return m, nil
 		case "enter":
 			if len(m.flashCandidates) == 0 {
+				return m, nil
+			}
+			if m.flashIgnored[m.flashCandidates[m.flashCursor].IgnoreKey()] {
+				m.message = fmt.Sprintf("%s is marked do-not-use; press i to allow it",
+					m.flashCandidates[m.flashCursor].Path)
 				return m, nil
 			}
 			m.flashStage = flashConfirm
@@ -6379,15 +6447,25 @@ func (m model) viewFlash() string {
 		for i, c := range m.flashCandidates {
 			line := fmt.Sprintf("%-14s %8s  %-4s %-10s %s",
 				c.Path, device.FormatSize(c.Size), c.Bus, c.Vendor, c.Model)
-			if i == m.flashCursor {
+			switch {
+			case m.flashIgnored[c.IgnoreKey()]:
+				// Greyed out but still listed, so an excluded disk reads as
+				// a deliberate choice rather than a device that vanished.
+				line += "  (do not use)"
+				if i == m.flashCursor {
+					b.WriteString(dimStyle.Render("> " + line))
+				} else {
+					b.WriteString(dimStyle.Render("  " + line))
+				}
+			case i == m.flashCursor:
 				b.WriteString(selectedStyle.Render("> " + line))
-			} else {
+			default:
 				b.WriteString("  " + line)
 			}
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("↑/↓ select • enter confirm • esc back • ? help"))
+		b.WriteString(helpStyle.Render("↑/↓ select • enter confirm • i do-not-use • esc back • ? help"))
 	case flashConfirm:
 		c := m.flashCandidates[m.flashCursor]
 		b.WriteString(fmt.Sprintf("Flash %s → %s (%s, %s %s)?\n",
