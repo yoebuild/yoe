@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.14.10] - 2026-09-02
+
 - **Mark a disk as do-not-use in the flash page.** Press `i` on a device to
   exclude it from flashing. It stays in the list, greyed out and not selectable,
   so an internal eMMC or a backup drive cannot be picked by accident. Press `i`
