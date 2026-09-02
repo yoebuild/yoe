@@ -24,10 +24,13 @@ type LocalOverrides struct {
 	Image       string // overrides PROJECT.star defaults.image (e.g. for `yoe run` and TUI bootstrap)
 	DeployHost  string // last-used target for `yoe deploy` from the TUI
 	FlashDevice string // last-used flash target (e.g. /dev/sdb) for the TUI flash view
-	// IgnoredFlashDevices lists block-device paths (e.g. /dev/mmcblk0) the
-	// developer has marked as never-flash. The TUI still shows them, greyed
-	// out and not selectable, so an internal disk cannot be picked by
-	// accident. Empty means "no device is ignored".
+	// IgnoredFlashDevices lists the devices the developer has marked as
+	// never-flash. Entries identify the physical device rather than the
+	// path it landed on this boot — "wwid:naa.5000c500b07a66d1",
+	// "serial:0x1234abcd", "usb:0781:5575:0401771110" — falling back to
+	// the path for devices that expose no stable identity. The TUI still
+	// shows them, greyed out and not selectable, so an internal disk
+	// cannot be picked by accident. Empty means "no device is ignored".
 	IgnoredFlashDevices []string
 	Query               string // last-saved TUI search query (in:base-image, etc.)
 	// QEMUMemory overrides the RAM `yoe run` gives the QEMU guest (e.g.

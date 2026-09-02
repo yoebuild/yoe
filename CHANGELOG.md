@@ -11,8 +11,9 @@ and this project adheres to
 - **Mark a disk as do-not-use in the flash page.** Press `i` on a device to
   exclude it from flashing. It stays in the list, greyed out and not selectable,
   so an internal eMMC or a backup drive cannot be picked by accident. Press `i`
-  again to allow it. The marks are saved per developer and persist across
-  sessions. See [Flash page](docs/yoe-tool.md#flash-page).
+  again to allow it. A mark follows the physical device, so it still applies
+  after a reboot renames the disk or you move it to another port. The marks are
+  saved per developer. See [Flash page](docs/yoe-tool.md#flash-page).
 - **BeaglePlay's analog inputs now work.** The board's on-board ADC appears
   under `/sys/bus/iio/devices`, so you can read the mikroBUS `AN` pin and the
   Grove connector's analog pin from a running image. See

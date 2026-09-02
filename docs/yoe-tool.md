@@ -967,9 +967,26 @@ marks are per developer: they are saved as `ignored_flash_devices` in
 `local.star`, which is not checked in, so each person's machine keeps its own
 list.
 
-Devices are matched by path (`/dev/mmcblk0`, `/dev/sdb`). Paths can move between
-boots when several removable devices are attached, so confirm the size, vendor,
-and model shown on the confirmation step before writing.
+A mark identifies the physical device, not the path it happened to get this
+boot, so it holds when `/dev/sdb` and `/dev/sdc` trade places or a drive moves
+to another port. The identity comes from what the kernel exposes: a WWID, a
+serial number, or the vendor, product, and serial of the enclosing USB device.
+Entries in `local.star` look like this:
+
+```python
+local(
+    ignored_flash_devices = [
+        "wwid:naa.5000c500b07a66d1",
+        "serial:0x1234abcd",
+        "usb:0781:5575:04017711101522123217:0",
+    ],
+)
+```
+
+A few devices expose nothing identifying — some USB bridges report no serial at
+all. Those fall back to matching on the path, and their entries read `/dev/sdb`.
+A path can move between boots, so a mark on one of these devices is worth a
+glance at the size, vendor, and model on the confirmation step.
 
 #### Detail view
 

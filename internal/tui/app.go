@@ -512,10 +512,12 @@ type model struct {
 	flashTotal      int64
 	flashErr        error
 	flashProgress   progress.Model
-	// flashIgnored holds the device paths marked "do not use" (saved as
-	// ignored_flash_devices in local.star). Ignored devices stay in the
-	// list, greyed out and not selectable, so an internal disk is visibly
-	// excluded rather than silently missing.
+	// flashIgnored holds the devices marked "do not use", keyed by
+	// device.Candidate.IgnoreKey so a mark follows the physical disk rather
+	// than the path it landed on this boot (saved as ignored_flash_devices
+	// in local.star). Ignored devices stay in the list, greyed out and not
+	// selectable, so an internal disk is visibly excluded rather than
+	// silently missing.
 	flashIgnored map[string]bool
 
 	// Deploy view
@@ -1350,9 +1352,9 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// instead of a fresh hunt through the candidate list. Fall back
 			// to the first device that is not marked "do not use".
 			m.flashCursor = firstSelectableFlash(cands, m.flashIgnored)
-			if lastDevice != "" && !m.flashIgnored[lastDevice] {
+			if lastDevice != "" {
 				for i, c := range cands {
-					if c.Path == lastDevice {
+					if c.Path == lastDevice && !m.flashIgnored[c.IgnoreKey()] {
 						m.flashCursor = i
 						break
 					}
@@ -6290,7 +6292,7 @@ func sortedKeys[V any](m map[string]V) []string {
 // still visible, and Enter on it explains why it cannot be used.
 func firstSelectableFlash(cands []device.Candidate, ignored map[string]bool) int {
 	for i, c := range cands {
-		if !ignored[c.Path] {
+		if !ignored[c.IgnoreKey()] {
 			return i
 		}
 	}
@@ -6322,10 +6324,12 @@ func (m model) updateFlash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.flashIgnored == nil {
 				m.flashIgnored = map[string]bool{}
 			}
-			nowIgnored := !m.flashIgnored[cand.Path]
-			m.flashIgnored[cand.Path] = nowIgnored
-			if !nowIgnored {
-				delete(m.flashIgnored, cand.Path)
+			key := cand.IgnoreKey()
+			nowIgnored := !m.flashIgnored[key]
+			if nowIgnored {
+				m.flashIgnored[key] = true
+			} else {
+				delete(m.flashIgnored, key)
 			}
 			if msg := m.mutateOverrides(func(ov *yoestar.LocalOverrides) {
 				ov.IgnoredFlashDevices = sortedKeys(m.flashIgnored)
@@ -6349,7 +6353,7 @@ func (m model) updateFlash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if len(m.flashCandidates) == 0 {
 				return m, nil
 			}
-			if m.flashIgnored[m.flashCandidates[m.flashCursor].Path] {
+			if m.flashIgnored[m.flashCandidates[m.flashCursor].IgnoreKey()] {
 				m.message = fmt.Sprintf("%s is marked do-not-use; press i to allow it",
 					m.flashCandidates[m.flashCursor].Path)
 				return m, nil
@@ -6444,7 +6448,7 @@ func (m model) viewFlash() string {
 			line := fmt.Sprintf("%-14s %8s  %-4s %-10s %s",
 				c.Path, device.FormatSize(c.Size), c.Bus, c.Vendor, c.Model)
 			switch {
-			case m.flashIgnored[c.Path]:
+			case m.flashIgnored[c.IgnoreKey()]:
 				// Greyed out but still listed, so an excluded disk reads as
 				// a deliberate choice rather than a device that vanished.
 				line += "  (do not use)"
