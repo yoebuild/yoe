@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/yoebuild/yoe/internal/device"
 	"github.com/yoebuild/yoe/internal/source"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
@@ -1731,5 +1732,123 @@ func TestModulesTab_PKeyDispatchesPull(t *testing.T) {
 	// Pinned, so the guard fires — which is proof the key reached it.
 	if got := updated.(model); !strings.Contains(got.message, "press u") {
 		t.Errorf("p did not reach runModulePull; message = %q", got.message)
+	}
+}
+
+// ----- Flash: do-not-use devices -----
+
+func flashTestModel(t *testing.T) model {
+	t.Helper()
+	return model{
+		projectDir: t.TempDir(),
+		view:       viewFlash,
+		flashStage: flashSelect,
+		flashCandidates: []device.Candidate{
+			{Path: "/dev/mmcblk0", Size: 32 << 30, Bus: "mmc"},
+			{Path: "/dev/sdb", Size: 16 << 30, Bus: "usb", Vendor: "SanDisk"},
+		},
+		flashIgnored: map[string]bool{},
+	}
+}
+
+func TestFlashIgnore_TogglePersistsToLocalStar(t *testing.T) {
+	m := flashTestModel(t)
+
+	next, _ := m.updateFlash(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	m = next.(model)
+	if !m.flashIgnored["/dev/mmcblk0"] {
+		t.Fatal("i did not mark the highlighted device do-not-use")
+	}
+	ov, err := yoestar.LoadLocalOverrides(m.projectDir)
+	if err != nil {
+		t.Fatalf("load overrides: %v", err)
+	}
+	if len(ov.IgnoredFlashDevices) != 1 || ov.IgnoredFlashDevices[0] != "/dev/mmcblk0" {
+		t.Fatalf("local.star ignored list = %v, want [/dev/mmcblk0]", ov.IgnoredFlashDevices)
+	}
+
+	// Pressing i again allows the device and clears it from local.star.
+	next, _ = m.updateFlash(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	m = next.(model)
+	if m.flashIgnored["/dev/mmcblk0"] {
+		t.Fatal("second i did not allow the device again")
+	}
+	ov, err = yoestar.LoadLocalOverrides(m.projectDir)
+	if err != nil {
+		t.Fatalf("load overrides: %v", err)
+	}
+	if len(ov.IgnoredFlashDevices) != 0 {
+		t.Fatalf("local.star ignored list = %v, want empty", ov.IgnoredFlashDevices)
+	}
+}
+
+func TestFlashIgnore_EnterRefusesIgnoredDevice(t *testing.T) {
+	m := flashTestModel(t)
+	m.flashIgnored["/dev/mmcblk0"] = true
+
+	next, _ := m.updateFlash(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if m.flashStage != flashSelect {
+		t.Fatalf("enter advanced past an ignored device: stage = %v", m.flashStage)
+	}
+	if !strings.Contains(m.message, "/dev/mmcblk0") {
+		t.Fatalf("expected a message naming the ignored device, got %q", m.message)
+	}
+
+	// A device that is not ignored still advances to the confirm step.
+	m.flashCursor = 1
+	next, _ = m.updateFlash(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if m.flashStage != flashConfirm {
+		t.Fatalf("enter on an allowed device: stage = %v, want flashConfirm", m.flashStage)
+	}
+}
+
+func TestFlashIgnore_ClearsRememberedTarget(t *testing.T) {
+	m := flashTestModel(t)
+	if msg := m.mutateOverrides(func(ov *yoestar.LocalOverrides) {
+		ov.FlashDevice = "/dev/mmcblk0"
+	}); msg != "" {
+		t.Fatalf("seed overrides: %s", msg)
+	}
+
+	next, _ := m.updateFlash(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	m = next.(model)
+
+	ov, err := yoestar.LoadLocalOverrides(m.projectDir)
+	if err != nil {
+		t.Fatalf("load overrides: %v", err)
+	}
+	if ov.FlashDevice != "" {
+		t.Fatalf("flash_device still points at the ignored device: %q", ov.FlashDevice)
+	}
+}
+
+func TestFirstSelectableFlash(t *testing.T) {
+	cands := []device.Candidate{{Path: "/dev/mmcblk0"}, {Path: "/dev/sdb"}}
+	if got := firstSelectableFlash(cands, map[string]bool{"/dev/mmcblk0": true}); got != 1 {
+		t.Fatalf("firstSelectableFlash = %d, want 1", got)
+	}
+	if got := firstSelectableFlash(cands, nil); got != 0 {
+		t.Fatalf("firstSelectableFlash with nothing ignored = %d, want 0", got)
+	}
+	// Every device ignored: fall back to 0 so the row is still reachable
+	// and Enter can explain why it cannot be used.
+	all := map[string]bool{"/dev/mmcblk0": true, "/dev/sdb": true}
+	if got := firstSelectableFlash(cands, all); got != 0 {
+		t.Fatalf("firstSelectableFlash with all ignored = %d, want 0", got)
+	}
+}
+
+func TestFlashView_RendersIgnoredDevice(t *testing.T) {
+	m := flashTestModel(t)
+	m.width = 100
+	m.flashIgnored["/dev/mmcblk0"] = true
+	out := m.viewFlash()
+	if !strings.Contains(out, "/dev/mmcblk0") {
+		t.Fatal("ignored device is missing from the list; it should stay visible")
+	}
+	if !strings.Contains(out, "do not use") {
+		t.Fatalf("ignored device is not labelled:\n%s", out)
 	}
 }
