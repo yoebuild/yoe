@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Ubuntu images build again.** Adding `libiio` to an image asked for an XML
+  library under a name Ubuntu 26.04 no longer uses, so any Ubuntu image
+  containing it stopped before the build started.
+
 ## [0.14.10] - 2026-09-02
 
 - **Mark a disk as do-not-use in the flash page.** Press `i` on a device to
