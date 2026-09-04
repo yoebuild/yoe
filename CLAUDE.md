@@ -301,6 +301,11 @@ page keeps only theme framing and a record of what has landed.
   `testdata/e2e-project/PROJECT.star` (and propagate to `internal/init.go` per
   the "`yoe init` mirrors the e2e-project template" rule), rather than spinning
   up a parallel project.
+- **Format before committing.** Run `source envsetup.sh && yoe_format` (prettier
+  over the repo's tracked markdown) and `gofmt -w` on any Go file you touched,
+  then stage the result. CI's `format-check` job fails the build otherwise, and
+  a formatting-only follow-up commit is noise in the history. Nothing local
+  enforces this — there is no pre-commit hook — so it is on you to run it.
 - **External-module fixes go in the cached copy and must be pushed.** When the
   right place to change something is an external module (e.g. `module-alpine`,
   `module-jetson`), edit the file in place under

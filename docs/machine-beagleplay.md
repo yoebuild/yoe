@@ -176,8 +176,94 @@ BeaglePlay's only analog inputs come from an on-board ADC102S051 — a two-chann
 10-bit SPI ADC sitting on the SoC's `MCU_SPI1` bus at chip select 1. Channel 0
 reaches the mikroBUS **AN** pin; channel 1 reaches the Grove connector's analog
 pin. Both accept 0–3.3 V, referenced to the board's `vdd_3v3` rail. **Do not
-exceed 3.3 V** — there is no series protection between the connector pin and the
-ADC input.
+exceed 3.3 V** — the only thing between a connector pin and the ADC is a 1 kΩ
+series resistor and a 100 pF cap (and, on the Grove pin, a ferrite bead and an
+ESD clamp). That is an anti-alias filter and an ESD part, not overvoltage
+protection.
+
+### Finding the pins
+
+Hold the board the way BeagleBoard.org photographs it: USB-C, HDMI and the two
+Ethernet jacks down the left edge, the expansion connectors down the right edge,
+the `mikroBUS` silkscreen logo reading upright. Both analog inputs are then on
+the right-hand half of the board.
+
+```
+      ┌───────────────────────────────────────────┐
+      │  o                                     o  │
+ USB-C┤                                           ├ OLDI
+  UART┤                ┌───────────────┐          │
+ USB-A┤                │               │          ├ CSI2
+  HDMI┤                │   mikroBUS    │          │
+      │                │    socket     │          ├ GROVE  ← analog
+   Eth┤                │               │          │
+   SPE┤                └───────────────┘          ├ QWIIC
+      │        [ microSD ]                        │
+      │  o                                     o  │
+      └───────────────────────────────────────────┘
+```
+
+**mikroBUS `AN` is the top pin of the socket's left-hand row** — the corner
+nearest the CSI2 connector, diagonally opposite the two ground pins. Pin numbers
+below are the board schematic's (`J21`); the names are the mikroBUS standard's.
+
+```
+                ┌────────────────────────────┐
+  ADC ch 0 →  9 │ ● AN              PWM ●  8 │
+             10 │ ● RST             INT ●  7 │
+             11 │ ● CS               RX ●  6 │
+             12 │ ● SCK              TX ●  5 │
+             13 │ ● MISO            SCL ●  4 │
+             14 │ ● MOSI            SDA ●  3 │
+             15 │ ● +3V3            +5V ●  2 │
+             16 │ ● GND             GND ●  1 │
+                └────────── mikroBUS ────────┘
+```
+
+**Grove's analog pin is pin 1**, the one the silkscreen triangle points at and
+the one nearest CSI2. It is a 4-pin JST 2.0 mm right-angle header (`J7`), wired
+to the Grove standard's order:
+
+```
+            ┌──────────────┐
+   ▲   1 ●  │  SCL / AIN   │ ← ADC ch 1
+       2 ●  │  SDA         │
+       3 ●  │  3V3         │
+       4 ●  │  GND         │
+            └── GROVE ─────┘
+```
+
+### Each pin has a second job
+
+Neither analog pin is analog-only, and that matters more on Grove than on
+mikroBUS:
+
+```
+mikroBUS AN (J21 pin 9)                          ADC102S051 (U11)
+  ├── GPIO1_10 ......... main_gpio1 line 10      ┌─────────────────┐
+  └── AIN1 ─ R68 1kΩ ─┬─────────────────────────►│ IN1 (pin 5)     │  in_voltage0
+                      └── C235 100pF ── GND      │                 │
+                                                 │                 │
+Grove pin 1 (J7), behind ferrite bead FB27       │                 │
+  ├── D20 ESD clamp ── GND                       │                 │
+  ├── I2C1_SCL ......... /dev/i2c-1              │                 │
+  └── AIN2 ─ R67 1kΩ ─┬─────────────────────────►│ IN2 (pin 4)     │  in_voltage1
+                      └── C234 100pF ── GND      └─────────────────┘
+                                                  VA = 3.3 V reference
+```
+
+On mikroBUS this is harmless: the device tree muxes `AN` as `GPIO1_10`
+(`MIKROBUS_GPIO1_10` in `gpio-line-names`) with the pad configured as a plain
+high-impedance input, so nothing drives the pin and the ADC sees whatever the
+click board puts there.
+
+On Grove it is not. The same pin is `I2C1_SCL`, the device tree enables
+`main_i2c1` on it as `/dev/i2c-1`, and the pad is muxed `PIN_INPUT_PULLUP`. So
+the pin idles pulled high — `in_voltage1_raw` on an otherwise idle bus reads
+near full scale, not zero — and any I²C traffic on that bus shows up as noise in
+the samples. Treat the Grove connector as either an I²C port or an analog input,
+not both at once; if you want a quiet analog channel there, take `main_i2c1` out
+of the device tree.
 
 The kernel exposes it through the industrial I/O (IIO) subsystem:
 
@@ -197,8 +283,10 @@ publishing `in_voltage0_scale` and `in_voltage1_scale` separately.
 
 The scale is a 12-bit figure because the driver binds the part as its 12-bit
 sibling (see below); the hardware really is 10-bit, so the two low bits of every
-reading come back zero. Note also that an unconnected input floats rather than
-reading zero — expect noise on a channel with nothing wired to it.
+reading come back zero. Note also that an unconnected mikroBUS `AN` pin floats
+rather than reading zero — expect noise on a channel with nothing wired to it.
+The Grove channel behaves differently for the reason given above: it idles high,
+not floating.
 
 The driver is a module, and the SPI controller it hangs off is built into the
 kernel — the controller registers the ADC during early boot, before any
@@ -219,6 +307,10 @@ sample buffers. To work with the board's sensors from a development host
 instead, add the `iiod-init` package — it runs the IIO network daemon, and it is
 a separate package because that daemon has no authentication and grants any
 client on the network read and write access to these channels.
+
+Both connectors are documented, with schematics, on BeagleBoard.org's
+[BeaglePlay design page](https://docs.beagleboard.org/boards/beagleplay/03-design.html);
+the pin numbers and net names above come from those schematics.
 
 The device tree names the part `ti,adc122s051` rather than `ti,adc102s051`. The
 driver (`drivers/iio/adc/ti-adc128s052.c`) carries only the 12-bit variants —
