@@ -11,12 +11,27 @@ import (
 
 // Candidate describes a removable block device suitable for flashing.
 type Candidate struct {
-	Path     string // /dev/sdb, /dev/mmcblk0, ...
+	Path string // /dev/sdb, /dev/mmcblk0, ...
+	// ID identifies the physical device rather than the slot it landed in
+	// this boot: "wwid:<v>", "serial:<v>", or "usb:<vid>:<pid>:<serial>".
+	// Empty when the kernel exposes nothing stable for the device.
+	ID       string
 	Size     int64  // bytes
 	Bus      string // usb, mmc, scsi, ata, ""
 	Vendor   string
 	Model    string
 	ReadOnly bool
+}
+
+// IgnoreKey is how a candidate is recorded in a persisted do-not-use list.
+// It prefers the stable identity so a mark follows the physical device
+// across reboots and across ports; the kernel-assigned path is the
+// fallback for devices that expose no identity at all.
+func (c Candidate) IgnoreKey() string {
+	if c.ID != "" {
+		return c.ID
+	}
+	return c.Path
 }
 
 // ListCandidates returns block devices that pass the removable / bus
@@ -72,6 +87,7 @@ func listCandidates(sysroot string, systemBlocked map[string]bool) ([]Candidate,
 
 		out = append(out, Candidate{
 			Path:     "/dev/" + name,
+			ID:       readIdentity(blockDir),
 			Size:     sectors * 512,
 			Bus:      bus,
 			Vendor:   strings.TrimSpace(readString(filepath.Join(blockDir, "device", "vendor"))),
@@ -117,6 +133,69 @@ func readBus(blockDir string) string {
 		}
 	}
 	return ""
+}
+
+// readIdentity derives a stable identifier for a block device from sysfs.
+// The chain runs most-specific first: the block-level wwid (NVMe, and newer
+// kernels for SCSI), the SCSI device's wwid, then its serial (which is also
+// where MMC/SD cards report theirs). USB storage often leaves all three
+// blank — the identity lives on the USB device a few levels up — so that is
+// the last resort. Returns "" when nothing identifying is exposed.
+func readIdentity(blockDir string) string {
+	for _, rel := range []string{"wwid", "device/wwid", "device/serial"} {
+		if v := strings.TrimSpace(readString(filepath.Join(blockDir, rel))); v != "" {
+			kind := "wwid"
+			if strings.HasSuffix(rel, "serial") {
+				kind = "serial"
+			}
+			return kind + ":" + v
+		}
+	}
+	return readUSBIdentity(blockDir)
+}
+
+// readUSBIdentity walks up from the block device to the enclosing USB
+// device and builds an identity from its vendor, product, and serial. A
+// multi-slot card reader presents one USB device per several block devices,
+// so the SCSI logical unit number is appended to keep the slots distinct.
+// The host number in that address changes between boots and is left out.
+func readUSBIdentity(blockDir string) string {
+	dev, err := filepath.EvalSymlinks(filepath.Join(blockDir, "device"))
+	if err != nil {
+		return ""
+	}
+	lun := scsiLUN(filepath.Base(dev))
+	for cur := dev; cur != "/" && cur != "."; cur = filepath.Dir(cur) {
+		vid := strings.TrimSpace(readString(filepath.Join(cur, "idVendor")))
+		if vid == "" {
+			continue
+		}
+		pid := strings.TrimSpace(readString(filepath.Join(cur, "idProduct")))
+		serial := strings.TrimSpace(readString(filepath.Join(cur, "serial")))
+		if serial == "" {
+			// Without a serial the identity would match every device of
+			// this make and model, which is worse than falling back to
+			// the path.
+			return ""
+		}
+		id := fmt.Sprintf("usb:%s:%s:%s", vid, pid, serial)
+		if lun != "" {
+			id += ":" + lun
+		}
+		return id
+	}
+	return ""
+}
+
+// scsiLUN pulls the logical unit number out of a SCSI device address of the
+// form host:channel:target:lun (e.g. "17:0:0:2"). Returns "" for anything
+// that is not such an address.
+func scsiLUN(name string) string {
+	parts := strings.Split(name, ":")
+	if len(parts) != 4 {
+		return ""
+	}
+	return parts[3]
 }
 
 func readString(path string) string {

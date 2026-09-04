@@ -40,8 +40,11 @@ cmake(
     deps = ["toolchain"],
     # libxml2 supplies the XML backend, and iiod's command parser is generated
     # from a lex/yacc grammar, so flex and bison have to be present at build
-    # time. All three are packaged by every backend distro under the same
-    # names, so take them from the distro feed rather than building them.
+    # time. All three are packaged by every backend distro, so take them from
+    # the distro feed rather than building them. The development packages share
+    # a name across the three; the runtime library does not. Ubuntu 26.04 ships
+    # libxml2 2.15, where the shared library moved to a SONAME-versioned
+    # package name, so the runtime dependency there is libxml2-16.
     distro_deps = {
         "alpine": ["libxml2-dev", "flex", "bison"],
         "debian": ["libxml2-dev", "flex", "bison"],
@@ -50,7 +53,7 @@ cmake(
     distro_runtime_deps = {
         "alpine": ["libxml2"],
         "debian": ["libxml2"],
-        "ubuntu": ["libxml2"],
+        "ubuntu": ["libxml2-16"],
     },
     cmake_args = [
         # CMake does not read $CPPFLAGS/$LDFLAGS, and pkg-config alone is not

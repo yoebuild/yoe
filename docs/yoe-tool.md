@@ -262,7 +262,9 @@ yoe flash --dry-run /dev/sdX
 ```
 
 Safety: `yoe flash` requires explicit confirmation before writing and refuses to
-write to mounted devices or devices that look like system disks.
+write to mounted devices or devices that look like system disks. The TUI's flash
+page adds a per-developer do-not-use list on top of that, described under
+[Flash page](#flash-page).
 
 ### `yoe run`
 
@@ -940,6 +942,51 @@ changed a setting or just looked around — the same place it sits when the TUI
 starts. The target image is the one recorded in `local.star` (the Setup page's
 **Image** picker writes it there), and it stays selected as you switch machines
 and distros.
+
+#### Flash page
+
+Pressing `f` on a built image unit opens the flash page, which lists the
+removable devices yoe considers safe to write. Move with `↑`/`↓`, press `Enter`
+to reach the confirmation step, and `Esc` to go back.
+
+| Key         | Action                                        |
+| ----------- | --------------------------------------------- |
+| `j/k` `↑/↓` | Choose a device                               |
+| `Enter`     | Continue to the confirm step                  |
+| `i`         | Mark the device do-not-use, or allow it again |
+| `Esc` · `q` | Back to the unit list                         |
+
+Some devices are worth excluding for good — an internal eMMC, a card reader that
+holds a permanent card, a USB drive used for backups. Press `i` on such a device
+to mark it do-not-use. It stays in the list, greyed out and labelled
+`(do not use)`, and `Enter` declines to select it. Press `i` again to allow it.
+
+Keeping the device visible rather than hiding it means an excluded disk reads as
+a deliberate choice, and lets you reverse the choice from the same page. The
+marks are per developer: they are saved as `ignored_flash_devices` in
+`local.star`, which is not checked in, so each person's machine keeps its own
+list.
+
+A mark identifies the physical device, not the path it happened to get this
+boot, so it holds when `/dev/sdb` and `/dev/sdc` trade places or a drive moves
+to another port. The identity comes from what the kernel exposes: a WWID, a
+serial number, or the vendor, product, and serial of the enclosing USB device.
+Entries in `local.star` look like this:
+
+```python
+local(
+    ignored_flash_devices = [
+        "wwid:naa.5000c500b07a66d1",
+        "serial:0x1234abcd",
+        "usb:0781:5575:04017711101522123217:0",
+    ],
+)
+```
+
+A few devices expose nothing identifying — some USB bridges report no serial at
+all. Those fall back to matching on the path, and their entries read `/dev/sdb`.
+A path can move between boots, so a mark on one of these devices is worth a
+glance at the size, vendor, and model on the confirmation step.
 
 #### Detail view
 
