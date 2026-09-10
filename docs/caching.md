@@ -226,6 +226,16 @@ $YOE_CACHE/
 - **Git sources are keyed by `sha256(url + "#" + ref)`** — since a git repo is a
   directory (not a single file), content-addressing isn't practical. The URL+ref
   key ensures different tags/branches get separate clones.
+- **Git clones retry transient failures.** A forge that returns a server error
+  while it restarts, drops a connection, or goes silent mid-transfer fails a
+  clone that would have succeeded moments later, and a git source has no mirror
+  to fall back to — the mirror tables apply only to HTTP archive fetches. A
+  clone that fails that way is retried on the same short backoff a download
+  uses. A failure the remote will keep reporting — no such repository, a tag or
+  branch that does not exist, credentials that are refused — is reported
+  immediately instead, since the fix is to edit the unit rather than to wait.
+  Each attempt clones into its own temporary directory, so a partially populated
+  tree from a failed attempt never blocks the next one.
 - **A cache entry is only reused once it is complete.** Two units can name the
   same repo at the same ref, and yoe builds them at the same time. A clone is
   published by landing it from a temporary directory, the fetch itself is
@@ -233,7 +243,7 @@ $YOE_CACHE/
   entry, and a clone counts as complete only when the ref is actually present in
   it. An entry left behind by an interrupted run is re-fetched instead of
   trusted. The wait is reported in the build log, so a unit pausing on another
-  unit'"'"'s clone is visible rather than looking stalled.
+  unit's clone is visible rather than looking stalled.
 - **Packages are keyed by unit input hash** — the same hash computed by
   `internal/resolve/hash.go` from unit fields, source hash, dependency hashes,
   and architecture. This is the Nix-like property: if the inputs haven't

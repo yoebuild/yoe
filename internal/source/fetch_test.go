@@ -88,10 +88,10 @@ func TestFetchGivesUpAfterRetryBudget(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected failure")
 	}
-	if got := n.Load(); int(got) != downloadRetries {
-		t.Errorf("requests = %d, want %d", got, downloadRetries)
+	if got := n.Load(); int(got) != fetchRetries {
+		t.Errorf("requests = %d, want %d", got, fetchRetries)
 	}
-	if !strings.Contains(err.Error(), fmt.Sprintf("after %d attempts", downloadRetries)) {
+	if !strings.Contains(err.Error(), fmt.Sprintf("after %d attempts", fetchRetries)) {
 		t.Errorf("error should report the attempt count, got: %v", err)
 	}
 }
@@ -127,8 +127,8 @@ func TestFetchFallsBackToMirror(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetch: %v\nlog:\n%s", err, log)
 	}
-	if got := downN.Load(); int(got) != downloadRetries {
-		t.Errorf("primary requests = %d, want %d", got, downloadRetries)
+	if got := downN.Load(); int(got) != fetchRetries {
+		t.Errorf("primary requests = %d, want %d", got, fetchRetries)
 	}
 	if got := upN.Load(); got != 1 {
 		t.Errorf("mirror requests = %d, want 1", got)

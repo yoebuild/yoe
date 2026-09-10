@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **A brief outage at a git host no longer fails the build.** Cloning a unit's
+  source now retries when a host returns an error or stops responding, the way
+  archive downloads already did. A wrong URL or a missing tag still fails right
+  away.
 - **Builds no longer stall fetching readline or gawk.** Both now come from GNU
   release tarballs instead of a git server that often stops responding
   mid-clone, and a project mirror table can point them at a faster host.

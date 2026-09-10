@@ -87,12 +87,16 @@ func sourceURLs(unit *yoestar.Unit, rules []yoestar.MirrorRule) []string {
 	return urls
 }
 
-// downloadRetries is how many times a transient download failure is retried
-// before the build gives up. Source archives come from volunteer mirror pools
-// (savannah, sourceforge, GNU) where a redirect can land on a mirror that is
-// briefly unavailable; a single 502 from one mirror should not fail an
-// otherwise healthy build, since the next attempt usually lands elsewhere.
-const downloadRetries = 4
+// fetchRetries is how many times a transient fetch failure is retried before
+// the build gives up. It governs both transports. Source archives come from
+// volunteer mirror pools (savannah, sourceforge, GNU) where a redirect can
+// land on a mirror that is briefly unavailable; a single 502 from one mirror
+// should not fail an otherwise healthy build, since the next attempt usually
+// lands elsewhere. Git hosts fail the same way — a 503 from a forge that is
+// restarting, or a clone that stalls partway — and a git source has no mirror
+// to fall back to, so the retry is the only thing standing between a brief
+// outage and a failed build.
+const fetchRetries = 4
 
 // retryDelay is the backoff before attempt n (1-based). Linear rather than
 // exponential: mirror outages are usually resolved by re-rolling the redirect,
@@ -115,11 +119,11 @@ func transientStatus(code int) bool {
 // contents; the caller owns the temp file and must rename or remove it.
 func downloadWithRetry(cacheDir, url string, w io.Writer) (string, []byte, error) {
 	var lastErr error
-	for attempt := 1; attempt <= downloadRetries; attempt++ {
+	for attempt := 1; attempt <= fetchRetries; attempt++ {
 		if attempt > 1 {
 			delay := retryDelay(attempt - 1)
 			fmt.Fprintf(w, "  retrying %s in %s (attempt %d/%d): %v\n",
-				url, delay, attempt, downloadRetries, lastErr)
+				url, delay, attempt, fetchRetries, lastErr)
 			time.Sleep(delay)
 		}
 
@@ -134,7 +138,7 @@ func downloadWithRetry(cacheDir, url string, w io.Writer) (string, []byte, error
 			return "", nil, fmt.Errorf("downloading %s: %w", url, err)
 		}
 	}
-	return "", nil, fmt.Errorf("downloading %s: %w (after %d attempts)", url, lastErr, downloadRetries)
+	return "", nil, fmt.Errorf("downloading %s: %w (after %d attempts)", url, lastErr, fetchRetries)
 }
 
 // statusError carries the HTTP status so the retry loop can tell a mirror
@@ -322,29 +326,11 @@ func fetchGit(cacheDir string, unit *yoestar.Unit, w io.Writer) (string, error) 
 		}
 	}
 
-	tmpPath, err := os.MkdirTemp(cacheDir, urlHash+".tmp-")
+	tmpPath, err := cloneWithRetry(cacheDir, urlHash, ref, unit, w)
 	if err != nil {
 		return "", err
 	}
 	defer os.RemoveAll(tmpPath)
-
-	// Shallow clone of just the ref we need
-	args := []string{"clone", "--bare", "--depth", "1"}
-	if unit.Tag != "" {
-		args = append(args, "--branch", unit.Tag)
-	} else if unit.Branch != "" {
-		args = append(args, "--branch", unit.Branch)
-	}
-	args = append(args, unit.Source, tmpPath)
-
-	cmd := gitutil.Command("", args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("git clone %s: %s\n%s", unit.Source, err, out)
-	}
-
-	if !gitHasRef(tmpPath, ref) {
-		return "", fmt.Errorf("git clone %s: ref %q missing from the clone", unit.Source, ref)
-	}
 
 	// MkdirTemp is 0700; the cache is shared with builds running as other
 	// users, so restore the 0755 a plain clone would have produced.
@@ -357,6 +343,128 @@ func fetchGit(cacheDir string, unit *yoestar.Unit, w io.Writer) (string, error) 
 	}
 
 	return barePath, nil
+}
+
+// cloneWithRetry clones the unit's ref into a fresh temp directory under
+// cacheDir, retrying transient failures on the same backoff the HTTP path
+// uses. Returns the temp directory, which the caller owns and must rename
+// or remove.
+//
+// A git source has no mirror to fall back to — the mirror tables apply only
+// to HTTP archive fetches — so retrying the one host is the whole of the
+// resilience available here. Each attempt clones into its own temp
+// directory: a failed clone leaves a partially populated tree behind, and
+// git refuses to clone into a directory that is not empty.
+func cloneWithRetry(cacheDir, urlHash, ref string, unit *yoestar.Unit, w io.Writer) (string, error) {
+	var lastErr error
+	for attempt := 1; attempt <= fetchRetries; attempt++ {
+		if attempt > 1 {
+			delay := retryDelay(attempt - 1)
+			fmt.Fprintf(w, "  retrying clone of %s in %s (attempt %d/%d): %v\n",
+				unit.Source, delay, attempt, fetchRetries, lastErr)
+			time.Sleep(delay)
+		}
+
+		tmpPath, err := cloneOnce(cacheDir, urlHash, ref, unit)
+		if err == nil {
+			return tmpPath, nil
+		}
+		lastErr = err
+
+		// A wrong URL or a ref that does not exist upstream fails the same
+		// way however many times it is tried, and the fix is to edit the
+		// unit. Report it now rather than after the full backoff.
+		var pe permanentCloneError
+		if errors.As(err, &pe) {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("%w (after %d attempts)", lastErr, fetchRetries)
+}
+
+// cloneOnce performs a single shallow clone into a fresh temp directory,
+// removing it if the clone does not produce a usable repository.
+func cloneOnce(cacheDir, urlHash, ref string, unit *yoestar.Unit) (string, error) {
+	tmpPath, err := os.MkdirTemp(cacheDir, urlHash+".tmp-")
+	if err != nil {
+		return "", err
+	}
+
+	// Shallow clone of just the ref we need
+	args := []string{"clone", "--bare", "--depth", "1"}
+	if unit.Tag != "" {
+		args = append(args, "--branch", unit.Tag)
+	} else if unit.Branch != "" {
+		args = append(args, "--branch", unit.Branch)
+	}
+	args = append(args, unit.Source, tmpPath)
+
+	if out, err := gitutil.Command("", args...).CombinedOutput(); err != nil {
+		os.RemoveAll(tmpPath)
+		cloneErr := fmt.Errorf("git clone %s: %s\n%s", unit.Source, err, out)
+		if isPermanentCloneFailure(string(out)) {
+			return "", permanentCloneError{cloneErr}
+		}
+		return "", cloneErr
+	}
+
+	// The clone succeeded but does not carry what the unit asked for. The
+	// remote answered, so the host is healthy and another attempt would
+	// land in exactly the same place.
+	if !gitHasRef(tmpPath, ref) {
+		os.RemoveAll(tmpPath)
+		return "", permanentCloneError{
+			fmt.Errorf("git clone %s: ref %q missing from the clone", unit.Source, ref),
+		}
+	}
+
+	return tmpPath, nil
+}
+
+// permanentCloneError marks a clone failure that retrying cannot clear.
+type permanentCloneError struct{ err error }
+
+func (e permanentCloneError) Error() string { return e.err.Error() }
+func (e permanentCloneError) Unwrap() error { return e.err }
+
+// permanentCloneMessages are the parts of git's stderr that identify a
+// failure the remote will keep reporting: the repository or ref does not
+// exist, or the credentials are not accepted. Everything else — a 5xx from
+// a forge, a reset connection, a transfer that stalls under the low-speed
+// guard — is treated as transient, since those are the failures a retry
+// exists to absorb. The list is deliberately narrow: retrying a permanent
+// failure only delays a clear error, while treating a transient one as
+// permanent brings back the fragility the retry was added to remove.
+// permanentCloneMessages. Each entry is a set of substrings that must all
+// appear for the entry to match, which is what separates the fatal line from
+// the progress git prints above it: every clone announces "Cloning into bare
+// repository", so "repository" alone would match a healthy run.
+var permanentCloneMessages = [][]string{
+	{"fatal: repository", "not found"},         // the URL names no repository
+	{"not found in upstream origin"},           // the tag or branch does not exist
+	{"could not read username"},                // credential prompt, so private or absent
+	{"authentication failed"},                  // the credentials are rejected
+	{"does not appear to be a git repository"}, // the URL points at something else
+	{"permission denied"},                      // the remote refuses this caller
+}
+
+// isPermanentCloneFailure reports whether git's output names a condition
+// that another attempt cannot change.
+func isPermanentCloneFailure(out string) bool {
+	low := strings.ToLower(out)
+	for _, msg := range permanentCloneMessages {
+		matched := true
+		for _, part := range msg {
+			if !strings.Contains(low, part) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
 }
 
 // gitHasRef reports whether dir is a git repo holding ref. This is what
