@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.14.11] - 2026-09-10
+
 - **A brief outage at a git host no longer fails the build.** Cloning a unit's
   source, syncing a module, and entering dev mode all retry when a host returns
   an error or stops responding, the way archive downloads already did. A wrong
