@@ -207,6 +207,19 @@ If the build fails, use the diagnose workflow to fix it iteratively.
 
 - **Prefer git sources** over tarballs — use `source` with a `.git` URL and
   `tag` for version pinning
+- **Exception: GNU packages hosted on savannah.** `git.savannah.gnu.org`
+  regularly stalls mid-clone and fails the build with
+  `Operation too slow. Less than 1000 bytes/sec transferred the last 60 seconds`.
+  For a package that publishes GNU FTP releases, take the tarball
+  (`https://ftp.gnu.org/gnu/<pkg>/<pkg>-<version>.tar.gz`) with a `sha256`
+  instead. A tarball also picks up a second host from the project's
+  `source_mirrors` table, which rewrites `ftp.gnu.org/gnu` to
+  `mirrors.kernel.org/gnu`; mirrors apply only to HTTP fetches, so a git source
+  has no fallback when its host is unavailable. `readline` and `gawk` are the
+  worked examples. Release tarballs ship a generated `configure` whose
+  regeneration rules are commented out, so the `autotools` class's
+  `autoreconf -fi` step is unnecessary — override the build task to drop it if
+  the unit already defines one.
 - **Tag format** varies by project — inspect the upstream repo's tags (e.g.,
   `v1.2.3`, `release-1.2.3`, `openssl-3.4.1`)
 - **deps vs runtime_deps** — `deps` are build-time only (headers, static libs);
