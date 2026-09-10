@@ -233,9 +233,12 @@ $YOE_CACHE/
   clone that fails that way is retried on the same short backoff a download
   uses. A failure the remote will keep reporting — no such repository, a tag or
   branch that does not exist, credentials that are refused — is reported
-  immediately instead, since the fix is to edit the unit rather than to wait.
-  Each attempt clones into its own temporary directory, so a partially populated
-  tree from a failed attempt never blocks the next one.
+  immediately instead, since the fix is to edit the unit rather than to wait. A
+  partially populated tree from a failed attempt is cleared before the next one
+  runs, since git will not clone into a directory that is not empty. Everything
+  yoe clones or fetches shares this behavior: unit sources, module clones, the
+  fetch that puts a pinned module on its declared ref, and the fetch that
+  deepens a clone when a unit or module enters dev mode.
 - **A cache entry is only reused once it is complete.** Two units can name the
   same repo at the same ref, and yoe builds them at the same time. A clone is
   published by landing it from a temporary directory, the fetch itself is

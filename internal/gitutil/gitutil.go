@@ -13,6 +13,7 @@ package gitutil
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os/exec"
 	"slices"
@@ -156,6 +157,11 @@ type FetchOptions struct {
 	// unless Depth is positive.
 	PinnedRef string
 
+	// Progress receives the notice when a fetch is retried, so a pause
+	// waiting out a struggling remote is visible rather than looking like
+	// a hang. Nil discards it.
+	Progress io.Writer
+
 	// SkipWhenFull returns without fetching when the repository already
 	// has full history and no depth was requested. Module clones set
 	// this: toggling a module that is already complete has nothing to
@@ -200,10 +206,21 @@ func FetchOrigin(dir string, opts FetchOptions) error {
 	if refspec != "" {
 		args = append(args, refspec)
 	}
-	if _, err := Run(dir, args...); err != nil {
-		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	// Retried like any other network git operation: FetchOrigin runs when
+	// a user enters dev mode or deepens a clone, and a forge that is
+	// briefly unavailable should not end that with an error they have to
+	// act on.
+	progress := opts.Progress
+	if progress == nil {
+		progress = io.Discard
 	}
-	return nil
+	return Retry(progress, "fetch from origin", func() (string, error) {
+		out, err := Command(dir, args...).CombinedOutput()
+		if err != nil {
+			return string(out), fmt.Errorf("git %s: %s\n%s", strings.Join(args, " "), err, out)
+		}
+		return string(out), nil
+	})
 }
 
 // widenRefspec points remote.origin.fetch at every branch, undoing the

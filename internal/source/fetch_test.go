@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yoebuild/yoe/internal/gitutil"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -21,12 +22,18 @@ var payload = []byte("fake source tarball contents\n")
 const payloadSHA = "8ced396f790d62b89ec283073a1689c8b56e0cd3a7b649c5e63a942bc9be3c0b"
 
 // fastRetries shrinks the backoff so tests exercise the retry path without
-// sleeping the real 2s/4s/6s.
+// sleeping the real 2s/4s/6s. Both transports are shrunk: a test naming a
+// git URL waits on gitutil's backoff, an archive on this package's.
 func fastRetries(t *testing.T) {
 	t.Helper()
 	orig := retryDelay
 	retryDelay = func(int) time.Duration { return time.Millisecond }
-	t.Cleanup(func() { retryDelay = orig })
+	origGit := gitutil.Backoff
+	gitutil.Backoff = func(int) time.Duration { return time.Millisecond }
+	t.Cleanup(func() {
+		retryDelay = orig
+		gitutil.Backoff = origGit
+	})
 }
 
 // cacheIn points the source cache at a temp dir for the duration of a test.
@@ -88,10 +95,10 @@ func TestFetchGivesUpAfterRetryBudget(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected failure")
 	}
-	if got := n.Load(); int(got) != fetchRetries {
-		t.Errorf("requests = %d, want %d", got, fetchRetries)
+	if got := n.Load(); int(got) != downloadRetries {
+		t.Errorf("requests = %d, want %d", got, downloadRetries)
 	}
-	if !strings.Contains(err.Error(), fmt.Sprintf("after %d attempts", fetchRetries)) {
+	if !strings.Contains(err.Error(), fmt.Sprintf("after %d attempts", downloadRetries)) {
 		t.Errorf("error should report the attempt count, got: %v", err)
 	}
 }
@@ -127,8 +134,8 @@ func TestFetchFallsBackToMirror(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetch: %v\nlog:\n%s", err, log)
 	}
-	if got := downN.Load(); int(got) != fetchRetries {
-		t.Errorf("primary requests = %d, want %d", got, fetchRetries)
+	if got := downN.Load(); int(got) != downloadRetries {
+		t.Errorf("primary requests = %d, want %d", got, downloadRetries)
 	}
 	if got := upN.Load(); got != 1 {
 		t.Errorf("mirror requests = %d, want 1", got)

@@ -57,10 +57,7 @@ func Sync(modules []yoestar.ModuleRef, w io.Writer) (map[string]string, error) {
 		if _, err := os.Stat(filepath.Join(moduleDir, ".git")); os.IsNotExist(err) {
 			// Clone
 			fmt.Fprintf(w, "  %-20s cloning %s (ref: %s)...\n", name, m.URL, ref)
-			cmd := gitutil.Command("", "clone", "--depth", "1", "--branch", ref, m.URL, moduleDir)
-			cmd.Stdout = w
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
+			if err := cloneModule(m.URL, ref, moduleDir, w); err != nil {
 				return nil, fmt.Errorf("cloning module %s: %w", name, err)
 			}
 		} else if state := moduleState(moduleDir); source.IsDev(state) {
@@ -71,13 +68,11 @@ func Sync(modules []yoestar.ModuleRef, w io.Writer) (map[string]string, error) {
 		} else {
 			// Pin mode: yoe owns this tree, so put it on the declared ref.
 			fmt.Fprintf(w, "  %-20s fetching %s...\n", name, ref)
-			cmd := gitutil.Command(moduleDir, "fetch", "origin", ref)
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
+			if err := gitutil.FetchRef(moduleDir, "origin", ref, w); err != nil {
 				return nil, fmt.Errorf("fetching module %s: %w", name, err)
 			}
 
-			cmd = gitutil.Command(moduleDir, "checkout", "FETCH_HEAD")
+			cmd := gitutil.Command(moduleDir, "checkout", "FETCH_HEAD")
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {
 				return nil, fmt.Errorf("checking out %s in module %s: %w", ref, name, err)
@@ -95,6 +90,23 @@ func Sync(modules []yoestar.ModuleRef, w io.Writer) (map[string]string, error) {
 	}
 
 	return result, nil
+}
+
+// cloneModule clones a module into the cache. Unlike a unit source it keeps
+// a working tree, since the user may enter dev mode and edit it, and unlike
+// a unit source the destination is where the clone stays rather than a temp
+// directory that is renamed into place.
+//
+// The retry and the classification of which failures are worth retrying are
+// the same ones unit sources use: a forge that answers with a 503 should not
+// fail a build at module sync any more than it should mid-build.
+func cloneModule(url, ref, dest string, w io.Writer) error {
+	return gitutil.Clone(gitutil.CloneOptions{
+		URL:   url,
+		Ref:   ref,
+		Dest:  dest,
+		Depth: 1,
+	}, w)
 }
 
 // moduleState reports the source state of an existing module clone,
@@ -229,10 +241,7 @@ func SyncIfNeeded(modules []yoestar.ModuleRef, w io.Writer) error {
 		}
 
 		fmt.Fprintf(w, "[yoe] cloning module %s (ref: %s)...\n", name, ref)
-		cmd := gitutil.Command("", "clone", "--depth", "1", "--branch", ref, m.URL, moduleDir)
-		cmd.Stdout = w
-		cmd.Stderr = w
-		if err := cmd.Run(); err != nil {
+		if err := cloneModule(m.URL, ref, moduleDir, w); err != nil {
 			return fmt.Errorf("cloning module %s: %w", name, err)
 		}
 	}

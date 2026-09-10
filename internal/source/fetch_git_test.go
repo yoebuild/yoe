@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yoebuild/yoe/internal/gitutil"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -221,10 +222,10 @@ func TestFetchGitRetriesTransientFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected failure")
 	}
-	if got := n.Load(); int(got) != fetchRetries {
-		t.Errorf("clone attempts = %d, want %d", got, fetchRetries)
+	if got := n.Load(); int(got) != gitutil.Retries {
+		t.Errorf("clone attempts = %d, want %d", got, gitutil.Retries)
 	}
-	if !strings.Contains(err.Error(), fmt.Sprintf("after %d attempts", fetchRetries)) {
+	if !strings.Contains(err.Error(), fmt.Sprintf("after %d attempts", gitutil.Retries)) {
 		t.Errorf("error should report the attempt count, got: %v", err)
 	}
 }
@@ -287,31 +288,5 @@ func TestFetchGitRetryLeavesNoTempDirs(t *testing.T) {
 	left, _ := filepath.Glob(filepath.Join(cacheDir, "*.tmp-*"))
 	if len(left) != 0 {
 		t.Errorf("failed clones left temp dirs behind: %v", left)
-	}
-}
-
-// The classifier decides whether a failure is worth another attempt, so the
-// exact wording git uses matters. These are messages observed from real
-// hosts.
-func TestIsPermanentCloneFailure(t *testing.T) {
-	tests := []struct {
-		name string
-		out  string
-		want bool
-	}{
-		{"503 from a forge", "Cloning into bare repository '/c'...\nremote: no healthy upstream\nfatal: unable to access 'https://git.trustedfirmware.org/TF-A/trusted-firmware-a.git/': The requested URL returned error: 503", false},
-		{"stalled transfer", "Cloning into bare repository '/c'...\nfatal: unable to access 'https://git.savannah.gnu.org/git/readline.git/': Operation too slow. Less than 1000 bytes/sec transferred the last 60 seconds", false},
-		{"connection reset", "Cloning into bare repository '/c'...\nfatal: unable to access 'https://example.com/x.git/': Recv failure: Connection reset by peer", false},
-		{"missing repo", "Cloning into bare repository '/c'...\nfatal: repository 'http://127.0.0.1:1/nosuch.git/' not found", true},
-		{"missing branch", "Cloning into bare repository '/c'...\nfatal: Remote branch v99 not found in upstream origin", true},
-		{"private repo prompt", "Cloning into bare repository '/c'...\nfatal: could not read Username for 'https://github.com': No such device or address", true},
-		{"healthy clone", "Cloning into bare repository '/c'...\n", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := isPermanentCloneFailure(tt.out); got != tt.want {
-				t.Errorf("isPermanentCloneFailure = %v, want %v", got, tt.want)
-			}
-		})
 	}
 }
