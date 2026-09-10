@@ -1,13 +1,18 @@
 package source
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/yoebuild/yoe/internal/gitutil"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 )
 
@@ -188,5 +193,100 @@ func TestFetchGitSweepsStaleTempDirs(t *testing.T) {
 	left, _ := filepath.Glob(filepath.Join(cacheDir, "*.tmp-*"))
 	if len(left) != 1 {
 		t.Errorf("got %d temp dirs, want only the unrelated one: %v", len(left), left)
+	}
+}
+
+// serveGitStatus returns a server answering every git request with `code`,
+// plus a counter of requests. Git makes exactly one request per clone
+// attempt before giving up, so the counter is the attempt count.
+func serveGitStatus(code int) (*httptest.Server, *atomic.Int32) {
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n.Add(1)
+		w.WriteHeader(code)
+	}))
+	return srv, &n
+}
+
+// A forge that is briefly unavailable must not fail the build on the first
+// try. A git source has no mirror to fall back to, so the retry is the only
+// resilience there is — a 503 from trustedfirmware.org has failed an
+// otherwise healthy machine build.
+func TestFetchGitRetriesTransientFailure(t *testing.T) {
+	fastRetries(t)
+	cacheIn(t)
+	srv, n := serveGitStatus(http.StatusServiceUnavailable)
+	defer srv.Close()
+
+	_, _, err := fetchTagged(t, srv.URL+"/tfa.git", "v1")
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+	if got := n.Load(); int(got) != gitutil.Retries {
+		t.Errorf("clone attempts = %d, want %d", got, gitutil.Retries)
+	}
+	if !strings.Contains(err.Error(), fmt.Sprintf("after %d attempts", gitutil.Retries)) {
+		t.Errorf("error should report the attempt count, got: %v", err)
+	}
+}
+
+// A URL that names no repository fails the same way however often it is
+// tried, and the fix is to edit the unit. Retrying only delays the error.
+func TestFetchGitDoesNotRetryMissingRepo(t *testing.T) {
+	fastRetries(t)
+	cacheIn(t)
+	srv, n := serveGitStatus(http.StatusNotFound)
+	defer srv.Close()
+
+	_, _, err := fetchTagged(t, srv.URL+"/nosuch.git", "v1")
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+	if got := n.Load(); got != 1 {
+		t.Errorf("clone attempts = %d, want 1", got)
+	}
+}
+
+// A ref the remote does not carry is equally permanent: the host answered,
+// so it is healthy, and the unit is asking for something that is not there.
+func TestFetchGitDoesNotRetryMissingRef(t *testing.T) {
+	fastRetries(t)
+	cacheIn(t)
+	src := gitSource(t)
+
+	start := time.Now()
+	_, log, err := fetchTagged(t, src, "v99")
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+	if strings.Contains(log, "retrying clone") {
+		t.Errorf("missing ref should not be retried, log:\n%s", log)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Errorf("missing ref took %s, suggesting it ran the retry budget", elapsed)
+	}
+}
+
+// Each attempt needs its own temp directory: a failed clone leaves a
+// partially populated tree, and git refuses to clone into a directory that
+// is not empty. A retry that reused the directory would fail for a reason
+// unrelated to the outage it is meant to ride out.
+func TestFetchGitRetryLeavesNoTempDirs(t *testing.T) {
+	fastRetries(t)
+	cacheIn(t)
+	srv, _ := serveGitStatus(http.StatusServiceUnavailable)
+	defer srv.Close()
+
+	if _, _, err := fetchTagged(t, srv.URL+"/tfa.git", "v1"); err == nil {
+		t.Fatal("expected failure")
+	}
+
+	cacheDir, err := CacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	left, _ := filepath.Glob(filepath.Join(cacheDir, "*.tmp-*"))
+	if len(left) != 0 {
+		t.Errorf("failed clones left temp dirs behind: %v", left)
 	}
 }

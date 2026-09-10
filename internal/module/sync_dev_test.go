@@ -2,10 +2,14 @@ package module
 
 import (
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/yoebuild/yoe/internal/gitutil"
 	"github.com/yoebuild/yoe/internal/source"
@@ -146,5 +150,34 @@ func TestSync_PinStillChecksOutRef(t *testing.T) {
 
 	if got, want := headSHA(t, moduleDir), headSHA(t, upstream); got != want {
 		t.Errorf("HEAD = %s, want %s", got, want)
+	}
+}
+
+// A module clone rides out a brief outage the same way a unit source does.
+// Both go through gitutil, so this is a wiring test: the concern is that
+// SyncIfNeeded reaches the shared clone rather than running its own.
+func TestSyncIfNeededRetriesTransientFailure(t *testing.T) {
+	origBackoff := gitutil.Backoff
+	gitutil.Backoff = func(int) time.Duration { return time.Millisecond }
+	t.Cleanup(func() { gitutil.Backoff = origBackoff })
+
+	t.Setenv("YOE_CACHE", t.TempDir())
+
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	err := SyncIfNeeded([]yoestar.ModuleRef{{
+		URL: srv.URL + "/module-alpine.git",
+		Ref: "main",
+	}}, io.Discard)
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+	if got := n.Load(); int(got) != gitutil.Retries {
+		t.Errorf("clone attempts = %d, want %d", got, gitutil.Retries)
 	}
 }

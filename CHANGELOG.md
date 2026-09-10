@@ -8,6 +8,15 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.14.11] - 2026-09-10
+
+- **A brief outage at a git host no longer fails the build.** Cloning a unit's
+  source, syncing a module, and entering dev mode all retry when a host returns
+  an error or stops responding, the way archive downloads already did. A wrong
+  URL or a missing tag still fails right away.
+- **Builds no longer stall fetching readline or gawk.** Both now come from GNU
+  release tarballs instead of a git server that often stops responding
+  mid-clone, and a project mirror table can point them at a faster host.
 - **Ubuntu images build again.** Adding `libiio` to an image asked for an XML
   library under a name Ubuntu 26.04 no longer uses, so any Ubuntu image
   containing it stopped before the build started.

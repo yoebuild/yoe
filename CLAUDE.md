@@ -22,7 +22,11 @@ architecture description live under `docs/` (start with `docs/intro.md` and
   `container_arch` explicitly; units inherit these from their class. Do not let
   container selection happen by implicit default.
 - **Prefer git sources over tarballs.** Shallow clone with tag pinning. Enables
-  the `yoe dev` workflow (edit, commit, extract patches).
+  the `yoe dev` workflow (edit, commit, extract patches). The exception is a
+  host that cannot be relied on to answer — `git.savannah.gnu.org` stalls
+  mid-clone often enough to fail CI — where a release tarball with a `sha256` is
+  the better source, since the project's `source_mirrors` table gives it a
+  fallback host and a git source has none. See the `new-unit` skill.
 - **Native builds only — no cross-compilation.** Cross-arch is handled by
   foreign-arch containers under QEMU user-mode (binfmt_misc); never propose a
   cross-compile toolchain instead.

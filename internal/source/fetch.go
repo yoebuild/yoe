@@ -92,6 +92,11 @@ func sourceURLs(unit *yoestar.Unit, rules []yoestar.MirrorRule) []string {
 // (savannah, sourceforge, GNU) where a redirect can land on a mirror that is
 // briefly unavailable; a single 502 from one mirror should not fail an
 // otherwise healthy build, since the next attempt usually lands elsewhere.
+//
+// Git clones are retried on their own budget, gitutil.Retries, which is the
+// same count for the same reason. The two stay separate because the
+// conditions worth retrying differ per transport: an HTTP status code here,
+// git's own diagnostics there.
 const downloadRetries = 4
 
 // retryDelay is the backoff before attempt n (1-based). Linear rather than
@@ -322,29 +327,11 @@ func fetchGit(cacheDir string, unit *yoestar.Unit, w io.Writer) (string, error) 
 		}
 	}
 
-	tmpPath, err := os.MkdirTemp(cacheDir, urlHash+".tmp-")
+	tmpPath, err := cloneUnitSource(cacheDir, urlHash, ref, unit, w)
 	if err != nil {
 		return "", err
 	}
 	defer os.RemoveAll(tmpPath)
-
-	// Shallow clone of just the ref we need
-	args := []string{"clone", "--bare", "--depth", "1"}
-	if unit.Tag != "" {
-		args = append(args, "--branch", unit.Tag)
-	} else if unit.Branch != "" {
-		args = append(args, "--branch", unit.Branch)
-	}
-	args = append(args, unit.Source, tmpPath)
-
-	cmd := gitutil.Command("", args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("git clone %s: %s\n%s", unit.Source, err, out)
-	}
-
-	if !gitHasRef(tmpPath, ref) {
-		return "", fmt.Errorf("git clone %s: ref %q missing from the clone", unit.Source, ref)
-	}
 
 	// MkdirTemp is 0700; the cache is shared with builds running as other
 	// users, so restore the 0755 a plain clone would have produced.
@@ -357,6 +344,46 @@ func fetchGit(cacheDir string, unit *yoestar.Unit, w io.Writer) (string, error) 
 	}
 
 	return barePath, nil
+}
+
+// cloneUnitSource clones the unit's ref into a fresh temp directory under
+// cacheDir. Returns the temp directory, which the caller owns and must
+// rename or remove.
+//
+// Retries and the classification of what is worth retrying live in gitutil,
+// so a unit source and a module clone ride out the same outage the same
+// way.
+func cloneUnitSource(cacheDir, urlHash, ref string, unit *yoestar.Unit, w io.Writer) (string, error) {
+	tmpPath, err := os.MkdirTemp(cacheDir, urlHash+".tmp-")
+	if err != nil {
+		return "", err
+	}
+
+	clone := gitutil.CloneOptions{
+		URL:   unit.Source,
+		Ref:   unit.Tag,
+		Dest:  tmpPath,
+		Bare:  true,
+		Depth: 1,
+	}
+	if clone.Ref == "" {
+		clone.Ref = unit.Branch
+	}
+
+	if err := gitutil.Clone(clone, w); err != nil {
+		os.RemoveAll(tmpPath)
+		return "", err
+	}
+
+	// The clone succeeded but does not carry what the unit asked for. The
+	// remote answered, so the host is healthy and another attempt would
+	// land in exactly the same place.
+	if !gitHasRef(tmpPath, ref) {
+		os.RemoveAll(tmpPath)
+		return "", fmt.Errorf("git clone %s: ref %q missing from the clone", unit.Source, ref)
+	}
+
+	return tmpPath, nil
 }
 
 // gitHasRef reports whether dir is a git repo holding ref. This is what
