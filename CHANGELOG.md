@@ -8,6 +8,9 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **Builds no longer stall fetching readline.** The library now comes from the
+  GNU release tarball instead of a git server that often stops responding
+  mid-clone, and a project mirror table can point it at a faster host.
 - **Ubuntu images build again.** Adding `libiio` to an image asked for an XML
   library under a name Ubuntu 26.04 no longer uses, so any Ubuntu image
   containing it stopped before the build started.
