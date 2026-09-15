@@ -101,6 +101,50 @@ func TestFetchGitReplacesPartialClone(t *testing.T) {
 	}
 }
 
+// A unit may pin its source to a commit no tag names: the SHA the TUI
+// writes when a dev checkout at an untagged commit is pinned, or a
+// known-good commit on a branch whose tip does not build. The build tree
+// has to land on that commit rather than on the branch tip.
+func TestPrepareGitCommitPin(t *testing.T) {
+	projectDir := t.TempDir()
+	t.Setenv("YOE_CACHE", filepath.Join(projectDir, "cache"))
+
+	work := initRepo(t)
+	pin, err := gitutil.Run(work, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin = strings.TrimSpace(pin)
+	if err := os.WriteFile(filepath.Join(work, "main.c"), []byte("int main() { return 1; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(t, work, "git", "commit", "-q", "-am", "past the pin")
+	bare := filepath.Join(t.TempDir(), "upstream.git")
+	run(t, work, "git", "clone", "-q", "--bare", work, bare)
+
+	unit := &yoestar.Unit{Name: "t", Version: "1", Source: bare, Tag: pin}
+	var log strings.Builder
+	srcDir, err := Prepare(projectDir, "x86_64", "alpine", unit, "", nil, &log)
+	if err != nil {
+		t.Fatalf("Prepare: %v\n%s", err, log.String())
+	}
+
+	head, err := gitutil.Run(srcDir, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(head); got != pin {
+		t.Errorf("build tree HEAD = %s, want the pinned commit %s", got, pin)
+	}
+	src, err := os.ReadFile(filepath.Join(srcDir, "main.c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(src) != "int main() {}\n" {
+		t.Errorf("build tree has the branch tip's main.c, not the pinned commit's: %q", src)
+	}
+}
+
 // A complete entry is reused rather than re-cloned.
 func TestFetchGitReusesCompleteClone(t *testing.T) {
 	cacheIn(t)
