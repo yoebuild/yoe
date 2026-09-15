@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.14.12] - 2026-09-15
+
 - **Units can pin a git source to a specific commit.** Set `tag` to a full
   commit SHA when no upstream tag marks the version you need. A unit pinned with
   `P` from a dev checkout at an untagged commit now builds from a clean cache
