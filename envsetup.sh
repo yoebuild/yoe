@@ -130,7 +130,8 @@ _yoe_tag_release_on_main() {
 	echo "=== tagged and pushed ${tag} ==="
 }
 
-# Tag the version named at the top of CHANGELOG.md on main and push the tag.
+# Tag the version named at the top of CHANGELOG.md on main and push the tag,
+# then merge origin/main into cbrake/main so work continues from the release.
 yoe_tag_release() {
 	local branch rc
 
@@ -153,6 +154,13 @@ yoe_tag_release() {
 
 	_yoe_tag_release_on_main
 	rc=$?
+
+	# After a successful release, bring cbrake/main up to date with main. A
+	# merge that conflicts stops here, on cbrake/main, to be resolved there.
+	if [ ${rc} -eq 0 ]; then
+		(cd "${OE_BASE}" && git checkout cbrake/main && git fetch origin &&
+			git merge --no-edit origin/main) || return 1
+	fi
 
 	(cd "${OE_BASE}" && git checkout "${branch}") || return 1
 	return ${rc}
