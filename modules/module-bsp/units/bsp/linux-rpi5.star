@@ -3,6 +3,11 @@ unit(
     version = "6.12",
     scope = "machine",
     source = "https://github.com/raspberrypi/linux.git",
+    # Pinned to the last rpi-6.12.y commit that the Raspberry Pi kernel CI
+    # built cleanly. The commits after it fail in drivers/gpu/drm/v3d
+    # (v3d_gemfs.o has no source). Move the pin forward once upstream
+    # repairs the branch.
+    tag = "7d1826930811232688a50c99c540fbb137aed081",
     branch = "rpi-6.12.y",
     license = "GPL-2.0",
     description = "Raspberry Pi 5 kernel (BCM2712)",

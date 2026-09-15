@@ -113,7 +113,7 @@ participates in the cache hash) rather than mapping to a typed field.
 | `source`          | str       | A tarball URL or a git repository to fetch. Git sources are preferred (shallow clone with tag pinning). |
 | `sha256`          | str       | Checksum for a tarball source. Mutually exclusive with `apk_checksum`.                                  |
 | `apk_checksum`    | str       | The `APKINDEX` `C:` checksum for an upstream Alpine package. Mutually exclusive with `sha256`.          |
-| `tag`             | str       | Git tag to check out, pinning the version.                                                              |
+| `tag`             | str       | Git tag or full commit SHA to check out, pinning the version.                                           |
 | `branch`          | str       | Git branch to check out.                                                                                |
 | `patches`         | list[str] | Patch files (relative to the unit's directory) applied after fetch and before build.                    |
 | `passthrough_apk` | str       | An `.apk` filename to republish verbatim, used by Alpine feeds.                                         |

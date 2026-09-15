@@ -8,6 +8,15 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.14.12] - 2026-09-15
+
+- **Units can pin a git source to a specific commit.** Set `tag` to a full
+  commit SHA when no upstream tag marks the version you need. A unit pinned with
+  `P` from a dev checkout at an untagged commit now builds from a clean cache
+  too.
+- **Raspberry Pi 5 images build again.** The kernel stays on its last working
+  commit until the upstream branch is repaired.
+
 ## [0.14.11] - 2026-09-10
 
 - **A brief outage at a git host no longer fails the build.** Cloning a unit's

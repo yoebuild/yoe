@@ -90,13 +90,15 @@ func Retry(w io.Writer, what string, fn func() (string, error)) error {
 // the fragility the retry exists to remove — so anything not named here (a
 // 5xx, a reset connection, a stalled transfer) is treated as transient.
 var permanentMessages = [][]string{
-	{"fatal: repository", "not found"},         // the URL names no repository
-	{"not found in upstream origin"},           // the tag or branch does not exist
-	{"couldn't find remote ref"},               // the same, from fetch rather than clone
-	{"could not read username"},                // credential prompt, so private or absent
-	{"authentication failed"},                  // the credentials are rejected
-	{"does not appear to be a git repository"}, // the URL points at something else
-	{"permission denied"},                      // the remote refuses this caller
+	{"fatal: repository", "not found"},                 // the URL names no repository
+	{"not found in upstream origin"},                   // the tag or branch does not exist
+	{"couldn't find remote ref"},                       // the same, from fetch rather than clone
+	{"not our ref"},                                    // a commit named by SHA is not on the remote
+	{"does not allow request for unadvertised object"}, // the remote will not serve a commit by SHA
+	{"could not read username"},                        // credential prompt, so private or absent
+	{"authentication failed"},                          // the credentials are rejected
+	{"does not appear to be a git repository"},         // the URL points at something else
+	{"permission denied"},                              // the remote refuses this caller
 }
 
 // isPermanentMessage reports whether git's output names a condition that
@@ -123,8 +125,8 @@ type CloneOptions struct {
 	// URL is the repository to clone.
 	URL string
 
-	// Ref is the tag or branch to clone. Empty clones the remote's
-	// default branch.
+	// Ref is the tag, branch, or full commit SHA to clone. Empty clones
+	// the remote's default branch.
 	Ref string
 
 	// Dest is where the clone lands. Clone owns this path: a failed
@@ -151,6 +153,10 @@ type CloneOptions struct {
 // Progress and any retry notice go to w; git's output is reported with the
 // error rather than streamed, so a failure reads as one message.
 func Clone(opts CloneOptions, w io.Writer) error {
+	if isCommitSHA(opts.Ref) {
+		return cloneCommit(opts, w)
+	}
+
 	args := []string{"clone"}
 	if opts.Bare {
 		args = append(args, "--bare")

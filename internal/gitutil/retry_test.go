@@ -206,6 +206,8 @@ func TestIsPermanentMessage(t *testing.T) {
 		{"missing repo", "Cloning into bare repository '/c'...\nfatal: repository 'http://127.0.0.1:1/nosuch.git/' not found", true},
 		{"missing branch", "Cloning into bare repository '/c'...\nfatal: Remote branch v99 not found in upstream origin", true},
 		{"missing ref on fetch", "fatal: couldn't find remote ref v99", true},
+		{"missing commit", "fatal: remote error: upload-pack: not our ref 1111111111111111111111111111111111111111", true},
+		{"commit fetch refused", "error: Server does not allow request for unadvertised object 7d1826930811232688a50c99c540fbb137aed081", true},
 		{"private repo prompt", "Cloning into bare repository '/c'...\nfatal: could not read Username for 'https://github.com': No such device or address", true},
 		{"healthy clone", "Cloning into bare repository '/c'...\n", false},
 	}
