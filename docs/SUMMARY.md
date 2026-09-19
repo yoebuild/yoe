@@ -11,6 +11,7 @@
 - [Node.js Workflows](nodejs.md)
 - [Bun Workflows](bun.md)
 - [Monitoring and Telemetry](monitoring.md)
+- [Hardware in the Loop](hardware-in-loop.md)
 - [Feed Server and yoe deploy](feed-server.md)
 - [On-Device Package Management](on-device-apk.md)
 - [On-Device Upstream Feeds](on-device-upstream-feeds.md)
