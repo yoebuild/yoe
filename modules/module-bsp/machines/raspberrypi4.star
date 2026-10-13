@@ -8,6 +8,7 @@ machine(
         defconfig = "bcm2711_defconfig",
         cmdline = "console=ttyS0,115200 root=/dev/mmcblk0p2 rootfstype=ext4 rootwait rw",
     ),
+    serial = serial_config(baud = 115200),
     packages = ["rpi-firmware", "rpi4-config"],
     partitions = [
         partition(label = "boot", type = "vfat", size = "64M", contents = ["kernel", "dtbs", "firmware"]),

@@ -95,3 +95,25 @@ func TestRunClean_NoBuildDir(t *testing.T) {
 		t.Fatalf("RunClean on missing build dir: %v", err)
 	}
 }
+
+// The serial console's log and socket live under build/serial/, so the
+// default clean removes them; this pins the path so it stays covered if
+// the build layout moves.
+func TestRunClean_RemovesSerialCapture(t *testing.T) {
+	proj := t.TempDir()
+	serialDir := filepath.Join(proj, "build", "serial")
+	if err := os.MkdirAll(serialDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"raspberrypi5.log", "raspberrypi5.sock"} {
+		if err := os.WriteFile(filepath.Join(serialDir, f), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := RunClean(proj, "x86_64", false, true, nil); err != nil {
+		t.Fatalf("RunClean: %v", err)
+	}
+	if _, err := os.Stat(serialDir); !os.IsNotExist(err) {
+		t.Error("expected build/serial to be removed")
+	}
+}

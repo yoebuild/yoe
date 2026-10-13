@@ -8,6 +8,16 @@ and this project adheres to
 
 ## [Unreleased]
 
+- **The TUI captures your board's serial console.** Map a USB serial adapter to
+  a machine on the Setup page and the boot log appears in a new Serial tab, is
+  saved to `build/serial/<machine>.log` as timestamped text, and stays available
+  while you work. Enter on the tab attaches a full terminal to the board;
+  `ctrl-t q` returns. From a shell or Claude Code, `yoe serial` attaches,
+  `yoe serial log` reads the capture, and `yoe serial send` types at the board,
+  all while the TUI keeps the port. Machines declare their console speed with
+  `serial = serial_config(baud = ...)`; the Raspberry Pi and BeaglePlay machines
+  already do.
+
 ## [0.14.12] - 2026-09-15
 
 - **Units can pin a git source to a specific commit.** Set `tag` to a full

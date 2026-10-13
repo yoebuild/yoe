@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"go.starlark.net/starlark"
@@ -55,6 +56,16 @@ type LocalOverrides struct {
 	// PROJECT.star". Populated by the TUI Setup → Default Distro
 	// picker.
 	DefaultDistroOverride string
+	// SerialPorts maps a machine name to the host serial adapter that
+	// carries its console: a /dev/serial/by-id/ link (stable across
+	// replugs) or, for adapters with no by-id entry, a /dev/tty* path.
+	// Populated by the TUI Setup → Serial port picker and
+	// `yoe config set serial-port`. Empty means "no console mapped".
+	SerialPorts map[string]string
+	// SerialListen is an optional TCP address ("127.0.0.1:7001") on which
+	// the serial session also serves the raw console stream. Empty means
+	// "Unix socket only".
+	SerialListen string
 }
 
 // LoadLocalOverrides reads <projectDir>/local.star if it exists and
@@ -85,6 +96,24 @@ func LoadLocalOverrides(projectDir string) (LocalOverrides, error) {
 					return nil, fmt.Errorf("local: parallel_builds must be >= 1")
 				}
 				captured.ParallelBuilds = int(i)
+				continue
+			}
+			if string(key) == "serial_ports" {
+				d, ok := kv[1].(*starlark.Dict)
+				if !ok {
+					return nil, fmt.Errorf("local: serial_ports must be a dict of machine name to device path")
+				}
+				for _, item := range d.Items() {
+					k, ok1 := item[0].(starlark.String)
+					v, ok2 := item[1].(starlark.String)
+					if !ok1 || !ok2 {
+						return nil, fmt.Errorf("local: serial_ports keys and values must be strings")
+					}
+					if captured.SerialPorts == nil {
+						captured.SerialPorts = map[string]string{}
+					}
+					captured.SerialPorts[string(k)] = string(v)
+				}
 				continue
 			}
 			if string(key) == "qemu_ports" || string(key) == "ignored_flash_devices" {
@@ -128,6 +157,8 @@ func LoadLocalOverrides(projectDir string) (LocalOverrides, error) {
 				captured.DefaultDistroOverride = string(v)
 			case "qemu_memory":
 				captured.QEMUMemory = string(v)
+			case "serial_listen":
+				captured.SerialListen = string(v)
 			case "qemu_display":
 				switch string(v) {
 				case "on", "off", "":
@@ -205,6 +236,21 @@ func WriteLocalOverrides(projectDir string, ov LocalOverrides) error {
 	}
 	if ov.ParallelBuilds > 0 {
 		fmt.Fprintf(&b, "    parallel_builds = %d,\n", ov.ParallelBuilds)
+	}
+	if len(ov.SerialPorts) > 0 {
+		keys := make([]string, 0, len(ov.SerialPorts))
+		for k := range ov.SerialPorts {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		b.WriteString("    serial_ports = {\n")
+		for _, k := range keys {
+			fmt.Fprintf(&b, "        %q: %q,\n", k, ov.SerialPorts[k])
+		}
+		b.WriteString("    },\n")
+	}
+	if ov.SerialListen != "" {
+		fmt.Fprintf(&b, "    serial_listen = %q,\n", ov.SerialListen)
 	}
 	b.WriteString(")\n")
 	return os.WriteFile(path, []byte(b.String()), 0o644)

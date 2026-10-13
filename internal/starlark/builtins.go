@@ -20,6 +20,7 @@ func (e *Engine) builtins() starlark.StringDict {
 		"machine":          starlark.NewBuiltin("machine", e.fnMachine),
 		"kernel":           starlark.NewBuiltin("kernel", fnKernel),
 		"qemu_config":      starlark.NewBuiltin("qemu_config", fnQEMUConfig),
+		"serial_config":    starlark.NewBuiltin("serial_config", fnSerialConfig),
 		"unit":             starlark.NewBuiltin("unit", e.fnUnit),
 		"image":            starlark.NewBuiltin("image", e.fnImage),
 		"partition":        starlark.NewBuiltin("partition", fnPartition),
@@ -444,6 +445,27 @@ func structString(s *starlarkstruct.Struct, field string) string {
 	return ""
 }
 
+// structInt returns the struct field as an int and whether it was present
+// and an int. Values outside the int range report false.
+func structInt(s *starlarkstruct.Struct, field string) (int, bool) {
+	if s == nil {
+		return 0, false
+	}
+	v, err := s.Attr(field)
+	if err != nil {
+		return 0, false
+	}
+	n, ok := v.(starlark.Int)
+	if !ok {
+		return 0, false
+	}
+	i, ok := n.Int64()
+	if !ok || int64(int(i)) != i {
+		return 0, false
+	}
+	return int(i), true
+}
+
 func structStringMap(s *starlarkstruct.Struct, field string) map[string]string {
 	if s == nil {
 		return nil
@@ -532,6 +554,10 @@ func fnKernel(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs 
 
 func fnQEMUConfig(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	return makeStruct("qemu_config", kwargs), nil
+}
+
+func fnSerialConfig(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	return makeStruct("serial_config", kwargs), nil
 }
 
 func fnPartition(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
@@ -756,6 +782,18 @@ func (e *Engine) fnMachine(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.T
 			}
 		case "partitions":
 			m.Partitions = append(m.Partitions, parsePartitions(kv[1])...)
+		case "serial":
+			s, ok := kv[1].(*starlarkstruct.Struct)
+			if !ok {
+				return nil, fmt.Errorf("machine %q: serial must be serial_config(...)", name)
+			}
+			// No default speed: a wrong guess produces garbage on the
+			// console and is harder to diagnose than a missing field.
+			baud, ok := structInt(s, "baud")
+			if !ok || baud <= 0 {
+				return nil, fmt.Errorf("machine %q: serial requires baud (a positive int, e.g. serial_config(baud = 115200))", name)
+			}
+			m.Serial = &SerialConfig{Baud: baud}
 		}
 	}
 

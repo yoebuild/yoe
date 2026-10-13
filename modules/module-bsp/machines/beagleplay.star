@@ -8,6 +8,7 @@ machine(
         defconfig = "defconfig",
         cmdline = "console=ttyS2,115200 root=/dev/mmcblk1p2 rootfstype=ext4 rootwait rw",
     ),
+    serial = serial_config(baud = 115200),
     # The boot chain (ROM → tiboot3.bin → tispl.bin → u-boot.img → Image)
     # is assembled from these packages. Order matters only for human
     # readability — yoe resolves the actual dep DAG via each unit's deps.

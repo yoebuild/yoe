@@ -1,6 +1,8 @@
 # Serial console for hardware in the loop — Implementation Plan
 
-> **Status:** Not started. Target-state doc:
+> **Status:** Implemented 2026-09-19 (all seven phases; unit tests green).
+> Hardware verification on a Raspberry Pi 5 with a USB serial adapter is still
+> to be done by hand, see Verification below. Target-state doc:
 > [hardware-in-loop](../hardware-in-loop.md). Tracks GitHub issue #157 (HIL:
 > serial terminal through the TUI). The SSH terminal half of that issue is out
 > of scope here.
@@ -287,7 +289,7 @@ project): resolve machine with the same cascade `yoe run` uses (`--machine`,
 - no `serial` block →
   `machine "x" declares no serial console; add serial = serial_config(baud = ...) to its machine file`
 - no mapping →
-  `no serial adapter mapped for "x"; run yoe serial list, then yoe config set serial-port <id>`
+  `no serial adapter mapped for "x"; run yoe serial list, then yoe config set serial-port <path>`
 
 ### Task 5.2: Raw attach loop
 
