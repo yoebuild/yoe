@@ -284,7 +284,7 @@ yoe run dev-image --machine qemu-x86_64
 yoe run base-image --machine qemu-arm64
 
 # Forward an extra host port (default qemu machines already forward 2222→22,
-# 8080→80, and 8118→8118 — `--port` adds to that list)
+# 8080→80, and 4223→4223 — `--port` adds to that list)
 yoe run --port 9000:9000
 
 # Allocate more memory — also saved to local.star and reused next time
@@ -329,7 +329,7 @@ run, mirroring `yoe build --distro`. Without it the project's effective distro
    `console=ttyAMA0` (aarch64) in its command line.
 7. **Set up networking** — use QEMU user-mode networking with port forwarding.
    The qemu-x86_64 and qemu-arm64 machines forward `2222:22` (SSH), `8080:80`,
-   and `8118:8118` by default, so SSH to the guest works without any extra
+   and `4223:4223` by default, so SSH to the guest works without any extra
    flags. `--port` adds to that list.
 
 **QEMU machine definitions:**

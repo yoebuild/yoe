@@ -29,7 +29,7 @@ units.
 | Root device      | `/dev/vda1` (single part)         | `/dev/vda2`                  |
 | Kernel unit      | `linux` (generic)                 | `linux` (`x86_64_defconfig`) |
 | Extra packages   | none                              | `syslinux` (Alpine only)     |
-| Default forwards | `2222:22`, `8080:80`, `8118:8118` | same                         |
+| Default forwards | `2222:22`, `8080:80`, `4223:4223` | same                         |
 
 Both default to 4 GB RAM and `display = "none"`; the `-nographic` flag sends
 serial to the controlling terminal. 4 GB is the floor for memory-heavy unit
@@ -62,7 +62,7 @@ machine(
     qemu = qemu_config(
         machine = "virt", cpu = "host", memory = "4G",
         display = "none",
-        ports = ["2222:22", "8080:80", "8118:8118"],
+        ports = ["2222:22", "8080:80", "4223:4223"],
     ),
 )
 ```
@@ -125,7 +125,7 @@ machine(
         machine = "q35", cpu = "host", memory = "4G",
         firmware = "seabios",
         display = "none",
-        ports = ["2222:22", "8080:80", "8118:8118"],
+        ports = ["2222:22", "8080:80", "4223:4223"],
     ),
 )
 ```
@@ -256,12 +256,12 @@ for exercising a self-hosted `yoe` build. Two things differ from a run on the
 bare host, and `yoe run` handles both:
 
 1. **Port forwards collide.** The outer guest already holds the machine's
-   default host forwards (`2222`, `8080`, `8118`), so a nested run cannot bind
+   default host forwards (`2222`, `8080`, `4223`), so a nested run cannot bind
    them. Remap the host side with `--port`; an entry whose guest port matches a
    default forward replaces it:
 
    ```sh
-   yoe run base-image --port 12222:22 --port 18080:80 --port 18118:8118
+   yoe run base-image --port 12222:22 --port 18080:80 --port 14223:4223
    ```
 
 2. **No KVM.** A guest has no `/dev/kvm` unless its host was started with nested

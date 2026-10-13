@@ -7,13 +7,11 @@
 # update.
 SIOT_DATA=/var/lib/simpleiot
 
-# Port the built-in web portal listens on
-SIOT_HTTP_PORT=8118
-
-# Ports used by the embedded NATS server
+# Port the embedded NATS server listens on. The other ports follow from it:
+# the web portal listens one above (4223) and NATS monitoring two above
+# (4224, loopback only). SIOT_HTTP_PORT and SIOT_NATS_MONITOR_PORT override
+# those when a device needs something else.
 SIOT_NATS_PORT=4222
-SIOT_NATS_HTTP_PORT=8222
-SIOT_NATS_WS_PORT=9222
 
 # History kept per subject in the JetStream store. Retention is per subject,
 # so the current value of every point survives and only older history is

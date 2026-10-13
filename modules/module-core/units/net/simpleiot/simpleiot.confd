@@ -10,7 +10,7 @@
 SIOT_DATA=/var/lib/simpleiot
 
 # Port the built-in web portal listens on
-SIOT_HTTP_PORT=8118
+SIOT_HTTP_PORT=4223
 
 # Ports used by the embedded NATS server
 SIOT_NATS_PORT=4222

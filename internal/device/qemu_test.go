@@ -14,7 +14,7 @@ import (
 )
 
 func TestMergeQEMUPorts(t *testing.T) {
-	machine := []string{"2222:22", "8080:80", "8118:8118"}
+	machine := []string{"2222:22", "8080:80", "4223:4223"}
 
 	tests := []struct {
 		name    string
@@ -26,37 +26,37 @@ func TestMergeQEMUPorts(t *testing.T) {
 			name:    "no CLI ports keeps machine defaults",
 			machine: machine,
 			cli:     nil,
-			want:    []string{"2222:22", "8080:80", "8118:8118"},
+			want:    []string{"2222:22", "8080:80", "4223:4223"},
 		},
 		{
 			name:    "matching guest port replaces the machine forward",
 			machine: machine,
-			cli:     []string{"18118:8118"},
-			want:    []string{"2222:22", "8080:80", "18118:8118"},
+			cli:     []string{"14223:4223"},
+			want:    []string{"2222:22", "8080:80", "14223:4223"},
 		},
 		{
 			name:    "new guest port is appended",
 			machine: machine,
 			cli:     []string{"9000:9000"},
-			want:    []string{"2222:22", "8080:80", "8118:8118", "9000:9000"},
+			want:    []string{"2222:22", "8080:80", "4223:4223", "9000:9000"},
 		},
 		{
 			name:    "qemu-in-qemu: every default forward remapped",
 			machine: machine,
-			cli:     []string{"12222:22", "18080:80", "18118:8118"},
-			want:    []string{"12222:22", "18080:80", "18118:8118"},
+			cli:     []string{"12222:22", "18080:80", "14223:4223"},
+			want:    []string{"12222:22", "18080:80", "14223:4223"},
 		},
 		{
 			name:    "replace and append mixed",
 			machine: machine,
 			cli:     []string{"18080:80", "9000:9000"},
-			want:    []string{"2222:22", "18080:80", "8118:8118", "9000:9000"},
+			want:    []string{"2222:22", "18080:80", "4223:4223", "9000:9000"},
 		},
 		{
 			name:    "malformed CLI entry is appended untouched",
 			machine: machine,
 			cli:     []string{"nonsense"},
-			want:    []string{"2222:22", "8080:80", "8118:8118", "nonsense"},
+			want:    []string{"2222:22", "8080:80", "4223:4223", "nonsense"},
 		},
 		{
 			name:    "no machine ports, CLI only",
@@ -79,9 +79,9 @@ func TestMergeQEMUPorts(t *testing.T) {
 // TestMergeQEMUPortsDoesNotMutateMachine guards against the merge aliasing
 // and writing through the machine's declared slice.
 func TestMergeQEMUPortsDoesNotMutateMachine(t *testing.T) {
-	machine := []string{"2222:22", "8118:8118"}
-	_ = MergeQEMUPorts(machine, []string{"18118:8118"})
-	if machine[1] != "8118:8118" {
+	machine := []string{"2222:22", "4223:4223"}
+	_ = MergeQEMUPorts(machine, []string{"14223:4223"})
+	if machine[1] != "4223:4223" {
 		t.Errorf("machine slice was mutated: %v", machine)
 	}
 }

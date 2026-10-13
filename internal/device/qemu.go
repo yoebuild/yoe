@@ -47,7 +47,7 @@ func checkQEMUPortsFree(ports []string) error {
 // Replacing (rather than appending) is what makes `--port` usable for
 // qemu-in-qemu: when `yoe run` executes inside a QEMU guest, the outer
 // guest already holds the machine's default host forwards (2222, 8080,
-// 8118). `--port 18118:8118` then moves the host side of the 8118 forward
+// 4223). `--port 14223:4223` then moves the host side of the 4223 forward
 // off the taken port instead of declaring a second, still-colliding
 // forward for the same guest port.
 func MergeQEMUPorts(machinePorts, cliPorts []string) []string {

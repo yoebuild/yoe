@@ -14,7 +14,7 @@ load("//classes/binary.star", "binary")
 # rather than the Go-style default.
 binary(
     name = "simpleiot-bin",
-    version = "0.25.1",
+    version = "0.28.5",
     base_url = "https://github.com/simpleiot/simpleiot/releases/download/v{version}",
     asset = "simpleiot-v{version}-linux-{arch}",
     arch_map = {
@@ -23,9 +23,9 @@ binary(
         "riscv64": "riscv64",
     },
     sha256 = {
-        "x86_64":  "09244fe809df324dc21cd32155c84cc8e5f38b63acfde52c3aeaba6cf1fbcf44",
-        "arm64":   "6463c761cd85e459514b5dfa71efbc7fc46343e4af3a494a465378b5514bebbf",
-        "riscv64": "21a4d15639097fe15177586b3d3db4ba4a34da966e6737bb2dce92ecc13f5a7b",
+        "x86_64":  "a6e3fe6b5702464ad2e3d3305c55e0248f577ccc72b4a47b1b3186622ef21ec6",
+        "arm64":   "8b392a490884966e0f4b385a510c4c4ea13dacbf2d1341040c4c661e51baa829",
+        "riscv64": "21c751de2b68cff37366fa50598814286f6d851685011d8dc349f37b8c6db27a",
     },
     binaries = {"siot": "simpleiot-v{version}-linux-{arch}"},
     license = "Apache-2.0",
