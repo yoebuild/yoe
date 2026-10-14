@@ -2,15 +2,18 @@ load("//classes/go.star", "go_binary")
 
 go_binary(
     name = "simpleiot",
-    version = "0.18.5",
+    version = "0.28.5",
     source = "https://github.com/simpleiot/simpleiot.git",
-    tag = "v0.18.5",
+    tag = "v0.28.5",
     branch = "master",
     go_package = "./cmd/siot",
     binary = "siot",
+    # go.mod requires go 1.27.2, newer than the class's default toolchain.
+    container = "golang:1.27",
     license = "Apache-2.0",
     description = "IoT application for sensor data, telemetry, configuration, and device management",
     services = ["simpleiot"],
+    runtime_deps = ["ca-certificates"],
     # openrc is the Alpine service manager; naming it unconditionally pulls
     # Debian's openrc package into an apt image, where it conflicts with
     # systemd-sysv and the rootfs solve fails.

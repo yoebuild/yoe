@@ -10,10 +10,17 @@ import (
 func ShowConfig(proj *yoestar.Project, dir string, w io.Writer) error {
 	fmt.Fprintf(w, "Project:    %s %s\n", proj.Name, proj.Version)
 	fmt.Fprintf(w, "Machine:    %s (default)\n", proj.Defaults.Machine)
-	fmt.Fprintf(w, "Image:      %s (default)\n", proj.Defaults.Image)
-	fmt.Fprintf(w, "Cache:      %s\n", proj.Cache.Path)
 
 	ov, _ := yoestar.LoadLocalOverrides(dir)
+
+	// proj is a machines-only load, which does not apply local.star's
+	// image override (that needs the unit catalog), so read it here.
+	if ov.Image != "" {
+		fmt.Fprintf(w, "Image:      %s (local.star)\n", ov.Image)
+	} else {
+		fmt.Fprintf(w, "Image:      %s (default)\n", proj.Defaults.Image)
+	}
+	fmt.Fprintf(w, "Cache:      %s\n", proj.Cache.Path)
 
 	parallel := yoestar.DefaultParallelBuilds
 	parallelNote := "default"
@@ -34,30 +41,22 @@ func ShowConfig(proj *yoestar.Project, dir string, w io.Writer) error {
 	}
 	fmt.Fprintf(w, "QEMU mem:   %s (%s)\n", qemuMem, qemuNote)
 
-	// Count distinct unit names across modules. AllUnits may yield
-	// the same name twice when alpine.main and debian.main both
-	// register it, so dedup before counting and printing.
-	unitNames := map[string]*yoestar.Unit{}
-	for name, u := range proj.AllUnits() {
-		if _, ok := unitNames[name]; !ok {
-			unitNames[name] = u
+	// Serial console for the default machine: the machine's declared
+	// speed plus the developer's adapter mapping.
+	if m, ok := proj.Machines[proj.Defaults.Machine]; ok && m.Serial != nil {
+		mapped := ov.SerialPorts[proj.Defaults.Machine]
+		if mapped == "" {
+			mapped = "unmapped (yoe serial list; yoe config set serial-port <path>)"
 		}
+		fmt.Fprintf(w, "Serial:     %d baud, %s\n", m.Serial.Baud, mapped)
 	}
 
 	fmt.Fprintf(w, "Machines:   %d defined\n", len(proj.Machines))
-	fmt.Fprintf(w, "Units:    %d defined\n", len(unitNames))
 
 	if len(proj.Machines) > 0 {
 		fmt.Fprintln(w, "\nMachines:")
 		for name, m := range proj.Machines {
 			fmt.Fprintf(w, "  %-20s %s\n", name, m.Arch)
-		}
-	}
-
-	if len(unitNames) > 0 {
-		fmt.Fprintln(w, "\nUnits:")
-		for name, r := range unitNames {
-			fmt.Fprintf(w, "  %-20s [%s] %s\n", name, r.Class, r.Version)
 		}
 	}
 

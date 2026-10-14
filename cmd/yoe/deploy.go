@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -23,12 +24,23 @@ func cmdDeploy(args []string) {
 	port := fs.Int("port", 8765, "feed port")
 	hostIP := fs.String("host-ip", "", "advertise this IP instead of <hostname>.local")
 	machineName := fs.String("machine", "", "target machine")
-	fs.Parse(args)
-	if fs.NArg() < 2 {
+	// flag stops at the first positional, and the usage puts flags after
+	// <unit> <host>; keep parsing past each positional so they are not
+	// silently dropped.
+	var pos []string
+	for rest := args; ; {
+		fs.Parse(rest)
+		if fs.NArg() == 0 {
+			break
+		}
+		pos = append(pos, fs.Arg(0))
+		rest = fs.Args()[1:]
+	}
+	if len(pos) != 2 {
 		fail("Usage: %s deploy <unit> <[user@]host[:port]> [--user U] [--port P] [--host-ip IP] [--machine M]", os.Args[0])
 	}
-	unitName := fs.Arg(0)
-	hostArg := fs.Arg(1)
+	unitName := pos[0]
+	hostArg := pos[1]
 
 	proj := loadProjectWithMachine(*machineName)
 	// AnyUnit suffices to read the unit's class — we only need to
@@ -124,9 +136,20 @@ func buildUnitForDeploy(proj *yoestar.Project, unit, machineName string) error {
 // (teardown is a no-op). Otherwise spin up an ephemeral feed on the
 // pinned port.
 func resolveOrStartFeed(proj *yoestar.Project, projDir string, port int, hostIP string) (string, func(), error) {
-	if url := feed.DiscoverForProject(proj); url != "" {
-		fmt.Printf("reusing existing feed %s\n", url)
-		return url, func() {}, nil
+	if found := feed.DiscoverForProject(proj); found != "" {
+		// The discovered URL names the host by its mDNS name. A device that
+		// can't resolve .local is why --host-ip exists, so swap the host for
+		// the given IP and keep the running feed's port and path.
+		if hostIP != "" {
+			u, err := url.Parse(found)
+			if err != nil {
+				return "", nil, fmt.Errorf("parse discovered feed URL %q: %w", found, err)
+			}
+			u.Host = net.JoinHostPort(hostIP, u.Port())
+			found = u.String()
+		}
+		fmt.Printf("reusing existing feed %s\n", found)
+		return found, func() {}, nil
 	}
 
 	cfg, err := feed.ConfigForProject(proj, projDir)

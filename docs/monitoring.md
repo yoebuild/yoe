@@ -7,7 +7,7 @@ wire the three together so a device comes up working.
 
 | Unit               | Provides                                       | Default port | Data directory              |
 | ------------------ | ---------------------------------------------- | ------------ | --------------------------- |
-| `simpleiot-bin`    | [Simple IoT](https://simpleiot.org)            | 8118         | `/var/lib/simpleiot`        |
+| `simpleiot-bin`    | [Simple IoT](https://simpleiot.org)            | 4223         | `/var/lib/simpleiot`        |
 | `victoria-metrics` | [VictoriaMetrics](https://victoriametrics.com) | 8428         | `/var/lib/victoria-metrics` |
 | `grafana`          | [Grafana](https://grafana.com)                 | 3000         | `/var/lib/grafana`          |
 | `simpleiot-config` | Simple IoT node configuration                  | —            | —                           |
@@ -123,7 +123,7 @@ provisioning tree ships with the package:
 
 Simple IoT writes to VictoriaMetrics through a Database node, which
 `simpleiot-config` declares. To set one up by hand instead, add it in the Simple
-IoT portal on port 8118. Either way the points arrive as the `points_value` and
+IoT portal on port 4223. Either way the points arrive as the `points_value` and
 `points_text` series, which is what a dashboard queries.
 
 ## Storage

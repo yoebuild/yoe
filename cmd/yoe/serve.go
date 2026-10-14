@@ -18,7 +18,7 @@ func cmdServe(args []string) {
 	instance := fs.String("service-name", "", "mDNS instance name (default: yoe-<project>)")
 	fs.Parse(args)
 
-	proj := loadProject()
+	proj := mustLoadMachineSettings()
 
 	cfg, err := feed.ConfigForProject(proj, projectDir())
 	if err != nil {

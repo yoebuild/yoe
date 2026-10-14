@@ -218,6 +218,18 @@ type Machine struct {
 	// board support is identical across distros.
 	DistroPackages map[string][]string
 	Partitions     []Partition // default partition layout for images
+	// Serial describes the board's serial console as seen from the host:
+	// the speed the bootloader and kernel talk at. nil when the machine
+	// declares none (the QEMU machines, whose console is the terminal
+	// `yoe run` starts in). Host-side only — never part of a unit hash.
+	Serial *SerialConfig
+}
+
+// SerialConfig is the machine's `serial = serial_config(baud = ...)` block.
+// Only what is intrinsic to the board lives here; which host adapter the
+// console is plugged into is per developer and lives in local.star.
+type SerialConfig struct {
+	Baud int
 }
 
 type KernelConfig struct {

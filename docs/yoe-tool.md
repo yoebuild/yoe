@@ -36,6 +36,7 @@ yoe shell           Open an interactive shell in a unit's build sandbox  [planne
 yoe dev             Manage source modifications (extract, diff, status)
 yoe flash           Write an image to a device/SD card
 yoe run             Run an image in QEMU
+yoe serial          Attach to a board's serial console (also: list, log, send)
 yoe serve           Serve the project's package repo over HTTP+mDNS
 yoe deploy          Build and install a unit on a running yoe device
 yoe device          Manage repo configuration on a target device
@@ -284,7 +285,7 @@ yoe run dev-image --machine qemu-x86_64
 yoe run base-image --machine qemu-arm64
 
 # Forward an extra host port (default qemu machines already forward 2222→22,
-# 8080→80, and 8118→8118 — `--port` adds to that list)
+# 8080→80, and 4223→4223 — `--port` adds to that list)
 yoe run --port 9000:9000
 
 # Allocate more memory — also saved to local.star and reused next time
@@ -329,7 +330,7 @@ run, mirroring `yoe build --distro`. Without it the project's effective distro
    `console=ttyAMA0` (aarch64) in its command line.
 7. **Set up networking** — use QEMU user-mode networking with port forwarding.
    The qemu-x86_64 and qemu-arm64 machines forward `2222:22` (SSH), `8080:80`,
-   and `8118:8118` by default, so SSH to the guest works without any extra
+   and `4223:4223` by default, so SSH to the guest works without any extra
    flags. `--port` adds to that list.
 
 **QEMU machine definitions:**
@@ -408,6 +409,44 @@ press Enter. The sub-screen lays out three sections:
   forward with no override can't be removed — edit its host port instead. Every
   change writes through to `local.star`.
 
+### `yoe serial`
+
+Reads and drives the selected machine's serial console. The console is captured
+whenever the TUI or a `yoe serial` owns the adapter, and other yoe processes
+attach through a socket, so a shell or Claude Code can read and type at the
+board while the TUI keeps showing it. The session model, the log format, and the
+Setup-page picker are described in [Hardware in the Loop](hardware-in-loop.md).
+
+```sh
+# Attach interactively to the current machine's console (ctrl-t q detaches)
+yoe serial
+
+# Attach to another machine's console
+yoe serial --machine beagleplay
+
+# Show the captured log; -f follows it like tail -f
+yoe serial log
+yoe serial log -f
+yoe serial log -n 200
+
+# Send a line to the console (a newline is appended; --raw sends bytes as given)
+yoe serial send "cat /proc/cpuinfo"
+yoe serial send --raw $'\x03'
+
+# List detected adapters, marking the one mapped to the current machine
+yoe serial list
+
+# Also serve the raw stream on a TCP port for this session
+yoe serial --listen 127.0.0.1:7001
+```
+
+The machine resolves the way `yoe run` resolves it: `--machine`, then the
+`local.star` machine, then the project default. The machine must declare
+`serial = serial_config(baud = …)` and have an adapter mapped in `local.star`
+(`serial_ports`); `yoe config set serial-port <path>` or the TUI Setup page
+writes the mapping. `serial_listen` in `local.star` serves the raw stream on a
+TCP address for every session without passing `--listen`.
+
 ### `yoe serve`
 
 Runs an HTTP server rooted at the project's `repo/` tree and advertises it on
@@ -453,6 +492,11 @@ yoe deploy myapp pi@dev-pi.local
 # Cross-subnet or mDNS-hostile network — advertise an explicit IP
 yoe deploy myapp 10.0.5.42 --host-ip 10.0.5.1
 ```
+
+`--host-ip` puts that address in the feed URL the device is given, whether
+deploy starts its own feed or reuses a running `yoe serve`. Use it when the
+device cannot resolve `<hostname>.local`, such as an image without an mDNS
+resolver.
 
 The dev-feed repo entry (under `/etc/apk/repositories.d/` on Alpine,
 `/etc/apt/sources.list.d/` on Debian/Ubuntu) is left in place after deploy, so
@@ -698,18 +742,24 @@ yoe config set qemu-memory 8G
 
 # Clear it so the machine's own qemu memory applies again
 yoe config set qemu-memory ""
+
+# Map the current machine's serial console to a host adapter (written to
+# local.star as serial_ports); an empty value clears the mapping
+yoe config set serial-port /dev/serial/by-id/usb-FTDI_FT232R_USB_UART_A50285BI-if00-port0
+yoe config set serial-port ""
 ```
 
 `yoe config show` reads `PROJECT.star` and reports the project name, default
-machine and image, cache path, the parallel-build concurrency in effect, and the
+machine and image, cache path, the parallel-build concurrency in effect, the
 QEMU guest memory in effect (each annotated `default`, `machine default`, or
-`local.star`).
+`local.star`), and, for a machine that declares a serial console, its speed and
+the adapter mapped to it.
 
 `yoe config set` only writes settings that live in the yoe-generated
-`local.star`: `parallel-builds` and `qemu-memory`. Project configuration
-(`defaults.machine`, `defaults.image`, etc.) lives in hand-authored
-`PROJECT.star` and is edited there directly — `config set` does not patch
-Starlark.
+`local.star`: `parallel-builds`, `qemu-memory`, and `serial-port`. Project
+configuration (`defaults.machine`, `defaults.image`, etc.) lives in
+hand-authored `PROJECT.star` and is edited there directly — `config set` does
+not patch Starlark.
 
 #### `yoe config set defaults.*` / `yoe config resolve` (planned)
 
@@ -808,8 +858,9 @@ yoe graph --stale
 ### `yoe` TUI (no args)
 
 Running `yoe` with no arguments launches an interactive terminal UI showing all
-units with their build status. The home screen has three tabs (`tab` /
-`shift+tab` to cycle): **Units**, **Modules**, and **Diagnostics**.
+units with their build status. The home screen has four tabs (`tab` /
+`shift+tab` to cycle): **Units**, **Modules**, **Diagnostics**, and **Serial**
+(the selected machine's console, see [Serial tab](#serial-tab)).
 
 ```
   `[yoe]`  Machine: qemu-x86_64  Image: base-image
@@ -920,7 +971,7 @@ visible. Press `P` to capture the new HEAD as the new pin.
 | `l`         | Open unit's build log in `$EDITOR`                             |
 | `d`         | Launch `claude diagnose` for the unit                          |
 | `a`         | Launch `claude /new-unit`                                      |
-| `s`         | Open Setup (machine / image / parallel builds / QEMU settings) |
+| `s`         | Open Setup (machine / image / parallel builds / QEMU / serial) |
 | `/`         | Edit the active query (substring + `type:` `module:` `in:`)    |
 | `\`         | Snap query back to the saved default in `local.star`           |
 | `S`         | Save the current query as the new default                      |
@@ -987,6 +1038,35 @@ A few devices expose nothing identifying — some USB bridges report no serial a
 all. Those fall back to matching on the path, and their entries read `/dev/sdb`.
 A path can move between boots, so a mark on one of these devices is worth a
 glance at the size, vendor, and model on the confirmation step.
+
+#### Serial tab
+
+The fourth home-screen tab shows the selected machine's serial console as yoe
+captures it: timestamped, escape-stripped lines, the same text written to
+`build/serial/<machine>.log`. The status line names the machine, the adapter,
+the speed, and whether the adapter is connected, waiting, or owned by another
+yoe process this TUI attached to. Output follows the newest line until you
+scroll up; `G` resumes following.
+
+| Key           | Action                                                         |
+| ------------- | -------------------------------------------------------------- |
+| `Enter`       | Attach interactively: keys go to the board until `ctrl-t q`    |
+| `j/k` `↑/↓`   | Scroll (scrolling up pauses following)                         |
+| `PgUp` `PgDn` | Scroll a page                                                  |
+| `g/G`         | Jump to the oldest captured line / resume following the newest |
+| `c`           | Clear the on-screen scrollback (the log file is untouched)     |
+| `s`           | Open Setup → Serial port to map an adapter                     |
+| `?`           | Show the keyboard cheat sheet for this tab                     |
+
+The tab is empty with an explanation when the machine declares no
+`serial = serial_config(baud = …)` or no adapter is mapped for it. Map one on
+the Setup page: **Serial port** lists the adapters on the host as
+`/dev/serial/by-id/` entries (vendor, serial number, and current `/dev/tty*`
+path), Enter maps the highlighted one to the current machine, `d` clears the
+mapping, and the list rescans every second while open. The mapping is saved as
+`serial_ports` in `local.star`. See [Hardware in the Loop](hardware-in-loop.md)
+for the interactive chords and the `yoe serial` commands that attach from a
+shell.
 
 #### Detail view
 

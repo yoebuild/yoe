@@ -88,6 +88,8 @@ func main() {
 		cmdBuild(cmdArgs)
 	case "flash":
 		cmdFlash(cmdArgs)
+	case "serial":
+		cmdSerial(cmdArgs)
 	case "run":
 		cmdRun(cmdArgs)
 	case "serve":
@@ -154,6 +156,7 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  dev                     Manage source modifications (extract, diff, status)\n")
 	fmt.Fprintf(os.Stderr, "  flash <unit> <device>   Write an image to a device/SD card (also: flash list)\n")
 	fmt.Fprintf(os.Stderr, "  run                     Run an image in QEMU\n")
+	fmt.Fprintf(os.Stderr, "  serial                  Attach to a board's serial console (list / log / send)\n")
 	fmt.Fprintf(os.Stderr, "  serve                   Run an HTTP+mDNS feed for the project's repo\n")
 	fmt.Fprintf(os.Stderr, "  device repo             Manage apk repos on a target device (add, remove, list)\n")
 	fmt.Fprintf(os.Stderr, "  deploy <unit> <host>    Build and install a unit on a running yoe device\n")
@@ -525,7 +528,11 @@ func cmdConfig(args []string) {
 
 	switch args[0] {
 	case "show":
-		if err := yoe.ShowConfig(loadProject(), dir, os.Stdout); err != nil {
+		proj, err := loadMachineSettings("")
+		if err != nil {
+			fail("Error: %v", err)
+		}
+		if err := yoe.ShowConfig(proj, dir, os.Stdout); err != nil {
 			fail("Error: %v", err)
 		}
 	case "set":
@@ -557,7 +564,33 @@ func cmdConfig(args []string) {
 			}
 			return
 		}
-		fail("config set: supported keys are 'parallel-builds <n>' and 'qemu-memory <size>'; edit PROJECT.star directly for project config")
+		if len(args) == 3 && args[1] == "serial-port" {
+			// The mapping is per machine, so it needs the effective
+			// machine (local.star override applied by the loader).
+			machine := mustLoadMachineSettings().Defaults.Machine
+			if machine == "" {
+				fail("config set serial-port: no machine selected; set one in local.star or PROJECT.star defaults")
+			}
+			path := strings.TrimSpace(args[2])
+			mutateOverrides(func(ov *yoestar.LocalOverrides) bool {
+				if path == "" {
+					delete(ov.SerialPorts, machine)
+					return true
+				}
+				if ov.SerialPorts == nil {
+					ov.SerialPorts = map[string]string{}
+				}
+				ov.SerialPorts[machine] = path
+				return true
+			})
+			if path == "" {
+				fmt.Printf("serial-port for %s cleared from local.star\n", machine)
+			} else {
+				fmt.Printf("serial-port for %s = %s (saved to local.star)\n", machine, path)
+			}
+			return
+		}
+		fail("config set: supported keys are 'parallel-builds <n>', 'qemu-memory <size>', and 'serial-port <path>'; edit PROJECT.star directly for project config")
 	default:
 		fail("Unknown config subcommand: %s", args[0])
 	}
@@ -584,9 +617,6 @@ func loadProject() *yoestar.Project {
 	return loadProjectWithMachine("")
 }
 
-// tryLoadProject returns nil if no project is loadable from the cwd
-// (rather than os.Exit'ing like loadProject). Useful for commands that
-// can run inside or outside a project, like `yoe device repo list`.
 // projectLoadOpts returns the LoadOptions every project load uses: the
 // module-sync callback, the feed builtins, and whatever the global CLI flags
 // say. The TUI needs these too, so reloads (after editing .star files or
@@ -623,14 +653,31 @@ func globalFlagArgs() []string {
 	return args
 }
 
-func tryLoadProject() *yoestar.Project {
+// loadMachineSettings loads only PROJECT.star and the machine definitions,
+// with the same --machine > local.star > PROJECT.star precedence as a full
+// load. The Project has no units or images; it is for commands that only
+// need the board's settings and should not pay for evaluating images.
+func loadMachineSettings(machineName string) (*yoestar.Project, error) {
 	dir := os.Getenv("YOE_PROJECT")
 	if dir == "" {
 		dir = "."
 	}
-	proj, err := yoestar.LoadProject(dir, projectLoadOpts()...)
+	if machineName == "" {
+		machineName = readOverrides().Machine
+	}
+	opts := append(projectLoadOpts(), yoestar.WithMachinesOnly())
+	if machineName != "" {
+		opts = append(opts, yoestar.WithMachine(machineName))
+	}
+	return yoestar.LoadProject(dir, opts...)
+}
+
+// mustLoadMachineSettings is loadMachineSettings for commands that cannot
+// run without a project.
+func mustLoadMachineSettings() *yoestar.Project {
+	proj, err := loadMachineSettings("")
 	if err != nil {
-		return nil
+		fail("Error: %v", err)
 	}
 	return proj
 }

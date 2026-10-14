@@ -31,6 +31,11 @@ Authoritative hardware reference for everything below:
 yoe-specific bits and a quick start; for pinouts, mechanical layout, and silicon
 details, defer to BeagleBoard.org's docs.
 
+The machine declares a 115200 baud console (`serial = serial_config(...)`), so
+once you map your USB serial adapter on the TUI Setup page the boot log lands in
+the Serial tab and in `build/serial/beagleplay.log`. See
+[Hardware in the Loop](hardware-in-loop.md).
+
 ### Writing the image to a microSD card
 
 Two ways:

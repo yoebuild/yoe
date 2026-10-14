@@ -24,7 +24,7 @@ func cmdKey(args []string) {
 		fail("Usage: %s key <generate|info>", os.Args[0])
 	}
 
-	proj := loadProject()
+	proj := mustLoadMachineSettings()
 
 	switch args[0] {
 	case "generate":
