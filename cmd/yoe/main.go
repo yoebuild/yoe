@@ -567,7 +567,7 @@ func cmdConfig(args []string) {
 		if len(args) == 3 && args[1] == "serial-port" {
 			// The mapping is per machine, so it needs the effective
 			// machine (local.star override applied by the loader).
-			machine := loadProject().Defaults.Machine
+			machine := mustLoadMachineSettings().Defaults.Machine
 			if machine == "" {
 				fail("config set serial-port: no machine selected; set one in local.star or PROJECT.star defaults")
 			}
@@ -617,9 +617,6 @@ func loadProject() *yoestar.Project {
 	return loadProjectWithMachine("")
 }
 
-// tryLoadProject returns nil if no project is loadable from the cwd
-// (rather than os.Exit'ing like loadProject). Useful for commands that
-// can run inside or outside a project, like `yoe device repo list`.
 // projectLoadOpts returns the LoadOptions every project load uses: the
 // module-sync callback, the feed builtins, and whatever the global CLI flags
 // say. The TUI needs these too, so reloads (after editing .star files or
@@ -656,18 +653,6 @@ func globalFlagArgs() []string {
 	return args
 }
 
-func tryLoadProject() *yoestar.Project {
-	dir := os.Getenv("YOE_PROJECT")
-	if dir == "" {
-		dir = "."
-	}
-	proj, err := yoestar.LoadProject(dir, projectLoadOpts()...)
-	if err != nil {
-		return nil
-	}
-	return proj
-}
-
 // loadMachineSettings loads only PROJECT.star and the machine definitions,
 // with the same --machine > local.star > PROJECT.star precedence as a full
 // load. The Project has no units or images; it is for commands that only
@@ -685,6 +670,16 @@ func loadMachineSettings(machineName string) (*yoestar.Project, error) {
 		opts = append(opts, yoestar.WithMachine(machineName))
 	}
 	return yoestar.LoadProject(dir, opts...)
+}
+
+// mustLoadMachineSettings is loadMachineSettings for commands that cannot
+// run without a project.
+func mustLoadMachineSettings() *yoestar.Project {
+	proj, err := loadMachineSettings("")
+	if err != nil {
+		fail("Error: %v", err)
+	}
+	return proj
 }
 
 func loadProjectWithMachine(machineName string) *yoestar.Project {

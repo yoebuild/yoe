@@ -130,7 +130,7 @@ func discoverFeed(needProject bool) (string, error) {
 	}
 
 	var projectName string
-	if proj := tryLoadProject(); proj != nil {
+	if proj, err := loadMachineSettings(""); err == nil {
 		projectName = proj.Name
 	} else if needProject {
 		return "", fmt.Errorf("not in a yoe project — run from a project dir or pass --feed")
@@ -163,7 +163,7 @@ func discoverFeed(needProject bool) (string, error) {
 // returns the path plus the apk-style key name (e.g. "myproj.rsa.pub").
 // Caller is responsible for os.Remove on the returned path.
 func stagePubKey() (string, string, error) {
-	proj := loadProject()
+	proj := mustLoadMachineSettings()
 	signer, err := artifact.LoadOrGenerateSigner(proj.Name, proj.SigningKey)
 	if err != nil {
 		return "", "", err
