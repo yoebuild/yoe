@@ -149,6 +149,29 @@ func TestLoadProject(t *testing.T) {
 	}
 }
 
+// TestLoadProject_MachinesOnly: the machines-only load returns the project's
+// defaults and machines, applies the machine override, and evaluates no
+// units or images.
+func TestLoadProject_MachinesOnly(t *testing.T) {
+	dir := filepath.Join("..", "..", "testdata", "valid-project")
+	proj, err := LoadProject(dir, WithMachinesOnly(), WithMachine("beaglebone-black"))
+	if err != nil {
+		t.Fatalf("LoadProject: %v", err)
+	}
+	if proj.Name != "test-distro" {
+		t.Errorf("Name = %q, want %q", proj.Name, "test-distro")
+	}
+	if proj.Defaults.Machine != "beaglebone-black" {
+		t.Errorf("Defaults.Machine = %q, want %q", proj.Defaults.Machine, "beaglebone-black")
+	}
+	if len(proj.Machines) != 2 {
+		t.Errorf("got %d machines, want 2", len(proj.Machines))
+	}
+	if n := countAllUnits(proj); n != 0 {
+		t.Errorf("got %d units, want 0", n)
+	}
+}
+
 func TestLoadMinimalProject(t *testing.T) {
 	dir := filepath.Join("..", "..", "testdata", "minimal-project")
 	proj, err := LoadProject(dir)

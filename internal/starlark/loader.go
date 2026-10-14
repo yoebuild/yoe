@@ -20,6 +20,7 @@ type loadConfig struct {
 	machine                string // override default machine before evaluating units/images
 	distroOverride         string // override default_distro_override before evaluating units/images
 	projectFile            string // alternative project file (instead of PROJECT.star)
+	machinesOnly           bool   // stop after machines; skip modules, containers, units, images
 	showShadows            bool   // emit shadow / provides-override notices (default off)
 	allowDuplicateProvides bool   // accept multiple intra-module providers of the same virtual
 	extraBuiltins          []extraBuiltin
@@ -54,6 +55,17 @@ func WithModuleSync(fn func([]ModuleRef, io.Writer) error) LoadOption {
 // the correct architecture for the specified machine.
 func WithMachine(name string) LoadOption {
 	return func(c *loadConfig) { c.machine = name }
+}
+
+// WithMachinesOnly stops the load once PROJECT.star and the machine
+// definitions are evaluated. The returned Project carries its name,
+// defaults (with any WithMachine override applied), modules and Machines,
+// but no units, images, containers or feeds. Commands that only need the
+// board's settings, like `yoe serial`, use it to skip evaluating images,
+// whose closure walk parses the distro package indexes and dominates load
+// time.
+func WithMachinesOnly() LoadOption {
+	return func(c *loadConfig) { c.machinesOnly = true }
 }
 
 // WithDistroOverride sets the per-invocation default-distro override (the
@@ -343,6 +355,16 @@ func LoadProjectFromRoot(root string, opts ...LoadOption) (*Project, error) {
 		if proj := eng.Project(); proj != nil {
 			proj.Defaults.Machine = cfg.machine
 		}
+	}
+
+	if cfg.machinesOnly {
+		proj := eng.Project()
+		if proj == nil {
+			return nil, fmt.Errorf("PROJECT.star did not call project()")
+		}
+		proj.Machines = eng.Machines()
+		proj.ResolvedModules = resolvedForProject
+		return proj, nil
 	}
 
 	// Build ctx — a single Starlark struct exposing the active machine /

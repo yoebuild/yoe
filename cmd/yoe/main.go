@@ -528,7 +528,11 @@ func cmdConfig(args []string) {
 
 	switch args[0] {
 	case "show":
-		if err := yoe.ShowConfig(loadProject(), dir, os.Stdout); err != nil {
+		proj, err := loadMachineSettings("")
+		if err != nil {
+			fail("Error: %v", err)
+		}
+		if err := yoe.ShowConfig(proj, dir, os.Stdout); err != nil {
 			fail("Error: %v", err)
 		}
 	case "set":
@@ -662,6 +666,25 @@ func tryLoadProject() *yoestar.Project {
 		return nil
 	}
 	return proj
+}
+
+// loadMachineSettings loads only PROJECT.star and the machine definitions,
+// with the same --machine > local.star > PROJECT.star precedence as a full
+// load. The Project has no units or images; it is for commands that only
+// need the board's settings and should not pay for evaluating images.
+func loadMachineSettings(machineName string) (*yoestar.Project, error) {
+	dir := os.Getenv("YOE_PROJECT")
+	if dir == "" {
+		dir = "."
+	}
+	if machineName == "" {
+		machineName = readOverrides().Machine
+	}
+	opts := append(projectLoadOpts(), yoestar.WithMachinesOnly())
+	if machineName != "" {
+		opts = append(opts, yoestar.WithMachine(machineName))
+	}
+	return yoestar.LoadProject(dir, opts...)
 }
 
 func loadProjectWithMachine(machineName string) *yoestar.Project {

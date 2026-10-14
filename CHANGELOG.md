@@ -27,6 +27,10 @@ and this project adheres to
 - **`yoe deploy` options now work when written after the unit and host**, as the
   docs show them. `--host-ip` also now applies when a `yoe serve` is already
   running, so devices that cannot resolve `.local` names can install from it.
+- **`yoe serial` commands and `yoe config show` start instantly** instead of
+  taking several seconds, so reading the console log or sending a line to the
+  board no longer waits on the whole project to load. `yoe config show` no
+  longer lists every unit; use `yoe desc <unit>` or the TUI for that.
 
 ## [0.14.12] - 2026-09-15
 

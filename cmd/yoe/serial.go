@@ -53,7 +53,10 @@ TUI Setup page. See docs/hardware-in-loop.md.
 // serialConfig resolves the console for the machine (or the project's
 // effective machine when machineName is empty).
 func serialConfig(machineName string) serial.Config {
-	proj := loadProjectWithMachine(machineName)
+	proj, err := loadMachineSettings(machineName)
+	if err != nil {
+		fail("Error: %v", err)
+	}
 	root, err := yoestar.FindProjectRoot(projectDir())
 	if err != nil {
 		fail("Error: %v", err)
@@ -129,7 +132,7 @@ func cmdSerialList(args []string) {
 	// loadable from here; outside a project the listing still works.
 	mapped := ""
 	machine := ""
-	if proj := tryLoadProject(); proj != nil {
+	if proj, err := loadMachineSettings(""); err == nil {
 		machine = proj.Defaults.Machine
 		mapped = readOverrides().SerialPorts[machine]
 	}
@@ -158,7 +161,10 @@ func cmdSerialLog(args []string) {
 
 	// Only the machine and project root are needed; the adapter need not
 	// be mapped or present to read what was captured earlier.
-	proj := loadProjectWithMachine(*machineName)
+	proj, err := loadMachineSettings(*machineName)
+	if err != nil {
+		fail("Error: %v", err)
+	}
 	root, err := yoestar.FindProjectRoot(projectDir())
 	if err != nil {
 		fail("Error: %v", err)
