@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/yoebuild/yoe/internal/serial"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
@@ -196,7 +198,9 @@ func serialWaitCmd(ch <-chan string) tea.Cmd {
 
 // serialAppend adds lines to the scrollback, trimming to the bound.
 func (m *model) serialAppend(lines []string) {
-	m.serial.lines = append(m.serial.lines, lines...)
+	for _, l := range lines {
+		m.serial.lines = append(m.serial.lines, expandConsoleTabs(l))
+	}
 	if over := len(m.serial.lines) - serialScrollback; over > 0 {
 		m.serial.lines = append([]string(nil), m.serial.lines[over:]...)
 		m.serial.scroll -= over
@@ -204,6 +208,46 @@ func (m *model) serialAppend(lines []string) {
 			m.serial.scroll = 0
 		}
 	}
+}
+
+// serialLogDisplayPath is the log path relative to the project, so the
+// status row stays short enough to show it whole.
+func (m model) serialLogDisplayPath() string {
+	p := serial.LogPath(m.serial.cfg.Dir, m.serial.cfg.Machine)
+	if rel, err := filepath.Rel(m.projectDir, p); err == nil && !strings.HasPrefix(rel, "..") {
+		return rel
+	}
+	return p
+}
+
+// expandConsoleTabs replaces tabs with spaces to the next 8-column stop,
+// counted from the start of the console text after the "[timestamp] "
+// prefix, so columns line up as they did on the board. The log keeps its
+// tabs; the tab expands them because a tab measures zero columns but the
+// terminal draws it wider, so an unexpanded line overflows the clip,
+// wraps, and pushes the header off the screen.
+func expandConsoleTabs(line string) string {
+	if !strings.Contains(line, "\t") {
+		return line
+	}
+	prefix, text := "", line
+	if i := strings.Index(line, "] "); strings.HasPrefix(line, "[") && i >= 0 {
+		prefix, text = line[:i+2], line[i+2:]
+	}
+	var b strings.Builder
+	b.WriteString(prefix)
+	col := 0
+	for _, r := range text {
+		if r == '\t' {
+			n := 8 - col%8
+			b.WriteString(strings.Repeat(" ", n))
+			col += n
+			continue
+		}
+		b.WriteRune(r)
+		col += ansi.StringWidth(string(r))
+	}
+	return b.String()
 }
 
 func (m model) serialViewportHeight() int {
@@ -345,18 +389,28 @@ func (m model) viewSerialTab() string {
 	var b strings.Builder
 	b.WriteString(m.renderHomeHeader())
 
+	// Every row below is clipped to the terminal width: the viewport
+	// height budgets one screen row per line, so a line that wraps pushes
+	// the header off the top.
+	width := m.width
+	if width <= 0 {
+		width = 200
+	}
+
 	machine := m.proj.Defaults.Machine
+	var status string
 	if m.serialConsole() == nil {
-		fmt.Fprintf(&b, "  %s%s\n\n",
+		status = fmt.Sprintf("  %s%s",
 			fieldLabelStyle.Render("Serial: "),
 			dimStyle.Render("off — "+m.serial.why))
 	} else {
-		fmt.Fprintf(&b, "  %s%s  %s%s  %s%s\n\n",
+		status = fmt.Sprintf("  %s%s  %s%s  %s%s",
 			fieldLabelStyle.Render("Serial: "),
 			fieldValueStyle.Render(fmt.Sprintf("%s %s %d baud", machine, m.serial.cfg.Mapped, m.serial.cfg.Baud)),
 			fieldLabelStyle.Render("State: "), fieldValueStyle.Render(m.serialState()),
-			fieldLabelStyle.Render("Log: "), dimStyle.Render(serial.LogPath(m.serial.cfg.Dir, m.serial.cfg.Machine)))
+			fieldLabelStyle.Render("Log: "), dimStyle.Render(m.serialLogDisplayPath()))
 	}
+	b.WriteString(clipFixed(status, width) + "\n\n")
 
 	viewH := m.serialViewportHeight()
 	start := m.serial.scroll
@@ -370,10 +424,6 @@ func (m model) viewSerialTab() string {
 	if end > len(m.serial.lines) {
 		end = len(m.serial.lines)
 	}
-	width := m.width - 2
-	if width <= 0 {
-		width = 200
-	}
 	if len(m.serial.lines) == 0 {
 		if m.serialConsole() == nil {
 			b.WriteString(dimStyle.Render("  Map an adapter on the Setup page (s) to capture this machine's console.\n"))
@@ -385,7 +435,7 @@ func (m model) viewSerialTab() string {
 		}
 	} else {
 		for _, l := range m.serial.lines[start:end] {
-			b.WriteString("  " + clipFixed(l, width) + "\n")
+			b.WriteString("  " + clipFixed(l, width-2) + "\n")
 		}
 		for i := end - start; i < viewH; i++ {
 			b.WriteString("\n")
@@ -394,7 +444,7 @@ func (m model) viewSerialTab() string {
 
 	b.WriteString("\n")
 	if m.message != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  " + m.message))
+		b.WriteString(clipFixed(lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render("  "+m.message), width))
 		b.WriteString("\n")
 		return b.String()
 	}
@@ -402,10 +452,10 @@ func (m model) viewSerialTab() string {
 	if !m.serial.follow {
 		follow = fmt.Sprintf("line %d/%d (G follows)", start+1, len(m.serial.lines))
 	}
-	b.WriteString(renderHelp([]helpItem{
+	b.WriteString(clipFixed(renderHelp([]helpItem{
 		{"enter", "attach"}, {"j/k", "scroll"}, {"g/G", "top/follow"}, {"c", "clear"},
 		{"s", "setup"}, {"tab", "next tab"}, {"?", "help"}, {"", follow},
-	}))
+	}), width))
 	return b.String()
 }
 

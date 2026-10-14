@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/yoebuild/yoe/internal/serial"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
@@ -278,5 +279,44 @@ func TestSerialWaitCmd_BatchesAndCloses(t *testing.T) {
 	}
 	if serialWaitCmd(nil) != nil {
 		t.Error("nil channel should yield no command")
+	}
+}
+
+// TestSerialTab_RowsFitScreen: the viewport budgets one screen row per
+// line, so a row wider than the terminal wraps and pushes the header off
+// the top. Long status text, a tab-separated ls listing and a long help
+// row must all render within the width, filling exactly the height.
+func TestSerialTab_RowsFitScreen(t *testing.T) {
+	m := serialTestModel(t, true)
+	m.activeTab = tabSerial
+	m.width, m.height = 80, 20
+	m.serial.why = "no serial adapter mapped for " + strings.Repeat("/dev/serial/by-id/usb-FTDI_TTL232R-3V3_FTADUKIC-if00-port0 ", 2)
+	var lines []string
+	for i := 0; i < 40; i++ {
+		lines = append(lines, "[2026-10-14 10:38:58.337] dhcp\t\t\tkernel\t     passwd-\t     shadow-\t"+strings.Repeat("x", 30))
+	}
+	m.serialAppend(lines)
+	m.serial.follow = false // the "line N/M (G follows)" help row is the longest
+
+	view := m.viewSerialTab()
+	if strings.Contains(view, "\t") {
+		t.Error("view contains a raw tab")
+	}
+	rows := strings.Split(strings.TrimSuffix(view, "\n"), "\n")
+	for i, r := range rows {
+		if w := ansi.StringWidth(r); w > m.width {
+			t.Errorf("row %d is %d columns, wider than %d: %q", i, w, m.width, ansi.Strip(r))
+		}
+	}
+	if len(rows) != m.height {
+		t.Errorf("view is %d rows, want %d", len(rows), m.height)
+	}
+}
+
+func TestExpandConsoleTabs(t *testing.T) {
+	got := expandConsoleTabs("[2026-10-14 10:38:58.337] ab\tc\td")
+	want := "[2026-10-14 10:38:58.337] ab      c       d"
+	if got != want {
+		t.Errorf("got  %q\nwant %q", got, want)
 	}
 }
