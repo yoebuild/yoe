@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-14
+
 - **`simpleiot-bin` updated to Simple IoT 0.28.5.** The web portal now listens
   on port 4223 instead of 8118, and the QEMU machines forward 4223 to the host
   in place of 8118.
