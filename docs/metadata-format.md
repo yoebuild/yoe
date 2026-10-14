@@ -214,12 +214,20 @@ machine(
         cmdline = "console=ttyS2,115200 root=/dev/mmcblk1p2 rootwait rw",
     ),
     packages = ["u-boot-beagleplay"],
+    serial = serial_config(baud = 115200),
 )
 
 The kernel and bootloader are ordinary units, named here rather than
 described inline: the unit owns the source, the patches, and the build
 steps, and the machine only says which one to use.
 ```
+
+`serial` declares the board's console speed for the host-side serial capture
+(the TUI's Serial tab and `yoe serial`). `baud` is required when the block is
+present; omit the block for a machine with no console yoe should capture. Which
+host adapter carries the console is per developer and lives in `local.star`
+(`serial_ports`), not here. The field does not enter any unit hash. See
+[Hardware in the Loop](hardware-in-loop.md).
 
 QEMU machines include emulation configuration:
 

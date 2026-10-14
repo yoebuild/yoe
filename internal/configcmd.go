@@ -34,6 +34,16 @@ func ShowConfig(proj *yoestar.Project, dir string, w io.Writer) error {
 	}
 	fmt.Fprintf(w, "QEMU mem:   %s (%s)\n", qemuMem, qemuNote)
 
+	// Serial console for the default machine: the machine's declared
+	// speed plus the developer's adapter mapping.
+	if m, ok := proj.Machines[proj.Defaults.Machine]; ok && m.Serial != nil {
+		mapped := ov.SerialPorts[proj.Defaults.Machine]
+		if mapped == "" {
+			mapped = "unmapped (yoe serial list; yoe config set serial-port <path>)"
+		}
+		fmt.Fprintf(w, "Serial:     %d baud, %s\n", m.Serial.Baud, mapped)
+	}
+
 	// Count distinct unit names across modules. AllUnits may yield
 	// the same name twice when alpine.main and debian.main both
 	// register it, so dedup before counting and printing.

@@ -11,6 +11,20 @@ and this project adheres to
 - **`simpleiot-bin` updated to Simple IoT 0.28.5.** The web portal now listens
   on port 4223 instead of 8118, and the QEMU machines forward 4223 to the host
   in place of 8118.
+- **The source-built `simpleiot` unit is updated from 0.18.5 to 0.28.5**,
+  matching `simpleiot-bin`, and now ships the same service settings.
+- **The TUI captures your board's serial console.** Map a USB serial adapter to
+  a machine on the Setup page and the boot log appears in a new Serial tab, is
+  saved to `build/serial/<machine>.log` as timestamped text, and stays available
+  while you work. Enter on the tab attaches a full terminal to the board;
+  `ctrl-t q` returns. From a shell or Claude Code, `yoe serial` attaches,
+  `yoe serial log` reads the capture, and `yoe serial send` types at the board,
+  all while the TUI keeps the port. Machines declare their console speed with
+  `serial = serial_config(baud = ...)`; the Raspberry Pi and BeaglePlay machines
+  already do.
+- **`yoe deploy` options now work when written after the unit and host**, as the
+  docs show them. `--host-ip` also now applies when a `yoe serve` is already
+  running, so devices that cannot resolve `.local` names can install from it.
 
 ## [0.14.12] - 2026-09-15
 

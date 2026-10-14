@@ -181,6 +181,19 @@ out noise (compiler progress, make output) and surface what matters.
 /build-log openssl --warnings-only
 ```
 
+#### `/serial-console`
+
+Read and drive an attached board's serial console through `yoe serial`: tail the
+captured log to see where a boot stopped, send a command and read the reply. The
+log is timestamped, escape-stripped text under `build/serial/<machine>.log`, so
+the same file a person reads after a failed boot is what the skill reads. See
+[Hardware in the Loop](hardware-in-loop.md).
+
+```
+/serial-console            # what did the board print, did it boot
+/serial-console send "dmesg | tail"
+```
+
 ### Security & Maintenance
 
 #### `/cve-check`

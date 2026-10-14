@@ -28,6 +28,7 @@ import (
 	"github.com/yoebuild/yoe/internal/gitutil"
 	"github.com/yoebuild/yoe/internal/module"
 	"github.com/yoebuild/yoe/internal/resolve"
+	"github.com/yoebuild/yoe/internal/serial"
 	"github.com/yoebuild/yoe/internal/source"
 	yoestar "github.com/yoebuild/yoe/internal/starlark"
 	"github.com/yoebuild/yoe/internal/tui/query"
@@ -252,6 +253,7 @@ const (
 	tabUnits homeTab = iota
 	tabModules
 	tabDiagnostics
+	tabSerial
 	numHomeTabs
 )
 
@@ -292,6 +294,8 @@ func (t homeTab) String() string {
 		return "Modules"
 	case tabDiagnostics:
 		return "Diagnostics"
+	case tabSerial:
+		return "Serial"
 	}
 	return ""
 }
@@ -502,6 +506,10 @@ type model struct {
 	qemuEditBuffer string   // in-progress "host:guest" text
 	qemuEditIndex  int      // effective-port row being edited, or -1 when adding a new forward
 
+	// Serial console (Serial tab + Setup → Serial port); see serial.go
+	serial     serialModel
+	serialInit tea.Cmd // line pump for a session opened before Init ran
+
 	// Flash view
 	flashUnit       string
 	flashCandidates []device.Candidate
@@ -707,6 +715,10 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 
 	m.checkBinfmtWarning()
 
+	// Open the selected machine's serial console, if one is mapped, so
+	// capture starts with the TUI. Init picks up the line pump.
+	m.serialInit = m.serialStart()
+
 	stopFeed, feedStatus := startProjectFeed(proj, projectDir)
 	defer stopFeed()
 	m.feedStatus = feedStatus
@@ -732,7 +744,15 @@ func Run(proj *yoestar.Project, projectDir string, cfg Config) error {
 	}
 	defer func() { container.OnNotify = nil }()
 
-	_, err = p.Run()
+	final, err := p.Run()
+	// The final model carries the live session pointer (a machine change
+	// may have replaced the one opened above); close it so the socket and
+	// adapter are released.
+	if fm, ok := final.(model); ok {
+		fm.serialStop()
+	} else {
+		m.serialStop()
+	}
 	return err
 }
 
@@ -743,6 +763,9 @@ func doTick() tea.Cmd {
 }
 
 func (m model) Init() tea.Cmd {
+	if m.serialInit != nil {
+		return tea.Batch(doTick(), m.serialInit)
+	}
 	return doTick()
 }
 
@@ -760,7 +783,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == viewDetail {
 			m.refreshDetail()
 		}
+		// Keep the adapter picker current while it is open, so a
+		// just-plugged adapter appears without a keypress; every other
+		// tick is 1 s, cheap for a directory read.
+		if m.view == viewSetup && m.setupField == "serial" && m.tick {
+			m.serialRefreshPorts()
+		}
 		return m, doTick()
+
+	case serialLinesMsg:
+		m.serialAppend(msg.lines)
+		return m, serialWaitCmd(m.serial.linesCh)
+
+	case serialClosedMsg:
+		// The session or attachment ended (owner exited, or we closed it
+		// on a machine change, in which case serialStart already replaced
+		// the channel and this stale message refers to the old one).
+		if m.serial.session == nil && m.serial.client == nil && m.serial.why == "" {
+			m.serial.why = "session ended"
+		}
+		return m, nil
 
 	case spinner.TickMsg:
 		// Forward to the in-flight op's spinner so its frame advances.
@@ -1082,6 +1124,8 @@ func (m model) updateUnits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateModulesTab(msg)
 	case tabDiagnostics:
 		return m.updateDiagnosticsTab(msg)
+	case tabSerial:
+		return m.updateSerialTab(msg)
 	}
 
 	switch msg.String() {
@@ -2015,7 +2059,7 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // Setup option names — add new options here.
-var setupOptions = []string{"Machine", "Image", "Default Distro", "Parallel builds", "QEMU settings"}
+var setupOptions = []string{"Machine", "Image", "Default Distro", "Parallel builds", "QEMU settings", "Serial port"}
 
 // QEMU settings sub-screen rows. Memory and Display occupy fixed positions
 // at the top; below them is the Ports section (each local port row + one
@@ -2130,6 +2174,8 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateSetupDistro(msg)
 	case "qemu":
 		return m.updateSetupQEMU(msg)
+	case "serial":
+		return m.updateSetupSerial(msg)
 	}
 
 	switch msg.String() {
@@ -2211,6 +2257,17 @@ func (m model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.qemuEditing = false
 			m.qemuEditBuffer = ""
 			m.qemuEditIndex = -1
+		case "Serial port":
+			m.setupField = "serial"
+			m.serialRefreshPorts()
+			// Land the cursor on the mapped adapter.
+			mapped := m.serialMapped()
+			for i, p := range m.serial.ports {
+				if _, ok := serial.Match([]serial.Port{p}, mapped); ok && mapped != "" {
+					m.serial.cursor = i
+					break
+				}
+			}
 		}
 		return m, nil
 	}
@@ -2594,7 +2651,9 @@ func (m model) updateSetupMachine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.setupField = ""
 		m.view = viewUnits
 		m.focusDefaultImage()
-		return m, nil
+		// The console follows the machine: close the old adapter and
+		// open whatever the new machine maps to.
+		return m, m.serialStart()
 	}
 	return m, nil
 }
@@ -3060,6 +3119,8 @@ func (m model) viewUnits() string {
 		return m.viewModulesTab()
 	case tabDiagnostics:
 		return m.viewDiagnosticsTab()
+	case tabSerial:
+		return m.viewSerialTab()
 	}
 	return m.viewUnitsTab()
 }
@@ -3450,9 +3511,9 @@ func (m model) helpSections() (string, []helpSection) {
 		}
 
 	case viewSetup:
-		return "Setup — machine, default image, parallel builds, QEMU settings", []helpSection{
+		return "Setup — machine, default image, parallel builds, QEMU settings, serial port", []helpSection{
 			{title: "Navigate", entries: []helpEntry{
-				{"↑  ·  k", "move up (Machine / Image / Parallel builds / QEMU settings)"},
+				{"↑  ·  k", "move up (Machine / Image / Parallel builds / QEMU settings / Serial port)"},
 				{"↓  ·  j", "move down"},
 				{"Enter", "open the picker / sub-screen for the selected option"},
 				{"←/→  ·  h/l", "adjust Parallel builds"},
@@ -3469,6 +3530,13 @@ func (m model) helpSections() (string, []helpSection) {
 				{"Enter", "edit the highlighted forward's host:guest (machine or local)"},
 				{"a  ·  +", "add a new host:guest port forward"},
 				{"d  ·  -", "revert/remove the highlighted forward"},
+				{"Esc", "back to the Setup menu"},
+			}},
+			{title: "In Serial port", entries: []helpEntry{
+				{"↑  ·  ↓", "choose an adapter (rows are /dev/serial/by-id entries)"},
+				{"Enter", "map it to the current machine and save to local.star"},
+				{"d  ·  -", "clear the machine's mapping"},
+				{"r", "re-scan adapters (also happens every second)"},
 				{"Esc", "back to the Setup menu"},
 			}},
 			helpGeneral(false),
@@ -3537,7 +3605,7 @@ func (m model) helpSections() (string, []helpSection) {
 		case tabModules:
 			return "Modules — external git modules and dev mode", []helpSection{
 				{title: "Navigation", entries: append(nav.entries,
-					helpEntry{"Tab  ·  Shift+Tab", "switch Units / Modules / Diagnostics"})},
+					helpEntry{"Tab  ·  Shift+Tab", "switch Units / Modules / Diagnostics / Serial"})},
 				{title: "Actions", entries: []helpEntry{
 					{"$", "open a shell in the module's clone dir"},
 					{"u", "toggle source between pin and dev mode"},
@@ -3549,13 +3617,29 @@ func (m model) helpSections() (string, []helpSection) {
 		case tabDiagnostics:
 			return "Diagnostics — shadowed units and duplicate provides", []helpSection{
 				{title: "Navigation", entries: append(nav.entries,
-					helpEntry{"Tab  ·  Shift+Tab", "switch Units / Modules / Diagnostics"})},
+					helpEntry{"Tab  ·  Shift+Tab", "switch Units / Modules / Diagnostics / Serial"})},
+				helpGeneral(true),
+			}
+		case tabSerial:
+			return "Serial — the selected machine's console", []helpSection{
+				{title: "Scroll", entries: []helpEntry{
+					{"↑  ·  k", "scroll up (pauses following)"},
+					{"↓  ·  j", "scroll down"},
+					{"PgUp  ·  PgDn", "scroll a page"},
+					{"g  ·  G", "oldest line / resume following the newest"},
+					{"Tab  ·  Shift+Tab", "switch Units / Modules / Diagnostics / Serial"},
+				}},
+				{title: "Console", entries: []helpEntry{
+					{"Enter", "attach: keys go to the board until ctrl-t q"},
+					{"c", "clear the on-screen scrollback (log file untouched)"},
+					{"s", "open Setup → Serial port to map an adapter"},
+				}},
 				helpGeneral(true),
 			}
 		default:
 			return "Units — the build target list", []helpSection{
 				{title: "Navigation", entries: append(nav.entries,
-					helpEntry{"Tab  ·  Shift+Tab", "switch Units / Modules / Diagnostics"},
+					helpEntry{"Tab  ·  Shift+Tab", "switch Units / Modules / Diagnostics / Serial"},
 					helpEntry{"Enter", "open the unit detail view"})},
 				{title: "Build", entries: []helpEntry{
 					{"b", "build the selected unit"},
@@ -4054,6 +4138,9 @@ func (m model) viewSetup() string {
 	case "qemu":
 		b.WriteString(m.viewSetupQEMU())
 
+	case "serial":
+		b.WriteString(m.viewSetupSerial())
+
 	case "distro":
 		b.WriteString(headerStyle.Render("  Select Default Distro"))
 		b.WriteString("\n\n")
@@ -4103,6 +4190,8 @@ func (m model) viewSetup() string {
 				value = headerStyle.Render(fmt.Sprintf("%d", m.parallelBuilds))
 			case "QEMU settings":
 				value = dimStyle.Render(m.qemuSettingsSummary())
+			case "Serial port":
+				value = dimStyle.Render(m.serialSettingsSummary())
 			}
 			b.WriteString(fmt.Sprintf("%s%s  %s\n", cursor, style.Render(opt), value))
 		}

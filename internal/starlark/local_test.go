@@ -19,6 +19,11 @@ func TestLocalOverrides_RoundTrip(t *testing.T) {
 		QEMUPorts:   []string{"5901:5900", "10022:22"},
 
 		IgnoredFlashDevices: []string{"/dev/mmcblk0", "/dev/sda"},
+		SerialPorts: map[string]string{
+			"raspberrypi5": "/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_A50285BI-if00-port0",
+			"beagleplay":   "/dev/ttyACM0",
+		},
+		SerialListen: "127.0.0.1:7001",
 	}
 	if err := WriteLocalOverrides(dir, in); err != nil {
 		t.Fatalf("write: %v", err)

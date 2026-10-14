@@ -488,3 +488,58 @@ unit(
 		t.Error("Extra[tasks] should not be set (tasks is a typed field)")
 	}
 }
+
+func TestEvalMachineSerial(t *testing.T) {
+	src := `
+machine(
+    name = "rpi5",
+    arch = "arm64",
+    kernel = kernel(unit = "linux-rpi5", cmdline = "console=ttyAMA0,115200"),
+    serial = serial_config(baud = 115200),
+)
+`
+	e := NewEngine()
+	if err := e.ExecString("machines/rpi5.star", src); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	m := e.machines["rpi5"]
+	if m == nil || m.Serial == nil {
+		t.Fatalf("machine.Serial = nil, want baud 115200")
+	}
+	if m.Serial.Baud != 115200 {
+		t.Errorf("Serial.Baud = %d, want 115200", m.Serial.Baud)
+	}
+}
+
+func TestEvalMachineSerial_AbsentIsNil(t *testing.T) {
+	src := `
+machine(
+    name = "qemu-x86_64",
+    arch = "x86_64",
+    kernel = kernel(unit = "linux-qemu", cmdline = "console=ttyS0"),
+)
+`
+	e := NewEngine()
+	if err := e.ExecString("machines/qemu.star", src); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if m := e.machines["qemu-x86_64"]; m == nil || m.Serial != nil {
+		t.Fatalf("machine.Serial = %+v, want nil", m.Serial)
+	}
+}
+
+func TestEvalMachineSerial_RequiresBaud(t *testing.T) {
+	src := `
+machine(
+    name = "rpi5",
+    arch = "arm64",
+    kernel = kernel(unit = "linux-rpi5"),
+    serial = serial_config(),
+)
+`
+	e := NewEngine()
+	err := e.ExecString("machines/rpi5.star", src)
+	if err == nil || !strings.Contains(err.Error(), "serial requires baud") {
+		t.Fatalf("err = %v, want 'serial requires baud'", err)
+	}
+}

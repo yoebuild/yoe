@@ -32,6 +32,11 @@ whatever image you've picked), yoe produces a single disk image under
 `build/<image>.raspberrypi{4,5}/disk.img`. The next steps are: write it to a
 microSD card, connect serial + power, and power on.
 
+Both machines declare a 115200 baud console (`serial = serial_config(...)`), so
+once you map your USB serial adapter on the TUI Setup page the boot log lands in
+the Serial tab and in `build/serial/<machine>.log`. See
+[Hardware in the Loop](hardware-in-loop.md).
+
 Authoritative hardware reference for everything below:
 <https://www.raspberrypi.com/documentation/>. The notes here cover the
 yoe-specific bits and a quick start; for pinouts, mechanical layout, and silicon

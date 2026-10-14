@@ -1,24 +1,33 @@
 # Runtime configuration for the simpleiot service.
 # Settings reference: https://docs.simpleiot.org
-#
-# These are the settings this version of Simple IoT reads. Newer releases
-# add more; see the simpleiot-bin unit, which tracks the current release.
 
-# Directory holding the Simple IoT store. It sits under /var/lib so it
-# survives a reboot; point it at a separate data partition if you have one
-# and want it to outlive a rootfs update.
+# Directory holding the Simple IoT store, a NATS JetStream directory since
+# v0.23.0. It sits under /var/lib so it survives across reboots; point it at
+# a separate data partition if you have one and want it to outlive a rootfs
+# update.
 SIOT_DATA=/var/lib/simpleiot
 
-# Port the built-in web portal listens on
-SIOT_HTTP_PORT=4223
-
-# Ports used by the embedded NATS server
+# Port the embedded NATS server listens on. The other ports follow from it:
+# the web portal listens one above (4223) and NATS monitoring two above
+# (4224, loopback only). SIOT_HTTP_PORT and SIOT_NATS_MONITOR_PORT override
+# those when a device needs something else.
 SIOT_NATS_PORT=4222
-SIOT_NATS_HTTP_PORT=8222
-SIOT_NATS_WS_PORT=9222
+
+# History kept per subject in the JetStream store. Retention is per subject,
+# so the current value of every point survives and only older history is
+# trimmed. Left unset, Simple IoT keeps 5000 per subject; -1 keeps everything.
+#SIOT_STORE_MAX_MSGS_PER_SUBJECT=5000
+
+# Field in /etc/os-release reported as the device OS version
+OS_VERSION_FIELD=VERSION
 
 # Set to require a token for NATS connections
 #SIOT_AUTH_TOKEN=
 
 # Set to connect this instance upstream to another Simple IoT instance
 #SIOT_NATS_SERVER=nats://example.com:4222
+
+# Directory of provisioning files applied at start-up and whenever they
+# change. Left unset, Simple IoT reads $SIOT_DATA/provisioning when that
+# directory exists.
+#SIOT_PROVISIONING_DIR=/etc/simpleiot/provisioning
