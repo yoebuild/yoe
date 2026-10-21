@@ -92,7 +92,10 @@ Three workflows run under `.github/workflows/`:
   its partition table. Each image is uploaded zstd-compressed and kept for seven
   days, so a nightly build can be downloaded from the run's Artifacts section
   and flashed to hardware (`unzstd` it first; `yoe flash` takes the decompressed
-  `.img`).
+  `.img`). All cells share one cache of synced modules and fetched sources: each
+  cell restores it and uploads what it added, and a final job merges those into
+  the next night's cache, so a board's sources stay cached even on a night its
+  upstream host is down.
 
 Both nightly workflows reuse the content-addressed cache via `actions/cache`, so
 an unchanged graph rebuilds incrementally.

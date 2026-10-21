@@ -110,19 +110,28 @@ jobs:
           VERSION=$(git describe --tags HEAD 2>/dev/null || echo "dev")
           go build -ldflags "-X main.version=${VERSION}" -o yoe ./cmd/yoe
 
-      - name: Cache yoe build cache
-        uses: actions/cache@v4
+      # Every cell restores one cache shared by the whole matrix: synced
+      # modules and fetched sources, all keyed by URL or content, so the
+      # union of what every cell needs is safe to hand to each of them. One
+      # union is a fraction of the size of seven per-cell copies, which
+      # together overran the repository's cache quota and got evicted --
+      # leaving a cell to re-clone from a host that may be down that night
+      # (git.ti.com, for one) with no cached copy to fall back on.
+      #
+      # Cells only restore. If each also saved under one key, the first cell
+      # to finish would win and the slower cells' fetches would never land,
+      # so instead each cell uploads what it added (below) and the
+      # save-cache job folds those into the next union.
+      - name: Restore shared yoe cache
+        uses: actions/cache/restore@v4
         with:
-          # Content-addressed objects, synced modules, and fetched sources.
-          # The run-id key always saves a fresh cache; restore-keys pulls the
-          # most recent prior cache so successive runs build incrementally.
-          # The key is scoped per machine and distro so the cells do not
-          # clobber one another's caches -- boards share a libc and toolchain
-          # but differ in kernel, bootloader, and board packages.
           path: testdata/e2e-project/cache
-          key: yoe-cache-${{ matrix.machine }}-${{ matrix.distro }}-${{ github.run_id }}
+          key: yoe-machine-cache-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            yoe-cache-${{ matrix.machine }}-${{ matrix.distro }}-
+            yoe-machine-cache-
+
+      - name: Mark cache restore time
+        run: touch "$RUNNER_TEMP/cache-restored"
 
       # The build's implicit module sync only clones missing modules; it does
       # not advance an already-cached module to the latest commit on its branch
@@ -137,6 +146,34 @@ jobs:
       - name: Build dev-image
         working-directory: testdata/e2e-project
         run: ../../yoe build -j "$(nproc)" --distro ${{ matrix.distro }} --machine ${{ matrix.machine }} dev-image
+
+      # Runs even when the build failed: a source fetched before the failure
+      # is still worth keeping, and a cell that dies on one unit should not
+      # have to re-fetch everything else the next night.
+      - name: Collect cache delta
+        if: ${{ !cancelled() }}
+        working-directory: testdata/e2e-project
+        run: |
+          # Everything written under cache/ since the restore: new clones and
+          # archives, plus files a fetch or module sync rewrote in place.
+          # Deletions are not carried; nothing in the cache deletes entries
+          # during a build.
+          out="$RUNNER_TEMP/cache-delta-${{ matrix.machine }}-${{ matrix.distro }}.tar"
+          find cache ! -type d -newer "$RUNNER_TEMP/cache-restored" -print0 \
+            | tar --null -T - -cf "$out"
+          ls -lh "$out"
+
+      - name: Upload cache delta
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: cache-delta-${{ matrix.machine }}-${{ matrix.distro }}
+          path: ${{ runner.temp }}/cache-delta-${{ matrix.machine }}-${{ matrix.distro }}.tar
+          # Mostly git packs and package archives, already compressed.
+          compression-level: 0
+          # Consumed by save-cache in this same run.
+          retention-days: 1
+          if-no-files-found: error
 
       - name: Verify image artifact
         working-directory: testdata/e2e-project
@@ -179,3 +216,69 @@ jobs:
           # images indefinitely would grow without bound.
           retention-days: 7
           if-no-files-found: error
+
+  # Folds every cell's cache delta into the previous union and saves the
+  # result as the next run's shared cache. Overlaying is safe because the
+  # cache is keyed by URL or content: two cells that fetched the same thing
+  # wrote the same files.
+  save-cache:
+    name: Save shared cache
+    needs: machine-build
+    # A red cell still uploaded its delta, and the union should keep it.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # Deleting the superseded union.
+      actions: write
+    env:
+      KEY: yoe-machine-cache-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Restore shared yoe cache
+        uses: actions/cache/restore@v4
+        with:
+          path: testdata/e2e-project/cache
+          key: ${{ env.KEY }}
+          restore-keys: |
+            yoe-machine-cache-
+
+      - name: Download cache deltas
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cache-delta-*
+          path: ${{ runner.temp }}/deltas
+          merge-multiple: true
+
+      - name: Apply cache deltas
+        run: |
+          mkdir -p testdata/e2e-project
+          for t in "$RUNNER_TEMP"/deltas/*.tar; do
+            echo "applying $(basename "$t")"
+            tar -xf "$t" -C testdata/e2e-project
+          done
+          du -sh testdata/e2e-project/cache
+
+      - name: Save shared yoe cache
+        uses: actions/cache/save@v4
+        with:
+          path: testdata/e2e-project/cache
+          key: ${{ env.KEY }}
+
+      # Keep exactly one union. Every run saves a new key, and leaving the
+      # old ones for LRU eviction would put them in competition with the
+      # E2E Build caches for the same quota.
+      - name: Delete superseded caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          keys=$(gh cache list --key yoe-machine-cache- --limit 100 --json key --jq '.[].key')
+          # cache/save only warns when it cannot save, so confirm the new
+          # union exists before dropping the one it replaces.
+          if ! grep -qx "$KEY" <<<"$keys"; then
+            echo "::error::$KEY was not saved; keeping the previous cache"
+            exit 1
+          fi
+          grep -vx "$KEY" <<<"$keys" | xargs -r -n1 gh cache delete
